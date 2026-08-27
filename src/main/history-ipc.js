@@ -83,8 +83,7 @@ function registerHistoryIpc({ ipcMain, historyStore, jars, broadcast }) {
   function handlePage(_e, p) {
     if (isMalformed(p)) return { ok: false, error: 'history: page — malformed-payload' };
     if (!isKnownJar(p.jarId)) return { ok: false, error: 'history: page — unknown-jar' };
-    if (!isPositiveInteger(p.page) ||
-        (p.pageSize !== undefined && !isPositiveInteger(p.pageSize))) {
+    if (!isPositiveInteger(p.page) || (p.pageSize !== undefined && !isPositiveInteger(p.pageSize))) {
       return { ok: false, error: 'history: page — bad-args' };
     }
     try {

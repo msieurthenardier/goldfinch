@@ -7,7 +7,7 @@
   --bg: #1e1f25;
   --bg-2: #282a32;
   --bg-3: #32343d;
-  --fg: #e6e7ea;          /* corrected from leg-2 #e8e8ec — matches styles.css */
+  --fg: #e6e7ea; /* corrected from leg-2 #e8e8ec — matches styles.css */
   --fg-dim: #9a9ca6;
   --border: #3a3c46;
   --nav-w: 220px;
@@ -34,7 +34,12 @@ body {
   min-height: 100%;
   background: var(--bg);
   color: var(--fg);
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
   font-size: 14px;
   line-height: 1.5;
   display: flex;
@@ -50,7 +55,7 @@ body {
 }
 
 /* ── Left nav (sticky sidebar) ── */
-nav[aria-label="Settings sections"] {
+nav[aria-label='Settings sections'] {
   flex: 0 0 var(--nav-w);
   position: sticky;
   top: var(--nav-top);
@@ -62,39 +67,41 @@ nav[aria-label="Settings sections"] {
   background: var(--bg-2);
 }
 
-nav[aria-label="Settings sections"] ul {
+nav[aria-label='Settings sections'] ul {
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
-nav[aria-label="Settings sections"] li {
+nav[aria-label='Settings sections'] li {
   margin: 0;
 }
 
-nav[aria-label="Settings sections"] a {
+nav[aria-label='Settings sections'] a {
   display: block;
   padding: 8px 20px;
   color: var(--fg);
   text-decoration: none;
   font-size: 13px;
   border-left: 3px solid transparent;
-  transition: background 0.1s, color 0.1s;
+  transition:
+    background 0.1s,
+    color 0.1s;
 }
 
-nav[aria-label="Settings sections"] a:hover {
+nav[aria-label='Settings sections'] a:hover {
   background: var(--bg-3);
   color: var(--fg);
 }
 
 /* Focus-visible ring for keyboard navigation */
-nav[aria-label="Settings sections"] a:focus-visible {
+nav[aria-label='Settings sections'] a:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
 
 /* Active section highlight (set by scroll-spy in settings.js; also :target fallback) */
-nav[aria-label="Settings sections"] a[aria-current="true"] {
+nav[aria-label='Settings sections'] a[aria-current='true'] {
   color: var(--accent);
   border-left-color: var(--accent);
   background: var(--bg-3);
@@ -232,7 +239,7 @@ main section p {
 
 /* Native radio, styled as a small filled dot — the same reset-then-custom-paint
    approach as .shield-row input[type="checkbox"], sized down for a round control. */
-.search-engine-option input[type="radio"] {
+.search-engine-option input[type='radio'] {
   appearance: none;
   -webkit-appearance: none;
   margin: 0;
@@ -246,11 +253,11 @@ main section p {
   cursor: pointer;
 }
 
-.search-engine-option input[type="radio"]:checked {
+.search-engine-option input[type='radio']:checked {
   border-color: var(--accent);
 }
 
-.search-engine-option input[type="radio"]:checked::after {
+.search-engine-option input[type='radio']:checked::after {
   content: '';
   position: absolute;
   top: 3px;
@@ -261,7 +268,7 @@ main section p {
   background: var(--accent);
 }
 
-.search-engine-option input[type="radio"]:focus-visible {
+.search-engine-option input[type='radio']:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -281,7 +288,7 @@ main section p {
    34×18px track, border-radius 9px, OFF #7c7f8a + border, ON var(--accent).
    Native <input type="checkbox"> kept for accessibility/behavior; appearance:none
    strips the UA chrome so the custom pill renders on top. */
-.shield-row input[type="checkbox"] {
+.shield-row input[type='checkbox'] {
   appearance: none;
   -webkit-appearance: none;
   margin: 0;
@@ -296,12 +303,12 @@ main section p {
   transition: background 0.15s;
 }
 
-.shield-row input[type="checkbox"]:checked {
+.shield-row input[type='checkbox']:checked {
   background: var(--accent);
   border-color: var(--accent);
 }
 
-.shield-row input[type="checkbox"]::after {
+.shield-row input[type='checkbox']::after {
   content: '';
   position: absolute;
   top: 1px;
@@ -313,11 +320,11 @@ main section p {
   transition: left 0.15s;
 }
 
-.shield-row input[type="checkbox"]:checked::after {
+.shield-row input[type='checkbox']:checked::after {
   left: 17px;
 }
 
-.shield-row input[type="checkbox"]:focus-visible {
+.shield-row input[type='checkbox']:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -329,7 +336,7 @@ main section p {
    design-review catch): the #startup section merged into #appearance — a bare
    #startup selector here would silently stop matching once that section is
    removed, and the home-page label would lose its styling. */
-#appearance label[for="home-page-input"] {
+#appearance label[for='home-page-input'] {
   display: block;
   color: var(--fg);
   font-size: 14px;
@@ -444,12 +451,12 @@ main section p {
 }
 
 /* Pinned (aria-pressed="true") — accent color = filled pin */
-.pin-toggle[aria-pressed="true"] {
+.pin-toggle[aria-pressed='true'] {
   color: var(--accent);
 }
 
 /* Unpinned (aria-pressed="false") — muted color = outline pin */
-.pin-toggle[aria-pressed="false"] {
+.pin-toggle[aria-pressed='false'] {
   color: var(--fg-dim);
 }
 

@@ -66,7 +66,14 @@ test('cookies maps to exactly ["cookies"]', () => {
 test('storage maps to the full non-cookie storages set, labeled "Site storage"', () => {
   const storage = jarDataClassById('storage');
   assert.equal(storage.label, 'Site storage');
-  assert.deepEqual(storage.storages, ['filesystem', 'indexdb', 'localstorage', 'websql', 'serviceworkers', 'cachestorage']);
+  assert.deepEqual(storage.storages, [
+    'filesystem',
+    'indexdb',
+    'localstorage',
+    'websql',
+    'serviceworkers',
+    'cachestorage'
+  ]);
 });
 
 test('cache is the null sentinel (not a clearStorageData storages set)', () => {

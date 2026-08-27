@@ -21,12 +21,18 @@ function makeGuestWc(id) {
   return {
     id,
     session: { __goldfinchInternal: false },
-    isDestroyed() { return false; },
+    isDestroyed() {
+      return false;
+    },
     /** @type {number} */
     _printCount: 0,
     /** @type {any} */
     _opts: undefined,
-    async printToPDF(opts) { this._printCount += 1; this._opts = opts; return Buffer.from(PDF_BYTES); },
+    async printToPDF(opts) {
+      this._printCount += 1;
+      this._opts = opts;
+      return Buffer.from(PDF_BYTES);
+    }
   };
 }
 
@@ -34,10 +40,16 @@ function makeInternalWc(id) {
   return {
     id,
     session: { __goldfinchInternal: true },
-    isDestroyed() { return false; },
+    isDestroyed() {
+      return false;
+    },
     _printCount: 0,
     _opts: undefined,
-    async printToPDF(opts) { this._printCount += 1; this._opts = opts; return Buffer.from(PDF_BYTES); },
+    async printToPDF(opts) {
+      this._printCount += 1;
+      this._opts = opts;
+      return Buffer.from(PDF_BYTES);
+    }
   };
 }
 
@@ -58,7 +70,7 @@ test('printToPDF: returns the base64 of the PDF buffer (a string)', async () => 
   const deps = {
     fromId: makeFakeFromId({ 60: guestWc }),
     chromeContents: null,
-    activate: async () => {},
+    activate: async () => {}
   };
 
   const result = await printToPDF(60, deps);
@@ -78,8 +90,14 @@ test('printToPDF: guest — activate called BEFORE printToPDF (ordering via call
   // A DISTINCT post-activate handle so we can prove the re-resolved one is used.
   const postWc = makeGuestWc(70);
 
-  preWc.printToPDF = async () => { callLog.push('print:pre'); return Buffer.from(PDF_BYTES); };
-  postWc.printToPDF = async () => { callLog.push('print:post'); return Buffer.from(PDF_BYTES); };
+  preWc.printToPDF = async () => {
+    callLog.push('print:pre');
+    return Buffer.from(PDF_BYTES);
+  };
+  postWc.printToPDF = async () => {
+    callLog.push('print:post');
+    return Buffer.from(PDF_BYTES);
+  };
 
   let resolved = 0;
   const fromId = (/** @type {number} */ id) => {
@@ -87,12 +105,18 @@ test('printToPDF: guest — activate called BEFORE printToPDF (ordering via call
     resolved += 1;
     return resolved === 1 ? preWc : postWc; // first resolve → pre, after activate → post
   };
-  const activate = async () => { callLog.push('activate'); };
+  const activate = async () => {
+    callLog.push('activate');
+  };
 
   const result = await printToPDF(70, { fromId, chromeContents: null, activate });
 
   assert.equal(result, EXPECTED_B64);
-  assert.deepEqual(callLog, ['activate', 'print:post'], 'activate runs before printToPDF, and the re-resolved (post-activate) handle is printed');
+  assert.deepEqual(
+    callLog,
+    ['activate', 'print:post'],
+    'activate runs before printToPDF, and the re-resolved (post-activate) handle is printed'
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -106,13 +130,12 @@ test('printToPDF: refuses an internal wc even when deps.allowInternal === true (
     fromId: makeFakeFromId({ 80: internalWc }),
     chromeContents: null,
     allowInternal: true, // admin relaxation — resolveContents would let internal through
-    activate: async (/** @type {number} */ id) => { activateCalls.push(id); },
+    activate: async (/** @type {number} */ id) => {
+      activateCalls.push(id);
+    }
   };
 
-  await assert.rejects(
-    () => printToPDF(80, deps),
-    /automation: printToPDF — internal-session excluded/,
-  );
+  await assert.rejects(() => printToPDF(80, deps), /automation: printToPDF — internal-session excluded/);
   assert.equal(activateCalls.length, 0, 'internal wc must be refused BEFORE activate (foregrounding) is attempted');
   assert.equal(internalWc._printCount, 0, 'printToPDF must NOT be called on the internal-session path');
 });
@@ -123,16 +146,10 @@ test('printToPDF: refuses an internal wc even when deps.allowInternal === true (
 
 test('printToPDF: bad-handle — non-number wcId rejects via resolveContents', async () => {
   const deps = { fromId: makeFakeFromId({}), chromeContents: null, activate: async () => {} };
-  await assert.rejects(
-    () => printToPDF(/** @type {any} */ ('nope'), deps),
-    /automation: bad-handle/,
-  );
+  await assert.rejects(() => printToPDF(/** @type {any} */ ('nope'), deps), /automation: bad-handle/);
 });
 
 test('printToPDF: no-such-contents — unknown wcId rejects via resolveContents', async () => {
   const deps = { fromId: makeFakeFromId({}), chromeContents: null, activate: async () => {} };
-  await assert.rejects(
-    () => printToPDF(999, deps),
-    /automation: no-such-contents/,
-  );
+  await assert.rejects(() => printToPDF(999, deps), /automation: no-such-contents/);
 });

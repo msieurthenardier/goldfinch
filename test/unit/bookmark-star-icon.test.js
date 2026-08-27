@@ -19,15 +19,30 @@ test('buildBookmarkStarIcon returns a decorative, filled SVG star — never a te
   const icon = buildBookmarkStarIcon(document);
 
   assert.equal(icon.tagName, 'SVG');
-  assert.equal(icon.attributes.get('aria-hidden'), 'true', 'must stay decorative — the row carries the accessible signal via its own sr-only node');
+  assert.equal(
+    icon.attributes.get('aria-hidden'),
+    'true',
+    'must stay decorative — the row carries the accessible signal via its own sr-only node'
+  );
   assert.equal(icon.attributes.get('focusable'), 'false');
-  assert.equal(icon.attributes.get('fill'), 'currentColor', 'filled, not stroked — legible at badge size (unlike the address-bar star\'s unstarred outline state)');
+  assert.equal(
+    icon.attributes.get('fill'),
+    'currentColor',
+    "filled, not stroked — legible at badge size (unlike the address-bar star's unstarred outline state)"
+  );
   assert.equal(icon.attributes.get('stroke'), 'none');
-  assert.equal(icon.textContent, '', 'markup-free per the sheet\'s no-innerHTML discipline — shape comes from a <path> child, not text');
+  assert.equal(
+    icon.textContent,
+    '',
+    "markup-free per the sheet's no-innerHTML discipline — shape comes from a <path> child, not text"
+  );
 
   const path = icon.children.find((c) => c.tagName === 'PATH');
   assert.ok(path, 'the star shape is a real <path> child element');
-  assert.ok(path.attributes.get('d').length > 0, 'the path carries real geometry (same Lucide star as the address-bar #star glyph)');
+  assert.ok(
+    path.attributes.get('d').length > 0,
+    'the path carries real geometry (same Lucide star as the address-bar #star glyph)'
+  );
 });
 
 test('buildBookmarkStarIcon carries the sizing class and stays free of width/height presentation attributes', () => {
@@ -46,7 +61,11 @@ test('buildBookmarkStarIcon carries the sizing class and stays free of width/hei
   const document = createDocument();
   const icon = buildBookmarkStarIcon(document);
 
-  assert.equal(icon.classList.contains('sg-badge-star'), true, 'must carry the class that .sg-badge-star sizing rules target');
+  assert.equal(
+    icon.classList.contains('sg-badge-star'),
+    true,
+    'must carry the class that .sg-badge-star sizing rules target'
+  );
   assert.equal(icon.attributes.has('width'), false, 'no width presentation attribute — CSS is the only size source');
   assert.equal(icon.attributes.has('height'), false, 'no height presentation attribute — CSS is the only size source');
 });

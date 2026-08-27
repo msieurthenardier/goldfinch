@@ -27,7 +27,10 @@ const read = (...rel) => fs.readFileSync(path.join(__dirname, '..', '..', ...rel
 test('main.js (MCP getEngine site) injects listPopups + isPopupWcId', () => {
   const src = read('src', 'main', 'main.js');
   assert.ok(src.includes('listPopups: popupTabRows'), 'listPopups injection at the getEngine site');
-  assert.ok(src.includes('isPopupWcId: (id) => popupRegistry.isPopupWcId(id)'), 'isPopupWcId injection at the getEngine site');
+  assert.ok(
+    src.includes('isPopupWcId: (id) => popupRegistry.isPopupWcId(id)'),
+    'isPopupWcId injection at the getEngine site'
+  );
 });
 
 test('app-lifecycle.js (dev-seam engine site) threads listPopups + isPopupWcId into createEngine', () => {
@@ -42,21 +45,30 @@ test('app-lifecycle.js (dev-seam engine site) threads listPopups + isPopupWcId i
 test('main.js: the leg-1 cancel stub is gone; the DD1f seam is the thin cancelForTab delegation, shared with guest-wiring', () => {
   const src = read('src', 'main', 'main.js');
   assert.equal(src.includes('cancelChallengesForPopup: () => {}'), false, 'the no-op stub is replaced');
-  assert.ok(src.includes("const cancelChallengesForPopup = (popupWcId) => authChallenges.cancelForTab(popupWcId, 'tab-close')"),
-    'the seam is a thin cancelForTab delegation (queue scan / exactly-once / sheet close all live in the store)');
+  assert.ok(
+    src.includes("const cancelChallengesForPopup = (popupWcId) => authChallenges.cancelForTab(popupWcId, 'tab-close')"),
+    'the seam is a thin cancelForTab delegation (queue scan / exactly-once / sheet close all live in the store)'
+  );
   const wiringIdx = src.indexOf('createGuestWiring({');
   const wiringBlock = src.slice(wiringIdx, src.indexOf('});', wiringIdx));
-  assert.ok(/\bcancelChallengesForPopup\b/.test(wiringBlock), 'the SAME seam rides guest-wiring deps (self-close teardown path)');
+  assert.ok(
+    /\bcancelChallengesForPopup\b/.test(wiringBlock),
+    'the SAME seam rides guest-wiring deps (self-close teardown path)'
+  );
 });
 
 test('main.js: enumerateWindows derives popup census entries at call time', () => {
   const src = read('src', 'main', 'main.js');
-  assert.ok(src.includes('buildWindowCensus(registry.records(), registry.getLastFocused(), popupCensusEntries())'),
-    'the census accessor appends live popup entries (zero-state discipline)');
+  assert.ok(
+    src.includes('buildWindowCensus(registry.records(), registry.getLastFocused(), popupCensusEntries())'),
+    'the census accessor appends live popup entries (zero-state discipline)'
+  );
 });
 
 test('main.js: authChallenges receives the lazy popup-registry routing seam', () => {
   const src = read('src', 'main', 'main.js');
-  assert.ok(src.includes('popupRegistry: { getByWcId: (wcId) => popupRegistry.getByWcId(wcId) }'),
-    'popup-registry-first challenge routing is wired (DD1b wall 1)');
+  assert.ok(
+    src.includes('popupRegistry: { getByWcId: (wcId) => popupRegistry.getByWcId(wcId) }'),
+    'popup-registry-first challenge routing is wired (DD1b wall 1)'
+  );
 });

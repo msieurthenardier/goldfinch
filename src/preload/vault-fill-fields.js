@@ -31,8 +31,7 @@ const USERNAME_TYPES = new Set(['', 'text', 'email', 'tel']);
  * @returns {{ username: any, password: any, form: any }}
  */
 function resolveLoginEntry(password) {
-  const form = password.form
-    || (typeof password.closest === 'function' ? password.closest('form') : null);
+  const form = password.form || (typeof password.closest === 'function' ? password.closest('form') : null);
 
   let username = null;
   if (form && typeof form.querySelectorAll === 'function') {
@@ -57,9 +56,8 @@ function resolveLoginEntry(password) {
  * @returns {{ username: any, password: any } | null}
  */
 function findLoginFields(doc) {
-  const pwList = doc && typeof doc.querySelectorAll === 'function'
-    ? doc.querySelectorAll('input[type=password]')
-    : null;
+  const pwList =
+    doc && typeof doc.querySelectorAll === 'function' ? doc.querySelectorAll('input[type=password]') : null;
   const password = pwList && pwList.length ? pwList[0] : null;
   if (!password) return null;
 
@@ -79,9 +77,8 @@ function findLoginFields(doc) {
  * @returns {Array<{ username: any, password: any, form: any }>}
  */
 function findAllLoginFields(doc) {
-  const pwList = doc && typeof doc.querySelectorAll === 'function'
-    ? doc.querySelectorAll('input[type=password]')
-    : null;
+  const pwList =
+    doc && typeof doc.querySelectorAll === 'function' ? doc.querySelectorAll('input[type=password]') : null;
   if (!pwList || !pwList.length) return [];
   return Array.from(pwList).map((pw) => resolveLoginEntry(pw));
 }
@@ -138,7 +135,7 @@ function fillLoginForm(doc, cred, targetPassword) {
   if (typeof window !== 'undefined' && window.top !== window) return { filled: false };
   const fields = isLivePasswordField(doc, targetPassword)
     ? resolveLoginEntry(targetPassword) // the clicked form's { username, password, form }
-    : findLoginFields(doc);             // first-password-field fallback (MCP / no-gesture)
+    : findLoginFields(doc); // first-password-field fallback (MCP / no-gesture)
   if (!fields || !fields.password) return { filled: false };
   if (fields.username && cred && cred.username != null) {
     setFieldValue(fields.username, String(cred.username));

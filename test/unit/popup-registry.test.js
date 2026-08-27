@@ -10,8 +10,13 @@ const { createPopupRegistry } = require('../../src/main/popup-registry');
 function fakeWin(log, label) {
   return {
     destroyed: false,
-    isDestroyed() { return this.destroyed; },
-    destroy() { this.destroyed = true; log.push(['destroy', label]); }
+    isDestroyed() {
+      return this.destroyed;
+    },
+    destroy() {
+      this.destroyed = true;
+      log.push(['destroy', label]);
+    }
   };
 }
 
@@ -65,8 +70,14 @@ test('listForRecord is identity-scoped and registration-ordered; chained popups 
   reg.register(8, { openerWcId: 7, openerRecord: recordA, partition: 'persist:jar-a', win: w2 });
   reg.register(9, { openerWcId: 20, openerRecord: recordB, partition: 'persist:jar-b', win: w3 });
 
-  assert.deepEqual(reg.listForRecord(recordA).map((e) => e.popupWcId), [7, 8]);
-  assert.deepEqual(reg.listForRecord(recordB).map((e) => e.popupWcId), [9]);
+  assert.deepEqual(
+    reg.listForRecord(recordA).map((e) => e.popupWcId),
+    [7, 8]
+  );
+  assert.deepEqual(
+    reg.listForRecord(recordB).map((e) => e.popupWcId),
+    [9]
+  );
   assert.deepEqual(reg.listForRecord(fakeRecord(3)), [], 'unknown record lists empty');
 });
 
@@ -92,8 +103,14 @@ test('rekeyForRecord re-keys exactly the moved opener tab popups to the destinat
 
   assert.equal(reg.getByWcId(7).openerRecord, dest, 'moved tab popup follows the destination');
   assert.equal(reg.getByWcId(8).openerRecord, source, 'other tab popups stay with the source');
-  assert.deepEqual(reg.listForRecord(dest).map((e) => e.popupWcId), [7]);
-  assert.deepEqual(reg.listForRecord(source).map((e) => e.popupWcId), [8]);
+  assert.deepEqual(
+    reg.listForRecord(dest).map((e) => e.popupWcId),
+    [7]
+  );
+  assert.deepEqual(
+    reg.listForRecord(source).map((e) => e.popupWcId),
+    [8]
+  );
 });
 
 test('closeAllForRecord honors the DD1f order: cancel-challenges seam for EVERY popup first, then destroy', () => {
@@ -111,10 +128,16 @@ test('closeAllForRecord honors the DD1f order: cancel-challenges seam for EVERY 
 
   reg.closeAllForRecord(record);
 
-  assert.deepEqual(log, [
-    ['cancel', 7], ['cancel', 8],
-    ['destroy', 7], ['destroy', 8]
-  ], 'all cancels precede the first destroy (DD1f order)');
+  assert.deepEqual(
+    log,
+    [
+      ['cancel', 7],
+      ['cancel', 8],
+      ['destroy', 7],
+      ['destroy', 8]
+    ],
+    'all cancels precede the first destroy (DD1f order)'
+  );
   assert.equal(reg.isPopupWcId(7), false);
   assert.equal(reg.isPopupWcId(8), false);
 });
@@ -127,15 +150,25 @@ test('closeAllForRecord snapshots before destroying — deregister-during-destro
   // (the mid-iteration mutation the snapshot exists for).
   const winFor = (popupWcId) => ({
     destroyed: false,
-    isDestroyed() { return this.destroyed; },
-    destroy() { this.destroyed = true; log.push(['destroy', popupWcId]); reg.remove(popupWcId); }
+    isDestroyed() {
+      return this.destroyed;
+    },
+    destroy() {
+      this.destroyed = true;
+      log.push(['destroy', popupWcId]);
+      reg.remove(popupWcId);
+    }
   });
   reg.register(7, { openerWcId: 10, openerRecord: record, partition: 'persist:jar-a', win: winFor(7) });
   reg.register(8, { openerWcId: 10, openerRecord: record, partition: 'persist:jar-a', win: winFor(8) });
 
   reg.closeAllForRecord(record);
 
-  assert.deepEqual(log.filter((e) => e[0] === 'destroy').map((e) => e[1]), [7, 8], 'both popups destroyed');
+  assert.deepEqual(
+    log.filter((e) => e[0] === 'destroy').map((e) => e[1]),
+    [7, 8],
+    'both popups destroyed'
+  );
   assert.deepEqual(reg.listForRecord(record), []);
 });
 
@@ -159,20 +192,34 @@ test('closeAllForRecord isolates a throwing cancel seam and a throwing destroy (
   const errors = [];
   const log = [];
   const reg = createPopupRegistry({
-    cancelChallengesForPopup: (popupWcId) => { if (popupWcId === 7) throw new Error('seam boom'); log.push(['cancel', popupWcId]); },
+    cancelChallengesForPopup: (popupWcId) => {
+      if (popupWcId === 7) throw new Error('seam boom');
+      log.push(['cancel', popupWcId]);
+    },
     logger: { error: (...args) => errors.push(args.join(' ')) }
   });
   const record = fakeRecord(1);
   const bad = {
     destroyed: false,
-    isDestroyed() { return false; },
-    destroy() { throw new Error('destroy boom'); }
+    isDestroyed() {
+      return false;
+    },
+    destroy() {
+      throw new Error('destroy boom');
+    }
   };
   reg.register(7, { openerWcId: 10, openerRecord: record, partition: 'persist:jar-a', win: bad });
   reg.register(8, { openerWcId: 10, openerRecord: record, partition: 'persist:jar-a', win: fakeWin(log, 8) });
 
   assert.doesNotThrow(() => reg.closeAllForRecord(record));
-  assert.deepEqual(log, [['cancel', 8], ['destroy', 8]], 'the healthy sibling still cancels and destroys');
+  assert.deepEqual(
+    log,
+    [
+      ['cancel', 8],
+      ['destroy', 8]
+    ],
+    'the healthy sibling still cancels and destroys'
+  );
   assert.equal(errors.length, 2, 'both failures logged');
   assert.equal(reg.listForRecord(record).length, 0, 'entries dropped even on destroy failure');
 });

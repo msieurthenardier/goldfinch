@@ -22,8 +22,12 @@ function makeIpc() {
   return {
     listeners,
     handlers,
-    on(channel, fn) { listeners.set(channel, fn); },
-    handle(channel, fn) { handlers.set(channel, fn); },
+    on(channel, fn) {
+      listeners.set(channel, fn);
+    },
+    handle(channel, fn) {
+      handlers.set(channel, fn);
+    }
   };
 }
 
@@ -47,8 +51,12 @@ function makeFakeStore(correctPw) {
       store.receivedBytes = Buffer.from(buf).toString('utf8'); // snapshot before the handler zeroizes
       if (store.receivedBytes !== correctPw) throw new vs.VaultAuthError('wrong password');
       store.unlocked = true;
-      try { store.onUnlock?.(); } catch { /* guarded, as in _installMrk */ }
-    },
+      try {
+        store.onUnlock?.();
+      } catch {
+        /* guarded, as in _installMrk */
+      }
+    }
   };
   // Wire onUnlock the way main.js does: broadcast the lock-state projection.
   store.onUnlock = () => broadcasts.push({ setUp: store.isSetUp(), unlocked: store.isUnlocked() });
@@ -64,23 +72,29 @@ function makeHarness(store) {
   const sheet = {
     getView: () => ({ webContents: sheetSender }),
     getCurrentMenu: () => ({ token: 7, menuType: 'vault-unlock' }),
-    closeMenuOverlay: (reason, token) => closeCalls.push([reason, token]),
+    closeMenuOverlay: (reason, token) => closeCalls.push([reason, token])
   };
   const rec = { sheet };
   const registry = { records: () => [rec], getWindowForChrome: () => null };
 
   // The main.js vaultUnlock delegate, verbatim in shape.
   const vaultUnlock = async (buf) => {
-    try { await store.unlock(buf); return true; }
-    catch (e) { if (e instanceof vs.VaultAuthError) return false; throw e; }
+    try {
+      await store.unlock(buf);
+      return true;
+    } catch (e) {
+      if (e instanceof vs.VaultAuthError) return false;
+      throw e;
+    }
   };
 
   registerOverlayIpc({
-    ipcMain, registry,
+    ipcMain,
+    registry,
     chromeForAttachment: () => null,
     chromeForTab: () => null,
     sanitizeActivatedValue: (v) => (typeof v === 'string' && v.length <= 24 ? v : undefined),
-    vaultUnlock,
+    vaultUnlock
   });
 
   const handler = ipcMain.handlers.get('menu-overlay:vault-unlock');
@@ -99,8 +113,14 @@ test('correct password → { ok:true }, Buffer hand-off + BOTH arrays zeroed, br
   assert.equal(store.receivedIsBuffer, true, 'unlock received a Buffer, not a Uint8Array');
   assert.equal(store.receivedBytes, 'hunter2');
   // BOTH the copied Buffer and the incoming Uint8Array are zeroed afterward.
-  assert.ok(store.receivedBuffer.every((b) => b === 0), 'copied Buffer zeroized in finally');
-  assert.ok(secret.every((b) => b === 0), 'incoming Uint8Array zeroized in finally');
+  assert.ok(
+    store.receivedBuffer.every((b) => b === 0),
+    'copied Buffer zeroized in finally'
+  );
+  assert.ok(
+    secret.every((b) => b === 0),
+    'incoming Uint8Array zeroized in finally'
+  );
   // Broadcast fired exactly once (unlocked) via onUnlock; sheet closed with 'activated'.
   assert.deepEqual(store.broadcasts, [{ setUp: true, unlocked: true }]);
   assert.deepEqual(closeCalls, [['activated', 7]]);
@@ -117,21 +137,36 @@ test('wrong password → { ok:false }, no broadcast, store stays locked, sheet N
   assert.equal(store.isUnlocked(), false, 'store stays locked on a wrong password');
   assert.deepEqual(store.broadcasts, [], 'no broadcast on a wrong password');
   assert.deepEqual(closeCalls, [], 'sheet stays open on a wrong password');
-  assert.ok(secret.every((b) => b === 0), 'incoming Uint8Array zeroized even on failure');
-  assert.ok(store.receivedBuffer.every((b) => b === 0), 'copied Buffer zeroized even on failure');
+  assert.ok(
+    secret.every((b) => b === 0),
+    'incoming Uint8Array zeroized even on failure'
+  );
+  assert.ok(
+    store.receivedBuffer.every((b) => b === 0),
+    'copied Buffer zeroized even on failure'
+  );
 });
 
 test('a non-auth throw still zeroizes BOTH arrays (finally runs), and the invoke rejects', async () => {
   const store = makeFakeStore('hunter2');
   // Replace unlock with a non-auth thrower; capture the buffer to assert zeroization.
-  store.unlock = async (buf) => { store.receivedBuffer = buf; throw new Error('disk exploded'); };
+  store.unlock = async (buf) => {
+    store.receivedBuffer = buf;
+    throw new Error('disk exploded');
+  };
   const { handler, sheetSender, closeCalls } = makeHarness(store);
 
   const secret = new TextEncoder().encode('hunter2');
   await assert.rejects(handler({ sender: sheetSender }, { token: 7, secret }), /disk exploded/);
 
-  assert.ok(secret.every((b) => b === 0), 'incoming Uint8Array zeroized on a non-auth throw');
-  assert.ok(store.receivedBuffer.every((b) => b === 0), 'copied Buffer zeroized on a non-auth throw');
+  assert.ok(
+    secret.every((b) => b === 0),
+    'incoming Uint8Array zeroized on a non-auth throw'
+  );
+  assert.ok(
+    store.receivedBuffer.every((b) => b === 0),
+    'copied Buffer zeroized on a non-auth throw'
+  );
   assert.deepEqual(store.broadcasts, []);
   assert.deepEqual(closeCalls, []);
 });

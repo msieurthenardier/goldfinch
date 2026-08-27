@@ -27,7 +27,12 @@ test('broadcast-before-resolve state is payload-owned and unchanged payload iden
 test('deleted-row confirm closes while unrelated transient state keeps identity', async () => {
   const { reconcileTransient } = await import(moduleUrl);
   const confirm = { mode: 'confirm', rowId: 'gone', action: 'delete', draft: null };
-  assert.deepEqual(reconcileTransient(confirm, [{ id: 'survivor' }]), { mode: null, rowId: null, action: null, draft: null });
+  assert.deepEqual(reconcileTransient(confirm, [{ id: 'survivor' }]), {
+    mode: null,
+    rowId: null,
+    action: null,
+    draft: null
+  });
   const create = { mode: 'create', rowId: null, action: null, draft: { name: 'Draft' } };
   assert.equal(reconcileTransient(create, []), create);
 });

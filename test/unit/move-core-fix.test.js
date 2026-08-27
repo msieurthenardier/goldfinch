@@ -90,10 +90,7 @@ test('AC1: mutating the pre-set back into the core makes it reappear — the sca
   const real = realSource();
   // Re-insert the pre-set exactly where F8 had it: right after the hand-compensation block's
   // closing brace, before the focus rules. Anchor on the `target.win.focus();` line.
-  const mutated = real.replace(
-    '  target.win.focus();',
-    '  target.activeTabWcId = p.wcId;\n  target.win.focus();'
-  );
+  const mutated = real.replace('  target.win.focus();', '  target.activeTabWcId = p.wcId;\n  target.win.focus();');
   assertMutated(real, mutated, 'preset-reintroduced');
   const body = coreBody(mutated);
   assert.equal(body.split(PRESET).length - 1, 1, 'mutated → the pre-set is back');
@@ -119,10 +116,7 @@ test("AC2: the synchronous closeMenuOverlay('tab-switch') REMAINS in the core �
 
   // Delete the menu-close. If dropped, the target's stale menu is re-shown in the interim —
   // the displaced-menu residual defect. Same shape as the hide mutation, other branch.
-  const mutated = real.replace(
-    "    target.sheet?.closeMenuOverlay('tab-switch');",
-    '    void 0;'
-  );
+  const mutated = real.replace("    target.sheet?.closeMenuOverlay('tab-switch');", '    void 0;');
   assertMutated(real, mutated, 'menu-close-removed');
   assert.equal(coreBody(mutated).includes(MENU_CLOSE), false, 'mutated → the menu-close is gone and this pin FAILS');
 });

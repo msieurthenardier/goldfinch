@@ -13,14 +13,28 @@ class FakeWebContents extends EventEmitter {
     super();
     this.openHandler = null;
   }
-  setWindowOpenHandler(fn) { this.openHandler = fn; }
+  setWindowOpenHandler(fn) {
+    this.openHandler = fn;
+  }
 }
 
 function navEvent(url) {
-  return { url, prevented: false, preventDefault() { this.prevented = true; } };
+  return {
+    url,
+    prevented: false,
+    preventDefault() {
+      this.prevented = true;
+    }
+  };
 }
 
-function makeHarness({ restore = null, platform = 'linux', dev = false, automationEnabled = false, hygieneMarker = null } = {}) {
+function makeHarness({
+  restore = null,
+  platform = 'linux',
+  dev = false,
+  automationEnabled = false,
+  hygieneMarker = null
+} = {}) {
   const events = [];
   const appListeners = new Map();
   const handlers = new Map();
@@ -59,24 +73,27 @@ function makeHarness({ restore = null, platform = 'linux', dev = false, automati
     isPackaged: !dev,
     on: (name, fn) => appListeners.set(name, fn),
     whenReady: () => Promise.resolve(),
-    quit: () => events.push('quit'),
+    quit: () => events.push('quit')
   };
   const lifecycle = registerAppLifecycle({
     app,
     ipcMain: {
       handle: (channel, fn) => handlers.set(channel, fn),
-      on: (channel, fn) => ipcListeners.set(channel, fn),
+      on: (channel, fn) => ipcListeners.set(channel, fn)
     },
     sessionRuntime: { onSessionCreated: () => events.push('session-created') },
     initProfileAndStores: () => events.push('init-stores'),
     profileStores: { jars: { getDefault: () => ({ id: 'personal' }) } },
     historyStore: {
-      open: () => events.push('history-open'), close: () => events.push('history-close'),
-      listRecent: () => [], search: () => [],
+      open: () => events.push('history-open'),
+      close: () => events.push('history-close'),
+      listRecent: () => [],
+      search: () => []
     },
     sessionStore: {
-      load: () => events.push('session-load'), read: () => restore,
-      write: () => events.push('session-write'),
+      load: () => events.push('session-load'),
+      read: () => restore,
+      write: () => events.push('session-write')
     },
     getUserDataPath: () => '/profile',
     createHistoryRecorder: () => ({ recorder: true }),
@@ -85,7 +102,10 @@ function makeHarness({ restore = null, platform = 'linux', dev = false, automati
     broadcast: () => {},
     pruneAllJars: () => events.push('prune'),
     scheduleInterval: () => ({ unref: () => events.push('interval') }),
-    createDownloadsManager: () => { events.push('downloads-manager'); return downloadsManager; },
+    createDownloadsManager: () => {
+      events.push('downloads-manager');
+      return downloadsManager;
+    },
     downloadsStore: {},
     setDownloadsManager: () => events.push('set-downloads-manager'),
     getDownloadsManager: () => downloadsManager,
@@ -100,7 +120,7 @@ function makeHarness({ restore = null, platform = 'linux', dev = false, automati
           handle: (scheme, handler) => {
             defaultSessionProtocolCalls.push({ scheme, handler });
             events.push(`default-protocol:${scheme}`);
-          },
+          }
         },
         clearStorageData: (options) => {
           events.push(['clear-storage-data', options]);
@@ -109,10 +129,13 @@ function makeHarness({ restore = null, platform = 'linux', dev = false, automati
         clearCache: () => {
           events.push('clear-cache');
           return Promise.resolve();
-        },
+        }
       };
     },
-    fromPartition: () => { events.push('internal-session'); return internalSession; },
+    fromPartition: () => {
+      events.push('internal-session');
+      return internalSession;
+    },
     internalPartition: 'goldfinch-internal',
     setCreatingInternalSession: (value) => events.push(`creating:${value}`),
     handleInternal: () => {},
@@ -140,7 +163,7 @@ function makeHarness({ restore = null, platform = 'linux', dev = false, automati
       records: () => records,
       getWindowForChrome: () => bootRecord,
       isTabViewWcId: () => false,
-      isChromeContents: () => false,
+      isChromeContents: () => false
     },
     isMcpAutomationEnabled: () => dev,
     shouldBindAutomation: (decision) => {
@@ -159,7 +182,8 @@ function makeHarness({ restore = null, platform = 'linux', dev = false, automati
     raiseWindowForTab: () => {},
     isKnownJar: () => false,
     resolveAutoMintTarget: () => null,
-    mintJarKey: () => '', mintAdminKey: () => '',
+    mintJarKey: () => '',
+    mintAdminKey: () => '',
     getMcpServer: () => server,
     setSessionQuitting: (value) => events.push(`quitting:${value}`),
     buildSessionSnapshot: () => ({ windows: [] }),
@@ -174,26 +198,38 @@ function makeHarness({ restore = null, platform = 'linux', dev = false, automati
             hygieneMarker = payload;
             hygieneWrites.push(payload);
             events.push(`hygiene-write:${payload}`);
-          },
+          }
         };
-      },
+      }
     },
     // M14 F1 L2/L3: the pending-challenge store behind app.on('login') and
     // app.on('select-client-certificate') — recording fakes; the tests pin
     // registration + routing.
     authChallenges: {
       handleLogin: (...args) => authLoginCalls.push(args),
-      handleSelectClientCertificate: (...args) => certSelectCalls.push(args),
+      handleSelectClientCertificate: (...args) => certSelectCalls.push(args)
     },
     getAllWindows: () => [],
-    argv: [], env: {}, platform,
+    argv: [],
+    env: {},
+    platform,
     stdout: { write: () => {} },
-    logger: { error: (...args) => events.push(['error', ...args]), warn: () => {} },
+    logger: { error: (...args) => events.push(['error', ...args]), warn: () => {} }
   });
   return {
-    events, appListeners, handlers, ipcListeners, lifecycle, created, internalSession, authLoginCalls, certSelectCalls,
+    events,
+    appListeners,
+    handlers,
+    ipcListeners,
+    lifecycle,
+    created,
+    internalSession,
+    authLoginCalls,
+    certSelectCalls,
     defaultSessionReads: () => defaultSessionReads,
-    setBootRecord: (record) => { bootRecord = record; },
+    setBootRecord: (record) => {
+      bootRecord = record;
+    },
     defaultSessionProtocolCalls,
     getCapturedMediaProxyDeps: () => capturedMediaProxyDeps,
     mediaProxyHandlerFn,
@@ -202,7 +238,7 @@ function makeHarness({ restore = null, platform = 'linux', dev = false, automati
     parseMediaProxyUrlFake,
     getHygieneDocStoreCreatedFor: () => hygieneDocStoreCreatedFor,
     hygieneWrites,
-    getHygieneMarker: () => hygieneMarker,
+    getHygieneMarker: () => hygieneMarker
   };
 }
 
@@ -220,10 +256,22 @@ test('ready path preserves store/session initialization order and default window
   await h.lifecycle.ready;
   assert.equal(h.defaultSessionReads(), 1, 'default session resolves only inside the ready continuation');
   assert.deepEqual(h.events.slice(0, 16), [
-    'init-stores', 'history-open', 'session-load', 'history-recorder', 'prune', 'interval',
-    'downloads-manager', 'set-downloads-manager', 'wire-downloads', 'apply-shields',
-    'apply-spellcheck', 'media-proxy-handler-built', 'default-protocol:goldfinch-media',
-    'creating:true', 'internal-session', 'creating:false'
+    'init-stores',
+    'history-open',
+    'session-load',
+    'history-recorder',
+    'prune',
+    'interval',
+    'downloads-manager',
+    'set-downloads-manager',
+    'wire-downloads',
+    'apply-shields',
+    'apply-spellcheck',
+    'media-proxy-handler-built',
+    'default-protocol:goldfinch-media',
+    'creating:true',
+    'internal-session',
+    'creating:false'
   ]);
   assert.equal(h.events.includes('protocol:goldfinch'), true);
   assert.equal(h.internalSession.__goldfinchInternal, true);
@@ -246,7 +294,12 @@ test('login handler is registered at TOP-LEVEL scope, before whenReady resolves 
 test('login handler ALWAYS preventDefault()s and routes all four args to authChallenges.handleLogin', () => {
   const h = makeHarness();
   const handler = h.appListeners.get('login');
-  const event = { prevented: false, preventDefault() { this.prevented = true; } };
+  const event = {
+    prevented: false,
+    preventDefault() {
+      this.prevented = true;
+    }
+  };
   const webContents = { id: 42, session: {} };
   const details = { url: 'http://127.0.0.1:8091/protected' };
   const authInfo = { isProxy: false, host: '127.0.0.1', port: 8091, scheme: 'basic', realm: 'fixture' };
@@ -273,13 +326,22 @@ test('select-client-certificate handler is registered at TOP-LEVEL scope, before
 test('select-client-certificate handler ALWAYS preventDefault()s and routes all four args to authChallenges.handleSelectClientCertificate', () => {
   const h = makeHarness();
   const handler = h.appListeners.get('select-client-certificate');
-  const event = { prevented: false, preventDefault() { this.prevented = true; } };
+  const event = {
+    prevented: false,
+    preventDefault() {
+      this.prevented = true;
+    }
+  };
   const webContents = { id: 42, session: {} };
   const url = 'https://127.0.0.1:8493/';
   const list = [{ subjectName: 'CN=Fixture Client', issuerName: 'CN=Fixture CA' }];
   const callback = () => {};
   handler(event, webContents, url, list, callback);
-  assert.equal(event.prevented, true, 'preventDefault must run unconditionally (Electron would auto-pick the first cert)');
+  assert.equal(
+    event.prevented,
+    true,
+    'preventDefault must run unconditionally (Electron would auto-pick the first cert)'
+  );
   assert.equal(h.certSelectCalls.length, 1);
   assert.deepEqual(h.certSelectCalls[0], [webContents, url, list, callback]);
 });
@@ -343,7 +405,11 @@ test('web-contents-created catch-all early-returns for a latched guest, even on 
 
   const unsafeButLatched = navEvent('javascript:alert(1)');
   contents.emit('will-navigate', unsafeButLatched);
-  assert.equal(unsafeButLatched.prevented, false, 'the latch early-returns unconditionally — enforcement is the guest\'s own job');
+  assert.equal(
+    unsafeButLatched.prevented,
+    false,
+    "the latch early-returns unconditionally — enforcement is the guest's own job"
+  );
 });
 
 test('media proxy handler is built with the threaded deps and registered on the DEFAULT session only (Mission 13 F1 Leg 2 / DD2/AC2)', async () => {
@@ -365,7 +431,11 @@ test('media proxy handler is built with the threaded deps and registered on the 
     ['goldfinch-media']
   );
   assert.equal(h.defaultSessionProtocolCalls[0].handler, h.mediaProxyHandlerFn);
-  assert.equal(h.events.includes('protocol:goldfinch-media'), false, 'goldfinch-media must never be registered on the internal session');
+  assert.equal(
+    h.events.includes('protocol:goldfinch-media'),
+    false,
+    'goldfinch-media must never be registered on the internal session'
+  );
 });
 
 test('DD7: a fresh profile purges default-session cookies + cache once, fire-and-forget, and writes the marker', async () => {
@@ -399,22 +469,22 @@ test('DD7: a second boot with the marker already present performs no purge', asy
   await h.lifecycle.ready;
   await flushMicrotasks();
 
-  assert.equal(h.events.some((e) => Array.isArray(e) && e[0] === 'clear-storage-data'), false);
+  assert.equal(
+    h.events.some((e) => Array.isArray(e) && e[0] === 'clear-storage-data'),
+    false
+  );
   assert.equal(h.events.includes('clear-cache'), false);
   assert.equal(h.hygieneWrites.length, 0, 'an already-purged profile must not rewrite the marker');
 });
 
 test('automation bind decision honors production setting and unpackaged dev override', async () => {
-  for (const options of [
-    { automationEnabled: true },
-    { dev: true },
-  ]) {
+  for (const options of [{ automationEnabled: true }, { dev: true }]) {
     const h = makeHarness(options);
     await h.lifecycle.ready;
     const decision = h.events.find((event) => Array.isArray(event) && event[0] === 'bind-decision');
     assert.deepEqual(decision[1], {
       automationEnabled: options.automationEnabled === true,
-      devForceBind: options.dev === true,
+      devForceBind: options.dev === true
     });
     assert.equal(h.events.includes('start-mcp'), true);
     assert.equal(h.handlers.has('automation:dev-invoke'), options.dev === true);
@@ -434,7 +504,7 @@ test('restore topology and boot-config keep saved tabs and flush queued chrome s
     noBootTab: true,
     restoreTabs: h.created[0].restoreTabs,
     pendingChromeSends: [() => ['adopt-tab', { wcId: 7 }]],
-    chromeView: { webContents: { isDestroyed: () => false, send: (...args) => sent.push(args) } },
+    chromeView: { webContents: { isDestroyed: () => false, send: (...args) => sent.push(args) } }
   };
   h.setBootRecord(rec);
   assert.deepEqual(h.handlers.get('window-boot-config')({ sender: {} }), {
@@ -476,6 +546,8 @@ test('the non-guest web-contents-created catch-all deny + guard is byte-unchange
       if (contents.__goldfinchNavGuarded) return; // guests: own predicate already covers them
       const url = event.url || '';
       if (isSafeTabUrl(url) || isInternalPageUrl(url)) return;`;
-  assert.ok(src.includes(pinned),
-    'the catch-all region changed — DD3 requires the non-guest deny to stay; the popup allow path belongs in guest-wiring only');
+  assert.ok(
+    src.includes(pinned),
+    'the catch-all region changed — DD3 requires the non-guest deny to stay; the popup allow path belongs in guest-wiring only'
+  );
 });

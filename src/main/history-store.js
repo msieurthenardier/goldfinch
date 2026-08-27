@@ -163,13 +163,10 @@ function attemptOpen(dbPath) {
 function prepareStatements() {
   const d = /** @type {import('node:sqlite').DatabaseSync} */ (db);
   statements = {
-    insertVisit: d.prepare(
-      'INSERT INTO visits (jar_id, url, title, visited_at) VALUES (?, ?, ?, ?)'
-    ),
+    insertVisit: d.prepare('INSERT INTO visits (jar_id, url, title, visited_at) VALUES (?, ?, ?, ?)'),
     setTitle: d.prepare('UPDATE visits SET title = ? WHERE id = ?'),
     listRecentNoCursor: d.prepare(
-      'SELECT id, url, title, visited_at FROM visits WHERE jar_id = ? ' +
-        'ORDER BY visited_at DESC, id DESC LIMIT ?'
+      'SELECT id, url, title, visited_at FROM visits WHERE jar_id = ? ' + 'ORDER BY visited_at DESC, id DESC LIMIT ?'
     ),
     findVisitCursor: d.prepare('SELECT jar_id, visited_at FROM visits WHERE id = ?'),
     // ⚠ every placeholder DISTINCT — mixing a bare `?` with `?1` collapses
@@ -311,9 +308,7 @@ function recordVisit({ jarId, url, title, visitedAt }) {
   if (typeof visitedAt !== 'number' || !Number.isFinite(visitedAt)) {
     throw new TypeError('recordVisit: visitedAt must be a finite number');
   }
-  const result = /** @type {any} */ (
-    statements.insertVisit.run(jarId, url, title ?? null, visitedAt)
-  );
+  const result = /** @type {any} */ (statements.insertVisit.run(jarId, url, title ?? null, visitedAt));
   return result.lastInsertRowid;
 }
 
@@ -342,9 +337,7 @@ function listRecent(jarId, { limit = 100, before = null } = {}) {
   const clampedLimit = Math.min(MAX_LIMIT, Math.max(MIN_LIMIT, limit));
 
   if (before === null || before === undefined) {
-    const rows = /** @type {any[]} */ (
-      statements.listRecentNoCursor.all(jarId, clampedLimit)
-    );
+    const rows = /** @type {any[]} */ (statements.listRecentNoCursor.all(jarId, clampedLimit));
     return rows.map(rowToVisit);
   }
 
@@ -385,9 +378,7 @@ function listByPage(jarId, { page = 1, pageSize = 50 } = {}) {
   const clampedPageSize = Math.min(MAX_LIMIT, Math.max(MIN_LIMIT, pageSize));
   const offset = (clampedPage - 1) * clampedPageSize;
 
-  const rows = /** @type {any[]} */ (
-    statements.listByOffset.all(jarId, clampedPageSize, offset)
-  );
+  const rows = /** @type {any[]} */ (statements.listByOffset.all(jarId, clampedPageSize, offset));
   return rows.map(rowToVisit);
 }
 
@@ -424,9 +415,7 @@ function search(jarId, query, { limit = 50 } = {}) {
   const ftsQuery = sanitizeSearchQuery(query);
   if (ftsQuery === null) return [];
 
-  const rows = /** @type {any[]} */ (
-    statements.search.all(ftsQuery, jarId, clampedLimit)
-  );
+  const rows = /** @type {any[]} */ (statements.search.all(ftsQuery, jarId, clampedLimit));
   return rows.map(rowToVisit);
 }
 
@@ -461,9 +450,7 @@ function suggest(jarId, query, { limit = 6, now } = /** @type {any} */ ({})) {
   const ftsQuery = sanitizeSearchQuery(query);
   if (ftsQuery === null) return [];
 
-  const rows = /** @type {any[]} */ (
-    statements.suggest.all(now, ftsQuery, jarId, clampedLimit)
-  );
+  const rows = /** @type {any[]} */ (statements.suggest.all(now, ftsQuery, jarId, clampedLimit));
   return rows.map((row) => ({
     url: row.url,
     title: row.title,

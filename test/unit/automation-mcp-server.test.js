@@ -18,7 +18,14 @@ const assert = require('node:assert/strict');
 const http = require('http');
 const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
 const { StreamableHTTPClientTransport } = require('@modelcontextprotocol/sdk/client/streamableHttp.js');
-const { createMcpServer, mintJarKey, revokeJarKey, revokeAdminKey, deriveAuditDetail, redactUrlForAudit } = require('../../src/main/automation/mcp-server');
+const {
+  createMcpServer,
+  mintJarKey,
+  revokeJarKey,
+  revokeAdminKey,
+  deriveAuditDetail,
+  redactUrlForAudit
+} = require('../../src/main/automation/mcp-server');
 const { hashKey, validateKey } = require('../../src/main/automation/automation-auth');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -42,7 +49,7 @@ function fakeSettings({ enabled = true, keyHashes = { test: hashKey(VALID_KEY) }
   const map = {
     automationEnabled: enabled,
     automationKeyHashes: keyHashes,
-    automationAdminKeyHash: adminKeyHash,
+    automationAdminKeyHash: adminKeyHash
   };
   return { get: (k) => map[k] };
 }
@@ -63,7 +70,7 @@ function fakeSettings({ enabled = true, keyHashes = { test: hashKey(VALID_KEY) }
 // existing gate/lifecycle tests authenticate as. A burner jar is NOT listed.
 const JARS = [
   { id: 'test', partition: 'persist:container:test' },
-  { id: 'work', partition: 'persist:container:work' },
+  { id: 'work', partition: 'persist:container:work' }
 ];
 
 // Interned-session map: one stable object per partition (=== identity is the test).
@@ -83,11 +90,39 @@ const fakeFromPartition = (partition) => sessionFor(partition);
 // - 4: jar 'test'   but reported jarId LIES 'work' (session is authoritative)
 // - 5: INTERNAL     (goldfinch://settings session)
 const WORLD_TABS = [
-  { wcId: 1, partition: 'persist:container:test', url: 'https://test.example', title: 'T', jarId: 'test', active: true },
-  { wcId: 2, partition: 'persist:container:work', url: 'https://work.example', title: 'W', jarId: 'work', active: false },
+  {
+    wcId: 1,
+    partition: 'persist:container:test',
+    url: 'https://test.example',
+    title: 'T',
+    jarId: 'test',
+    active: true
+  },
+  {
+    wcId: 2,
+    partition: 'persist:container:work',
+    url: 'https://work.example',
+    title: 'W',
+    jarId: 'work',
+    active: false
+  },
   { wcId: 3, partition: 'burner:1', url: 'https://burner.example', title: 'B', jarId: 'test', active: false },
-  { wcId: 4, partition: 'persist:container:test', url: 'https://test2.example', title: 'T2', jarId: 'work', active: false },
-  { wcId: 5, partition: 'goldfinch-internal', url: 'goldfinch://settings', title: 'Settings', jarId: null, active: false },
+  {
+    wcId: 4,
+    partition: 'persist:container:test',
+    url: 'https://test2.example',
+    title: 'T2',
+    jarId: 'work',
+    active: false
+  },
+  {
+    wcId: 5,
+    partition: 'goldfinch-internal',
+    url: 'goldfinch://settings',
+    title: 'Settings',
+    jarId: null,
+    active: false
+  }
 ];
 
 const TAB_BY_WCID = new Map(WORLD_TABS.map((t) => [t.wcId, t]));
@@ -96,7 +131,13 @@ const TAB_BY_WCID = new Map(WORLD_TABS.map((t) => [t.wcId, t]));
 function fakeFromId(wcId) {
   const t = TAB_BY_WCID.get(wcId);
   if (!t) return null;
-  return { id: wcId, session: sessionFor(t.partition), isDestroyed() { return false; } };
+  return {
+    id: wcId,
+    session: sessionFor(t.partition),
+    isDestroyed() {
+      return false;
+    }
+  };
 }
 
 // The scope ctx injected into createMcpServer. fromId / fromPartition are the
@@ -106,7 +147,7 @@ function fakeScopeCtx() {
     jars: { list: () => JARS },
     fromId: fakeFromId,
     fromPartition: fakeFromPartition,
-    getChromeContents: () => ({ id: 0 }),
+    getChromeContents: () => ({ id: 0 })
   };
 }
 
@@ -137,7 +178,7 @@ function makeFakeEngine({ allowInternal = false } = {}) {
     captureScreenshot: () => '',
     captureWindow: () => '',
     readDom: (wcId) => ({ dom: wcId }),
-    readAxTree: (wcId) => ({ ax: wcId }),
+    readAxTree: (wcId) => ({ ax: wcId })
   };
 }
 
@@ -156,7 +197,7 @@ async function startServer(settingsOpts, extraOpts) {
     getSettings: () => fakeSettings(settingsOpts),
     scopeCtx: fakeScopeCtx(),
     port: TEST_PORT,
-    ...(extraOpts || {}),
+    ...(extraOpts || {})
   });
   await server.start();
   return server;
@@ -179,7 +220,7 @@ async function connectClient(key = VALID_KEY) {
   const headers = { connection: 'close' };
   if (key) headers.authorization = 'Bearer ' + key;
   const transport = new StreamableHTTPClientTransport(new URL(ENDPOINT), {
-    requestInit: { headers },
+    requestInit: { headers }
   });
   await client.connect(transport);
   return client;
@@ -201,13 +242,15 @@ function rawPost(headers, body) {
           'content-type': 'application/json',
           accept: 'application/json, text/event-stream',
           connection: 'close',
-          ...headers,
-        },
+          ...headers
+        }
       },
       (res) => {
         const chunks = [];
         res.on('data', (c) => chunks.push(c));
-        res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks).toString('utf8') }));
+        res.on('end', () =>
+          resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks).toString('utf8') })
+        );
       }
     );
     req.on('error', reject);
@@ -249,8 +292,8 @@ function initBody() {
     params: {
       protocolVersion: '2024-11-05',
       capabilities: {},
-      clientInfo: { name: 'raw-test', version: '1.0.0' },
-    },
+      clientInfo: { name: 'raw-test', version: '1.0.0' }
+    }
   };
 }
 
@@ -344,7 +387,7 @@ test('REGRESSION F12: stop during an in-flight start leaves no orphan listener',
     getEngine: (engineOpts) => fakeEngine(engineOpts),
     getSettings: () => fakeSettings(),
     scopeCtx: fakeScopeCtx(),
-    port: TEST_PORT,
+    port: TEST_PORT
   });
 
   // start() yields while listen is pending; stop() must cancel that bind even
@@ -377,7 +420,7 @@ test('rebind primitive — start→stop→start on a DIFFERENT port binds on B, 
     getEngine: (engineOpts) => fakeEngine(engineOpts),
     getSettings: () => fakeSettings(),
     scopeCtx: fakeScopeCtx(),
-    port: PORT_A,
+    port: PORT_A
   });
   await onA.start();
   assert.equal(onA.port, PORT_A, '.port reflects A');
@@ -385,7 +428,7 @@ test('rebind primitive — start→stop→start on a DIFFERENT port binds on B, 
   {
     const client = new Client({ name: 'rebind-test', version: '1.0.0' });
     const transport = new StreamableHTTPClientTransport(endpointA, {
-      requestInit: { headers: { connection: 'close', authorization: 'Bearer ' + VALID_KEY } },
+      requestInit: { headers: { connection: 'close', authorization: 'Bearer ' + VALID_KEY } }
     });
     await client.connect(transport);
     try {
@@ -403,7 +446,7 @@ test('rebind primitive — start→stop→start on a DIFFERENT port binds on B, 
     getEngine: (engineOpts) => fakeEngine(engineOpts),
     getSettings: () => fakeSettings(),
     scopeCtx: fakeScopeCtx(),
-    port: PORT_B,
+    port: PORT_B
   });
   await onB.start();
   try {
@@ -411,7 +454,7 @@ test('rebind primitive — start→stop→start on a DIFFERENT port binds on B, 
     const endpointB = new URL('http://127.0.0.1:' + PORT_B + '/mcp');
     const client = new Client({ name: 'rebind-test', version: '1.0.0' });
     const transport = new StreamableHTTPClientTransport(endpointB, {
-      requestInit: { headers: { connection: 'close', authorization: 'Bearer ' + VALID_KEY } },
+      requestInit: { headers: { connection: 'close', authorization: 'Bearer ' + VALID_KEY } }
     });
     await client.connect(transport);
     try {
@@ -427,7 +470,7 @@ test('rebind primitive — start→stop→start on a DIFFERENT port binds on B, 
       getEngine: (engineOpts) => fakeEngine(engineOpts),
       getSettings: () => fakeSettings(),
       scopeCtx: fakeScopeCtx(),
-      port: PORT_A,
+      port: PORT_A
     });
     await assert.doesNotReject(reA.start(), 'A is free again after the rebind off it');
     await reA.stop();
@@ -581,10 +624,7 @@ test('REGRESSION F10: established-session POSTs are also capped at 1 MiB', async
   try {
     const sid = await rawInitSession();
     const huge = JSON.stringify({ pad: 'x'.repeat(1024 * 1024 + 1024) });
-    const res = await rawPost(
-      { authorization: 'Bearer ' + VALID_KEY, 'mcp-session-id': sid },
-      huge
-    );
+    const res = await rawPost({ authorization: 'Bearer ' + VALID_KEY, 'mcp-session-id': sid }, huge);
     assert.equal(res.status, 413, 'over-cap established-session body is 413');
 
     // The capped request is refused before delegation without killing the
@@ -646,7 +686,7 @@ async function startScopedServer({ enabled = true, withAdmin = false } = {}) {
     getEngine: (engineOpts) => makeFakeEngine(engineOpts),
     getSettings: multiKeySettings({ enabled, withAdmin }),
     scopeCtx: fakeScopeCtx(),
-    port: TEST_PORT,
+    port: TEST_PORT
   });
   await server.start();
   return server;
@@ -760,7 +800,9 @@ test('scope — admin (env-set) enumerates ALL jars + the internal tab and captu
     try {
       const res = await client.callTool({ name: 'enumerateTabs', arguments: {} });
       assert.equal(res.isError, undefined);
-      const wcIds = toolJson(res).map((t) => t.wcId).sort();
+      const wcIds = toolJson(res)
+        .map((t) => t.wcId)
+        .sort();
       // Admin sees every tab INCLUDING the internal session tab (wcId 5).
       assert.deepEqual(wcIds, [1, 2, 3, 4, 5]);
 
@@ -891,7 +933,7 @@ async function startAuditServer(sink, { withAdmin = false } = {}) {
     getSettings: multiKeySettings({ withAdmin }),
     scopeCtx: fakeScopeCtx(),
     broadcast: (payload) => sink.push(payload),
-    port: TEST_PORT,
+    port: TEST_PORT
   });
   await server.start();
   return server;
@@ -1012,8 +1054,8 @@ function openGetStream(sessionId, key = VALID_KEY) {
         headers: {
           accept: 'text/event-stream',
           authorization: 'Bearer ' + key,
-          'mcp-session-id': sessionId,
-        },
+          'mcp-session-id': sessionId
+        }
       },
       (res) => resolve({ req, res })
     );
@@ -1090,7 +1132,10 @@ test('audit — the injected broadcast fires with the snapshot on session open a
     }
     // The disconnect fires a session-close broadcast too.
     await waitFor(() => broadcasts.some((b) => b.sessions.length === 0));
-    assert.ok(broadcasts.some((b) => b.sessions.length === 0), 'session close fired a broadcast with an empty active set');
+    assert.ok(
+      broadcasts.some((b) => b.sessions.length === 0),
+      'session close fired a broadcast with an empty active set'
+    );
   } finally {
     await server.stop();
   }
@@ -1105,7 +1150,12 @@ test('audit — the injected broadcast fires with the snapshot on session open a
 
 function memSettings() {
   const map = {};
-  return { get: (k) => map[k], set: (k, v) => { map[k] = v; } };
+  return {
+    get: (k) => map[k],
+    set: (k, v) => {
+      map[k] = v;
+    }
+  };
 }
 
 test('mint — minting a KNOWN jar id creates a credential that validates as that jar (never enables)', () => {
@@ -1166,11 +1216,7 @@ test('revokeJarKey — deletes only the target jar hash; other jars untouched', 
   revokeJarKey('personal', settings);
 
   const hashes = settings.get('automationKeyHashes');
-  assert.equal(
-    Object.prototype.hasOwnProperty.call(hashes, 'personal'),
-    false,
-    'target jar hash deleted'
-  );
+  assert.equal(Object.prototype.hasOwnProperty.call(hashes, 'personal'), false, 'target jar hash deleted');
   assert.equal(hashes.work, beforeWork, "other jar's hash left intact");
 });
 
@@ -1233,7 +1279,10 @@ test('deriveAuditDetail — openTab returns url=<url>', () => {
 });
 
 test('deriveAuditDetail — openTab with jarId appends jar=<jarId>', () => {
-  assert.equal(deriveAuditDetail('openTab', { url: 'https://x.example', jarId: 'work' }), 'url=https://x.example jar=work');
+  assert.equal(
+    deriveAuditDetail('openTab', { url: 'https://x.example', jarId: 'work' }),
+    'url=https://x.example jar=work'
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -1294,7 +1343,10 @@ test('deriveAuditDetail — click returns (x,y) with defaults omitted', () => {
 });
 
 test('deriveAuditDetail — click with non-default button includes it', () => {
-  assert.equal(deriveAuditDetail('click', { wcId: 1, x: 10, y: 20, button: 'right', clickCount: 1 }), '(10,20) button=right');
+  assert.equal(
+    deriveAuditDetail('click', { wcId: 1, x: 10, y: 20, button: 'right', clickCount: 1 }),
+    '(10,20) button=right'
+  );
 });
 
 test('deriveAuditDetail — click with non-default clickCount includes it', () => {
@@ -1318,7 +1370,10 @@ test('deriveAuditDetail — pressKey with a single modifier records the chord (k
 });
 
 test('deriveAuditDetail — pressKey with multiple modifiers records each (key=P+control+shift)', () => {
-  assert.equal(deriveAuditDetail('pressKey', { wcId: 1, name: 'P', modifiers: ['control', 'shift'] }), 'key=P+control+shift');
+  assert.equal(
+    deriveAuditDetail('pressKey', { wcId: 1, name: 'P', modifiers: ['control', 'shift'] }),
+    'key=P+control+shift'
+  );
 });
 
 test('deriveAuditDetail — pressKey with empty modifiers keeps the bare-key string', () => {
@@ -1339,9 +1394,22 @@ test('deriveAuditDetail — typeText with empty text returns text(0 chars)', () 
 });
 
 test('deriveAuditDetail — null-returning ops yield null', () => {
-  const nullOps = ['enumerateTabs', 'getChromeTarget', 'downloadsList', 'captureWindow', 'captureScreenshot',
-    'readDom', 'readAxTree', 'closeTab', 'activateTab', 'goBack', 'goForward', 'reload',
-    'openDevTools', 'closeDevTools'];
+  const nullOps = [
+    'enumerateTabs',
+    'getChromeTarget',
+    'downloadsList',
+    'captureWindow',
+    'captureScreenshot',
+    'readDom',
+    'readAxTree',
+    'closeTab',
+    'activateTab',
+    'goBack',
+    'goForward',
+    'reload',
+    'openDevTools',
+    'closeDevTools'
+  ];
   for (const op of nullOps) {
     assert.equal(deriveAuditDetail(op, { wcId: 1 }), null, op + ' should return null');
   }
@@ -1378,7 +1446,10 @@ const mkToolResult = (value) => ({ content: [{ type: 'text', text: JSON.stringif
 
 test('deriveAuditDetail — vaultFill appends origin from a filled result (item=<id> origin=<origin>)', () => {
   const result = mkToolResult({ filled: true, id: 'w1', origin: 'https://work.example' });
-  assert.equal(deriveAuditDetail('vaultFill', { wcId: 10, itemId: 'w1' }, result), 'item=w1 origin=https://work.example');
+  assert.equal(
+    deriveAuditDetail('vaultFill', { wcId: 10, itemId: 'w1' }, result),
+    'item=w1 origin=https://work.example'
+  );
 });
 
 test('deriveAuditDetail — vaultFill with a NOT-filled result keeps item=<id> (no origin)', () => {
@@ -1408,7 +1479,10 @@ test('deriveAuditDetail — vaultUnlock with an empty unlocked array records unl
 });
 
 test('deriveAuditDetail — vaultUnlock with a non-array unlocked records unlocked=0 (Array.isArray guard)', () => {
-  assert.equal(deriveAuditDetail('vaultUnlock', { accessKey: 'secret' }, mkToolResult({ unlocked: 'oops' })), 'unlocked=0');
+  assert.equal(
+    deriveAuditDetail('vaultUnlock', { accessKey: 'secret' }, mkToolResult({ unlocked: 'oops' })),
+    'unlocked=0'
+  );
 });
 
 test('deriveAuditDetail — vaultUnlock 2-arg (no result) returns null — preserves the secret-op default', () => {
@@ -1437,9 +1511,20 @@ const VAULT_JARS = [{ id: 'work', partition: 'persist:container:work' }];
 
 async function buildVaultFixture() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gf-mcp-vault-'));
-  const setup = vaultStoreApi.load(dir, { scryptParams: VAULT_FAST_SCRYPT, getAutoLockMinutes: () => 10, listJars: () => VAULT_JARS });
+  const setup = vaultStoreApi.load(dir, {
+    scryptParams: VAULT_FAST_SCRYPT,
+    getAutoLockMinutes: () => 10,
+    listJars: () => VAULT_JARS
+  });
   await setup.setup({ masterPassword: VAULT_MASTER });
-  setup.saveItem('work', { id: 'w1', type: 'login', title: 'Work', origin: 'https://work.example', username: 'wuser', password: 'wpass' });
+  setup.saveItem('work', {
+    id: 'w1',
+    type: 'login',
+    title: 'Work',
+    origin: 'https://work.example',
+    username: 'wuser',
+    password: 'wpass'
+  });
   const work = await setup.mintAccessKey('work', { masterPassword: VAULT_MASTER });
   setup.lockNow(); // human store locked — the automation path is stateless.
   return { dir, workSecret: work.secret };
@@ -1457,17 +1542,29 @@ async function startVaultServer(sink, fixture, fillCalls) {
     scopeCtx: {
       jars: { list: () => VAULT_JARS },
       // wcId 501 is a work-session tab whose top-frame origin MATCHES the item.
-      fromId: (wcId) => (wcId === 501
-        ? { id: 501, session: vsessionFor('persist:container:work'), getURL: () => 'https://work.example/login', isDestroyed() { return false; } }
-        : null),
+      fromId: (wcId) =>
+        wcId === 501
+          ? {
+              id: 501,
+              session: vsessionFor('persist:container:work'),
+              getURL: () => 'https://work.example/login',
+              isDestroyed() {
+                return false;
+              }
+            }
+          : null,
       fromPartition: vsessionFor,
-      getChromeContents: () => ({ id: 0 }),
+      getChromeContents: () => ({ id: 0 })
     },
-    vaultStore: vaultStoreApi.load(fixture.dir, { scryptParams: VAULT_FAST_SCRYPT, getAutoLockMinutes: () => 10, listJars: () => VAULT_JARS }),
+    vaultStore: vaultStoreApi.load(fixture.dir, {
+      scryptParams: VAULT_FAST_SCRYPT,
+      getAutoLockMinutes: () => 10,
+      listJars: () => VAULT_JARS
+    }),
     fillDelegate: (a) => fillCalls.push(a),
     getAutoLockMinutes: () => 10,
     broadcast: (payload) => sink.push(payload),
-    port: TEST_PORT,
+    port: TEST_PORT
   });
   await server.start();
   return server;

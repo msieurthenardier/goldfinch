@@ -181,13 +181,14 @@ test('the scan PASSES source whose only registration is the wrapper itself', () 
   assert.deepEqual(violations, []);
 });
 
-test('.once(\'closed\') is caught too, not just .on', () => {
-  const src = "function onWindowClosed(win, handler) { win.on('closed', () => handler(win.id)); }\nwin.once('closed', () => {});";
+test(".once('closed') is caught too, not just .on", () => {
+  const src =
+    "function onWindowClosed(win, handler) { win.on('closed', () => handler(win.id)); }\nwin.once('closed', () => {});";
   const { violations } = scanSource(src, 'fake.js');
   assert.deepEqual(violations, ['fake.js:2']);
 });
 
-test("a registration-shaped mention inside a COMMENT is not a violation", () => {
+test('a registration-shaped mention inside a COMMENT is not a violation', () => {
   // This very test file's wrapper doc comment mentions `.on('closed'` — the mask is
   // what stops the net from tripping on prose about itself.
   const src = [

@@ -82,9 +82,8 @@ function createFaviconFetcher({ maxBytes = DEFAULT_FETCH_MAX_BYTES } = {}) {
     try {
       const response = await fetchImpl(favicon);
       if (!response || !response.ok) return null;
-      const rawType = response.headers && typeof response.headers.get === 'function'
-        ? response.headers.get('content-type')
-        : null;
+      const rawType =
+        response.headers && typeof response.headers.get === 'function' ? response.headers.get('content-type') : null;
       const contentType = (rawType || '').split(';')[0].trim();
       if (!/^image\//i.test(contentType)) return null;
       const buf = await response.arrayBuffer();

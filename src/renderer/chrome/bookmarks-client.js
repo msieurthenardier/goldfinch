@@ -78,14 +78,17 @@ export function createBookmarksClient({ bridge, isInternalTab, onChanged, jarsBo
    */
   function ensureJar(jarId) {
     if (jarId == null || map.has(jarId) || inFlight.has(jarId)) return inFlight.get(jarId);
-    const p = bridge.bookmarksGet({ jarId })
+    const p = bridge
+      .bookmarksGet({ jarId })
       .then((list) => {
         inFlight.delete(jarId);
         if (!isJarStillKnown(jarId)) return; // L3-DD-A2: dropped — evicted mid-flight
         applyJarList(jarId, list);
         if (onChanged) onChanged(jarId);
       })
-      .catch(() => { inFlight.delete(jarId); });
+      .catch(() => {
+        inFlight.delete(jarId);
+      });
     inFlight.set(jarId, p);
     return p;
   }
@@ -109,10 +112,13 @@ export function createBookmarksClient({ bridge, isInternalTab, onChanged, jarsBo
   bridge.onBookmarksChanged((payload) => {
     const jarId = payload && typeof payload.jarId === 'string' ? payload.jarId : null;
     if (jarId == null || !map.has(jarId)) return; // DD6: nothing cached -> nothing stale
-    bridge.bookmarksGet({ jarId }).then((list) => {
-      applyJarList(jarId, list);
-      if (onChanged) onChanged(jarId);
-    }).catch(() => {});
+    bridge
+      .bookmarksGet({ jarId })
+      .then((list) => {
+        applyJarList(jarId, list);
+        if (onChanged) onChanged(jarId);
+      })
+      .catch(() => {});
   });
 
   // L3-DD-A eviction: independent subscription, reads the broadcast's OWN
@@ -153,15 +159,12 @@ export function createBookmarksClient({ bridge, isInternalTab, onChanged, jarsBo
    * @returns {Promise<any | null>}
    */
   async function activateStar(tab) {
-    if (
-      !tab || tab.wcId == null || !tab.container ||
-      (isInternalTab && isInternalTab(tab)) ||
-      tab.container.burner
-    ) return null;
+    if (!tab || tab.wcId == null || !tab.container || (isInternalTab && isInternalTab(tab)) || tab.container.burner)
+      return null;
     const jarId = tab.container.id;
     const existing = findByUrl(jarId, tab.url);
     if (existing) return existing;
-    const title = tab.title && tab.title !== 'New tab' ? tab.title : (tab.url || '');
+    const title = tab.title && tab.title !== 'New tab' ? tab.title : tab.url || '';
     const res = await bridge.bookmarkAdd({ jarId, url: tab.url, title, icon: tab.favicon ?? undefined });
     return res && res.ok ? res.bookmark : null;
   }
@@ -312,7 +315,7 @@ export function createBookmarksClient({ bridge, isInternalTab, onChanged, jarsBo
     captureEditJar,
     handleEditSubmit,
     commitReorder,
-    commitOverflowDrop,
+    commitOverflowDrop
   };
 }
 

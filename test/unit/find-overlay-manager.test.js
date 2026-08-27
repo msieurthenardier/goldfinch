@@ -282,11 +282,7 @@ test('teardown destroys the webContents, resets state; later show recreates', ()
   );
   assert.equal(mgr.getView(), null);
   assert.equal(mgr.isVisible(), false);
-  assert.equal(
-    cv.calls.filter((c) => c[0] === 'removeChildView').length,
-    1,
-    'removed from the stack while visible'
-  );
+  assert.equal(cv.calls.filter((c) => c[0] === 'removeChildView').length, 1, 'removed from the stack while visible');
   mgr.show();
   assert.equal(createdViews.length, 2, 'later show recreated the view');
 });
@@ -377,7 +373,10 @@ test('an open AFTER load delivers init immediately (and focuses the bar)', () =>
   mgr.openSession(7, 'now');
   const sends = v.calls.filter((c) => c[0] === 'send');
   assert.deepEqual(sends.at(-1), ['send', 'find-overlay:init', { findText: 'now' }]);
-  assert.ok(v.calls.some((c) => c[0] === 'focus'), 'DD6: main focuses the overlay wc');
+  assert.ok(
+    v.calls.some((c) => c[0] === 'focus'),
+    'DD6: main focuses the overlay wc'
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -403,16 +402,8 @@ test('AC6e: re-open on the already-targeted tab re-focuses WITHOUT re-seeding in
 
   mgr.openSession(7, 'DIFFERENT');
 
-  assert.equal(
-    v.calls.filter((c) => c[0] === 'send').length,
-    sendsBefore,
-    'no re-init — the typed text survives'
-  );
-  assert.equal(
-    v.calls.filter((c) => c[0] === 'focus').length,
-    focusBefore + 1,
-    're-focused instead'
-  );
+  assert.equal(v.calls.filter((c) => c[0] === 'send').length, sendsBefore, 'no re-init — the typed text survives');
+  assert.equal(v.calls.filter((c) => c[0] === 'focus').length, focusBefore + 1, 're-focused instead');
   assert.equal(mgr.getSessionTabWcId(), 7);
 });
 
@@ -443,10 +434,7 @@ test('closeSession always stops the find; refocuses the guest ONLY when refocusG
   const guest = addTab(7);
   mgr.openSession(7, 'x');
   mgr.closeSession({ refocusGuest: true });
-  assert.deepEqual(guest.calls, [
-    ['stopFindInPage', 'clearSelection'],
-    ['focus']
-  ]);
+  assert.deepEqual(guest.calls, [['stopFindInPage', 'clearSelection'], ['focus']]);
 });
 
 test('closeSession with refocusGuest:false never focuses the guest (AC5)', () => {
@@ -496,11 +484,7 @@ test('HAT-1: the FIRST query of a session begins a NEW engine session (findNext:
   const guest = addTab(7);
   mgr.openSession(7, '');
   mgr.query({ text: 'cat', findNext: false });
-  assert.deepEqual(guest.calls.at(-1), [
-    'findInPage',
-    'cat',
-    { findNext: true, forward: true, matchCase: false }
-  ]);
+  assert.deepEqual(guest.calls.at(-1), ['findInPage', 'cat', { findNext: true, forward: true, matchCase: false }]);
 });
 
 test('HAT-1: same text + step ⇒ findNext:false (continue the engine session)', () => {
@@ -508,11 +492,7 @@ test('HAT-1: same text + step ⇒ findNext:false (continue the engine session)',
   mgr.openSession(7, '');
   mgr.query({ text: 'cat', findNext: true }); // first — new session
   mgr.query({ text: 'cat', findNext: true }); // step on unchanged text
-  assert.deepEqual(guest.calls.at(-1), [
-    'findInPage',
-    'cat',
-    { findNext: false, forward: true, matchCase: false }
-  ]);
+  assert.deepEqual(guest.calls.at(-1), ['findInPage', 'cat', { findNext: false, forward: true, matchCase: false }]);
 });
 
 test('HAT-1: CHANGED text ⇒ findNext:true even when the payload says step', () => {
@@ -522,11 +502,7 @@ test('HAT-1: CHANGED text ⇒ findNext:true even when the payload says step', ()
   mgr.openSession(7, '');
   mgr.query({ text: 'cat', findNext: true });
   mgr.query({ text: 'cats', findNext: true });
-  assert.deepEqual(guest.calls.at(-1), [
-    'findInPage',
-    'cats',
-    { findNext: true, forward: true, matchCase: false }
-  ]);
+  assert.deepEqual(guest.calls.at(-1), ['findInPage', 'cats', { findNext: true, forward: true, matchCase: false }]);
 });
 
 test('HAT-1: empty text makes NO engine call and resets the session text', () => {
@@ -539,11 +515,7 @@ test('HAT-1: empty text makes NO engine call and resets the session text', () =>
   // The reset is observable: the next non-empty query must begin a NEW session even
   // though the text matches the pre-delete one.
   mgr.query({ text: 'cat', findNext: true });
-  assert.deepEqual(guest.calls.at(-1), [
-    'findInPage',
-    'cat',
-    { findNext: true, forward: true, matchCase: false }
-  ]);
+  assert.deepEqual(guest.calls.at(-1), ['findInPage', 'cat', { findNext: true, forward: true, matchCase: false }]);
 });
 
 test('a NEW session resets the last-queried text (first query re-searches)', () => {
@@ -555,11 +527,7 @@ test('a NEW session resets the last-queried text (first query re-searches)', () 
   mgr.query({ text: 'cat', findNext: true });
   mgr.openSession(8, ''); // fresh session target
   mgr.query({ text: 'cat', findNext: true });
-  assert.deepEqual(newGuest.calls.at(-1), [
-    'findInPage',
-    'cat',
-    { findNext: true, forward: true, matchCase: false }
-  ]);
+  assert.deepEqual(newGuest.calls.at(-1), ['findInPage', 'cat', { findNext: true, forward: true, matchCase: false }]);
 });
 
 test('query forwards EVERY query text to chrome, empty included (DD9 deletion sync)', () => {
@@ -577,11 +545,7 @@ test('query honors forward and matchCase (forward defaults true, matchCase defau
   const guest = addTab(7);
   mgr.openSession(7, '');
   mgr.query({ text: 'cat', findNext: false, forward: false, matchCase: true });
-  assert.deepEqual(guest.calls.at(-1), [
-    'findInPage',
-    'cat',
-    { findNext: true, forward: false, matchCase: true }
-  ]);
+  assert.deepEqual(guest.calls.at(-1), ['findInPage', 'cat', { findNext: true, forward: false, matchCase: true }]);
 });
 
 test('query with no live session is a no-op', () => {
@@ -641,7 +605,7 @@ function makeIsolatedManager() {
   return ctx;
 }
 
-test('two instances share NO state: a syncBounds on A never moves B\'s view', () => {
+test("two instances share NO state: a syncBounds on A never moves B's view", () => {
   const a = makeIsolatedManager();
   const b = makeIsolatedManager();
   a.mgr.show();
@@ -661,12 +625,12 @@ test("two instances share NO state: A's session never appears in B", () => {
   a.mgr.openSession(7, 'x');
 
   assert.equal(a.mgr.getSessionTabWcId(), 7);
-  assert.equal(b.mgr.getSessionTabWcId(), null, "B has no session");
+  assert.equal(b.mgr.getSessionTabWcId(), null, 'B has no session');
   assert.equal(b.mgr.isSessionActive(7), false, "A's target is not active in B");
   assert.equal(b.mgr.isVisible(), false, "B's bar never showed");
 });
 
-test("two instances share NO state: tearing down A leaves B fully live", () => {
+test('two instances share NO state: tearing down A leaves B fully live', () => {
   // The leg's headline: closing one window destroys ONLY that window's overlays.
   const a = makeIsolatedManager();
   const b = makeIsolatedManager();

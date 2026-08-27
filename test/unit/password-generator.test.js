@@ -22,7 +22,7 @@ function classesPresent(pw) {
     lower: [...pw].some((c) => LOWER.has(c)),
     upper: [...pw].some((c) => UPPER.has(c)),
     digits: [...pw].some((c) => DIGITS.has(c)),
-    symbols: [...pw].some((c) => SYMBOLS.has(c)),
+    symbols: [...pw].some((c) => SYMBOLS.has(c))
   };
 }
 
@@ -41,7 +41,10 @@ test('honors an explicit length', () => {
 test('each ENABLED class appears at least once and DISABLED classes never appear', () => {
   // digits-only
   const digitsOnly = generatePassword({ length: 16, lower: false, upper: false, digits: true, symbols: false });
-  assert.ok([...digitsOnly].every((c) => DIGITS.has(c)), 'digits-only must contain only digits');
+  assert.ok(
+    [...digitsOnly].every((c) => DIGITS.has(c)),
+    'digits-only must contain only digits'
+  );
   assert.deepEqual(classesPresent(digitsOnly), { lower: false, upper: false, digits: true, symbols: false });
 
   // lower + upper only — no digit, no symbol, both letter classes present
@@ -58,8 +61,11 @@ test('guarantees >=1 of each enabled class even at the minimum length (length ==
   for (let i = 0; i < 200; i += 1) {
     const pw = generatePassword({ length: 4 });
     assert.equal(pw.length, 4);
-    assert.deepEqual(classesPresent(pw), { lower: true, upper: true, digits: true, symbols: true },
-      `every 4-char all-class password must hold one of each (iteration ${i})`);
+    assert.deepEqual(
+      classesPresent(pw),
+      { lower: true, upper: true, digits: true, symbols: true },
+      `every 4-char all-class password must hold one of each (iteration ${i})`
+    );
   }
 });
 

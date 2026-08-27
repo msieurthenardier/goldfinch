@@ -77,7 +77,7 @@ test('burner partition (COLON separator, not the hyphen used in burner ids) -> f
   assert.deepEqual(inheritFromPartition('burner:123456789', CONTAINERS), { freshBurner: true });
 });
 
-test('popup from a burner tab never inherits the opener\'s own burner container (burner containers are never in `containers` anyway, pinned regardless)', () => {
+test("popup from a burner tab never inherits the opener's own burner container (burner containers are never in `containers` anyway, pinned regardless)", () => {
   const withBurnerLookalike = [...CONTAINERS, { id: 'burner-123456789', partition: 'burner:123456789', burner: true }];
   const result = inheritFromPartition('burner:123456789', withBurnerLookalike);
   assert.deepEqual(result, { freshBurner: true });

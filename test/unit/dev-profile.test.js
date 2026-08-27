@@ -39,7 +39,7 @@ describe('devUserDataPath', () => {
     );
   });
 
-  it('the helper source contains no require(\'electron\') (pins the DD1 electron-free invariant)', () => {
+  it("the helper source contains no require('electron') (pins the DD1 electron-free invariant)", () => {
     const src = fs.readFileSync(path.join(__dirname, '../../src/shared/dev-profile.js'), 'utf8');
     assert.equal(/require\(\s*['"]electron['"]\s*\)/.test(src), false);
   });

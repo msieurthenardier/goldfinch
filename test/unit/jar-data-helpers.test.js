@@ -65,10 +65,7 @@ test('origin: malformed URL returns null, never throws', () => {
 // ---------------------------------------------------------------------------
 
 test('originFromIndexedDbDirname: spike-measured format with an explicit port', () => {
-  assert.equal(
-    originFromIndexedDbDirname('http_127.0.0.1_54321.indexeddb.leveldb'),
-    'http://127.0.0.1:54321'
-  );
+  assert.equal(originFromIndexedDbDirname('http_127.0.0.1_54321.indexeddb.leveldb'), 'http://127.0.0.1:54321');
   assert.equal(originFromIndexedDbDirname('https_example.com_443.indexeddb.leveldb'), 'https://example.com:443');
 });
 
@@ -125,7 +122,10 @@ test('mergeOriginTiers: stored wins on overlap', () => {
 
 test('mergeOriginTiers: sorted by origin string ascending', () => {
   const merged = mergeOriginTiers(['https://z.example'], ['https://a.example']);
-  assert.deepEqual(merged.map((r) => r.origin), ['https://a.example', 'https://z.example']);
+  assert.deepEqual(
+    merged.map((r) => r.origin),
+    ['https://a.example', 'https://z.example']
+  );
 });
 
 test('mergeOriginTiers: both sides empty yields an empty array', () => {

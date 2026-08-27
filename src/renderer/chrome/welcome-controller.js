@@ -10,8 +10,15 @@
 /** @param {any} deps */
 export function createWelcomeController(deps) {
   const {
-    document, els, attachView, welcomeSetPreference, onSettingsChanged,
-    SEARCH_ENGINES, buildSearchUrl, currentSearchEngine, currentHomePage, // M16 F2 Leg 2
+    document,
+    els,
+    attachView,
+    welcomeSetPreference,
+    onSettingsChanged,
+    SEARCH_ENGINES,
+    buildSearchUrl,
+    currentSearchEngine,
+    currentHomePage, // M16 F2 Leg 2
     normalizeHomePageInput // M16 F3 Leg 2, HAT item 5: bare-domain home-page input agrees with the address bar
   } = deps;
   // `els.address` is no longer read by this controller (M16 F3 Leg 2, HAT
@@ -54,8 +61,7 @@ export function createWelcomeController(deps) {
   // read "Set up the two things…" beside just one card.
   const tagline = document.createElement('p');
   tagline.className = 'welcome-tagline';
-  tagline.textContent =
-    "Set up the two things Goldfinch won't guess for you. You can always change these in Settings.";
+  tagline.textContent = "Set up the two things Goldfinch won't guess for you. You can always change these in Settings.";
   brandHeader.appendChild(tagline);
 
   // Burner note (DD7, restyled M16 F3 Leg 1 DD4): "This choice is saved for
@@ -243,13 +249,11 @@ export function createWelcomeController(deps) {
       // window) while this tab's engine block is showing. Assign `.checked`
       // directly; never `.click()` a radio programmatically (that would
       // re-fire `change` and re-submit).
-      for (const radio of engineRadios) radio.checked = (radio.value === engine);
+      for (const radio of engineRadios) radio.checked = radio.value === engine;
       // Confirmation text is state-derived, not an event-driven one-shot: it
       // reflects whatever the resolved engine currently is, so a tab switch
       // or an unrelated broadcast never leaves a stale or missing message.
-      engineStatus.textContent = engine != null
-        ? 'Saved — you can always change this in Settings.'
-        : '';
+      engineStatus.textContent = engine != null ? 'Saved — you can always change this in Settings.' : '';
     } else {
       engineStatus.textContent = '';
     }
@@ -305,7 +309,9 @@ export function createWelcomeController(deps) {
       homeStatus.textContent = 'Enter a valid address.';
     }
   }
-  homeSet.addEventListener('click', () => { submitHome(); });
+  homeSet.addEventListener('click', () => {
+    submitHome();
+  });
 
   // settle(tab, opts) (M16 F2 Leg 2, DD3/DD7; opts added M16 F3 Leg 2, HAT
   // item 3 design review; rewritten HAT item 6, DD7 pivot): the single place

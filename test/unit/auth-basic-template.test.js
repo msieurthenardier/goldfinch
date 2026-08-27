@@ -95,8 +95,11 @@ test('popup marker line (M14 F2 L2, DD5): fixed copy, hidden by default, sited b
   assert.ok(card.popupNote, 'the template returns the popupNote ref (menu-overlay toggles it per model.popup)');
   assert.equal(card.popupNote.classList.contains('hidden'), true, 'hidden by default — tab challenges never show it');
   assert.equal(card.popupNote.className, 'auth-basic-origin auth-popup-note');
-  assert.equal(card.popupNote.textContent, 'This request comes from a pop-up window opened by this page.',
-    'FIXED template copy — no server-controlled string ever rides the marker');
+  assert.equal(
+    card.popupNote.textContent,
+    'This request comes from a pop-up window opened by this page.',
+    'FIXED template copy — no server-controlled string ever rides the marker'
+  );
 
   // Sited directly after the origin context line (both are context copy).
   const body = card.origin.parentNode;

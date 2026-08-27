@@ -42,7 +42,9 @@
  * inlined here (a shared module must not reach into renderer.js).
  * @param {any} s @param {number} n */
 function truncateForLabel(s, n) {
-  const t = String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
+  const t = String(s == null ? '' : s)
+    .replace(/\s+/g, ' ')
+    .trim();
   return t.length > n ? t.slice(0, n - 1) + '…' : t;
 }
 
@@ -97,7 +99,7 @@ export function pageContextModel(params, toolbarItem, opts = {}) {
   }
 
   // --- image (mediaType gate; prefer srcURL, fall back to imageURL) ---
-  const imgSrc = p.mediaType === 'image' ? (p.srcURL || p.imageURL) : null;
+  const imgSrc = p.mediaType === 'image' ? p.srcURL || p.imageURL : null;
   if (imgSrc) {
     sep();
     item('image:open', 'Open image in new tab');

@@ -99,7 +99,10 @@ async function findInPage(wcId, text, deps, { forward = true, findNext = false, 
   // Post-activate re-resolve is ASSIGNED to wc so the find is issued on the
   // live, re-resolved handle (the pre-activate handle may be stale after the
   // async hop).
-  if (classifyContents(wc, deps.chromeContents, deps.isChromeContents) === 'guest' && typeof deps.activate === 'function') {
+  if (
+    classifyContents(wc, deps.chromeContents, deps.isChromeContents) === 'guest' &&
+    typeof deps.activate === 'function'
+  ) {
     await deps.activate(wcId);
     wc = resolveContents(wcId, deps); // post-activate stale-handle re-resolve (bad-handle / dead check)
   }
@@ -121,10 +124,14 @@ async function findInPage(wcId, text, deps, { forward = true, findNext = false, 
   // MAX-retry exhaustion resolves `last` immediately (finish(last) in the
   // interval) so the interval does not busy-spin until the timeout fires.
   const res = await new Promise((resolve) => {
-    const RETRY = 500, MAX = 5;
+    const RETRY = 500,
+      MAX = 5;
     const issued = new Set();
     let last = { activeMatchOrdinal: 0, matches: 0 };
-    let attempts = 0, done = false, iv = null, to = null;
+    let attempts = 0,
+      done = false,
+      iv = null,
+      to = null;
 
     const cleanup = () => {
       if (iv) clearInterval(iv);
@@ -153,7 +160,10 @@ async function findInPage(wcId, text, deps, { forward = true, findNext = false, 
     issue();
     iv = setInterval(() => {
       if (done) return;
-      if (attempts >= MAX) { finish(last); return; }
+      if (attempts >= MAX) {
+        finish(last);
+        return;
+      }
       issue();
     }, RETRY);
     to = setTimeout(() => finish(last), timeoutMs);

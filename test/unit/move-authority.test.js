@@ -102,8 +102,9 @@ test('AC5 mutated: resolving the source FROM THE PAYLOAD is caught — real → 
   // tab really is where the payload says. It is wrong only when a renderer lies, which is
   // the case the registry filter exists to make impossible.
   const mutated = real.replace(
-    "ipcMain.handle('tab-move-to-window', (event, payload) => {\n  const source = registry.getWindowForChrome(event.sender);",
-    "ipcMain.handle('tab-move-to-window', (event, payload) => {\n  const source = registry.get(payload.sourceWindowId);"
+    /ipcMain\.handle\(\s*'tab-move-to-window',\s*\(event, payload\) => \{\s*\n(\s*)const source = registry\.getWindowForChrome\(event\.sender\);/,
+    (_m, indent) =>
+      `ipcMain.handle('tab-move-to-window', (event, payload) => {\n${indent}const source = registry.get(payload.sourceWindowId);`
   );
   assertMutated(real, mutated, 'payload-as-source-authority');
   assert.equal((bodyOf(mutated).match(SENDER_RE) || []).length, 0, 'mutated → the sender is no longer consulted');

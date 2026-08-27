@@ -52,13 +52,20 @@ test('record fills defaults: sessionId/targetWcId/errorCode/detail default to nu
     targetWcId: null,
     outcome: 'ok',
     errorCode: null,
-    detail: null,
+    detail: null
   });
 });
 
 test('record carries an errorCode on an error outcome', () => {
   const log = createAuditLog({ now: () => 1 });
-  log.record({ identity: 'test', sessionId: 's', op: 'navigate', targetWcId: 2, outcome: 'error', errorCode: 'out-of-jar' });
+  log.record({
+    identity: 'test',
+    sessionId: 's',
+    op: 'navigate',
+    targetWcId: 2,
+    outcome: 'error',
+    errorCode: 'out-of-jar'
+  });
   const [e] = log.recentEntries();
   assert.equal(e.outcome, 'error');
   assert.equal(e.errorCode, 'out-of-jar');
@@ -72,8 +79,14 @@ test('ring evicts the oldest past capacity', () => {
   const entries = log.recentEntries();
   assert.equal(entries.length, 3, 'length is capped at capacity');
   // The two oldest (op1@1, op2@2) were evicted; op3..op5 remain newest-last.
-  assert.deepEqual(entries.map((e) => e.op), ['op3', 'op4', 'op5']);
-  assert.deepEqual(entries.map((e) => e.ts), [3, 4, 5]);
+  assert.deepEqual(
+    entries.map((e) => e.op),
+    ['op3', 'op4', 'op5']
+  );
+  assert.deepEqual(
+    entries.map((e) => e.ts),
+    [3, 4, 5]
+  );
 });
 
 test('recentEntries returns a copy — mutating it does not affect the ring', () => {
@@ -112,7 +125,12 @@ test('noteSessionClose removes the session from the active set', () => {
 
 test('noteSessionClose is idempotent — closing an unknown/already-closed sid is a no-op and does NOT fire onChange', () => {
   let calls = 0;
-  const log = createAuditLog({ now: () => 1, onChange: () => { calls += 1; } });
+  const log = createAuditLog({
+    now: () => 1,
+    onChange: () => {
+      calls += 1;
+    }
+  });
   log.noteSessionOpen('sid-1', 'test'); // 1 fire
   log.noteSessionClose('sid-1'); // 2 fires (real removal)
   log.noteSessionClose('sid-1'); // no-op — no fire
@@ -169,7 +187,14 @@ test('onChange is optional — mutations work with no listener', () => {
 
 test('record stores a provided detail string in the ring entry', () => {
   const log = createAuditLog({ now: () => 1 });
-  log.record({ identity: 'admin', sessionId: 's', op: 'navigate', targetWcId: 3, outcome: 'ok', detail: 'url=https://x' });
+  log.record({
+    identity: 'admin',
+    sessionId: 's',
+    op: 'navigate',
+    targetWcId: 3,
+    outcome: 'ok',
+    detail: 'url=https://x'
+  });
   const [e] = log.recentEntries();
   assert.equal(e.detail, 'url=https://x');
 });
@@ -184,7 +209,14 @@ test('record defaults detail to null when not supplied', () => {
 test('detail propagates through snapshot() and recentEntries()', () => {
   const snapshots = [];
   const log = createAuditLog({ now: () => 1, onChange: (snap) => snapshots.push(snap) });
-  log.record({ identity: 'admin', sessionId: 's', op: 'navigate', targetWcId: 5, outcome: 'ok', detail: 'url=https://example.com' });
+  log.record({
+    identity: 'admin',
+    sessionId: 's',
+    op: 'navigate',
+    targetWcId: 5,
+    outcome: 'ok',
+    detail: 'url=https://example.com'
+  });
   const snap = log.snapshot();
   assert.equal(snap.log[0].detail, 'url=https://example.com');
   assert.equal(snapshots[0].log[0].detail, 'url=https://example.com');

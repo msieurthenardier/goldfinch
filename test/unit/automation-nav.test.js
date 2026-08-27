@@ -24,7 +24,9 @@ function makeGuestWc(id) {
   const wc = {
     id,
     session: { __goldfinchInternal: false },
-    isDestroyed() { return false; },
+    isDestroyed() {
+      return false;
+    },
     loadURLCalls: [],
     loadURL(url) {
       this.loadURLCalls.push(url);
@@ -33,11 +35,17 @@ function makeGuestWc(id) {
     goBackCalled: false,
     goForwardCalled: false,
     navigationHistory: {
-      goBack() { wc.goBackCalled = true; },
-      goForward() { wc.goForwardCalled = true; }
+      goBack() {
+        wc.goBackCalled = true;
+      },
+      goForward() {
+        wc.goForwardCalled = true;
+      }
     },
     reloadCalled: false,
-    reload() { this.reloadCalled = true; }
+    reload() {
+      this.reloadCalled = true;
+    }
   };
   return wc;
 }
@@ -50,7 +58,9 @@ function makeInternalWc(id) {
   const wc = {
     id,
     session: { __goldfinchInternal: true },
-    isDestroyed() { return false; },
+    isDestroyed() {
+      return false;
+    },
     loadURLCalls: [],
     loadURL(url) {
       this.loadURLCalls.push(url);
@@ -59,11 +69,17 @@ function makeInternalWc(id) {
     goBackCalled: false,
     goForwardCalled: false,
     navigationHistory: {
-      goBack() { wc.goBackCalled = true; },
-      goForward() { wc.goForwardCalled = true; }
+      goBack() {
+        wc.goBackCalled = true;
+      },
+      goForward() {
+        wc.goForwardCalled = true;
+      }
     },
     reloadCalled: false,
-    reload() { this.reloadCalled = true; }
+    reload() {
+      this.reloadCalled = true;
+    }
   };
   return wc;
 }
@@ -75,7 +91,9 @@ function makeDestroyedWc(id) {
   return {
     id,
     session: { __goldfinchInternal: false },
-    isDestroyed() { return true; },
+    isDestroyed() {
+      return true;
+    },
     loadURLCalls: [],
     loadURL(url) {
       this.loadURLCalls.push(url);
@@ -90,7 +108,7 @@ function makeDestroyedWc(id) {
 
 test('navigate: safe http URL → loadURL called with exact URL', async () => {
   const wc = makeGuestWc(10);
-  const deps = { fromId: (id) => id === 10 ? wc : null, chromeContents: null };
+  const deps = { fromId: (id) => (id === 10 ? wc : null), chromeContents: null };
   await navigate(10, 'https://example.com', deps);
   assert.equal(wc.loadURLCalls.length, 1);
   assert.equal(wc.loadURLCalls[0], 'https://example.com');
@@ -98,7 +116,7 @@ test('navigate: safe http URL → loadURL called with exact URL', async () => {
 
 test('navigate: about:blank → loadURL called (valid target)', async () => {
   const wc = makeGuestWc(10);
-  const deps = { fromId: (id) => id === 10 ? wc : null, chromeContents: null };
+  const deps = { fromId: (id) => (id === 10 ? wc : null), chromeContents: null };
   await navigate(10, 'about:blank', deps);
   assert.equal(wc.loadURLCalls.length, 1);
   assert.equal(wc.loadURLCalls[0], 'about:blank');
@@ -106,7 +124,7 @@ test('navigate: about:blank → loadURL called (valid target)', async () => {
 
 test('navigate: goldfinch://settings → throws bad-url, loadURL NOT called', async () => {
   const wc = makeGuestWc(10);
-  const deps = { fromId: (id) => id === 10 ? wc : null, chromeContents: null };
+  const deps = { fromId: (id) => (id === 10 ? wc : null), chromeContents: null };
   await assert.rejects(
     () => navigate(10, 'goldfinch://settings', deps),
     (err) => err instanceof Error && err.message.includes('automation: bad-url')
@@ -116,7 +134,7 @@ test('navigate: goldfinch://settings → throws bad-url, loadURL NOT called', as
 
 test('navigate: file: URL → throws bad-url, loadURL NOT called', async () => {
   const wc = makeGuestWc(10);
-  const deps = { fromId: (id) => id === 10 ? wc : null, chromeContents: null };
+  const deps = { fromId: (id) => (id === 10 ? wc : null), chromeContents: null };
   await assert.rejects(
     () => navigate(10, 'file:///etc/passwd', deps),
     (err) => err instanceof Error && err.message.includes('automation: bad-url')
@@ -126,7 +144,7 @@ test('navigate: file: URL → throws bad-url, loadURL NOT called', async () => {
 
 test('navigate: data: URL → throws bad-url, loadURL NOT called', async () => {
   const wc = makeGuestWc(10);
-  const deps = { fromId: (id) => id === 10 ? wc : null, chromeContents: null };
+  const deps = { fromId: (id) => (id === 10 ? wc : null), chromeContents: null };
   await assert.rejects(
     () => navigate(10, 'data:text/html,<h1>hi</h1>', deps),
     (err) => err instanceof Error && err.message.includes('automation: bad-url')
@@ -136,7 +154,7 @@ test('navigate: data: URL → throws bad-url, loadURL NOT called', async () => {
 
 test('navigate: javascript: URL → throws bad-url, loadURL NOT called', async () => {
   const wc = makeGuestWc(10);
-  const deps = { fromId: (id) => id === 10 ? wc : null, chromeContents: null };
+  const deps = { fromId: (id) => (id === 10 ? wc : null), chromeContents: null };
   await assert.rejects(
     () => navigate(10, 'javascript:alert(1)', deps),
     (err) => err instanceof Error && err.message.includes('automation: bad-url')
@@ -146,7 +164,7 @@ test('navigate: javascript: URL → throws bad-url, loadURL NOT called', async (
 
 test('navigate: non-string (number) → throws bad-url, loadURL NOT called', async () => {
   const wc = makeGuestWc(10);
-  const deps = { fromId: (id) => id === 10 ? wc : null, chromeContents: null };
+  const deps = { fromId: (id) => (id === 10 ? wc : null), chromeContents: null };
   await assert.rejects(
     // @ts-expect-error — intentionally passing wrong type
     () => navigate(10, 42, deps),
@@ -157,7 +175,7 @@ test('navigate: non-string (number) → throws bad-url, loadURL NOT called', asy
 
 test('navigate: non-string (null) → throws bad-url, loadURL NOT called', async () => {
   const wc = makeGuestWc(10);
-  const deps = { fromId: (id) => id === 10 ? wc : null, chromeContents: null };
+  const deps = { fromId: (id) => (id === 10 ? wc : null), chromeContents: null };
   await assert.rejects(
     // @ts-expect-error — intentionally passing wrong type
     () => navigate(10, null, deps),
@@ -168,7 +186,7 @@ test('navigate: non-string (null) → throws bad-url, loadURL NOT called', async
 
 test('navigate: non-string (undefined) → throws bad-url, loadURL NOT called', async () => {
   const wc = makeGuestWc(10);
-  const deps = { fromId: (id) => id === 10 ? wc : null, chromeContents: null };
+  const deps = { fromId: (id) => (id === 10 ? wc : null), chromeContents: null };
   await assert.rejects(
     // @ts-expect-error — intentionally passing wrong type
     () => navigate(10, undefined, deps),
@@ -196,7 +214,7 @@ test('navigate: unsafe URL + invalid wcId → bad-url error (URL gate fires firs
 
 test('navigate: internal-session wcId with safe URL → throws internal-session, loadURL NOT called', async () => {
   const internalWc = makeInternalWc(99);
-  const deps = { fromId: (id) => id === 99 ? internalWc : null, chromeContents: null };
+  const deps = { fromId: (id) => (id === 99 ? internalWc : null), chromeContents: null };
   // URL is safe, passes the gate; resolve guard fires
   await assert.rejects(
     () => navigate(99, 'https://example.com', deps),
@@ -215,7 +233,7 @@ test('navigate: bad wcId (fromId returns null) → throws no-such-contents', asy
 
 test('navigate: destroyed wcId → throws no-such-contents', async () => {
   const destroyedWc = makeDestroyedWc(55);
-  const deps = { fromId: (id) => id === 55 ? destroyedWc : null, chromeContents: null };
+  const deps = { fromId: (id) => (id === 55 ? destroyedWc : null), chromeContents: null };
   await assert.rejects(
     () => navigate(55, 'https://example.com', deps),
     (err) => err instanceof Error && err.message.includes('automation: no-such-contents')
@@ -229,14 +247,14 @@ test('navigate: destroyed wcId → throws no-such-contents', async () => {
 
 test('goBack: valid guest wcId → wc.goBack() called once', () => {
   const wc = makeGuestWc(10);
-  const deps = { fromId: (id) => id === 10 ? wc : null, chromeContents: null };
+  const deps = { fromId: (id) => (id === 10 ? wc : null), chromeContents: null };
   goBack(10, deps);
   assert.equal(wc.goBackCalled, true);
 });
 
 test('goBack: internal-session wcId → throws internal-session (no navigation side effect)', () => {
   const internalWc = makeInternalWc(99);
-  const deps = { fromId: (id) => id === 99 ? internalWc : null, chromeContents: null };
+  const deps = { fromId: (id) => (id === 99 ? internalWc : null), chromeContents: null };
   assert.throws(
     () => goBack(99, deps),
     (err) => err instanceof Error && err.message.includes('automation: internal-session')
@@ -253,7 +271,7 @@ test('goBack: bad wcId → throws no-such-contents', () => {
 
 test('goBack: destroyed wcId → throws no-such-contents', () => {
   const destroyedWc = makeDestroyedWc(55);
-  const deps = { fromId: (id) => id === 55 ? destroyedWc : null, chromeContents: null };
+  const deps = { fromId: (id) => (id === 55 ? destroyedWc : null), chromeContents: null };
   assert.throws(
     () => goBack(55, deps),
     (err) => err instanceof Error && err.message.includes('automation: no-such-contents')
@@ -266,14 +284,14 @@ test('goBack: destroyed wcId → throws no-such-contents', () => {
 
 test('goForward: valid guest wcId → wc.goForward() called once', () => {
   const wc = makeGuestWc(10);
-  const deps = { fromId: (id) => id === 10 ? wc : null, chromeContents: null };
+  const deps = { fromId: (id) => (id === 10 ? wc : null), chromeContents: null };
   goForward(10, deps);
   assert.equal(wc.goForwardCalled, true);
 });
 
 test('goForward: internal-session wcId → throws internal-session', () => {
   const internalWc = makeInternalWc(99);
-  const deps = { fromId: (id) => id === 99 ? internalWc : null, chromeContents: null };
+  const deps = { fromId: (id) => (id === 99 ? internalWc : null), chromeContents: null };
   assert.throws(
     () => goForward(99, deps),
     (err) => err instanceof Error && err.message.includes('automation: internal-session')
@@ -290,7 +308,7 @@ test('goForward: bad wcId → throws no-such-contents', () => {
 
 test('goForward: destroyed wcId → throws no-such-contents', () => {
   const destroyedWc = makeDestroyedWc(55);
-  const deps = { fromId: (id) => id === 55 ? destroyedWc : null, chromeContents: null };
+  const deps = { fromId: (id) => (id === 55 ? destroyedWc : null), chromeContents: null };
   assert.throws(
     () => goForward(55, deps),
     (err) => err instanceof Error && err.message.includes('automation: no-such-contents')
@@ -303,14 +321,14 @@ test('goForward: destroyed wcId → throws no-such-contents', () => {
 
 test('reload: valid guest wcId → wc.reload() called once', () => {
   const wc = makeGuestWc(10);
-  const deps = { fromId: (id) => id === 10 ? wc : null, chromeContents: null };
+  const deps = { fromId: (id) => (id === 10 ? wc : null), chromeContents: null };
   reload(10, deps);
   assert.equal(wc.reloadCalled, true);
 });
 
 test('reload: internal-session wcId → throws internal-session', () => {
   const internalWc = makeInternalWc(99);
-  const deps = { fromId: (id) => id === 99 ? internalWc : null, chromeContents: null };
+  const deps = { fromId: (id) => (id === 99 ? internalWc : null), chromeContents: null };
   assert.throws(
     () => reload(99, deps),
     (err) => err instanceof Error && err.message.includes('automation: internal-session')
@@ -327,7 +345,7 @@ test('reload: bad wcId → throws no-such-contents', () => {
 
 test('reload: destroyed wcId → throws no-such-contents', () => {
   const destroyedWc = makeDestroyedWc(55);
-  const deps = { fromId: (id) => id === 55 ? destroyedWc : null, chromeContents: null };
+  const deps = { fromId: (id) => (id === 55 ? destroyedWc : null), chromeContents: null };
   assert.throws(
     () => reload(55, deps),
     (err) => err instanceof Error && err.message.includes('automation: no-such-contents')
@@ -340,7 +358,7 @@ test('reload: destroyed wcId → throws no-such-contents', () => {
 
 test('goBack/goForward/reload each call the correct wc method and not the others', () => {
   const wc = makeGuestWc(10);
-  const deps = { fromId: (id) => id === 10 ? wc : null, chromeContents: null };
+  const deps = { fromId: (id) => (id === 10 ? wc : null), chromeContents: null };
 
   goBack(10, deps);
   assert.equal(wc.goBackCalled, true, 'goBack must call wc.goBack');
@@ -348,14 +366,14 @@ test('goBack/goForward/reload each call the correct wc method and not the others
   assert.equal(wc.reloadCalled, false, 'goBack must NOT call wc.reload');
 
   const wc2 = makeGuestWc(10);
-  const deps2 = { fromId: (id) => id === 10 ? wc2 : null, chromeContents: null };
+  const deps2 = { fromId: (id) => (id === 10 ? wc2 : null), chromeContents: null };
   goForward(10, deps2);
   assert.equal(wc2.goForwardCalled, true, 'goForward must call wc.goForward');
   assert.equal(wc2.goBackCalled, false, 'goForward must NOT call wc.goBack');
   assert.equal(wc2.reloadCalled, false, 'goForward must NOT call wc.reload');
 
   const wc3 = makeGuestWc(10);
-  const deps3 = { fromId: (id) => id === 10 ? wc3 : null, chromeContents: null };
+  const deps3 = { fromId: (id) => (id === 10 ? wc3 : null), chromeContents: null };
   reload(10, deps3);
   assert.equal(wc3.reloadCalled, true, 'reload must call wc.reload');
   assert.equal(wc3.goBackCalled, false, 'reload must NOT call wc.goBack');
@@ -376,7 +394,7 @@ test('goBack/goForward/reload each call the correct wc method and not the others
 
 test('navigate: internal wcId under allowInternal:true → op-local guard refuses, loadURL NOT called', async () => {
   const internalWc = makeInternalWc(99);
-  const deps = { fromId: (id) => id === 99 ? internalWc : null, chromeContents: null, allowInternal: true };
+  const deps = { fromId: (id) => (id === 99 ? internalWc : null), chromeContents: null, allowInternal: true };
   await assert.rejects(
     () => navigate(99, 'https://example.com', deps),
     (err) => err instanceof Error && err.message.includes('automation: navigate — internal-session excluded')
@@ -386,7 +404,7 @@ test('navigate: internal wcId under allowInternal:true → op-local guard refuse
 
 test('goBack: internal wcId under allowInternal:true → op-local guard refuses, goBack NOT called', () => {
   const internalWc = makeInternalWc(99);
-  const deps = { fromId: (id) => id === 99 ? internalWc : null, chromeContents: null, allowInternal: true };
+  const deps = { fromId: (id) => (id === 99 ? internalWc : null), chromeContents: null, allowInternal: true };
   assert.throws(
     () => goBack(99, deps),
     (err) => err instanceof Error && err.message.includes('automation: goBack — internal-session excluded')
@@ -396,7 +414,7 @@ test('goBack: internal wcId under allowInternal:true → op-local guard refuses,
 
 test('goForward: internal wcId under allowInternal:true → op-local guard refuses, goForward NOT called', () => {
   const internalWc = makeInternalWc(99);
-  const deps = { fromId: (id) => id === 99 ? internalWc : null, chromeContents: null, allowInternal: true };
+  const deps = { fromId: (id) => (id === 99 ? internalWc : null), chromeContents: null, allowInternal: true };
   assert.throws(
     () => goForward(99, deps),
     (err) => err instanceof Error && err.message.includes('automation: goForward — internal-session excluded')
@@ -406,7 +424,7 @@ test('goForward: internal wcId under allowInternal:true → op-local guard refus
 
 test('reload: internal wcId under allowInternal:true → op-local guard refuses, reload NOT called', () => {
   const internalWc = makeInternalWc(99);
-  const deps = { fromId: (id) => id === 99 ? internalWc : null, chromeContents: null, allowInternal: true };
+  const deps = { fromId: (id) => (id === 99 ? internalWc : null), chromeContents: null, allowInternal: true };
   assert.throws(
     () => reload(99, deps),
     (err) => err instanceof Error && err.message.includes('automation: reload — internal-session excluded')
@@ -418,7 +436,7 @@ test('reload: internal wcId under allowInternal:true → op-local guard refuses,
 // not an admin-wide block).
 test('navigate: guest wcId under allowInternal:true → loadURL still called (guard is internal-only)', async () => {
   const wc = makeGuestWc(10);
-  const deps = { fromId: (id) => id === 10 ? wc : null, chromeContents: null, allowInternal: true };
+  const deps = { fromId: (id) => (id === 10 ? wc : null), chromeContents: null, allowInternal: true };
   await navigate(10, 'https://example.com', deps);
   assert.equal(wc.loadURLCalls.length, 1);
   assert.equal(wc.loadURLCalls[0], 'https://example.com');

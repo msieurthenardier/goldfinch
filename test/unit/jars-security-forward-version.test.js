@@ -48,7 +48,10 @@ test('user-minted privileged identity names are remapped by slug/add', () => {
       ['Admin', 'Internal', 'Default'],
       'display names are untouched'
     );
-    assert.equal(store.list().some((jar) => jar.id === 'admin' || jar.id === 'internal'), false);
+    assert.equal(
+      store.list().some((jar) => jar.id === 'admin' || jar.id === 'internal'),
+      false
+    );
   } finally {
     appDb.close();
     fs.rmSync(dir, { recursive: true, force: true });
@@ -72,8 +75,14 @@ test('load remaps privileged identity claims but preserves the built-in legacy d
     const store = freshStore();
     store.load(dir);
 
-    assert.deepEqual(store.list().map((jar) => jar.id), ['jar-admin', 'jar-internal', 'jar-default', 'default']);
-    assert.equal(store.list().some((jar) => jar.id === 'admin' || jar.id === 'internal'), false);
+    assert.deepEqual(
+      store.list().map((jar) => jar.id),
+      ['jar-admin', 'jar-internal', 'jar-default', 'default']
+    );
+    assert.equal(
+      store.list().some((jar) => jar.id === 'admin' || jar.id === 'internal'),
+      false
+    );
     assert.deepEqual(
       store.list().find((jar) => jar.id === 'default'),
       { id: 'default', name: 'Default', color: '#9aa0ac', partition: 'persist:goldfinch', retentionDays: 30 }
@@ -106,9 +115,16 @@ test('unknown-version envelope survives load without being overwritten', () => {
 
     assert.doesNotThrow(() => store.load(dir));
     // In-memory records gain the retentionDays default; the on-disk envelope must not.
-    assert.deepEqual(store.list(), envelope.containers.map((c) => ({ ...c, retentionDays: 30 })));
+    assert.deepEqual(
+      store.list(),
+      envelope.containers.map((c) => ({ ...c, retentionDays: 30 }))
+    );
     assert.equal(store.getDefault().id, 'research');
-    assert.equal(fs.readFileSync(storeFile(dir), 'utf8'), bytes, 'load must leave the envelope bytes untouched — the DD5 carve-out');
+    assert.equal(
+      fs.readFileSync(storeFile(dir), 'utf8'),
+      bytes,
+      'load must leave the envelope bytes untouched — the DD5 carve-out'
+    );
   } finally {
     appDb.close();
     fs.rmSync(dir, { recursive: true, force: true });

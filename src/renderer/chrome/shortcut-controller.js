@@ -1,10 +1,26 @@
 /** @param {any} deps */
 export function createShortcutController(deps) {
   const {
-    window, document, ctx, els, activeTab, isInternalTab, isWebTab,
-    openFind, createTab, openNewTab, closeTab, jarsClient, announceTabStatus,
-    togglePanel, togglePrivacy, openDownloads, orderedTabIds, activateTab,
-    keydownToAction, handleBookmarkStarActivate
+    window,
+    document,
+    ctx,
+    els,
+    activeTab,
+    isInternalTab,
+    isWebTab,
+    openFind,
+    createTab,
+    openNewTab,
+    closeTab,
+    jarsClient,
+    announceTabStatus,
+    togglePanel,
+    togglePrivacy,
+    openDownloads,
+    orderedTabIds,
+    activateTab,
+    keydownToAction,
+    handleBookmarkStarActivate
   } = deps;
   /* --------------------------------------------------------------- shortcuts */
 
@@ -40,7 +56,7 @@ export function createShortcutController(deps) {
       case 'zoom-reset': {
         const t = activeTab();
         if (!t || isInternalTab(t) || t.wcId == null) return false;
-        const zoom = (action === 'zoom-out') ? 'out' : (action === 'zoom-reset') ? 'reset' : 'in';
+        const zoom = action === 'zoom-out' ? 'out' : action === 'zoom-reset' ? 'reset' : 'in';
         window.goldfinch.zoomApply({ webContentsId: t.wcId, action: zoom });
         return true;
       }
@@ -80,7 +96,7 @@ export function createShortcutController(deps) {
           createTab(entry.url, container, {
             trusted: false,
             restoreHistory: { entries: entry.navEntries, index: entry.navIndex, title: entry.title },
-            insertAt: entry.stripIndex,
+            insertAt: entry.stripIndex
           });
           if (entry.jarFallback) {
             announceTabStatus('Reopened tab — its cookie jar no longer exists; reopened in the default jar');
@@ -102,7 +118,8 @@ export function createShortcutController(deps) {
         // (true) even when there is no / an internal active tab.
         const t = activeTab();
         // Internal tabs: reload keyboard shortcut is a no-op (internal pages are static).
-        if (t && isWebTab(t) && t.wcId != null) window.goldfinch.tabNavigate({ wcId: t.wcId, verb: 'reload', args: [] });
+        if (t && isWebTab(t) && t.wcId != null)
+          window.goldfinch.tabNavigate({ wcId: t.wcId, verb: 'reload', args: [] });
         return true;
       }
       // Downloads (Ctrl+J) — chrome-focused fallback (the page-focused case is captured main-side
@@ -185,7 +202,7 @@ export function createShortcutController(deps) {
       lightboxOpen: !els.lightbox.classList.contains('hidden'),
       // Real e.altKey threaded through (M09 F3, i18n ruling): AltGr digits report
       // ctrl+alt on European layouts and must not be misread as a tab-jump.
-      alt: e.altKey,
+      alt: e.altKey
     });
     if (!action) return;
     if (dispatchChromeAction(action)) e.preventDefault();
@@ -198,7 +215,6 @@ export function createShortcutController(deps) {
   window.goldfinch.onChromeShortcutAction(({ action }) => {
     if (typeof action === 'string') dispatchChromeAction(action);
   });
-
 
   return { dispatchChromeAction };
 }

@@ -86,7 +86,7 @@ export function createSheetReport(bridge) {
       sent = true;
       bridge.sendActivated(Object.assign({}, payload, { token }));
       return true;
-    },
+    }
   };
 }
 
@@ -144,8 +144,7 @@ export function attachBackdropPressGate({ node, dismiss }) {
 export function attachModalCard(opts) {
   const { node, getCycle, close } = opts;
   const dismissible = opts.dismissible !== false;
-  const activeElement =
-    opts.activeElement || (() => (node.ownerDocument ? node.ownerDocument.activeElement : null));
+  const activeElement = opts.activeElement || (() => (node.ownerDocument ? node.ownerDocument.activeElement : null));
 
   node.addEventListener('keydown', (/** @type {any} */ e) => {
     if (e.key === 'Escape') {
@@ -169,6 +168,8 @@ export function attachModalCard(opts) {
   // NOT dismiss.
   attachBackdropPressGate({
     node,
-    dismiss: () => { if (dismissible) close('outside-click'); }
+    dismiss: () => {
+      if (dismissible) close('outside-click');
+    }
   });
 }

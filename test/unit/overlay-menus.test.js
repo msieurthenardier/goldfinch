@@ -10,22 +10,42 @@ async function makeHarness() {
   let clock = 1000;
   const trigger = {
     attrs: {},
-    setAttribute(name, value) { this.attrs[name] = value; events.push(['aria', value]); },
-    focus() { events.push(['focus']); },
+    setAttribute(name, value) {
+      this.attrs[name] = value;
+      events.push(['aria', value]);
+    },
+    focus() {
+      events.push(['focus']);
+    }
   };
   const bridge = {
     menuOverlayOpen: (payload) => events.push(['open', payload]),
     menuOverlayClose: (payload) => events.push(['close', payload]),
-    onMenuOverlayActivated: (fn) => { callbacks.activated = fn; },
-    onMenuOverlayClosed: (fn) => { callbacks.closed = fn; },
+    onMenuOverlayActivated: (fn) => {
+      callbacks.activated = fn;
+    },
+    onMenuOverlayClosed: (fn) => {
+      callbacks.closed = fn;
+    }
   };
   const states = { kebab: fixedTriggerMenu(() => trigger) };
   const client = createOverlayMenus({
-    bridge, states, now: () => clock,
+    bridge,
+    states,
+    now: () => clock,
     onActivated: (payload) => events.push(['activated', payload]),
-    onClosed: (payload) => events.push(['closed', payload]),
+    onClosed: (payload) => events.push(['closed', payload])
   });
-  return { callbacks, events, states, client, trigger, tick: (ms) => { clock += ms; } };
+  return {
+    callbacks,
+    events,
+    states,
+    client,
+    trigger,
+    tick: (ms) => {
+      clock += ms;
+    }
+  };
 }
 
 test('menu open mints monotonic tokens and stale close cannot reset ARIA or refocus', async () => {
@@ -41,7 +61,10 @@ test('menu open mints monotonic tokens and stale close cannot reset ARIA or refo
   assert.deepEqual(h.events, []);
   h.callbacks.closed({ menuType: 'kebab', reason: 'escape', token: second });
   assert.equal(h.states.kebab.open, false);
-  assert.deepEqual(h.events.map((event) => event[0]), ['aria', 'focus', 'closed']);
+  assert.deepEqual(
+    h.events.map((event) => event[0]),
+    ['aria', 'focus', 'closed']
+  );
 });
 
 test('blur close suppresses only the same trigger for 300ms', async () => {
@@ -93,7 +116,13 @@ function pageActionsHarness() {
 test('openSiteSettingsTab: no existing internal tab creates one trusted Settings tab', async () => {
   const { createChromePageActions } = await import('../../src/renderer/chrome/overlay-menus.js');
   const h = pageActionsHarness();
-  const actions = createChromePageActions({ ...h, activeTab: () => null, isInternalPageUrl: () => false, deriveSiteInfo: () => ({}), openNewTab: () => {} });
+  const actions = createChromePageActions({
+    ...h,
+    activeTab: () => null,
+    isInternalPageUrl: () => false,
+    deriveSiteInfo: () => ({}),
+    openNewTab: () => {}
+  });
   actions.openSiteSettingsTab();
   assert.deepEqual(h.calls, [['createTab', 'goldfinch://settings/#privacy', null, { trusted: true }]]);
 });
@@ -103,7 +132,13 @@ test('openSiteSettingsTab: reuses an existing Settings tab matched by HOST ONLY 
   const h = pageActionsHarness();
   const existing = { id: 'settings-1', url: 'goldfinch://settings/#privacy', wcId: 42, trusted: true };
   h.tabs.set(existing.id, existing);
-  const actions = createChromePageActions({ ...h, activeTab: () => null, isInternalPageUrl: () => false, deriveSiteInfo: () => ({}), openNewTab: () => {} });
+  const actions = createChromePageActions({
+    ...h,
+    activeTab: () => null,
+    isInternalPageUrl: () => false,
+    deriveSiteInfo: () => ({}),
+    openNewTab: () => {}
+  });
   actions.openSiteSettingsTab();
   assert.deepEqual(h.calls, [
     ['tabNavigate', { wcId: 42, verb: 'loadURL', args: ['goldfinch://settings/#privacy'] }],
@@ -115,7 +150,13 @@ test('openSiteSettingsTab: never reuses a Downloads tab — creates a new Settin
   const { createChromePageActions } = await import('../../src/renderer/chrome/overlay-menus.js');
   const h = pageActionsHarness();
   h.tabs.set('downloads-1', { id: 'downloads-1', url: 'goldfinch://downloads', wcId: 7, trusted: true });
-  const actions = createChromePageActions({ ...h, activeTab: () => null, isInternalPageUrl: () => false, deriveSiteInfo: () => ({}), openNewTab: () => {} });
+  const actions = createChromePageActions({
+    ...h,
+    activeTab: () => null,
+    isInternalPageUrl: () => false,
+    deriveSiteInfo: () => ({}),
+    openNewTab: () => {}
+  });
   actions.openSiteSettingsTab();
   assert.ok(h.calls.some(([name, url]) => name === 'createTab' && url === 'goldfinch://settings/#privacy'));
   assert.ok(!h.calls.some(([name]) => name === 'tabNavigate'));
@@ -124,7 +165,13 @@ test('openSiteSettingsTab: never reuses a Downloads tab — creates a new Settin
 test('openSiteSettingsTab: called twice in a row creates no second tab', async () => {
   const { createChromePageActions } = await import('../../src/renderer/chrome/overlay-menus.js');
   const h = pageActionsHarness();
-  const actions = createChromePageActions({ ...h, activeTab: () => null, isInternalPageUrl: () => false, deriveSiteInfo: () => ({}), openNewTab: () => {} });
+  const actions = createChromePageActions({
+    ...h,
+    activeTab: () => null,
+    isInternalPageUrl: () => false,
+    deriveSiteInfo: () => ({}),
+    openNewTab: () => {}
+  });
   actions.openSiteSettingsTab();
   h.calls.length = 0;
   actions.openSiteSettingsTab();
@@ -137,9 +184,10 @@ test('menu models and chrome-to-sheet anchor conversion retain exact shapes', as
     await import('../../src/renderer/chrome/overlay-menus.js');
   const kebab = buildKebabModel();
   // The menuitem ids, in order — separators carry no id and are filtered out here.
-  assert.deepEqual(kebab.filter((item) => item.id).map((item) => item.id), [
-    'new-window', 'settings', 'downloads', 'jars', 'vault', 'print', 'exit'
-  ]);
+  assert.deepEqual(
+    kebab.filter((item) => item.id).map((item) => item.id),
+    ['new-window', 'settings', 'downloads', 'jars', 'vault', 'print', 'exit']
+  );
   // Two separators divide the menu into three bands: after New window and after Passwords.
   assert.deepEqual(
     kebab.map((item) => (item.type === 'separator' ? 'sep' : item.id)),

@@ -78,7 +78,10 @@ test('jars-clear-data applies each requested class in order, passing the exact s
   const h = makeHarness(t);
   const result = await h.invoke('jars-clear-data', { id: 'personal', classes: ['cookies', 'storage'] });
   assert.deepEqual(result, { ok: true, cleared: ['cookies', 'storage'] });
-  assert.deepEqual(h.events.map((e) => e.fn), ['clearStorageData', 'clearStorageData', 'broadcast']);
+  assert.deepEqual(
+    h.events.map((e) => e.fn),
+    ['clearStorageData', 'clearStorageData', 'broadcast']
+  );
   assert.deepEqual(h.events[0].args, { storages: ['cookies'] });
   assert.deepEqual(h.events[1].args, {
     storages: ['filesystem', 'indexdb', 'localstorage', 'websql', 'serviceworkers', 'cachestorage']
@@ -112,14 +115,21 @@ test('jars-clear-data with classes:["storage"] (no cookies requested) leaves coo
   cookieSeen.insertIfAbsent('personal', 'sid', 'x.test', '/', 1000);
   const result = await h.invoke('jars-clear-data', { id: 'personal', classes: ['storage'] });
   assert.equal(result.ok, true);
-  assert.equal(cookieSeen.selectExpired('personal', Number.MAX_SAFE_INTEGER).length, 1, 'a storage-only clear must not touch cookie bookkeeping');
+  assert.equal(
+    cookieSeen.selectExpired('personal', Number.MAX_SAFE_INTEGER).length,
+    1,
+    'a storage-only clear must not touch cookie bookkeeping'
+  );
 });
 
 test('jars-clear-data with the cache class calls clearCache AND clearStorageData({ storages: [shadercache] })', async (t) => {
   const h = makeHarness(t);
   const result = await h.invoke('jars-clear-data', { id: 'personal', classes: ['cache'] });
   assert.equal(result.ok, true);
-  assert.deepEqual(h.events.map((e) => e.fn), ['clearCache', 'clearStorageData']);
+  assert.deepEqual(
+    h.events.map((e) => e.fn),
+    ['clearCache', 'clearStorageData']
+  );
   assert.deepEqual(h.events[1].args, { storages: ['shadercache'] });
 });
 
@@ -199,7 +209,10 @@ test('jars-clear-data with the cache class still routes to clearCache, NOT histo
   h.historyStore.seed('personal', 1000);
   const result = await h.invoke('jars-clear-data', { id: 'personal', classes: ['cache'] });
   assert.equal(result.ok, true);
-  assert.deepEqual(h.events.map((e) => e.fn), ['clearCache', 'clearStorageData']);
+  assert.deepEqual(
+    h.events.map((e) => e.fn),
+    ['clearCache', 'clearStorageData']
+  );
   assert.equal(h.historyStore.count('personal'), 1, 'a cache clear must NOT touch history');
   assert.equal(h.broadcasts().length, 0, 'no history-changed for a cache-only clear');
 });
@@ -211,7 +224,10 @@ test('jars-clear-data with mixed ["history","cookies"] clears BOTH, in request o
   assert.deepEqual(result, { ok: true, cleared: ['history', 'cookies'] });
   assert.equal(h.historyStore.count('personal'), 0);
   const sessionCalls = h.events.filter((e) => e.fn !== 'broadcast');
-  assert.deepEqual(sessionCalls.map((e) => e.fn), ['clearStorageData']);
+  assert.deepEqual(
+    sessionCalls.map((e) => e.fn),
+    ['clearStorageData']
+  );
   assert.deepEqual(sessionCalls[0].args, { storages: ['cookies'] });
   // Two broadcasts now: history-changed (n>0 gate) THEN jar-data-changed
   // (DD10 — 'cookies' ∩ {cookies, storage} is non-empty; 'history' is
@@ -231,7 +247,10 @@ test('jars-clear-data with classes:["cookies","history"] on a history-store thro
   // fired and is not rolled back (matching the mixed-class error-attribution
   // shape, not the strict fail-closed PRE-validation, which only guards
   // against unknown class ids).
-  assert.deepEqual(h.events.map((e) => e.fn), ['clearStorageData']);
+  assert.deepEqual(
+    h.events.map((e) => e.fn),
+    ['clearStorageData']
+  );
   assert.equal(h.broadcasts().length, 0);
 });
 
@@ -252,13 +271,10 @@ test('jars-wipe composes storage -> cache -> reroll -> broadcast(jar-wiped) -> b
   const h = makeHarness(t);
   const result = await h.invoke('jars-wipe', { id: 'personal' });
   assert.deepEqual(result, { ok: true });
-  assert.deepEqual(h.events.map((e) => e.fn), [
-    'clearStorageData',
-    'clearCache',
-    'rerollSeed',
-    'broadcast',
-    'broadcast'
-  ]);
+  assert.deepEqual(
+    h.events.map((e) => e.fn),
+    ['clearStorageData', 'clearCache', 'rerollSeed', 'broadcast', 'broadcast']
+  );
   assert.equal(h.events[0].partition, 'persist:container:personal');
   assert.equal(h.events[0].args, undefined); // no filter — full wipe, matching identity-new
   assert.equal(h.events[1].partition, 'persist:container:personal');
@@ -275,7 +291,7 @@ test('jars-wipe composes storage -> cache -> reroll -> broadcast(jar-wiped) -> b
 
 // M10 Flight 2, Leg 3 / DD7 — wipe routes through the SAME wipeJarData as
 // jars-remove, so bookkeeping dies with it too.
-test('jars-wipe clears the jar\'s cookie_seen bookkeeping (DD7 lifecycle, via wipeJarData)', async (t) => {
+test("jars-wipe clears the jar's cookie_seen bookkeeping (DD7 lifecycle, via wipeJarData)", async (t) => {
   const h = makeHarness(t);
   const cookieSeen = appDb.createCookieSeenStore();
   cookieSeen.insertIfAbsent('personal', 'sid', 'x.test', '/', 1000);
@@ -406,7 +422,11 @@ test('jars-set-retention full rejection matrix: malformed payload / unknown jar 
     assert.deepEqual(h.invoke('jars-set-retention', payload), { ok: false, error }, label);
   }
   assert.equal(h.broadcasts().length, 0);
-  assert.equal(h.jars.list().find((c) => c.id === 'personal').retentionDays, 30, 'no partial mutation on any rejection');
+  assert.equal(
+    h.jars.list().find((c) => c.id === 'personal').retentionDays,
+    30,
+    'no partial mutation on any rejection'
+  );
 });
 
 test('jars-set-retention prune-on-change: deleted>0 broadcasts history-changed AFTER jars-changed', (t) => {
@@ -496,10 +516,13 @@ test('jars-set-retention: no aged-out origins and no aged-out cookies sweeps to 
   const result = h.invoke('jars-set-retention', { id: 'personal', days: 90 });
   assert.equal(result.ok, true);
   await flush();
-  assert.ok(!h.broadcasts().some((b) => b.channel === 'jar-data-changed'), 'nothing was swept, so no completion broadcast');
+  assert.ok(
+    !h.broadcasts().some((b) => b.channel === 'jar-data-changed'),
+    'nothing was swept, so no completion broadcast'
+  );
 });
 
-test('jars-set-retention: the sweep\'s jar-data-changed broadcast fires on COMPLETION (async, never on the invoke itself — DD10)', async (t) => {
+test("jars-set-retention: the sweep's jar-data-changed broadcast fires on COMPLETION (async, never on the invoke itself — DD10)", async (t) => {
   const h = makeHarness(t);
   h.historyStore.seedVisit('personal', 'https://old.example/', Date.now() - 100 * DAY_MS);
   h.invoke('jars-set-retention', { id: 'personal', days: 7 });
@@ -657,7 +680,11 @@ test('jars-cookies-remove: host-only cookie reconstructs a dot-free URL (DD2, sp
   });
   assert.deepEqual(result, { ok: true });
   assert.deepEqual(h.events, [
-    { fn: 'cookiesRemove', partition: 'persist:container:personal', args: { url: 'https://host-only.test/', name: 'sid' } }
+    {
+      fn: 'cookiesRemove',
+      partition: 'persist:container:personal',
+      args: { url: 'https://host-only.test/', name: 'sid' }
+    }
   ]);
   assert.equal(h.broadcasts().length, 0, 'per-item delete never broadcasts jar-data-changed (DD10)');
 });
@@ -683,7 +710,7 @@ test('jars-cookies-remove: empty-name cookie is a valid removal target', async (
 
 // M10 Flight 2, Leg 3 / DD7 — a per-cookie delete clears its bookkeeping row
 // too (matching `path` defaulted to '/' the same way cookieUrl defaults it).
-test('jars-cookies-remove clears the cookie\'s cookie_seen bookkeeping row (DD7 lifecycle)', async (t) => {
+test("jars-cookies-remove clears the cookie's cookie_seen bookkeeping row (DD7 lifecycle)", async (t) => {
   const h = makeHarness(t);
   const cookieSeen = appDb.createCookieSeenStore();
   cookieSeen.insertIfAbsent('personal', 'sid', 'x.test', '/', 1000);
@@ -691,7 +718,10 @@ test('jars-cookies-remove clears the cookie\'s cookie_seen bookkeeping row (DD7 
   const result = await h.invoke('jars-cookies-remove', { id: 'personal', name: 'sid', domain: 'x.test' });
   assert.equal(result.ok, true);
   const remaining = cookieSeen.selectExpired('personal', Number.MAX_SAFE_INTEGER);
-  assert.deepEqual(remaining.map((r) => r.name), ['other']);
+  assert.deepEqual(
+    remaining.map((r) => r.name),
+    ['other']
+  );
 });
 
 test('jars-cookies-remove: a session-throw never touches bookkeeping (fails before the cleanup step)', async (t) => {
@@ -700,7 +730,11 @@ test('jars-cookies-remove: a session-throw never touches bookkeeping (fails befo
   cookieSeen.insertIfAbsent('personal', 'sid', 'x.test', '/', 1000);
   const result = await h.invoke('jars-cookies-remove', { id: 'personal', name: 'sid', domain: 'x.test' });
   assert.equal(result.ok, false);
-  assert.equal(cookieSeen.selectExpired('personal', Number.MAX_SAFE_INTEGER).length, 1, 'bookkeeping survives a failed session removal');
+  assert.equal(
+    cookieSeen.selectExpired('personal', Number.MAX_SAFE_INTEGER).length,
+    1,
+    'bookkeeping survives a failed session removal'
+  );
 });
 
 test('jars-cookies-remove rejection matrix returns { ok: false, error }, no session call', async (t) => {
@@ -810,8 +844,16 @@ test('jars-cookies-value rejection matrix returns { ok: false, error }, no sessi
     ['missing name', { id: 'personal', domain: 'y', path: '/' }, 'jars: cookies-value — malformed-payload'],
     ['missing domain', { id: 'personal', name: 'x', path: '/' }, 'jars: cookies-value — malformed-payload'],
     ['missing path', { id: 'personal', name: 'x', domain: 'y' }, 'jars: cookies-value — malformed-payload'],
-    ['non-string name', { id: 'personal', name: 42, domain: 'y', path: '/' }, 'jars: cookies-value — malformed-payload'],
-    ['non-string domain', { id: 'personal', name: 'x', domain: 42, path: '/' }, 'jars: cookies-value — malformed-payload'],
+    [
+      'non-string name',
+      { id: 'personal', name: 42, domain: 'y', path: '/' },
+      'jars: cookies-value — malformed-payload'
+    ],
+    [
+      'non-string domain',
+      { id: 'personal', name: 'x', domain: 42, path: '/' },
+      'jars: cookies-value — malformed-payload'
+    ],
     ['non-string path', { id: 'personal', name: 'x', domain: 'y', path: 42 }, 'jars: cookies-value — malformed-payload']
   ];
   for (const [label, payload, error] of cases) {
@@ -1074,7 +1116,10 @@ test('jars-clear-data with the cache class still routes to clearCache, NOT bookm
   const h = makeHarness(t, { bookmarksStore });
   const result = await h.invoke('jars-clear-data', { id: 'personal', classes: ['cache'] });
   assert.equal(result.ok, true);
-  assert.deepEqual(h.events.map((e) => e.fn), ['clearCache', 'clearStorageData']);
+  assert.deepEqual(
+    h.events.map((e) => e.fn),
+    ['clearCache', 'clearStorageData']
+  );
   assert.equal(bookmarksStore.count('personal'), 1, 'a cache clear must NOT touch bookmarks');
 });
 

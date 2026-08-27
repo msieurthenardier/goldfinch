@@ -134,8 +134,9 @@ function displayHost(challenge) {
   } catch {
     // unparseable URL — keep the port (fail-informative)
   }
-  const isDefaultPort = ((protocol === 'http:' || protocol === 'ws:') && port === 80)
-    || ((protocol === 'https:' || protocol === 'wss:') && port === 443);
+  const isDefaultPort =
+    ((protocol === 'http:' || protocol === 'ws:') && port === 80) ||
+    ((protocol === 'https:' || protocol === 'wss:') && port === 443);
   if (isDefaultPort) return host;
   const bracketed = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
   return `${bracketed}:${port}`;
@@ -228,10 +229,10 @@ function createAuthChallenges({ registry, chromeForTab, popupRegistry = null, lo
       // ERR_SSL_CLIENT_AUTH_CERT_NEEDED). Cert cancels MUST pass exactly one
       // argument, strictly null — pinned in auth-challenges.test.js.
       if (!resolution) {
-        if (challenge.kind === 'client-cert') cb(null); // explicit null — NEVER zero-arg (SIGSEGV, see above)
+        if (challenge.kind === 'client-cert')
+          cb(null); // explicit null — NEVER zero-arg (SIGSEGV, see above)
         else cb();
-      }
-      else if (challenge.kind === 'client-cert') cb(/** @type {{ cert: any }} */ (resolution).cert);
+      } else if (challenge.kind === 'client-cert') cb(/** @type {{ cert: any }} */ (resolution).cert);
       else {
         const credential = /** @type {{ username?: any, password?: any }} */ (resolution);
         cb(String(credential.username ?? ''), String(credential.password ?? ''));
@@ -287,18 +288,19 @@ function createAuthChallenges({ registry, chromeForTab, popupRegistry = null, lo
     // guard the destroyed-chrome teardown window. The payload's `popup: true`
     // feeds the sheet templates' marker copy line (DD5) and is ABSENT for tab
     // challenges — both existing payload contracts stay frozen.
-    const target = next.isPopup === true
-      ? (record.chromeView?.webContents && !record.chromeView.webContents.isDestroyed?.()
-        ? record.chromeView.webContents
-        : null)
-      : chromeForTab(next.wcId);
+    const target =
+      next.isPopup === true
+        ? record.chromeView?.webContents && !record.chromeView.webContents.isDestroyed?.()
+          ? record.chromeView.webContents
+          : null
+        : chromeForTab(next.wcId);
     const popupField = next.isPopup === true ? { popup: true } : {};
     if (next.kind === 'client-cert') {
       target?.send('cert-challenge-present', {
         wcId: next.wcId,
         host: next.host,
         certs: next.certSummaries,
-        ...popupField,
+        ...popupField
       });
     } else {
       target?.send('auth-challenge-present', {
@@ -307,7 +309,7 @@ function createAuthChallenges({ registry, chromeForTab, popupRegistry = null, lo
         // raw host/port stay untouched for the agent read seam.
         host: displayHost(next),
         realm: next.realm,
-        ...popupField,
+        ...popupField
       });
     }
   }
@@ -342,7 +344,7 @@ function createAuthChallenges({ registry, chromeForTab, popupRegistry = null, lo
     if (!record) return cancelSilently();
     const state = stateFor(record);
     state.queue.push({
-      challengeId: 'auth-' + (++seq),
+      challengeId: 'auth-' + ++seq,
       kind: 'basic-auth',
       record,
       ...(popupEntry ? { isPopup: true } : {}),
@@ -355,7 +357,7 @@ function createAuthChallenges({ registry, chromeForTab, popupRegistry = null, lo
       realm: (authInfo && authInfo.realm) || '',
       url: (details && details.url) || '',
       callback,
-      resolved: false,
+      resolved: false
     });
     presentNext(record);
   }
@@ -400,7 +402,7 @@ function createAuthChallenges({ registry, chromeForTab, popupRegistry = null, lo
     const host = certChallengeHost(url);
     const state = stateFor(record);
     state.queue.push({
-      challengeId: 'cert-' + (++seq),
+      challengeId: 'cert-' + ++seq,
       kind: 'client-cert',
       record,
       ...(popupEntry ? { isPopup: true } : {}),
@@ -409,11 +411,11 @@ function createAuthChallenges({ registry, chromeForTab, popupRegistry = null, lo
       url: String(url || ''),
       certSummaries: list.map((c) => ({
         subject: String((c && c.subjectName) || ''),
-        issuer: String((c && c.issuerName) || ''),
+        issuer: String((c && c.issuerName) || '')
       })),
       list,
       callback,
-      resolved: false,
+      resolved: false
     });
     presentNext(record);
   }
@@ -618,7 +620,13 @@ function createAuthChallenges({ registry, chromeForTab, popupRegistry = null, lo
     for (const [, state] of states) {
       const target = pendingBasicAuthFor(state, wcId);
       if (!target) continue;
-      return { wcId: target.wcId, host: target.host, port: target.port ?? null, realm: target.realm || '', url: target.url };
+      return {
+        wcId: target.wcId,
+        host: target.host,
+        port: target.port ?? null,
+        realm: target.realm || '',
+        url: target.url
+      };
     }
     return null;
   }
@@ -635,7 +643,7 @@ function createAuthChallenges({ registry, chromeForTab, popupRegistry = null, lo
     answerFromSheet,
     answerWithCredential,
     selectCertFromSheet,
-    getPendingChallenge,
+    getPendingChallenge
   };
 }
 

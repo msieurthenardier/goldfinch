@@ -22,7 +22,7 @@ const {
   SVG_NS,
   ICON_ATTR,
   buildVaultLockIcon,
-  createVaultIconController,
+  createVaultIconController
 } = require('../../src/preload/vault-fill-icon');
 const { findAllLoginFields } = require('../../src/preload/vault-fill-fields');
 
@@ -42,9 +42,15 @@ class FakeElement {
     this.isConnected = false;
     this._parent = null;
   }
-  setAttribute(name, value) { this.attributes[name] = String(value); }
-  getAttribute(name) { return name in this.attributes ? this.attributes[name] : null; }
-  addEventListener(type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn); }
+  setAttribute(name, value) {
+    this.attributes[name] = String(value);
+  }
+  getAttribute(name) {
+    return name in this.attributes ? this.attributes[name] : null;
+  }
+  addEventListener(type, fn) {
+    (this.listeners[type] = this.listeners[type] || []).push(fn);
+  }
   appendChild(child) {
     this.children.push(child);
     child._parent = this;
@@ -76,7 +82,9 @@ class FakeInput extends FakeElement {
     this.offsetParent = {}; // non-null → visible
     this._rect = { top: 100, left: 200, width: 180, height: 24 };
   }
-  getBoundingClientRect() { return this._rect; }
+  getBoundingClientRect() {
+    return this._rect;
+  }
 }
 
 class FakeForm extends FakeElement {
@@ -85,7 +93,9 @@ class FakeForm extends FakeElement {
     this.inputs = inputs;
     for (const input of inputs) input.form = this;
   }
-  querySelectorAll(selector) { return selector === 'input' ? this.inputs.slice() : []; }
+  querySelectorAll(selector) {
+    return selector === 'input' ? this.inputs.slice() : [];
+  }
 }
 
 function makeDoc(forms) {
@@ -95,13 +105,17 @@ function makeDoc(forms) {
   return {
     body,
     documentElement: body,
-    createElement(tag) { return new FakeElement(tag); },
-    createElementNS(ns, tag) { return new FakeElement(tag, ns); },
+    createElement(tag) {
+      return new FakeElement(tag);
+    },
+    createElementNS(ns, tag) {
+      return new FakeElement(tag, ns);
+    },
     querySelectorAll(selector) {
       if (selector === 'input[type=password]') return all.filter((i) => i.type === 'password');
       if (selector === 'input') return all.slice();
       return [];
-    },
+    }
   };
 }
 
@@ -113,7 +127,7 @@ function makeController(doc, sends) {
     // Model the captured getter: honour the event's own isTrusted flag.
     isTrustedGet: { call: (e) => !!e.isTrusted },
     findAllLoginFields,
-    getEnabled: () => true,
+    getEnabled: () => true
   });
 }
 
@@ -194,8 +208,11 @@ test('the icon is placed on BOTH the username and the password field (moves with
   ctl.handleFocusIn({ target: pass });
   icon = bodyIcon(doc);
   assert.ok(icon, 'password field gets an icon too');
-  assert.equal(doc.body.children.filter((c) => c.getAttribute(ICON_ATTR) !== null).length, 1,
-    'only the focused field shows an icon at a time (no stacking)');
+  assert.equal(
+    doc.body.children.filter((c) => c.getAttribute(ICON_ATTR) !== null).length,
+    1,
+    'only the focused field shows an icon at a time (no stacking)'
+  );
   assert.notEqual(icon.style.top, undefined);
   assert.ok(userLeft, 'username icon had been positioned');
 });
@@ -231,7 +248,11 @@ test('click on the icon keeps field focus (mousedown preventDefault) so the clic
   const icon = bodyIcon(doc);
 
   let prevented = false;
-  icon.dispatch('mousedown', { preventDefault: () => { prevented = true; } });
+  icon.dispatch('mousedown', {
+    preventDefault: () => {
+      prevented = true;
+    }
+  });
   assert.ok(prevented, 'icon mousedown calls preventDefault → field keeps focus through the click');
 });
 
@@ -258,7 +279,7 @@ test('click: a trusted gesture sends the BARE guest-vault-gesture IPC; a scripte
   assert.deepEqual(sends[0].payload, {}, 'bare payload — main derives the wcId from the sender');
 });
 
-test('a trusted gesture binds the clicked form\'s password as the single-use, TTL-bound fill target (PR#112 finding 9)', () => {
+test("a trusted gesture binds the clicked form's password as the single-use, TTL-bound fill target (PR#112 finding 9)", () => {
   const userA = new FakeInput('text', 'user-a');
   const passA = new FakeInput('password', 'pass-a');
   const userB = new FakeInput('email', 'user-b');
@@ -273,7 +294,7 @@ test('a trusted gesture binds the clicked form\'s password as the single-use, TT
     isTrustedGet: { call: (e) => !!e.isTrusted },
     findAllLoginFields,
     getEnabled: () => true,
-    now: () => clock,
+    now: () => clock
   });
 
   // Nothing gestured yet → no bound target.
@@ -313,7 +334,13 @@ test('contextmenu: a trusted right-click sends the BARE guest-vault-icon-menu IP
 
   // Scripted contextmenu → ignored (no menu, no default suppression needed).
   let prevented = false;
-  icon.dispatch('contextmenu', { isTrusted: false, preventDefault: () => { prevented = true; }, stopPropagation() {} });
+  icon.dispatch('contextmenu', {
+    isTrusted: false,
+    preventDefault: () => {
+      prevented = true;
+    },
+    stopPropagation() {}
+  });
   assert.deepEqual(sends, [], 'a synthetic contextmenu raises no native menu');
   assert.equal(prevented, false);
 
@@ -322,8 +349,12 @@ test('contextmenu: a trusted right-click sends the BARE guest-vault-icon-menu IP
   let stopped = false;
   icon.dispatch('contextmenu', {
     isTrusted: true,
-    preventDefault: () => { prevented2 = true; },
-    stopPropagation: () => { stopped = true; },
+    preventDefault: () => {
+      prevented2 = true;
+    },
+    stopPropagation: () => {
+      stopped = true;
+    }
   });
   assert.equal(sends.length, 1);
   assert.equal(sends[0].channel, 'guest-vault-icon-menu');
@@ -346,7 +377,10 @@ test('the icon is decorative: it holds no credential value or text a hostile pag
   assert.equal(icon.value, undefined, 'not a form control — no .value');
   // The only attributes are presentational/marker — none carries a secret.
   const attrKeys = Object.keys(icon.attributes).sort();
-  assert.deepEqual(attrKeys, ['aria-label', 'data-locked', 'focusable', 'height', 'role', 'viewBox', 'width', ICON_ATTR].sort());
+  assert.deepEqual(
+    attrKeys,
+    ['aria-label', 'data-locked', 'focusable', 'height', 'role', 'viewBox', 'width', ICON_ATTR].sort()
+  );
 });
 
 test('setVaultLocked flips the shown icon glyph + color live (no reload)', () => {
@@ -406,7 +440,7 @@ test('disabled controller (not eligible / not top-frame) never injects an icon',
     ipcRenderer: { send() {} },
     isTrustedGet: { call: (e) => !!e.isTrusted },
     findAllLoginFields,
-    getEnabled: () => false,
+    getEnabled: () => false
   });
 
   ctl.handleFocusIn({ target: pass });

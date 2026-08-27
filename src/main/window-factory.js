@@ -111,9 +111,7 @@ function createWindowFactory(deps) {
       event.preventDefault();
       if (hit.autoRepeatGuard && input.isAutoRepeat) return;
 
-      const accelChrome = !record.chromeView.webContents.isDestroyed()
-        ? record.chromeView.webContents
-        : null;
+      const accelChrome = !record.chromeView.webContents.isDestroyed() ? record.chromeView.webContents : null;
       if (hit.scope === 'chrome') {
         accelChrome?.send('chrome-shortcut-action', { action: hit.action });
         return;
@@ -156,9 +154,8 @@ function createWindowFactory(deps) {
 
   /** @param {{ noBootTab?: boolean, contentSize?: { width: number, height: number } | null }} [opts] */
   function createWindow({ noBootTab = false, contentSize = null } = {}) {
-    const frameOpts = platform === 'darwin'
-      ? { titleBarStyle: 'hidden', trafficLightPosition: { x: 12, y: 14 } }
-      : { frame: false };
+    const frameOpts =
+      platform === 'darwin' ? { titleBarStyle: 'hidden', trafficLightPosition: { x: 12, y: 14 } } : { frame: false };
     const initialWidth = contentSize ? contentSize.width : 1400;
     const initialHeight = contentSize ? contentSize.height : 900;
     const win = new BaseWindow({
@@ -179,9 +176,7 @@ function createWindowFactory(deps) {
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: false,
-        ...(isAutomationEnabled(argv) && !isPackaged
-          ? { additionalArguments: ['--automation-dev'] }
-          : {})
+        ...(isAutomationEnabled(argv) && !isPackaged ? { additionalArguments: ['--automation-dev'] } : {})
       }
     });
     win.contentView.addChildView(chromeView);

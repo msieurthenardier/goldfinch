@@ -59,7 +59,11 @@
 // external-source case). See `foreign`.
 
 import {
-  BOOKMARK_DND_MIME, visibleSlotRects, classifyBookmarkDrop, indicatorX, isOverChevron,
+  BOOKMARK_DND_MIME,
+  visibleSlotRects,
+  classifyBookmarkDrop,
+  indicatorX,
+  isOverChevron,
   barDropToIndex
 } from '../../shared/bookmark-drag.js';
 
@@ -221,15 +225,25 @@ const FOREIGN_DRAG_MAX_MS = 15000;
  * }} deps
  */
 export function createBookmarksBar({
-  document, ResizeObserver, els,
-  bookmarksClient, navigate, createTab, openBookmarkEditOverlay, activeContainer,
-  overlayMenuClient, overlayMenuState, rightAnchorOf,
+  document,
+  ResizeObserver,
+  els,
+  bookmarksClient,
+  navigate,
+  createTab,
+  openBookmarkEditOverlay,
+  activeContainer,
+  overlayMenuClient,
+  overlayMenuState,
+  rightAnchorOf,
   // M15 F3 Leg 4. `navigate` is ACTIVE-TAB-ONLY and therefore cannot serve AC9
   // (the drop may land on a background tab's guest) — `tabNavigate` is the
   // per-wcId form of the SAME untrusted path (navigation-controller.js's
   // `navigate` bottoms out in exactly this call). Defaulted to no-ops so an
   // offline fixture that predates this leg constructs without them.
-  tabNavigate = () => {}, bookmarkDragStarted = () => {}, bookmarkDragEnded = () => {},
+  tabNavigate = () => {},
+  bookmarkDragStarted = () => {},
+  bookmarkDragEnded = () => {},
   // M15 F3 Leg 5a: the spring-load dwell's clock. Defaulted (renderer.js passes
   // nothing) so the wiring costs no renderer.js lines; injectable so the dwell
   // is pinned by a deterministic test rather than by a sleep.
@@ -355,7 +369,10 @@ export function createBookmarksBar({
   let foreignTimer = null;
 
   function clearDragHoldTimer() {
-    if (dragHoldTimer != null) { clearTimeout(dragHoldTimer); dragHoldTimer = null; }
+    if (dragHoldTimer != null) {
+      clearTimeout(dragHoldTimer);
+      dragHoldTimer = null;
+    }
   }
   /** Drop the held record immediately — used on consumption (one commit per drag). */
   function releaseDragHold() {
@@ -392,7 +409,10 @@ export function createBookmarksBar({
    */
   function showIndicatorAt(index, session) {
     const x = indicatorX(session.slotRects, index, session.draggedIndex);
-    if (x == null) { hideIndicator(); return; }
+    if (x == null) {
+      hideIndicator();
+      return;
+    }
     // Viewport x -> bar-relative: #bookmarks-bar has no border, so its padding
     // box (the absolute containing block) starts at its own rect.left.
     dropIndicator.style.left = `${x - session.barRect.left}px`;
@@ -414,10 +434,12 @@ export function createBookmarksBar({
    * filtering is the whole point (DD3): a `.hidden` item is `display: none` and
    * reports a zero-width rect AT LEFT 0, which would inflate every index. */
   function measureSlotRects() {
-    return visibleSlotRects(itemEls().map((el) => {
-      const r = el.getBoundingClientRect();
-      return { rect: { left: r.left, width: r.width }, hidden: el.classList.contains('hidden') };
-    }));
+    return visibleSlotRects(
+      itemEls().map((el) => {
+        const r = el.getBoundingClientRect();
+        return { rect: { left: r.left, width: r.width }, hidden: el.classList.contains('hidden') };
+      })
+    );
   }
 
   function clearItems() {
@@ -505,7 +527,10 @@ export function createBookmarksBar({
     btn.addEventListener('dragstart', (e) => {
       const dt = e.dataTransfer;
       // Refuse rather than start a session we could never commit.
-      if (!dt || !b || typeof b.id !== 'string') { e.preventDefault(); return; }
+      if (!dt || !b || typeof b.id !== 'string') {
+        e.preventDefault();
+        return;
+      }
       // DD2's three types. The custom one carries the bookmark ID (the chrome's
       // own dispatch key); the two standard ones carry the url so a page with a
       // real drop zone gets a normal url drop (DD5's "page wins" only means
@@ -538,7 +563,7 @@ export function createBookmarksBar({
         // discipline as barRect (read once, never re-measured mid-gesture). A
         // HIDDEN chevron reads 0,0,0,0 and `isOverChevron` refuses a zero-area
         // rect, so "no overflow → nothing to spring" needs no separate branch.
-        chevronRect: edgesOf(els.bookmarksOverflow),
+        chevronRect: edgesOf(els.bookmarksOverflow)
       };
       dragActive = true; // AC7: both rebuild paths are suppressed from here
       springDwellStart = null;
@@ -555,7 +580,7 @@ export function createBookmarksBar({
         url: typeof b.url === 'string' && b.url ? b.url : null,
         bookmarkId: b.id,
         jarId: currentJarId,
-        visibleCount: overflowVisibleCount,
+        visibleCount: overflowVisibleCount
       };
       bookmarkDragStarted();
     });
@@ -587,7 +612,10 @@ export function createBookmarksBar({
       bookmarkDragEnded();
       if (dragHold != null) {
         clearDragHoldTimer();
-        dragHoldTimer = setTimeout(() => { dragHoldTimer = null; dragHold = null; }, DRAG_HOLD_MS);
+        dragHoldTimer = setTimeout(() => {
+          dragHoldTimer = null;
+          dragHold = null;
+        }, DRAG_HOLD_MS);
       }
     });
 
@@ -670,11 +698,7 @@ export function createBookmarksBar({
     // here — dragend's flush re-measures and re-partitions unconditionally.
     if (dragActive) return;
     const rect = els.bookmarksBar.getBoundingClientRect();
-    if (
-      lastMeasuredSize &&
-      rect.width === lastMeasuredSize.width &&
-      rect.height === lastMeasuredSize.height
-    ) {
+    if (lastMeasuredSize && rect.width === lastMeasuredSize.width && rect.height === lastMeasuredSize.height) {
       return; // unchanged since the last pass — no re-partition needed
     }
     lastMeasuredSize = { width: rect.width, height: rect.height };
@@ -750,7 +774,10 @@ export function createBookmarksBar({
    * is not dropped: it sets a pending flag that `dragend` flushes, so a sheet is
    * never left open over a snapshot that changed while it was unclosable. */
   function closeOverflowIfOpen() {
-    if (dragActive) { pendingOverflowClose = true; return; }
+    if (dragActive) {
+      pendingOverflowClose = true;
+      return;
+    }
     if (overlayMenuState.open) overlayMenuClient.close('superseded');
   }
 
@@ -784,13 +811,14 @@ export function createBookmarksBar({
     // shares this record, releasing here also makes a stray guest drop signal
     // for the same gesture resolve to nothing. One release, one outcome.
     releaseDragHold();
-    bookmarksClient.commitOverflowDrop(
-      hold.jarId, hold.bookmarkId, hold.visibleCount, /** @type {number} */ (index)
-    );
+    bookmarksClient.commitOverflowDrop(hold.jarId, hold.bookmarkId, hold.visibleCount, /** @type {number} */ (index));
   }
 
   function clearForeignTimer() {
-    if (foreignTimer != null) { clearTimeout(foreignTimer); foreignTimer = null; }
+    if (foreignTimer != null) {
+      clearTimeout(foreignTimer);
+      foreignTimer = null;
+    }
   }
 
   /** Drop a foreign session WITHOUT flushing — for the one case where another
@@ -870,7 +898,7 @@ export function createBookmarksBar({
       draggedIndex: -1,
       slotRects: measureSlotRects(),
       barRect: edgesOf(els.bookmarksBar),
-      chevronRect: edgesOf(els.bookmarksOverflow),
+      chevronRect: edgesOf(els.bookmarksOverflow)
     };
     dragActive = true; // AC7: both rebuild paths + the overflow close are suppressed
     springDwellStart = null;
@@ -924,7 +952,10 @@ export function createBookmarksBar({
     }
     springDwellStart = null; // left the chevron — the dwell restarts from scratch
     const zone = classifyBookmarkDrop(session.barRect, session.slotRects, e.clientX, e.clientY, session.draggedIndex);
-    if (zone.zone !== 'reorder') { hideIndicator(); return; }
+    if (zone.zone !== 'reorder') {
+      hideIndicator();
+      return;
+    }
     showIndicatorAt(zone.index, session);
   });
 
@@ -941,10 +972,16 @@ export function createBookmarksBar({
    * session 3's throwaway probe used `open`, which is why it worked.
    */
   function springLoad() {
-    if (overlayMenuState.open) { springDwellStart = null; return; } // already sprung
+    if (overlayMenuState.open) {
+      springDwellStart = null;
+      return;
+    } // already sprung
     if (!overflowSnapshot.length) return; // nothing to open — inert, not an error
     const t = now();
-    if (springDwellStart == null) { springDwellStart = t; return; }
+    if (springDwellStart == null) {
+      springDwellStart = t;
+      return;
+    }
     if (t - springDwellStart < SPRING_DWELL_MS) return;
     springDwellStart = null;
     openOverflowMenu(0);

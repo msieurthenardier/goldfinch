@@ -28,12 +28,23 @@ const ids = (model) => model.filter((m) => m.type === 'item').map((m) => m.id);
 test('full params: link → image → selection → editable → spelling → (bookmark-page, Inspect), separators between sections', () => {
   const model = pageContextModel(fullParams(), null);
   assert.deepEqual(ids(model), [
-    'link:open', 'link:copy',
-    'image:open', 'image:copy', 'image:save',
-    'sel:copy', 'sel:search',
-    'edit:cut', 'edit:copy', 'edit:paste', 'edit:undo', 'edit:redo',
-    'spell:0', 'spell:1', 'spell:2',
-    'action:bookmark-page', 'action:inspect'
+    'link:open',
+    'link:copy',
+    'image:open',
+    'image:copy',
+    'image:save',
+    'sel:copy',
+    'sel:search',
+    'edit:cut',
+    'edit:copy',
+    'edit:paste',
+    'edit:undo',
+    'edit:redo',
+    'spell:0',
+    'spell:1',
+    'spell:2',
+    'action:bookmark-page',
+    'action:inspect'
   ]);
   // Separators sit exactly between sections: 6 sections → 5 separators (the
   // always-present bookmark-page + Inspect group counts as ONE section — no
@@ -43,12 +54,28 @@ test('full params: link → image → selection → editable → spelling → (b
   // Order pinned positionally: separator directly after each section's last item.
   const labels = model.map((m) => (m.type === 'separator' ? '|' : m.type === 'note' ? '(note)' : m.id));
   assert.deepEqual(labels, [
-    'link:open', 'link:copy', '|',
-    'image:open', 'image:copy', 'image:save', '|',
-    'sel:copy', 'sel:search', '|',
-    'edit:cut', 'edit:copy', 'edit:paste', 'edit:undo', 'edit:redo', '|',
-    'spell:0', 'spell:1', 'spell:2', '|',
-    'action:bookmark-page', 'action:inspect'
+    'link:open',
+    'link:copy',
+    '|',
+    'image:open',
+    'image:copy',
+    'image:save',
+    '|',
+    'sel:copy',
+    'sel:search',
+    '|',
+    'edit:cut',
+    'edit:copy',
+    'edit:paste',
+    'edit:undo',
+    'edit:redo',
+    '|',
+    'spell:0',
+    'spell:1',
+    'spell:2',
+    '|',
+    'action:bookmark-page',
+    'action:inspect'
   ]);
 });
 
@@ -122,8 +149,14 @@ test('spelling suggestions are sliced to 8 with spell:<index> ids and word label
   const model = pageContextModel({ misspelledWord: 'teh', dictionarySuggestions: sugg }, null);
   const spell = model.filter((m) => m.type === 'item' && m.id.startsWith('spell:'));
   assert.equal(spell.length, 8);
-  assert.deepEqual(spell.map((m) => m.id), ['spell:0', 'spell:1', 'spell:2', 'spell:3', 'spell:4', 'spell:5', 'spell:6', 'spell:7']);
-  assert.deepEqual(spell.map((m) => m.label), sugg.slice(0, 8));
+  assert.deepEqual(
+    spell.map((m) => m.id),
+    ['spell:0', 'spell:1', 'spell:2', 'spell:3', 'spell:4', 'spell:5', 'spell:6', 'spell:7']
+  );
+  assert.deepEqual(
+    spell.map((m) => m.label),
+    sugg.slice(0, 8)
+  );
 });
 
 test('zero suggestions → non-focusable note fallback (the only non-item affordance)', () => {
@@ -162,7 +195,11 @@ test('opts is optional (every pre-leg 2-arg call site is unaffected) and default
 });
 
 test('toolbar mode short-circuits to the single namespaced Unpin item — page sections AND the bookmark-page/Inspect group are ignored', () => {
-  for (const [itm, label] of [['media', 'Unpin Media'], ['shields', 'Unpin Shields'], ['devtools', 'Unpin DevTools']]) {
+  for (const [itm, label] of [
+    ['media', 'Unpin Media'],
+    ['shields', 'Unpin Shields'],
+    ['devtools', 'Unpin DevTools']
+  ]) {
     const model = pageContextModel(fullParams(), /** @type {any} */ (itm), { isBookmarked: true });
     assert.deepEqual(model, [{ type: 'item', id: 'action:unpin:' + itm, label }]);
   }

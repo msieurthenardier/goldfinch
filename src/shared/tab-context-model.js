@@ -63,7 +63,14 @@
  *   caller (including the a11y-audit synthetic model) is unaffected.
  * @returns {Array<{ type: 'item', id: string, label: string } | { type: 'separator' }>}
  */
-export function tabContextModel({ isLastTab, tabsToRight, stackSize, isInternal = false, hasView = true, moveTargets = [] }) {
+export function tabContextModel({
+  isLastTab,
+  tabsToRight,
+  stackSize,
+  isInternal = false,
+  hasView = true,
+  moveTargets = []
+}) {
   /** @type {Array<{ type: 'item', id: string, label: string } | { type: 'separator' }>} */
   const model = [];
   let needSep = false;

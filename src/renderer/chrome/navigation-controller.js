@@ -3,15 +3,34 @@
 /** @param {any} deps */
 export function createNavigationController(deps) {
   const {
-    window, document, ctx, els,
-    activeTab, isInternalTab, isWebTab, createTab, openDownloads,
-    openNewTab, attachView, // M16 F2 Leg 1: the `+` pill (DD4) / navigate() on a welcome tab (DD2)
-    openWelcomeTab, refreshWelcome, // M16 F2 Leg 2 (DD3): the search handoff — a new welcome tab beside the page, or an in-place re-render
+    window,
+    document,
+    ctx,
+    els,
+    activeTab,
+    isInternalTab,
+    isWebTab,
+    createTab,
+    openDownloads,
+    openNewTab,
+    attachView, // M16 F2 Leg 1: the `+` pill (DD4) / navigate() on a welcome tab (DD2)
+    openWelcomeTab,
+    refreshWelcome, // M16 F2 Leg 2 (DD3): the search handoff — a new welcome tab beside the page, or an in-place re-render
     bookmarksClient,
-    buildSearchUrl, currentSearchEngine, capPendingQuery, normalizeHomePageInput, // M16 F1 Leg 2 / F2 Leg 2 / F3 Leg 2: toUrl's search fallback + the pending-query cap + the shared domain-normalize rule (HAT item 5)
-    isInternalPageUrl, shouldQuery, buildSuggestionModel, mergeSuggestionSources, moveSelection,
-    acceptSuggestResponse, suggestionsState, closeOverlayMenu,
-    openOverlayMenu, leftAnchorOf
+    buildSearchUrl,
+    currentSearchEngine,
+    capPendingQuery,
+    normalizeHomePageInput, // M16 F1 Leg 2 / F2 Leg 2 / F3 Leg 2: toUrl's search fallback + the pending-query cap + the shared domain-normalize rule (HAT item 5)
+    isInternalPageUrl,
+    shouldQuery,
+    buildSuggestionModel,
+    mergeSuggestionSources,
+    moveSelection,
+    acceptSuggestResponse,
+    suggestionsState,
+    closeOverlayMenu,
+    openOverlayMenu,
+    leftAnchorOf
   } = deps;
   function updateAddressChip(tab) {
     const chip = els.addressChip;
@@ -49,16 +68,20 @@ export function createNavigationController(deps) {
     const secure = /^https:/i.test(url);
     chip.setAttribute('data-state', 'web');
     chip.setAttribute('data-secure', secure ? 'true' : 'false');
-    chip.setAttribute('aria-label', host
-      ? (secure ? `Site information, ${host}` : `Site information, ${host}, not secure`)
-      : 'Site information');
+    chip.setAttribute(
+      'aria-label',
+      host ? (secure ? `Site information, ${host}` : `Site information, ${host}, not secure`) : 'Site information'
+    );
     els.address.readOnly = false;
   }
 
-
   function updateNavButtons() {
     const tab = activeTab();
-    if (!tab) { els.back.disabled = true; els.forward.disabled = true; return; }
+    if (!tab) {
+      els.back.disabled = true;
+      els.forward.disabled = true;
+      return;
+    }
     // Internal tabs never have navigation history; a viewless (welcome) record
     // has none yet either (M16 F2 Leg 1, DD7) — disable both explicitly in
     // either case. (No webview to query; tab-nav-state IPC is not sent for
@@ -89,7 +112,10 @@ export function createNavigationController(deps) {
     if (s === '') return;
     const url = toUrl(s);
     // Capture site 1/2 (DD3): capPendingQuery caps the query to PENDING_QUERY_MAX before it ever reaches the record.
-    if (url == null) { handoffSearch(tab, capPendingQuery(s)); return; }
+    if (url == null) {
+      handoffSearch(tab, capPendingQuery(s));
+      return;
+    }
     // M16 F2 Leg 1 (DD2): a viewless welcome record acquires its view on its
     // first navigation, whatever the entry point — attachView validates the
     // URL and runs the shared onViewCreated continuation once it resolves.
@@ -166,8 +192,14 @@ export function createNavigationController(deps) {
   const suggest = { seq: 0, items: [], selectedIndex: -1, graceTimer: null, debounceTimer: null, lastQuery: '' };
 
   function cancelSuggestTimers() {
-    if (suggest.graceTimer) { clearTimeout(suggest.graceTimer); suggest.graceTimer = null; }
-    if (suggest.debounceTimer) { clearTimeout(suggest.debounceTimer); suggest.debounceTimer = null; }
+    if (suggest.graceTimer) {
+      clearTimeout(suggest.graceTimer);
+      suggest.graceTimer = null;
+    }
+    if (suggest.debounceTimer) {
+      clearTimeout(suggest.debounceTimer);
+      suggest.debounceTimer = null;
+    }
   }
 
   // Full local-state reset — cancels both timers and clears the painted rows/
@@ -271,10 +303,12 @@ export function createNavigationController(deps) {
         if (!acceptSuggestResponse({ requestSeq, currentSeq: suggest.seq, gateNow })) return;
         const historyRes = historyOutcome.status === 'fulfilled' ? historyOutcome.value : null;
         const bookmarksRes = bookmarksOutcome.status === 'fulfilled' ? bookmarksOutcome.value : null;
-        const historyRows = historyRes && historyRes.ok === true && Array.isArray(historyRes.suggestions)
-          ? historyRes.suggestions : [];
-        const bookmarkRows = bookmarksRes && bookmarksRes.ok === true && Array.isArray(bookmarksRes.suggestions)
-          ? bookmarksRes.suggestions : [];
+        const historyRows =
+          historyRes && historyRes.ok === true && Array.isArray(historyRes.suggestions) ? historyRes.suggestions : [];
+        const bookmarkRows =
+          bookmarksRes && bookmarksRes.ok === true && Array.isArray(bookmarksRes.suggestions)
+            ? bookmarksRes.suggestions
+            : [];
         suggest.items = mergeSuggestionSources(bookmarkRows, historyRows);
         suggest.selectedIndex = -1;
         paintSuggestions();
@@ -311,7 +345,11 @@ export function createNavigationController(deps) {
     const open = suggestionsState().open;
     if (open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
       e.preventDefault();
-      suggest.selectedIndex = moveSelection(suggest.selectedIndex, e.key === 'ArrowDown' ? 1 : -1, suggest.items.length);
+      suggest.selectedIndex = moveSelection(
+        suggest.selectedIndex,
+        e.key === 'ArrowDown' ? 1 : -1,
+        suggest.items.length
+      );
       paintSuggestions();
       return;
     }
@@ -337,13 +375,17 @@ export function createNavigationController(deps) {
     const t = activeTab();
     if (!t) return;
     // Internal tabs have back disabled; web tabs use the view IPC path.
-    if (isWebTab(t) && t.wcId != null) { window.goldfinch.tabNavigate({ wcId: t.wcId, verb: 'goBack', args: [] }); }
+    if (isWebTab(t) && t.wcId != null) {
+      window.goldfinch.tabNavigate({ wcId: t.wcId, verb: 'goBack', args: [] });
+    }
   });
   els.forward.addEventListener('click', () => {
     const t = activeTab();
     if (!t) return;
     // Internal tabs have forward disabled; web tabs use the view IPC path.
-    if (isWebTab(t) && t.wcId != null) { window.goldfinch.tabNavigate({ wcId: t.wcId, verb: 'goForward', args: [] }); }
+    if (isWebTab(t) && t.wcId != null) {
+      window.goldfinch.tabNavigate({ wcId: t.wcId, verb: 'goForward', args: [] });
+    }
   });
   els.reload.addEventListener('click', () => {
     const t = activeTab();

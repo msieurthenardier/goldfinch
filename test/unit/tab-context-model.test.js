@@ -15,7 +15,12 @@ const seps = (model) => model.filter((m) => m.type === 'separator').length;
 test('multi-tab + tabs-to-right + non-empty stack: all six items, in order, two separators', () => {
   const model = tabContextModel({ tabId: 't1', isLastTab: false, tabsToRight: 2, stackSize: 3 });
   assert.deepEqual(ids(model), [
-    'tab:close', 'tab:close-others', 'tab:close-right', 'tab:duplicate', 'tab:move-new-window', 'tab:reopen-closed'
+    'tab:close',
+    'tab:close-others',
+    'tab:close-right',
+    'tab:duplicate',
+    'tab:move-new-window',
+    'tab:reopen-closed'
   ]);
   assert.equal(seps(model), 2);
   // Never a leading or trailing separator.
@@ -45,7 +50,13 @@ test('rightmost tab of a multi-tab strip: tab:close-right omitted, tab:close-oth
 // ---------------------------------------------------------------------------
 test('empty closed-tab stack: tab:reopen-closed omitted, no trailing separator', () => {
   const model = tabContextModel({ tabId: 't1', isLastTab: false, tabsToRight: 1, stackSize: 0 });
-  assert.deepEqual(ids(model), ['tab:close', 'tab:close-others', 'tab:close-right', 'tab:duplicate', 'tab:move-new-window']);
+  assert.deepEqual(ids(model), [
+    'tab:close',
+    'tab:close-others',
+    'tab:close-right',
+    'tab:duplicate',
+    'tab:move-new-window'
+  ]);
   assert.notEqual(model[model.length - 1].type, 'separator');
   assert.equal(seps(model), 1); // only the separator before duplicate
 });
@@ -58,7 +69,11 @@ test('empty closed-tab stack: tab:reopen-closed omitted, no trailing separator',
 test('internal tab: tab:move-new-window omitted (M4 ruling), everything else per its own rules', () => {
   const model = tabContextModel({ tabId: 't1', isLastTab: false, tabsToRight: 2, stackSize: 3, isInternal: true });
   assert.deepEqual(ids(model), [
-    'tab:close', 'tab:close-others', 'tab:close-right', 'tab:duplicate', 'tab:reopen-closed'
+    'tab:close',
+    'tab:close-others',
+    'tab:close-right',
+    'tab:duplicate',
+    'tab:reopen-closed'
   ]);
 });
 
@@ -69,7 +84,13 @@ test('internal + only tab: both omission rules compose (no move row, no close-ot
 
 test('move row shares the duplicate section: separator count unchanged by its presence/absence', () => {
   const withMove = tabContextModel({ tabId: 't1', isLastTab: false, tabsToRight: 1, stackSize: 1, isInternal: false });
-  const withoutMove = tabContextModel({ tabId: 't1', isLastTab: false, tabsToRight: 1, stackSize: 1, isInternal: true });
+  const withoutMove = tabContextModel({
+    tabId: 't1',
+    isLastTab: false,
+    tabsToRight: 1,
+    stackSize: 1,
+    isInternal: true
+  });
   assert.equal(seps(withMove), 2);
   assert.equal(seps(withoutMove), 2);
   // Adjacency pin (Chrome parity): move-new-window renders directly after duplicate.
@@ -122,19 +143,26 @@ const win = (windowId, label) => ({ windowId, label });
 
 test('AC1 — one window (no other windows): ZERO move-to-window items', () => {
   const model = tabContextModel({ tabId: 't1', isLastTab: false, tabsToRight: 0, stackSize: 0, moveTargets: [] });
-  assert.deepEqual(ids(model).filter((i) => i.startsWith('tab:move-window:')), []);
+  assert.deepEqual(
+    ids(model).filter((i) => i.startsWith('tab:move-window:')),
+    []
+  );
   // The new-window move is unaffected — it needs no second window.
   assert.ok(ids(model).includes('tab:move-new-window'));
 });
 
 test('AC1 — three windows (two others): TWO move-to-window items, captioned from their active tabs', () => {
   const model = tabContextModel({
-    tabId: 't1', isLastTab: false, tabsToRight: 0, stackSize: 0,
+    tabId: 't1',
+    isLastTab: false,
+    tabsToRight: 0,
+    stackSize: 0,
     moveTargets: [win(7, 'GitHub'), win(9, 'Wikipedia')]
   });
-  assert.deepEqual(ids(model).filter((i) => i.startsWith('tab:move-window:')), [
-    'tab:move-window:7', 'tab:move-window:9'
-  ]);
+  assert.deepEqual(
+    ids(model).filter((i) => i.startsWith('tab:move-window:')),
+    ['tab:move-window:7', 'tab:move-window:9']
+  );
   const items = model.filter((m) => m.type === 'item');
   assert.equal(items.find((i) => i.id === 'tab:move-window:7').label, 'Move to window "GitHub"');
   assert.equal(items.find((i) => i.id === 'tab:move-window:9').label, 'Move to window "Wikipedia"');
@@ -145,19 +173,35 @@ test('AC3 — the item is keyed by windowId, NOT by its position in the list', (
   // Same two windows, opposite ORDER: each item keeps its own id, so nothing
   // downstream can resolve a target by position.
   const forward = tabContextModel({
-    tabId: 't1', isLastTab: false, tabsToRight: 0, stackSize: 0,
+    tabId: 't1',
+    isLastTab: false,
+    tabsToRight: 0,
+    stackSize: 0,
     moveTargets: [win(7, 'A'), win(9, 'B')]
   });
   const reversed = tabContextModel({
-    tabId: 't1', isLastTab: false, tabsToRight: 0, stackSize: 0,
+    tabId: 't1',
+    isLastTab: false,
+    tabsToRight: 0,
+    stackSize: 0,
     moveTargets: [win(9, 'B'), win(7, 'A')]
   });
-  assert.deepEqual(ids(forward).filter((i) => i.startsWith('tab:move-window:')), ['tab:move-window:7', 'tab:move-window:9']);
-  assert.deepEqual(ids(reversed).filter((i) => i.startsWith('tab:move-window:')), ['tab:move-window:9', 'tab:move-window:7']);
+  assert.deepEqual(
+    ids(forward).filter((i) => i.startsWith('tab:move-window:')),
+    ['tab:move-window:7', 'tab:move-window:9']
+  );
+  assert.deepEqual(
+    ids(reversed).filter((i) => i.startsWith('tab:move-window:')),
+    ['tab:move-window:9', 'tab:move-window:7']
+  );
   // The SET of destinations is order-invariant — only the render order moved.
   assert.deepEqual(
-    ids(forward).filter((i) => i.startsWith('tab:move-window:')).sort(),
-    ids(reversed).filter((i) => i.startsWith('tab:move-window:')).sort()
+    ids(forward)
+      .filter((i) => i.startsWith('tab:move-window:'))
+      .sort(),
+    ids(reversed)
+      .filter((i) => i.startsWith('tab:move-window:'))
+      .sort()
   );
 });
 
@@ -168,16 +212,20 @@ test('AC1 (M09 F10 L3) — a SOLE tab offers move-to-window (existing windows) b
   // tab-move-to-window path and closes the emptied source). move-new-window
   // stays OMITTED (a sole-tab move to a NEW window is still a no-op swap).
   const sole = tabContextModel({ tabId: 't1', isLastTab: true, tabsToRight: 0, stackSize: 0, moveTargets: targets });
-  assert.deepEqual(ids(sole).filter((i) => i.startsWith('tab:move-window:')), [
-    'tab:move-window:7', 'tab:move-window:9'
-  ]);
+  assert.deepEqual(
+    ids(sole).filter((i) => i.startsWith('tab:move-window:')),
+    ['tab:move-window:7', 'tab:move-window:9']
+  );
   assert.ok(!ids(sole).includes('tab:move-new-window'));
 });
 
 test('AC1 (M09 F10 L3) — a SOLE tab with NO other window offers no move items at all', () => {
   // No target to consolidate into: move-window:* empty, move-new-window omitted.
   const sole = tabContextModel({ tabId: 't1', isLastTab: true, tabsToRight: 0, stackSize: 0, moveTargets: [] });
-  assert.deepEqual(ids(sole).filter((i) => i.startsWith('tab:move-window:')), []);
+  assert.deepEqual(
+    ids(sole).filter((i) => i.startsWith('tab:move-window:')),
+    []
+  );
   assert.ok(!ids(sole).includes('tab:move-new-window'));
 });
 
@@ -185,15 +233,26 @@ test('AC1 — move items are omitted for an INTERNAL tab regardless of window co
   const targets = [win(7, 'GitHub'), win(9, 'Wikipedia')];
   // Internal tab: main's core refuses `internal`. Both move families omitted.
   const internal = tabContextModel({
-    tabId: 't1', isLastTab: false, tabsToRight: 0, stackSize: 0, isInternal: true, moveTargets: targets
+    tabId: 't1',
+    isLastTab: false,
+    tabsToRight: 0,
+    stackSize: 0,
+    isInternal: true,
+    moveTargets: targets
   });
-  assert.deepEqual(ids(internal).filter((i) => i.startsWith('tab:move-window:')), []);
+  assert.deepEqual(
+    ids(internal).filter((i) => i.startsWith('tab:move-window:')),
+    []
+  );
   assert.ok(!ids(internal).includes('tab:move-new-window'));
 });
 
 test('the move items are flat items in the duplicate section — no submenu, no note, no header', () => {
   const model = tabContextModel({
-    tabId: 't1', isLastTab: false, tabsToRight: 0, stackSize: 0,
+    tabId: 't1',
+    isLastTab: false,
+    tabsToRight: 0,
+    stackSize: 0,
     moveTargets: [win(7, 'GitHub')]
   });
   // Every entry is still one of the two types the sheet's renderMenu knows (DD8:
@@ -211,7 +270,11 @@ test('the move items are flat items in the duplicate section — no submenu, no 
 // ---------------------------------------------------------------------------
 test('hasView:false omits duplicate, move-new-window, and move-window:* — everything else unaffected', () => {
   const model = tabContextModel({
-    tabId: 't1', isLastTab: false, tabsToRight: 2, stackSize: 3, hasView: false,
+    tabId: 't1',
+    isLastTab: false,
+    tabsToRight: 2,
+    stackSize: 3,
+    hasView: false,
     moveTargets: [win(7, 'GitHub')]
   });
   assert.deepEqual(ids(model), ['tab:close', 'tab:close-others', 'tab:close-right', 'tab:reopen-closed']);
@@ -224,13 +287,25 @@ test('hasView default (omitted) behaves as true — pre-Leg-1 callers (incl. the
 });
 
 test('hasView:false composes with isInternal:true — both gates omit the same items, redundantly', () => {
-  const model = tabContextModel({ tabId: 't1', isLastTab: false, tabsToRight: 0, stackSize: 0, hasView: false, isInternal: true });
+  const model = tabContextModel({
+    tabId: 't1',
+    isLastTab: false,
+    tabsToRight: 0,
+    stackSize: 0,
+    hasView: false,
+    isInternal: true
+  });
   assert.deepEqual(ids(model), ['tab:close', 'tab:close-others']);
 });
 
 test('absent moveTargets defaults to none — every pre-F8 caller is unaffected', () => {
   const model = tabContextModel({ tabId: 't1', isLastTab: false, tabsToRight: 2, stackSize: 3 });
   assert.deepEqual(ids(model), [
-    'tab:close', 'tab:close-others', 'tab:close-right', 'tab:duplicate', 'tab:move-new-window', 'tab:reopen-closed'
+    'tab:close',
+    'tab:close-others',
+    'tab:close-right',
+    'tab:duplicate',
+    'tab:move-new-window',
+    'tab:reopen-closed'
   ]);
 });

@@ -22,7 +22,12 @@
 // registerInternalHandler channel — the trust boundary is "internal page vs web," NOT
 // "settings vs downloads vs jars," consistent with the existing single-trust-domain
 // model. A new internal origin is added here (M12 F3 F3: the vault management page).
-const INTERNAL_ORIGINS = new Set(['goldfinch://settings', 'goldfinch://downloads', 'goldfinch://jars', 'goldfinch://vault']);
+const INTERNAL_ORIGINS = new Set([
+  'goldfinch://settings',
+  'goldfinch://downloads',
+  'goldfinch://jars',
+  'goldfinch://vault'
+]);
 
 /**
  * Returns true only when both conditions are met:
@@ -39,11 +44,7 @@ const INTERNAL_ORIGINS = new Set(['goldfinch://settings', 'goldfinch://downloads
  * @returns {boolean}
  */
 function isTrustedInternalSender(origin, isInternalSession) {
-  return (
-    typeof origin === 'string' &&
-    INTERNAL_ORIGINS.has(origin) &&
-    isInternalSession === true
-  );
+  return typeof origin === 'string' && INTERNAL_ORIGINS.has(origin) && isInternalSession === true;
 }
 
 /**

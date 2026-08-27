@@ -73,7 +73,12 @@ export function createVaultNav(deps) {
   /** @type {ReadonlyArray<{tag: string, attrs: Record<string, string>}>} */
   const ICON_SETTINGS = [
     { tag: 'circle', attrs: { cx: '12', cy: '12', r: '3' } },
-    { tag: 'path', attrs: { d: 'M12 2.5v3M12 18.5v3M4.6 4.6l2.1 2.1M17.3 17.3l2.1 2.1M2.5 12h3M18.5 12h3M4.6 19.4l2.1-2.1M17.3 6.7l2.1-2.1' } }
+    {
+      tag: 'path',
+      attrs: {
+        d: 'M12 2.5v3M12 18.5v3M4.6 4.6l2.1 2.1M17.3 17.3l2.1 2.1M2.5 12h3M18.5 12h3M4.6 19.4l2.1-2.1M17.3 6.7l2.1-2.1'
+      }
+    }
   ];
 
   /** @type {Map<string, any>} */
@@ -238,23 +243,26 @@ export function createVaultNav(deps) {
       return;
     }
     const visible = new Set();
-    scrollObserver = new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        if (entry.isIntersecting) visible.add(entry.target.id);
-        else visible.delete(entry.target.id);
-      }
-      for (const section of sections) {
-        if (visible.has(section.id)) {
-          setActive(section.id);
-          return;
+    scrollObserver = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) visible.add(entry.target.id);
+          else visible.delete(entry.target.id);
         }
-      }
-      // Top inset (-48px) must exceed .vault-section's scroll-margin-top (24px in
-      // vault.css): an anchor jump lands the target's top ~24px down, leaving the
-      // PREVIOUS section's bottom sliver in the top band — with a 0 top inset that
-      // earlier-in-DOM sliver wins the topmost-visible loop and the nav highlights the
-      // entry ABOVE the clicked one. Insetting past the scroll-margin excludes it.
-    }, { rootMargin: '-48px 0px -50% 0px', threshold: 0 });
+        for (const section of sections) {
+          if (visible.has(section.id)) {
+            setActive(section.id);
+            return;
+          }
+        }
+        // Top inset (-48px) must exceed .vault-section's scroll-margin-top (24px in
+        // vault.css): an anchor jump lands the target's top ~24px down, leaving the
+        // PREVIOUS section's bottom sliver in the top band — with a 0 top inset that
+        // earlier-in-DOM sliver wins the topmost-visible loop and the nav highlights the
+        // entry ABOVE the clicked one. Insetting past the scroll-margin excludes it.
+      },
+      { rootMargin: '-48px 0px -50% 0px', threshold: 0 }
+    );
     for (const section of sections) scrollObserver.observe(section);
   }
 

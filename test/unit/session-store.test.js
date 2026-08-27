@@ -34,9 +34,7 @@ function removeTempDir(dir) {
 function readRow(dir) {
   const check = new DatabaseSync(path.join(dir, 'app.db'));
   try {
-    const row = /** @type {any} */ (
-      check.prepare('SELECT payload FROM documents WHERE store = ?1').get('session')
-    );
+    const row = /** @type {any} */ (check.prepare('SELECT payload FROM documents WHERE store = ?1').get('session'));
     return row ? row.payload : null;
   } finally {
     check.close();
@@ -60,10 +58,10 @@ function snap() {
       {
         tabs: [
           { url: 'https://b.example/', jarId: 'play', active: false },
-          { url: 'https://c.example/', jarId: 'work', active: true },
-        ],
-      },
-    ],
+          { url: 'https://c.example/', jarId: 'work', active: true }
+        ]
+      }
+    ]
   };
 }
 
@@ -178,7 +176,7 @@ test('a snapshot whose every window drops to zero tabs → read() → null', () 
       path.join(dir, FILE),
       JSON.stringify({
         version: 1,
-        windows: [{ tabs: [{ url: '', jarId: 'work' }] }, { tabs: [] }],
+        windows: [{ tabs: [{ url: '', jarId: 'work' }] }, { tabs: [] }]
       }),
       'utf8'
     );
@@ -206,16 +204,16 @@ test('malformed members dropped while valid siblings kept, in both tabs and wind
           tabs: [
             { url: 123, jarId: 'work', active: true }, // non-string url → drop
             { url: 'https://kept.example/', jarId: 'work', active: false }, // kept
-            { url: 'https://nojar.example/', active: true }, // missing jarId → drop
-          ],
+            { url: 'https://nojar.example/', active: true } // missing jarId → drop
+          ]
         },
         // Window 1: tabs is not an array → whole window dropped.
         { tabs: {} },
         // Window 2: zero-tab window → dropped.
         { tabs: [] },
         // Window 3: fully valid, active coerces to !! → kept.
-        { tabs: [{ url: 'https://also.example/', jarId: 'play', active: 1 }] },
-      ],
+        { tabs: [{ url: 'https://also.example/', jarId: 'play', active: 1 }] }
+      ]
     };
     fs.writeFileSync(path.join(dir, FILE), JSON.stringify(onDisk), 'utf8');
     const store = freshStore();
@@ -224,8 +222,8 @@ test('malformed members dropped while valid siblings kept, in both tabs and wind
       version: 1,
       windows: [
         { tabs: [{ url: 'https://kept.example/', jarId: 'work', active: false }] },
-        { tabs: [{ url: 'https://also.example/', jarId: 'play', active: true }] },
-      ],
+        { tabs: [{ url: 'https://also.example/', jarId: 'play', active: true }] }
+      ]
     });
   } finally {
     appDb.close();

@@ -20,8 +20,12 @@ const FAST_SCRYPT = { algo: 'scrypt', N: 2 ** 12, r: 8, p: 1, maxmem: 64 * 1024 
 const MASTER = 'correct horse battery staple';
 const JARS = [{ id: 'work' }, { id: 'personal' }];
 
-function tmpDir() { return fs.mkdtempSync(path.join(os.tmpdir(), 'gf-vaultitem-')); }
-function rm(dir) { fs.rmSync(dir, { recursive: true, force: true }); }
+function tmpDir() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'gf-vaultitem-'));
+}
+function rm(dir) {
+  fs.rmSync(dir, { recursive: true, force: true });
+}
 async function makeStore(dir) {
   const store = vs.load(dir, { scryptParams: FAST_SCRYPT, getAutoLockMinutes: () => 10, listJars: () => JARS });
   await store.setup({ masterPassword: MASTER });
@@ -34,8 +38,26 @@ test('listItemsMeta returns metadata for all three types with NO secret field/va
   const dir = tmpDir();
   try {
     const store = await makeStore(dir);
-    store.saveItem('global', { type: 'login', title: 'Bank', username: 'me', origin: 'https://bank.example', password: 'PW', totp: 'SEED', notes: 'reco' });
-    store.saveItem('global', { type: 'card', title: 'Visa', cardholder: 'Me', brand: 'visa', last4: '4242', number: '4111111111111111', cvv: '123', expiry: '12/30', notes: 'cardnote' });
+    store.saveItem('global', {
+      type: 'login',
+      title: 'Bank',
+      username: 'me',
+      origin: 'https://bank.example',
+      password: 'PW',
+      totp: 'SEED',
+      notes: 'reco'
+    });
+    store.saveItem('global', {
+      type: 'card',
+      title: 'Visa',
+      cardholder: 'Me',
+      brand: 'visa',
+      last4: '4242',
+      number: '4111111111111111',
+      cvv: '123',
+      expiry: '12/30',
+      notes: 'cardnote'
+    });
     store.saveItem('global', { type: 'note', title: 'Wifi', body: 'hunter2-wifi', notes: 'extra' });
 
     const meta = store.listItemsMeta('global');
@@ -57,7 +79,9 @@ test('listItemsMeta returns metadata for all three types with NO secret field/va
     assert.equal(login.username, 'me');
     assert.equal(login.origin, 'https://bank.example');
     assert.equal(login.hasTotp, true);
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('listItemsMeta on an uncreated vault is empty; a locked store throws VaultLockedError', async () => {
@@ -66,8 +90,13 @@ test('listItemsMeta on an uncreated vault is empty; a locked store throws VaultL
     const store = await makeStore(dir);
     assert.deepEqual(store.listItemsMeta('work'), []);
     store.lockNow();
-    assert.throws(() => store.listItemsMeta('global'), (e) => e instanceof vs.VaultLockedError);
-  } finally { rm(dir); }
+    assert.throws(
+      () => store.listItemsMeta('global'),
+      (e) => e instanceof vs.VaultLockedError
+    );
+  } finally {
+    rm(dir);
+  }
 });
 
 /* -------------------------------------------------------------------- revealItem */
@@ -76,8 +105,21 @@ test('revealItem returns the FULL item for the requested id ONLY (exact scope)',
   const dir = tmpDir();
   try {
     const store = await makeStore(dir);
-    const a = store.saveItem('global', { type: 'login', title: 'A', username: 'a', origin: 'https://a', password: 'pwA', totp: 'seedA' });
-    const b = store.saveItem('global', { type: 'login', title: 'B', username: 'b', origin: 'https://b', password: 'pwB' });
+    const a = store.saveItem('global', {
+      type: 'login',
+      title: 'A',
+      username: 'a',
+      origin: 'https://a',
+      password: 'pwA',
+      totp: 'seedA'
+    });
+    const b = store.saveItem('global', {
+      type: 'login',
+      title: 'B',
+      username: 'b',
+      origin: 'https://b',
+      password: 'pwB'
+    });
 
     const revealed = store.revealItem('global', a.id);
     assert.equal(revealed.id, a.id);
@@ -87,7 +129,9 @@ test('revealItem returns the FULL item for the requested id ONLY (exact scope)',
     assert.equal(JSON.stringify(revealed).includes('pwB'), false);
     assert.equal(store.revealItem('global', b.id).password, 'pwB');
     assert.equal(store.revealItem('global', 'no-such-id'), null);
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 /* -------------------------------------------------------------------- deleteItem */
@@ -96,7 +140,13 @@ test('deleteItem removes the item and returns true; a missing id returns false (
   const dir = tmpDir();
   try {
     const store = await makeStore(dir);
-    const a = store.saveItem('global', { type: 'login', title: 'A', username: 'a', origin: 'https://a', password: 'pw' });
+    const a = store.saveItem('global', {
+      type: 'login',
+      title: 'A',
+      username: 'a',
+      origin: 'https://a',
+      password: 'pw'
+    });
     store.saveItem('global', { type: 'note', title: 'keep', body: 'x' });
 
     assert.equal(store.deleteItem('global', a.id), true);
@@ -104,7 +154,9 @@ test('deleteItem removes the item and returns true; a missing id returns false (
     assert.equal(store.listItemsMeta('global')[0].type, 'note');
     assert.equal(store.deleteItem('global', a.id), false, 'already gone');
     assert.equal(store.deleteItem('work', 'anything'), false, 'uncreated vault, missing id');
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 /* ---------------------------------------------------- saveItemPreservingSecrets */
@@ -114,13 +166,28 @@ test('preserving save: LOGIN — editing title with password+totp+notes unchange
   try {
     const store = await makeStore(dir);
     const orig = store.saveItem('global', {
-      type: 'login', title: 'Old', username: 'me', origin: 'https://x',
-      password: 'secretPW', totp: 'SEEDXYZ', notes: 'recovery codes',
+      type: 'login',
+      title: 'Old',
+      username: 'me',
+      origin: 'https://x',
+      password: 'secretPW',
+      totp: 'SEEDXYZ',
+      notes: 'recovery codes'
     });
-    const saved = store.saveItemPreservingSecrets('global', {
-      id: orig.id, type: 'login', title: 'New Title', username: 'me', origin: 'https://x',
-      password: '', totp: '', notes: '',
-    }, ['password', 'totp', 'notes']);
+    const saved = store.saveItemPreservingSecrets(
+      'global',
+      {
+        id: orig.id,
+        type: 'login',
+        title: 'New Title',
+        username: 'me',
+        origin: 'https://x',
+        password: '',
+        totp: '',
+        notes: ''
+      },
+      ['password', 'totp', 'notes']
+    );
 
     assert.equal(saved.title, 'New Title');
     assert.equal(saved.createdAt, orig.createdAt, 'createdAt preserved (full-replace keeps it)');
@@ -129,7 +196,9 @@ test('preserving save: LOGIN — editing title with password+totp+notes unchange
     assert.equal(full.password, 'secretPW', 'password preserved');
     assert.equal(full.totp, 'SEEDXYZ', 'totp preserved');
     assert.equal(full.notes, 'recovery codes', 'notes preserved');
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('preserving save: NOTE body preserved; CARD number/cvv preserved when unchanged', async () => {
@@ -143,30 +212,78 @@ test('preserving save: NOTE body preserved; CARD number/cvv preserved when uncha
     assert.equal(nf.title, 'N2');
     assert.equal(nf.body, 'the body', 'note body preserved');
 
-    const card = store.saveItem('global', { type: 'card', title: 'C', cardholder: 'Me', brand: 'visa', last4: '4242', number: '4111111111111111', cvv: '321', expiry: '01/29', notes: '' });
-    store.saveItemPreservingSecrets('global', { id: card.id, type: 'card', title: 'C2', cardholder: 'Me', brand: 'visa', last4: '4242', number: '', cvv: '', expiry: '', notes: '' }, ['number', 'cvv', 'expiry', 'notes']);
+    const card = store.saveItem('global', {
+      type: 'card',
+      title: 'C',
+      cardholder: 'Me',
+      brand: 'visa',
+      last4: '4242',
+      number: '4111111111111111',
+      cvv: '321',
+      expiry: '01/29',
+      notes: ''
+    });
+    store.saveItemPreservingSecrets(
+      'global',
+      {
+        id: card.id,
+        type: 'card',
+        title: 'C2',
+        cardholder: 'Me',
+        brand: 'visa',
+        last4: '4242',
+        number: '',
+        cvv: '',
+        expiry: '',
+        notes: ''
+      },
+      ['number', 'cvv', 'expiry', 'notes']
+    );
     const cf = store.revealItem('global', card.id);
     assert.equal(cf.title, 'C2');
     assert.equal(cf.number, '4111111111111111', 'card number preserved');
     assert.equal(cf.cvv, '321', 'card cvv preserved');
     assert.equal(cf.expiry, '01/29', 'card expiry preserved');
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('preserving save: an EXPLICIT clear (field not in unchangedSecrets) actually removes the value', async () => {
   const dir = tmpDir();
   try {
     const store = await makeStore(dir);
-    const orig = store.saveItem('global', { type: 'login', title: 'T', username: 'u', origin: 'https://x', password: 'pw', totp: 'SEED', notes: 'keep' });
+    const orig = store.saveItem('global', {
+      type: 'login',
+      title: 'T',
+      username: 'u',
+      origin: 'https://x',
+      password: 'pw',
+      totp: 'SEED',
+      notes: 'keep'
+    });
     // Clear totp explicitly (empty, NOT in unchangedSecrets); keep password + notes.
-    store.saveItemPreservingSecrets('global', {
-      id: orig.id, type: 'login', title: 'T', username: 'u', origin: 'https://x', password: '', totp: '', notes: '',
-    }, ['password', 'notes']);
+    store.saveItemPreservingSecrets(
+      'global',
+      {
+        id: orig.id,
+        type: 'login',
+        title: 'T',
+        username: 'u',
+        origin: 'https://x',
+        password: '',
+        totp: '',
+        notes: ''
+      },
+      ['password', 'notes']
+    );
     const full = store.revealItem('global', orig.id);
     assert.equal(full.password, 'pw', 'password preserved');
     assert.equal(full.notes, 'keep', 'notes preserved');
     assert.equal(full.totp, '', 'totp explicitly cleared');
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('preserving save: CREATE-DEFENSE — a new-id save naming unchanged fields THROWS (no placeholder persisted)', async () => {
@@ -174,29 +291,46 @@ test('preserving save: CREATE-DEFENSE — a new-id save naming unchanged fields 
   try {
     const store = await makeStore(dir);
     assert.throws(
-      () => store.saveItemPreservingSecrets('global', { id: 'brand-new', type: 'login', title: 'T', password: '' }, ['password']),
+      () =>
+        store.saveItemPreservingSecrets('global', { id: 'brand-new', type: 'login', title: 'T', password: '' }, [
+          'password'
+        ]),
       (e) => e instanceof vs.VaultStateError && /create-defense/.test(e.message)
     );
     // Nothing was persisted.
     assert.equal(store.listItemsMeta('global').length, 0);
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('preserving save: a genuine CREATE (no id, empty unchangedSecrets) works and mints an id', async () => {
   const dir = tmpDir();
   try {
     const store = await makeStore(dir);
-    const saved = store.saveItemPreservingSecrets('global', { type: 'login', title: 'Fresh', username: 'u', origin: 'https://x', password: 'newpw', totp: '', notes: '' }, []);
+    const saved = store.saveItemPreservingSecrets(
+      'global',
+      { type: 'login', title: 'Fresh', username: 'u', origin: 'https://x', password: 'newpw', totp: '', notes: '' },
+      []
+    );
     assert.ok(saved.id, 'id minted');
     assert.equal(store.revealItem('global', saved.id).password, 'newpw');
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('preserving save: unchangedSecrets ⊄ secret is rejected (non-secret or unknown field)', async () => {
   const dir = tmpDir();
   try {
     const store = await makeStore(dir);
-    const orig = store.saveItem('global', { type: 'login', title: 'T', username: 'u', origin: 'https://x', password: 'pw' });
+    const orig = store.saveItem('global', {
+      type: 'login',
+      title: 'T',
+      username: 'u',
+      origin: 'https://x',
+      password: 'pw'
+    });
     // `title` is a non-secret field; `bogus` is unknown — both must be refused.
     assert.throws(
       () => store.saveItemPreservingSecrets('global', { id: orig.id, type: 'login', title: 'T' }, ['title']),
@@ -206,7 +340,9 @@ test('preserving save: unchangedSecrets ⊄ secret is rejected (non-secret or un
       () => store.saveItemPreservingSecrets('global', { id: orig.id, type: 'login', title: 'T' }, ['bogus']),
       (e) => e instanceof vs.VaultStateError && /not a secret field/.test(e.message)
     );
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('preserving save: a locked store throws VaultLockedError', async () => {
@@ -218,5 +354,7 @@ test('preserving save: a locked store throws VaultLockedError', async () => {
       () => store.saveItemPreservingSecrets('global', { type: 'login', title: 'T', password: 'x' }, []),
       (e) => e instanceof vs.VaultLockedError
     );
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });

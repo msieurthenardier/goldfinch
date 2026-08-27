@@ -35,11 +35,31 @@
            .hidden / .downloads-active / .downloads-recent and the badge from the pure
            downloads-indicator-model (mirrors #automation-indicator). Icon: Lucide
            download (ISC). -->
-      <button id="downloads-indicator" class="icon-btn hidden" type="button"
-              title="Downloads" aria-label="Downloads" aria-haspopup="dialog" aria-expanded="false">
-        <svg class="tb-glyph" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
-             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
-          <path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>
+      <button
+        id="downloads-indicator"
+        class="icon-btn hidden"
+        type="button"
+        title="Downloads"
+        aria-label="Downloads"
+        aria-haspopup="dialog"
+        aria-expanded="false"
+      >
+        <svg
+          class="tb-glyph"
+          viewBox="0 0 24 24"
+          width="16"
+          height="16"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <path d="M12 3v12" />
+          <path d="m7 10 5 5 5-5" />
+          <path d="M5 21h14" />
         </svg>
         <span id="downloads-indicator-badge" class="tb-badge hidden" aria-hidden="true"></span>
       </button>
@@ -66,13 +86,43 @@
       <button id="forward" class="icon-btn" title="Forward" aria-label="Forward">▶</button>
       <button id="reload" class="icon-btn" title="Reload" aria-label="Reload">⟳</button>
       <div id="address-wrap" role="search">
-        <button id="address-chip" class="addr-chip" type="button" aria-label="Site information" aria-haspopup="dialog"></button>
+        <button
+          id="address-chip"
+          class="addr-chip"
+          type="button"
+          aria-label="Site information"
+          aria-haspopup="dialog"
+        ></button>
         <!-- Address-bar star (M15 F1 Leg 2, flight DD4): bookmark this page / open
              the quick-edit popover. Hidden on internal tabs and tabs without a live
              wcId (refreshStar); aria-pressed reflects fill state (Chrome-parity
              toggle-button semantics — the label itself stays constant). -->
-        <button id="star" class="star-btn hidden" type="button" title="Bookmark this page (Ctrl+D)" aria-label="Bookmark this page" aria-pressed="false" aria-haspopup="dialog">
-          <svg class="tb-glyph" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/></svg>
+        <button
+          id="star"
+          class="star-btn hidden"
+          type="button"
+          title="Bookmark this page (Ctrl+D)"
+          aria-label="Bookmark this page"
+          aria-pressed="false"
+          aria-haspopup="dialog"
+        >
+          <svg
+            class="tb-glyph"
+            viewBox="0 0 24 24"
+            width="16"
+            height="16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <path
+              d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"
+            />
+          </svg>
         </button>
         <input
           id="address"
@@ -92,23 +142,96 @@
           <button id="zoom-out" class="zoom-btn" type="button" aria-label="Zoom out">−</button>
           <span id="zoom-percent" role="status" aria-live="off">100%</span>
           <button id="zoom-in" class="zoom-btn" type="button" aria-label="Zoom in">+</button>
-          <button id="zoom-reset" class="zoom-btn" type="button" title="Reset zoom to 100%" aria-label="Reset zoom to 100%">⟳</button>
+          <button
+            id="zoom-reset"
+            class="zoom-btn"
+            type="button"
+            title="Reset zoom to 100%"
+            aria-label="Reset zoom to 100%"
+          >
+            ⟳
+          </button>
         </div>
       </div>
       <!-- Icons: Lucide (ISC license) — inline SVG path data, CSP-safe -->
-      <button id="toggle-media" class="icon-btn" title="Toggle media panel (Ctrl+M)" aria-label="Media" aria-expanded="false">
-        <svg class="tb-glyph" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3Z"/><path d="m6.2 5.3 3.1 3.9"/><path d="m12.4 3.4 3.1 4"/><path d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
+      <button
+        id="toggle-media"
+        class="icon-btn"
+        title="Toggle media panel (Ctrl+M)"
+        aria-label="Media"
+        aria-expanded="false"
+      >
+        <svg
+          class="tb-glyph"
+          viewBox="0 0 24 24"
+          width="16"
+          height="16"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3Z" />
+          <path d="m6.2 5.3 3.1 3.9" />
+          <path d="m12.4 3.4 3.1 4" />
+          <path d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+        </svg>
         <span id="media-count" class="tb-badge hidden" aria-hidden="true"></span>
       </button>
-      <button id="toggle-privacy" class="icon-btn" title="Toggle privacy panel (Ctrl+Shift+P)" aria-label="Shields" aria-expanded="false">
-        <svg class="tb-glyph" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>
+      <button
+        id="toggle-privacy"
+        class="icon-btn"
+        title="Toggle privacy panel (Ctrl+Shift+P)"
+        aria-label="Shields"
+        aria-expanded="false"
+      >
+        <svg
+          class="tb-glyph"
+          viewBox="0 0 24 24"
+          width="16"
+          height="16"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path
+            d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"
+          />
+        </svg>
         <span id="privacy-count" class="tb-badge hidden" aria-hidden="true"></span>
       </button>
       <!-- DevTools toggle (SC5/DD3). Pinnable (toolbarPins.devtools, default unpinned); a toggle
            reflecting the active web tab's DevTools open state via aria-pressed (NOT aria-expanded —
            it does not control an in-page panel). Inert on internal tabs (click no-ops, not hidden). -->
-      <button id="toggle-devtools" class="icon-btn" type="button" title="DevTools (F12)" aria-label="DevTools" aria-pressed="false">
-        <svg class="tb-glyph" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/></svg>
+      <button
+        id="toggle-devtools"
+        class="icon-btn"
+        type="button"
+        title="DevTools (F12)"
+        aria-label="DevTools"
+        aria-pressed="false"
+      >
+        <svg
+          class="tb-glyph"
+          viewBox="0 0 24 24"
+          width="16"
+          height="16"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <path d="m16 18 6-6-6-6" />
+          <path d="m8 6-6 6 6 6" />
+        </svg>
       </button>
       <!-- Automation ("robot") indicator (F7, Flight 3 Leg 6 HAT — operator ruling;
            was SC10/DD6's connection-active-only indicator before F7). Always present,
@@ -127,22 +250,78 @@
            buildVaultIndicatorModel — never a cache. NOT a pinnable item
            (applyToolbarPins must never touch it). The live open trigger + click
            action are the pick-and-fill leg; this leg wires only the indicator. -->
-      <button id="vault-indicator" class="icon-btn hidden" type="button" title="Password manager" aria-label="Password manager locked">
-        <svg class="tb-glyph vault-glyph-locked" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-        <svg class="tb-glyph vault-glyph-unlocked" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>
-      </button>
-      <button id="automation-indicator" class="icon-btn hidden" type="button" title="Automation" aria-label="Automation sessions">
-        <svg class="tb-glyph" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>
-        <span id="automation-indicator-badge" class="tb-badge hidden" aria-hidden="true"></span>
+      <button
+        id="vault-indicator"
+        class="icon-btn hidden"
+        type="button"
+        title="Password manager"
+        aria-label="Password manager locked"
+      >
+        <svg
+          class="tb-glyph vault-glyph-locked"
+          viewBox="0 0 24 24"
+          width="16"
+          height="16"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+          <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+        </svg>
+        <svg
+          class="tb-glyph vault-glyph-unlocked"
+          viewBox="0 0 24 24"
+          width="16"
+          height="16"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+          <path d="M7 11V7a5 5 0 0 1 9.9-1" />
+        </svg>
       </button>
       <button
-        id="kebab"
-        class="icon-btn"
-        title="More"
-        aria-label="More"
-        aria-haspopup="menu"
-        aria-expanded="false"
-      >⋮</button>
+        id="automation-indicator"
+        class="icon-btn hidden"
+        type="button"
+        title="Automation"
+        aria-label="Automation sessions"
+      >
+        <svg
+          class="tb-glyph"
+          viewBox="0 0 24 24"
+          width="16"
+          height="16"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <path d="M12 8V4H8" />
+          <rect width="16" height="12" x="4" y="8" rx="2" />
+          <path d="M2 14h2" />
+          <path d="M20 14h2" />
+          <path d="M15 13v2" />
+          <path d="M9 13v2" />
+        </svg>
+        <span id="automation-indicator-badge" class="tb-badge hidden" aria-hidden="true"></span>
+      </button>
+      <button id="kebab" class="icon-btn" title="More" aria-label="More" aria-haspopup="menu" aria-expanded="false">
+        ⋮
+      </button>
     </div>
 
     <!-- Bookmarks bar (M15 F1 Leg 3, DD7/DD8). Hidden via .hidden (bookmarksBarEnabled,
@@ -156,7 +335,17 @@
          (no role="toolbar" here) — the simpler, still-APG-legal option for a small,
          infrequently-focused control row. -->
     <div id="bookmarks-bar" class="hidden" role="group" aria-label="Bookmarks bar">
-      <button id="bookmarks-overflow" class="icon-btn hidden" type="button" title="More bookmarks" aria-label="More bookmarks" aria-haspopup="menu" aria-expanded="false">▾</button>
+      <button
+        id="bookmarks-overflow"
+        class="icon-btn hidden"
+        type="button"
+        title="More bookmarks"
+        aria-label="More bookmarks"
+        aria-haspopup="menu"
+        aria-expanded="false"
+      >
+        ▾
+      </button>
     </div>
 
     <!-- Main area: web content + media panel -->

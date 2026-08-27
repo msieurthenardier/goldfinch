@@ -86,7 +86,10 @@ function phraseMatches(subtokens, contentTokens) {
   for (let start = 0; start + n <= contentTokens.length; start++) {
     let ok = true;
     for (let k = 0; k < lastIndex; k++) {
-      if (contentTokens[start + k] !== subtokens[k]) { ok = false; break; }
+      if (contentTokens[start + k] !== subtokens[k]) {
+        ok = false;
+        break;
+      }
     }
     if (ok && !contentTokens[start + lastIndex].startsWith(subtokens[lastIndex])) ok = false;
     if (ok) return true;

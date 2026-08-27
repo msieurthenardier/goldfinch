@@ -67,17 +67,17 @@ const CHROME_SCOPE_CASES = [
   // This leg's additions (DD5).
   { chord: { key: 'd', ctrl: true }, action: 'bookmark-page' },
   { chord: { key: 'B', ctrl: true, shift: true }, action: 'toggle-bookmarks-bar' },
-  { chord: { key: 'b', ctrl: true, shift: true }, action: 'toggle-bookmarks-bar' },
+  { chord: { key: 'b', ctrl: true, shift: true }, action: 'toggle-bookmarks-bar' }
 ];
 
 for (const { chord, action } of CHROME_SCOPE_CASES) {
   const label = `${chord.ctrl ? 'Ctrl+' : ''}${chord.shift ? 'Shift+' : ''}${chord.key}`;
   test(`chrome-scope parity: ${label} -> '${action}' on both classifiers`, () => {
     const sheetResult = sheetAcceleratorAction(toSheetDescriptor(chord));
-    assert.deepEqual(
-      sheetResult && { scope: sheetResult.scope, action: sheetResult.action },
-      { scope: 'chrome', action }
-    );
+    assert.deepEqual(sheetResult && { scope: sheetResult.scope, action: sheetResult.action }, {
+      scope: 'chrome',
+      action
+    });
     assert.equal(keydownToAction(toKeydownDescriptor(chord)), action);
   });
 }
@@ -90,11 +90,7 @@ test('generic contract: across the whole corpus, every chrome-scope sheet result
   for (const { chord } of CHROME_SCOPE_CASES) {
     const sheetResult = sheetAcceleratorAction(toSheetDescriptor(chord));
     if (sheetResult && sheetResult.scope === 'chrome') {
-      assert.equal(
-        keydownToAction(toKeydownDescriptor(chord)),
-        sheetResult.action,
-        `chord ${JSON.stringify(chord)}`
-      );
+      assert.equal(keydownToAction(toKeydownDescriptor(chord)), sheetResult.action, `chord ${JSON.stringify(chord)}`);
     }
   }
 });
@@ -132,7 +128,7 @@ const NULL_ON_BOTH = [
   { key: 'b', ctrl: true }, // unshifted Ctrl+B — unassigned (only Ctrl+Shift+B is)
   { key: 'B', ctrl: true }, // capital B, no shift flag — same unassigned chord
   { key: 'D', ctrl: true, shift: true, alt: true }, // near-miss noise: an unassigned Alt combo
-  { key: '7', ctrl: true, alt: true }, // AltGr digit guard (pre-existing, re-verified here)
+  { key: '7', ctrl: true, alt: true } // AltGr digit guard (pre-existing, re-verified here)
 ];
 
 for (const chord of NULL_ON_BOTH) {

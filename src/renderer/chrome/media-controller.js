@@ -3,9 +3,19 @@
 /** @param {any} deps */
 export function createMediaController(deps) {
   const {
-    window, document, ctx, els, activeTab, isInternalTab, closePrivacyPanel,
-    sendActiveBounds, isSafePosterUrl, toMediaProxyUrl, escapeHtml,
-    openToolbarContextMenu, createTab
+    window,
+    document,
+    ctx,
+    els,
+    activeTab,
+    isInternalTab,
+    closePrivacyPanel,
+    sendActiveBounds,
+    isSafePosterUrl,
+    toMediaProxyUrl,
+    escapeHtml,
+    openToolbarContextMenu,
+    createTab
   } = deps;
   /* --------------------------------------------------------------- media panel */
 
@@ -28,9 +38,18 @@ export function createMediaController(deps) {
       else els.address.focus();
     }
   }
-  els.toggleMedia.addEventListener('click', () => { togglePanel(); sendActiveBounds(); });
-  els.toggleMedia.addEventListener('contextmenu', (e) => { e.preventDefault(); openToolbarContextMenu('media', els.toggleMedia); });
-  els.mediaClose.addEventListener('click', () => { togglePanel(false); sendActiveBounds(); });
+  els.toggleMedia.addEventListener('click', () => {
+    togglePanel();
+    sendActiveBounds();
+  });
+  els.toggleMedia.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    openToolbarContextMenu('media', els.toggleMedia);
+  });
+  els.mediaClose.addEventListener('click', () => {
+    togglePanel(false);
+    sendActiveBounds();
+  });
   // Non-modal: Escape closes the media panel; togglePanel restores focus to the toggle.
   els.panel.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
@@ -127,7 +146,8 @@ export function createMediaController(deps) {
     } else if (item.type === 'video') {
       // isSafePosterUrl gates the RAW poster URL before wrapping — the proxy
       // wrap must never bypass this validation (DD2/AC3).
-      if (isSafePosterUrl(item.poster)) thumb.style.backgroundImage = `url("${toMediaProxyUrl(tab.wcId, item.poster)}")`;
+      if (isSafePosterUrl(item.poster))
+        thumb.style.backgroundImage = `url("${toMediaProxyUrl(tab.wcId, item.poster)}")`;
       thumb.insertAdjacentHTML('beforeend', `<span class="play-glyph">▶</span>`);
       thumb.title = 'Play here';
       thumb.addEventListener('click', () => playInline(item, thumb));
@@ -457,7 +477,8 @@ export function createMediaController(deps) {
     bulk.inFlight--;
     bulk.done++;
     success ? bulk.ok++ : bulk.fail++;
-    if (bulk.toastEl) bulk.toastEl.querySelector('.toast-title').textContent = `Downloading ${bulk.done}/${bulk.total}…`;
+    if (bulk.toastEl)
+      bulk.toastEl.querySelector('.toast-title').textContent = `Downloading ${bulk.done}/${bulk.total}…`;
     if (bulk.queue.length) bulkPump();
     else if (bulk.inFlight === 0) bulkFinish();
   }
@@ -579,7 +600,6 @@ export function createMediaController(deps) {
     if (player.index < player.list.length - 1) playNext();
   });
 
-
   /* ------------------------------------------------------------------- toasts */
 
   const toastEls = new Map(); // url -> element
@@ -626,10 +646,22 @@ export function createMediaController(deps) {
       el.removeEventListener('focusout', onFocusOut);
     }
 
-    function onEnter() { hovering = true; pause(); }
-    function onLeave() { hovering = false; resume(); }
-    function onFocusIn() { focused = true; pause(); }
-    function onFocusOut() { focused = false; resume(); }
+    function onEnter() {
+      hovering = true;
+      pause();
+    }
+    function onLeave() {
+      hovering = false;
+      resume();
+    }
+    function onFocusIn() {
+      focused = true;
+      pause();
+    }
+    function onFocusOut() {
+      focused = false;
+      resume();
+    }
 
     el.addEventListener('mouseenter', onEnter);
     el.addEventListener('mouseleave', onLeave);

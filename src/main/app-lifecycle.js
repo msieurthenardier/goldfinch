@@ -73,7 +73,7 @@ function registerAppLifecycle({
   env,
   platform,
   stdout,
-  logger = console,
+  logger = console
 }) {
   app.on('session-created', sessionRuntime.onSessionCreated);
 
@@ -151,9 +151,7 @@ function registerAppLifecycle({
       const [channel, payload] = buildMessage();
       chrome.send(channel, payload);
     }
-    return rec.restoreTabs
-      ? { bootTab: false, restoreTabs: rec.restoreTabs }
-      : { bootTab: !rec.noBootTab };
+    return rec.restoreTabs ? { bootTab: false, restoreTabs: rec.restoreTabs } : { bootTab: !rec.noBootTab };
   });
   ipcMain.on('app-quit', () => app.quit());
 
@@ -237,7 +235,7 @@ function registerAppLifecycle({
           listRecent: (id, options) => historyStore.listRecent(id, options),
           search: (id, query, options) => historyStore.search(id, query, options)
         },
-        isKnownJar,
+        isKnownJar
       });
       ipcMain.handle('automation:dev-invoke', async (event, payload) => {
         if (!registry.getWindowForChrome(event.sender)) {
@@ -249,10 +247,12 @@ function registerAppLifecycle({
       });
     }
 
-    if (shouldBindAutomation({
-      automationEnabled: settings.get('automationEnabled') === true,
-      devForceBind: devOverride
-    })) {
+    if (
+      shouldBindAutomation({
+        automationEnabled: settings.get('automationEnabled') === true,
+        devForceBind: devOverride
+      })
+    ) {
       void startMcpServerInstance();
     }
 
@@ -316,8 +316,16 @@ function registerAppLifecycle({
   });
 
   app.on('will-quit', () => {
-    try { historyStore.close(); } catch { /* best effort */ }
-    try { appDb.close(); } catch { /* best effort */ }
+    try {
+      historyStore.close();
+    } catch {
+      /* best effort */
+    }
+    try {
+      appDb.close();
+    } catch {
+      /* best effort */
+    }
   });
 
   return { ready };

@@ -2,8 +2,18 @@
 // specifiers intentionally describe serving paths rather than disk paths.
 // @ts-ignore — serving-path vs disk-path mismatch
 import { selectVaultView, vaultNavEntries } from './vault-page-model.js';
-// @ts-ignore — serving-path vs disk-path mismatch
-import { MASK, EDITOR_LAYOUT, initialSecretStates, reveal as revealState, hide as hideState, edit as editState, assembleSave, partitionItemsByType, safeHttpUrl } from './vault-editor-model.js';
+import {
+  MASK,
+  EDITOR_LAYOUT,
+  initialSecretStates,
+  reveal as revealState,
+  hide as hideState,
+  edit as editState,
+  assembleSave,
+  partitionItemsByType,
+  safeHttpUrl
+  // @ts-ignore — serving-path vs disk-path mismatch
+} from './vault-editor-model.js';
 // @ts-ignore — serving-path vs disk-path mismatch
 import { generatePassword, CLASS_NAMES } from './password-generator.js';
 // @ts-ignore — serving-path vs disk-path mismatch
@@ -104,13 +114,25 @@ function init() {
   const ICON_PATHS = {
     add: ['M12 5v14', 'M5 12h14'],
     edit: ['M12 20h9', 'M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z'],
-    trash: ['M3 6h18', 'M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2', 'M6 6l1 14a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-14', 'M10 11v6', 'M14 11v6'],
+    trash: [
+      'M3 6h18',
+      'M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2',
+      'M6 6l1 14a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-14',
+      'M10 11v6',
+      'M14 11v6'
+    ],
     eye: ['M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z', 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z'],
-    'eye-off': ['M17.9 17.9A10.4 10.4 0 0 1 12 20c-7 0-10-8-10-8a18.8 18.8 0 0 1 5.1-6M9.9 4.2A9.5 9.5 0 0 1 12 4c7 0 10 8 10 8a18.9 18.9 0 0 1-2.2 3.2m-6.7-1.1a3 3 0 0 1-4.2-4.2', 'M2 2l20 20'],
-    copy: ['M9 9h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V11a2 2 0 0 1 2-2z', 'M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'],
+    'eye-off': [
+      'M17.9 17.9A10.4 10.4 0 0 1 12 20c-7 0-10-8-10-8a18.8 18.8 0 0 1 5.1-6M9.9 4.2A9.5 9.5 0 0 1 12 4c7 0 10 8 10 8a18.9 18.9 0 0 1-2.2 3.2m-6.7-1.1a3 3 0 0 1-4.2-4.2',
+      'M2 2l20 20'
+    ],
+    copy: [
+      'M9 9h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V11a2 2 0 0 1 2-2z',
+      'M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'
+    ],
     // Open-folder — the file-uploader row's "browse" affordance (M12 F5 HAT tail): opens the
     // native dialog (pickImportFile / pickSavePath) and populates the path field.
-    folder: ['M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z'],
+    folder: ['M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z']
   };
 
   const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -158,7 +180,8 @@ function init() {
    * @returns {HTMLButtonElement}
    */
   function iconButton(iconKey, ariaLabel, onClick, opts) {
-    const b = /** @type {HTMLButtonElement} */
+    const b =
+      /** @type {HTMLButtonElement} */
       (el('button', 'vault-icon-btn' + (opts && opts.danger ? ' danger' : '')));
     b.type = 'button';
     b.setAttribute('aria-label', ariaLabel);
@@ -214,7 +237,10 @@ function init() {
       const mi = /** @type {HTMLButtonElement} */ (el('button', 'vault-kebab-item', item.label));
       mi.type = 'button';
       mi.setAttribute('role', 'menuitem');
-      mi.addEventListener('click', () => { close(); item.onSelect(); });
+      mi.addEventListener('click', () => {
+        close();
+        item.onSelect();
+      });
       menu.appendChild(mi);
       itemEls.push(mi);
     }
@@ -243,9 +269,16 @@ function init() {
       }
       if (restoreFocus) btn.focus();
     }
-    btn.addEventListener('click', () => { if (isOpen()) close(); else open(); });
+    btn.addEventListener('click', () => {
+      if (isOpen()) close();
+      else open();
+    });
     wrap.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Escape' && isOpen()) { ev.preventDefault(); close(true); return; }
+      if (ev.key === 'Escape' && isOpen()) {
+        ev.preventDefault();
+        close(true);
+        return;
+      }
       if (!isOpen()) {
         if (ev.target === btn && (ev.key === 'ArrowDown' || ev.key === 'ArrowUp')) {
           ev.preventDefault();
@@ -255,10 +288,19 @@ function init() {
       }
       const n = itemEls.length;
       const idx = itemEls.indexOf(/** @type {any} */ (ev.target));
-      if (ev.key === 'ArrowDown') { ev.preventDefault(); itemEls[(idx + 1 + n) % n].focus(); }
-      else if (ev.key === 'ArrowUp') { ev.preventDefault(); itemEls[(idx - 1 + n) % n].focus(); }
-      else if (ev.key === 'Home') { ev.preventDefault(); itemEls[0].focus(); }
-      else if (ev.key === 'End') { ev.preventDefault(); itemEls[n - 1].focus(); }
+      if (ev.key === 'ArrowDown') {
+        ev.preventDefault();
+        itemEls[(idx + 1 + n) % n].focus();
+      } else if (ev.key === 'ArrowUp') {
+        ev.preventDefault();
+        itemEls[(idx - 1 + n) % n].focus();
+      } else if (ev.key === 'Home') {
+        ev.preventDefault();
+        itemEls[0].focus();
+      } else if (ev.key === 'End') {
+        ev.preventDefault();
+        itemEls[n - 1].focus();
+      }
     });
 
     wrap.appendChild(btn);
@@ -280,7 +322,11 @@ function init() {
     const fns = editorCleanups;
     editorCleanups = [];
     for (const fn of fns) {
-      try { fn(); } catch { /* a cleanup must never throw out of teardown */ }
+      try {
+        fn();
+      } catch {
+        /* a cleanup must never throw out of teardown */
+      }
     }
   }
 
@@ -293,7 +339,11 @@ function init() {
   let accessKeyRefreshers = [];
   function refreshAccessKeyLists() {
     for (const fn of accessKeyRefreshers) {
-      try { fn(); } catch { /* a refresh must never throw */ }
+      try {
+        fn();
+      } catch {
+        /* a refresh must never throw */
+      }
     }
   }
 
@@ -362,7 +412,9 @@ function init() {
 
     const actions = el('div', 'vault-modal-actions');
     const cancelBtn = button('Cancel', 'vault-btn', () => dismiss());
-    const submitBtn = button(opts.submitLabel, opts.danger ? 'vault-btn danger' : 'vault-btn primary', () => opts.onSubmit());
+    const submitBtn = button(opts.submitLabel, opts.danger ? 'vault-btn danger' : 'vault-btn primary', () =>
+      opts.onSubmit()
+    );
     submitBtn.disabled = opts.submitEnabled !== true;
     actions.appendChild(cancelBtn);
     actions.appendChild(submitBtn);
@@ -380,16 +432,30 @@ function init() {
       if (invoker && invoker.isConnected) invoker.focus();
     }
     function dismiss() {
-      if (opts.onCancel) { try { opts.onCancel(); } catch { /* a cancel hook must never throw out */ } }
+      if (opts.onCancel) {
+        try {
+          opts.onCancel();
+        } catch {
+          /* a cancel hook must never throw out */
+        }
+      }
       close();
     }
 
     backdrop.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') { e.stopPropagation(); dismiss(); return; }
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        dismiss();
+        return;
+      }
       if (e.key === 'Tab') {
-        const focusables = /** @type {HTMLElement[]} */ (Array.from(card.querySelectorAll(
-          'button:not([disabled]), select:not([disabled]), input:not([disabled]), textarea:not([disabled]), a[href]'
-        )));
+        const focusables = /** @type {HTMLElement[]} */ (
+          Array.from(
+            card.querySelectorAll(
+              'button:not([disabled]), select:not([disabled]), input:not([disabled]), textarea:not([disabled]), a[href]'
+            )
+          )
+        );
         if (!focusables.length) return;
         e.preventDefault();
         const i = focusables.indexOf(/** @type {any} */ (document.activeElement));
@@ -397,12 +463,18 @@ function init() {
         focusables[n].focus();
       }
     });
-    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) dismiss(); });
+    backdrop.addEventListener('click', (e) => {
+      if (e.target === backdrop) dismiss();
+    });
 
     const handle = {
       close,
-      setSubmitEnabled: (/** @type {boolean} */ on) => { submitBtn.disabled = !on; },
-      setStatus: (/** @type {string} */ text) => { status.textContent = text; },
+      setSubmitEnabled: (/** @type {boolean} */ on) => {
+        submitBtn.disabled = !on;
+      },
+      setStatus: (/** @type {string} */ text) => {
+        status.textContent = text;
+      }
     };
     activePageModal = handle;
 
@@ -466,15 +538,19 @@ function init() {
       handle.setSubmitEnabled(pathInput.value.trim().length > 0);
     });
     fileRow.appendChild(pathInput);
-    fileRow.appendChild(iconButton('folder', 'Choose a save location', () => {
-      Promise.resolve(bridge.pickSavePath(select.value)).then((res) => {
-        if (res && res.path) {
-          pathInput.value = res.path;
-          handle.setStatus('');
-          handle.setSubmitEnabled(true);
-        }
-      }).catch(() => {});
-    }));
+    fileRow.appendChild(
+      iconButton('folder', 'Choose a save location', () => {
+        Promise.resolve(bridge.pickSavePath(select.value))
+          .then((res) => {
+            if (res && res.path) {
+              pathInput.value = res.path;
+              handle.setStatus('');
+              handle.setSubmitEnabled(true);
+            }
+          })
+          .catch(() => {});
+      })
+    );
     body.appendChild(fileRow);
 
     const handle = openModal({
@@ -487,23 +563,38 @@ function init() {
         if (!savePath) return;
         handle.setSubmitEnabled(false);
         handle.setStatus('Exporting…');
-        Promise.resolve(bridge.exportVault(select.value, savePath)).then((res) => {
-          if (res && res.locked) {
-            pendingNotice = 'The manager locked — export canceled. Unlock and try again.';
-            handle.close();
-            refresh();
-            return;
-          }
-          if (res && res.ok) { handle.close(); return; }
-          if (res && res.error === 'invalid-path') {
-            handle.setStatus('That location can’t be used. Pick a .gfvaultbundle or .json path in an existing folder.');
+        Promise.resolve(bridge.exportVault(select.value, savePath))
+          .then((res) => {
+            if (res && res.locked) {
+              pendingNotice = 'The manager locked — export canceled. Unlock and try again.';
+              handle.close();
+              refresh();
+              return;
+            }
+            if (res && res.ok) {
+              handle.close();
+              return;
+            }
+            if (res && res.error === 'invalid-path') {
+              handle.setStatus(
+                'That location can’t be used. Pick a .gfvaultbundle or .json path in an existing folder.'
+              );
+              handle.setSubmitEnabled(true);
+              return;
+            }
+            if (res && res.canceled) {
+              handle.setStatus('Export canceled.');
+              handle.setSubmitEnabled(true);
+              return;
+            }
+            handle.setStatus('Could not export the vault.');
             handle.setSubmitEnabled(true);
-            return;
-          }
-          if (res && res.canceled) { handle.setStatus('Export canceled.'); handle.setSubmitEnabled(true); return; }
-          handle.setStatus('Could not export the vault.'); handle.setSubmitEnabled(true);
-        }).catch(() => { handle.setStatus('Could not export the vault.'); handle.setSubmitEnabled(true); });
-      },
+          })
+          .catch(() => {
+            handle.setStatus('Could not export the vault.');
+            handle.setSubmitEnabled(true);
+          });
+      }
     });
   }
 
@@ -553,16 +644,21 @@ function init() {
   function openImportModal(vaults, opts) {
     const fresh = !!(opts && opts.fresh);
     let picked = false;
-    let importHandle = null;      // opaque per-transaction token from pickImportFile (PR#112 finding 5)
-    let collision = false;        // the current destination already holds a vault (never in fresh mode)
+    let importHandle = null; // opaque per-transaction token from pickImportFile (PR#112 finding 5)
+    let collision = false; // the current destination already holds a vault (never in fresh mode)
     let replaceConfirmed = false; // the "Replace the existing vault" checkbox state (unused in fresh mode)
     const body = el('div', 'vault-modal-form');
 
     // Fresh mode: a restore lede in place of a destination select — there is no destination on a
     // not-set-up profile and the fresh-adopt branch ignores the target entirely.
     if (fresh) {
-      body.appendChild(el('p', 'vault-lede',
-        'Restore a vault exported from another device. You’ll enter its master password or recovery key on a secure prompt.'));
+      body.appendChild(
+        el(
+          'p',
+          'vault-lede',
+          'Restore a vault exported from another device. You’ll enter its master password or recovery key on a secure prompt.'
+        )
+      );
     }
 
     // Destination-vault select — set-up profiles only (a fresh profile has no destination vault).
@@ -587,8 +683,13 @@ function init() {
     // holds a vault. A fresh profile never collides, so the affordance is omitted entirely.
     const replaceRow = el('div', 'vault-modal-replace-row');
     replaceRow.hidden = true;
-    replaceRow.appendChild(el('p', 'vault-modal-warn',
-      'A vault already exists here — importing will REPLACE it, permanently destroying the current vault.'));
+    replaceRow.appendChild(
+      el(
+        'p',
+        'vault-modal-warn',
+        'A vault already exists here — importing will REPLACE it, permanently destroying the current vault.'
+      )
+    );
     const replaceLabel = el('label', 'vault-modal-replace-label');
     const replaceCheckbox = /** @type {HTMLInputElement} */ (el('input'));
     replaceCheckbox.type = 'checkbox';
@@ -608,12 +709,17 @@ function init() {
 
     // Probe whether a destination already holds a vault → show/hide the Replace affordance.
     function probeCollision(dest) {
-      return Promise.resolve(bridge.hasVault(dest)).then((r) => {
-        collision = !!(r && r.present);
-        replaceRow.hidden = !collision;
-        if (!collision) { replaceConfirmed = false; replaceCheckbox.checked = false; }
-        updateContinueEnabled();
-      }).catch(() => {});
+      return Promise.resolve(bridge.hasVault(dest))
+        .then((r) => {
+          collision = !!(r && r.present);
+          replaceRow.hidden = !collision;
+          if (!collision) {
+            replaceConfirmed = false;
+            replaceCheckbox.checked = false;
+          }
+          updateContinueEnabled();
+        })
+        .catch(() => {});
     }
 
     // The target threaded into pickImportFile. Fresh mode has no select and the fresh branch
@@ -623,22 +729,24 @@ function init() {
     }
 
     function pickFile() {
-      Promise.resolve(bridge.pickImportFile(pickTarget())).then((res) => {
-        if (res && res.ok) {
-          picked = true;
-          importHandle = res.importHandle || null; // finding 5: bind this transaction's token.
-          pathInput.value = res.path || '';
-          handle.setStatus('');
-          updateContinueEnabled();
-        } else if (res && res.error) {
-          picked = false;
-          importHandle = null;
-          pathInput.value = '';
-          handle.setStatus('Could not read that bundle file.');
-          updateContinueEnabled();
-        }
-        // { canceled } → do nothing (keep any prior pick).
-      }).catch(() => {});
+      Promise.resolve(bridge.pickImportFile(pickTarget()))
+        .then((res) => {
+          if (res && res.ok) {
+            picked = true;
+            importHandle = res.importHandle || null; // finding 5: bind this transaction's token.
+            pathInput.value = res.path || '';
+            handle.setStatus('');
+            updateContinueEnabled();
+          } else if (res && res.error) {
+            picked = false;
+            importHandle = null;
+            pathInput.value = '';
+            handle.setStatus('Could not read that bundle file.');
+            updateContinueEnabled();
+          }
+          // { canceled } → do nothing (keep any prior pick).
+        })
+        .catch(() => {});
     }
 
     // H1: a destination change after a successful pick invalidates the held bundle; always re-probe
@@ -674,7 +782,7 @@ function init() {
       onCancel: () => {
         // L1: drop any held bundle when the operator dismisses the modal.
         if (picked) Promise.resolve(bridge.clearPendingImport(importHandle)).catch(() => {});
-      },
+      }
     });
 
     // Initial probe for the default-selected destination (set-up mode only — no destination or
@@ -690,8 +798,9 @@ function init() {
     const h2 = el('h2', undefined, 'Set up the password manager');
     h2.id = 'vault-setup-heading';
     section.appendChild(h2);
-    section.appendChild(el('p', 'vault-lede',
-      'Choose a master password to start storing logins, cards, and notes in an encrypted vault.'));
+    section.appendChild(
+      el('p', 'vault-lede', 'Choose a master password to start storing logins, cards, and notes in an encrypted vault.')
+    );
 
     const note = el('p', 'vault-stub-note');
     note.setAttribute('role', 'status');
@@ -703,18 +812,22 @@ function init() {
     // chrome-owned vault-import-unlock sheet (DD2/DD5). On a successful adopt the store leaves the
     // profile set-up + UNLOCKED and broadcasts the lock-state → the page re-renders to unlocked.
     const actions = el('div', 'vault-setup-actions');
-    actions.appendChild(button('Set up the password manager', 'vault-btn primary', () => {
-      // M12 F3 Leg 4: request the chrome-owned setup sheet (page → main → chrome → the
-      // vault-set card). NO password is entered here — it lives only on the sheet + in
-      // main; the page moves to unlocked off the vault-lock-state broadcast on success.
-      root.dataset.setupRequested = 'true';
-      Promise.resolve(bridge.requestSetup()).catch(() => {});
-    }));
-    actions.appendChild(button('Import a vault bundle', 'vault-btn', () => {
-      // Fresh-profile restore: a destination-less import modal (no vault select, no Replace
-      // checkbox) that adopts a bundle exported from another device. No destination exists yet.
-      openImportModal([], { fresh: true });
-    }));
+    actions.appendChild(
+      button('Set up the password manager', 'vault-btn primary', () => {
+        // M12 F3 Leg 4: request the chrome-owned setup sheet (page → main → chrome → the
+        // vault-set card). NO password is entered here — it lives only on the sheet + in
+        // main; the page moves to unlocked off the vault-lock-state broadcast on success.
+        root.dataset.setupRequested = 'true';
+        Promise.resolve(bridge.requestSetup()).catch(() => {});
+      })
+    );
+    actions.appendChild(
+      button('Import a vault bundle', 'vault-btn', () => {
+        // Fresh-profile restore: a destination-less import modal (no vault select, no Replace
+        // checkbox) that adopts a bundle exported from another device. No destination exists yet.
+        openImportModal([], { fresh: true });
+      })
+    );
     section.appendChild(actions);
     section.appendChild(note);
     return section;
@@ -738,16 +851,20 @@ function init() {
     // M12 F3 Leg 4: request the F2 chrome-owned unlock sheet (page → main → chrome). A
     // DISTINCT trigger from the guest-gesture unlock — no fill-picker continuation. The
     // page refreshes to unlocked off the vault-lock-state broadcast on success.
-    banner.appendChild(button('Unlock', 'vault-btn primary', () => {
-      root.dataset.unlockRequested = 'true';
-      Promise.resolve(bridge.requestUnlock()).catch(() => {});
-    }));
+    banner.appendChild(
+      button('Unlock', 'vault-btn primary', () => {
+        root.dataset.unlockRequested = 'true';
+        Promise.resolve(bridge.requestUnlock()).catch(() => {});
+      })
+    );
     // M12 F4 Leg 2 (key-rotation): the RECOVER-after-forgotten-master affordance — reachable
     // FROM the LOCKED state (the recovery key is its own step-up + installs the MRK). Routes
     // to the chrome-owned vault-recover sheet; NO secret is entered here.
-    banner.appendChild(button('Forgot master password? Recover', 'vault-btn vault-link-btn', () => {
-      Promise.resolve(bridge.requestRecover()).catch(() => {});
-    }));
+    banner.appendChild(
+      button('Forgot master password? Recover', 'vault-btn vault-link-btn', () => {
+        Promise.resolve(bridge.requestRecover()).catch(() => {});
+      })
+    );
     return banner;
   }
 
@@ -826,7 +943,10 @@ function init() {
     let bestDiff = Math.abs(best - value);
     for (const opt of AUTOLOCK_OPTIONS) {
       const diff = Math.abs(opt - value);
-      if (diff < bestDiff) { best = opt; bestDiff = diff; }
+      if (diff < bestDiff) {
+        best = opt;
+        bestDiff = diff;
+      }
     }
     return best;
   }
@@ -848,8 +968,7 @@ function init() {
     const section = el('div', 'vault-subsection vault-autolock-section');
     const h3 = el('h3', 'vault-subsection-title', 'Auto-lock');
     section.appendChild(h3);
-    section.appendChild(el('p', 'vault-lede',
-      'Automatically lock the manager after a period of inactivity.'));
+    section.appendChild(el('p', 'vault-lede', 'Automatically lock the manager after a period of inactivity.'));
 
     const row = el('div', 'vault-settings-row');
     const field = el('label', 'vault-settings-field');
@@ -857,7 +976,8 @@ function init() {
     const select = /** @type {HTMLSelectElement} */ (el('select', 'vault-settings-select'));
     select.setAttribute('aria-label', 'Auto-lock after this many minutes of inactivity');
     for (const minutes of AUTOLOCK_OPTIONS) {
-      const opt = /** @type {HTMLOptionElement} */
+      const opt =
+        /** @type {HTMLOptionElement} */
         (el('option', undefined, minutes === 1 ? '1 minute' : `${minutes} minutes`));
       opt.value = String(minutes);
       select.appendChild(opt);
@@ -871,9 +991,11 @@ function init() {
     // the page re-renders to the locked view off the vault-lock-state broadcast the store's onLock
     // hook emits. Carries no secret.
     if (unlocked) {
-      row.appendChild(button('Lock now', 'vault-btn primary', () => {
-        Promise.resolve(bridge.lockVault()).catch(() => {});
-      }));
+      row.appendChild(
+        button('Lock now', 'vault-btn primary', () => {
+          Promise.resolve(bridge.lockVault()).catch(() => {});
+        })
+      );
     }
     section.appendChild(row);
 
@@ -882,18 +1004,24 @@ function init() {
     section.appendChild(status);
 
     // Seed the selection from the existing settings bridge, snapping to the nearest option.
-    Promise.resolve(bridge.settingsGet('vaultAutoLockMinutes')).then((v) => {
-      select.value = String(nearestAutoLockOption(/** @type {number} */ (v)));
-    }).catch(() => { select.value = String(AUTOLOCK_DEFAULT); });
+    Promise.resolve(bridge.settingsGet('vaultAutoLockMinutes'))
+      .then((v) => {
+        select.value = String(nearestAutoLockOption(/** @type {number} */ (v)));
+      })
+      .catch(() => {
+        select.value = String(AUTOLOCK_DEFAULT);
+      });
 
     // Persist on change. Every option is in range, so a rejection is unexpected — surface it inline.
     select.addEventListener('change', () => {
       const minutes = Number(select.value);
-      Promise.resolve(bridge.settingsSet('vaultAutoLockMinutes', minutes)).then(() => {
-        status.textContent = 'Saved.';
-      }).catch(() => {
-        status.textContent = 'Could not save the auto-lock setting.';
-      });
+      Promise.resolve(bridge.settingsSet('vaultAutoLockMinutes', minutes))
+        .then(() => {
+          status.textContent = 'Saved.';
+        })
+        .catch(() => {
+          status.textContent = 'Could not save the auto-lock setting.';
+        });
     });
     return section;
   }
@@ -911,8 +1039,13 @@ function init() {
   function buildImportExportSection(vaults) {
     const section = el('div', 'vault-subsection vault-importexport-section');
     section.appendChild(el('h3', 'vault-subsection-title', 'Import / Export'));
-    section.appendChild(el('p', 'vault-lede',
-      'Import a portable vault bundle, or export one to a file. You’ll pick the vault and file location in a dialog; for import you’ll enter the source master password or recovery key on a secure prompt.'));
+    section.appendChild(
+      el(
+        'p',
+        'vault-lede',
+        'Import a portable vault bundle, or export one to a file. You’ll pick the vault and file location in a dialog; for import you’ll enter the source master password or recovery key on a secure prompt.'
+      )
+    );
 
     const row = el('div', 'vault-settings-row');
     row.appendChild(button('Import…', 'vault-btn', () => openImportModal(vaults)));
@@ -940,17 +1073,39 @@ function init() {
     // sheet (mode 'rotate-admin'), which provisions from scratch or rotates + invalidates the prior key.
     const head = el('div', 'vault-subsection-head');
     head.appendChild(el('h3', 'vault-subsection-title', 'Master-key management'));
-    head.appendChild(buildKebabMenu({
-      ariaLabel: 'Master-key actions',
-      items: [
-        { label: 'Change master password', onSelect: () => { Promise.resolve(bridge.requestChangeMaster()).catch(() => {}); } },
-        { label: 'Rotate recovery key', onSelect: () => { Promise.resolve(bridge.requestRotateRecovery()).catch(() => {}); } },
-        { label: 'Provision / rotate admin key', onSelect: () => { Promise.resolve(bridge.requestRotateAdmin()).catch(() => {}); } }
-      ]
-    }));
+    head.appendChild(
+      buildKebabMenu({
+        ariaLabel: 'Master-key actions',
+        items: [
+          {
+            label: 'Change master password',
+            onSelect: () => {
+              Promise.resolve(bridge.requestChangeMaster()).catch(() => {});
+            }
+          },
+          {
+            label: 'Rotate recovery key',
+            onSelect: () => {
+              Promise.resolve(bridge.requestRotateRecovery()).catch(() => {});
+            }
+          },
+          {
+            label: 'Provision / rotate admin key',
+            onSelect: () => {
+              Promise.resolve(bridge.requestRotateAdmin()).catch(() => {});
+            }
+          }
+        ]
+      })
+    );
     section.appendChild(head);
-    section.appendChild(el('p', 'vault-lede',
-      'Change your master password, or rotate your recovery or admin key. You’ll confirm on a secure prompt — nothing secret is typed on this page.'));
+    section.appendChild(
+      el(
+        'p',
+        'vault-lede',
+        'Change your master password, or rotate your recovery or admin key. You’ll confirm on a secure prompt — nothing secret is typed on this page.'
+      )
+    );
     return section;
   }
 
@@ -961,7 +1116,7 @@ function init() {
   const ITEM_SUBSECTIONS = [
     { type: 'login', title: 'Logins', empty: 'No logins yet.' },
     { type: 'card', title: 'Cards', empty: 'No cards yet.' },
-    { type: 'note', title: 'Notes', empty: 'No notes yet.' },
+    { type: 'note', title: 'Notes', empty: 'No notes yet.' }
   ];
 
   // Fallback dot color when a jar carries no safe color — the nav-dot idiom
@@ -1011,9 +1166,11 @@ function init() {
     const h4 = el('h4', 'vault-subsection-title', sub.title);
     h4.id = headingId;
     head.appendChild(h4);
-    head.appendChild(iconButton('add', `Add ${sub.type}`, () => {
-      openEditor({ vaultId, meta: null, type: sub.type });
-    }));
+    head.appendChild(
+      iconButton('add', `Add ${sub.type}`, () => {
+        openEditor({ vaultId, meta: null, type: sub.type });
+      })
+    );
     subsection.appendChild(head);
 
     const list = el('ul', 'vault-item-list');
@@ -1088,14 +1245,20 @@ function init() {
 
     // One metadata-only read (no secret ever), partitioned by type client-side (defensively —
     // an unknown type surfaces in "Other items", never dropped).
-    bridge.vaultList(vaultId).then((res) => {
-      if (!res || res.locked) { refresh(); return; }
-      const buckets = partitionItemsByType(res.items || []);
-      for (const sub of ITEM_SUBSECTIONS) {
-        renderItems(lists[sub.type], buckets[sub.type], vaultId, sub.empty);
-      }
-      renderUnknownItems(unknown, buckets.unknown);
-    }).catch(() => {});
+    bridge
+      .vaultList(vaultId)
+      .then((res) => {
+        if (!res || res.locked) {
+          refresh();
+          return;
+        }
+        const buckets = partitionItemsByType(res.items || []);
+        for (const sub of ITEM_SUBSECTIONS) {
+          renderItems(lists[sub.type], buckets[sub.type], vaultId, sub.empty);
+        }
+        renderUnknownItems(unknown, buckets.unknown);
+      })
+      .catch(() => {});
 
     // Access-key management (M12 F3 Leg 5): a jar-only fourth subsection — Add(=Mint) + list +
     // per-row Revoke. The manager-wide Global vault has none.
@@ -1114,15 +1277,17 @@ function init() {
    */
   function renderUnknownItems(sub, items) {
     sub.list.textContent = '';
-    if (!items || !items.length) { sub.subsection.hidden = true; return; }
+    if (!items || !items.length) {
+      sub.subsection.hidden = true;
+      return;
+    }
     sub.subsection.hidden = false;
     for (const meta of items) {
       console.warn('vault: unknown item type surfaced, not dropped:', meta && meta.type);
       const li = el('li', 'vault-item-row');
       const info = el('div', 'vault-item-info');
       info.appendChild(el('span', 'vault-item-title', (meta && meta.title) || '(untitled)'));
-      info.appendChild(el('span', 'vault-item-sub',
-        `Unknown item${meta && meta.type ? ` (${meta.type})` : ''}`));
+      info.appendChild(el('span', 'vault-item-sub', `Unknown item${meta && meta.type ? ` (${meta.type})` : ''}`));
       li.appendChild(info);
       sub.list.appendChild(li);
     }
@@ -1150,9 +1315,11 @@ function init() {
     // aria-label stays "Mint access key" for the true action). Routes to the chrome-owned
     // vault-stepup sheet (page → main → chrome). NO secret is entered or shown here; the minted
     // secret appears only on the chrome-owned accesskey-show sheet.
-    head.appendChild(iconButton('add', 'Mint access key', () => {
-      Promise.resolve(bridge.requestMint(v.vaultId)).catch(() => {});
-    }));
+    head.appendChild(
+      iconButton('add', 'Mint access key', () => {
+        Promise.resolve(bridge.requestMint(v.vaultId)).catch(() => {});
+      })
+    );
     akSection.appendChild(head);
 
     const list = el('ul', 'vault-accesskey-list');
@@ -1161,10 +1328,15 @@ function init() {
     akSection.appendChild(list);
 
     function refreshKeys() {
-      Promise.resolve(bridge.vaultAccessKeys(v.vaultId)).then((res) => {
-        if (!res || res.locked) { refresh(); return; }
-        renderAccessKeys(list, res.keys || [], v.vaultId, refreshKeys);
-      }).catch(() => {});
+      Promise.resolve(bridge.vaultAccessKeys(v.vaultId))
+        .then((res) => {
+          if (!res || res.locked) {
+            refresh();
+            return;
+          }
+          renderAccessKeys(list, res.keys || [], v.vaultId, refreshKeys);
+        })
+        .catch(() => {});
     }
     accessKeyRefreshers.push(refreshKeys);
     refreshKeys();
@@ -1190,9 +1362,16 @@ function init() {
       const li = el('li', 'vault-accesskey-row');
       li.dataset.keyId = k.keyId;
       li.appendChild(el('span', 'vault-accesskey-id', k.keyId));
-      li.appendChild(iconButton('trash', `Revoke access key ${k.keyId}`, () => {
-        openRevokeConfirm({ vaultId, keyId: k.keyId, refreshKeys });
-      }, { danger: true }));
+      li.appendChild(
+        iconButton(
+          'trash',
+          `Revoke access key ${k.keyId}`,
+          () => {
+            openRevokeConfirm({ vaultId, keyId: k.keyId, refreshKeys });
+          },
+          { danger: true }
+        )
+      );
       list.appendChild(li);
     }
   }
@@ -1219,15 +1398,21 @@ function init() {
       danger: true,
       onSubmit: () => {
         handle.setSubmitEnabled(false);
-        Promise.resolve(bridge.vaultItemDelete({ vaultId, itemId })).then((res) => {
-          if (!res || res.locked) { handle.close(); refresh(); return; }
-          handle.close();
-          refresh();
-        }).catch(() => {
-          handle.setStatus('Could not delete the item.');
-          handle.setSubmitEnabled(true);
-        });
-      },
+        Promise.resolve(bridge.vaultItemDelete({ vaultId, itemId }))
+          .then((res) => {
+            if (!res || res.locked) {
+              handle.close();
+              refresh();
+              return;
+            }
+            handle.close();
+            refresh();
+          })
+          .catch(() => {
+            handle.setStatus('Could not delete the item.');
+            handle.setSubmitEnabled(true);
+          });
+      }
     });
   }
 
@@ -1253,15 +1438,21 @@ function init() {
       danger: true,
       onSubmit: () => {
         handle.setSubmitEnabled(false);
-        Promise.resolve(bridge.vaultAccessKeyRevoke({ vaultId, keyId })).then((res) => {
-          if (!res || res.locked) { handle.close(); refresh(); return; }
-          handle.close();
-          refreshKeys();
-        }).catch(() => {
-          handle.setStatus('Could not revoke the access key.');
-          handle.setSubmitEnabled(true);
-        });
-      },
+        Promise.resolve(bridge.vaultAccessKeyRevoke({ vaultId, keyId }))
+          .then((res) => {
+            if (!res || res.locked) {
+              handle.close();
+              refresh();
+              return;
+            }
+            handle.close();
+            refreshKeys();
+          })
+          .catch(() => {
+            handle.setStatus('Could not revoke the access key.');
+            handle.setSubmitEnabled(true);
+          });
+      }
     });
   }
 
@@ -1289,9 +1480,14 @@ function init() {
       // Item info (textContent-only). No open-button now — Edit opens the editor modal.
       const info = el('div', 'vault-item-info');
       info.appendChild(el('span', 'vault-item-title', meta.title || '(untitled)'));
-      const sub = meta.type === 'login'
-        ? (meta.username || '')
-        : (meta.type === 'card' ? (meta.last4 ? `•••• ${meta.last4}` : '') : '');
+      const sub =
+        meta.type === 'login'
+          ? meta.username || ''
+          : meta.type === 'card'
+            ? meta.last4
+              ? `•••• ${meta.last4}`
+              : ''
+            : '';
       if (sub) info.appendChild(el('span', 'vault-item-sub', sub));
 
       // The origin is an attacker-influenced string: render it as a link ONLY when its scheme
@@ -1314,12 +1510,21 @@ function init() {
       // Row actions: Edit + Delete sit together with NO divider (CSS). Edit opens the edit
       // modal; Delete opens a confirm modal (delete moved OFF the editor).
       const actions = el('div', 'vault-item-actions');
-      actions.appendChild(iconButton('edit', `Edit ${meta.title || 'item'}`, () => {
-        openEditor({ vaultId, meta, type: meta.type });
-      }));
-      actions.appendChild(iconButton('trash', `Delete ${meta.title || 'item'}`, () => {
-        openDeleteConfirm({ vaultId, itemId: meta.id, title: meta.title || '(untitled)' });
-      }, { danger: true }));
+      actions.appendChild(
+        iconButton('edit', `Edit ${meta.title || 'item'}`, () => {
+          openEditor({ vaultId, meta, type: meta.type });
+        })
+      );
+      actions.appendChild(
+        iconButton(
+          'trash',
+          `Delete ${meta.title || 'item'}`,
+          () => {
+            openDeleteConfirm({ vaultId, itemId: meta.id, title: meta.title || '(untitled)' });
+          },
+          { danger: true }
+        )
+      );
       li.appendChild(actions);
 
       list.appendChild(li);
@@ -1376,7 +1581,7 @@ function init() {
       row.appendChild(el('span', 'vault-field-label', spec.label));
       const input = /** @type {HTMLInputElement} */ (el('input', 'vault-input'));
       input.type = 'text';
-      input.value = isNew ? '' : (meta[spec.name] == null ? '' : String(meta[spec.name]));
+      input.value = isNew ? '' : meta[spec.name] == null ? '' : String(meta[spec.name]);
       nonSecretInputs[spec.name] = input;
       row.appendChild(input);
       form.appendChild(row);
@@ -1396,8 +1601,13 @@ function init() {
       row.appendChild(matchModeCheckbox);
       const text = el('span', 'vault-field-toggle-text');
       text.appendChild(el('span', 'vault-field-label', 'Match any subdomain of this site'));
-      text.appendChild(el('span', 'vault-field-hint',
-        'Fill on any subdomain of this website’s registrable domain, not just this exact address. Off by default.'));
+      text.appendChild(
+        el(
+          'span',
+          'vault-field-hint',
+          'Fill on any subdomain of this website’s registrable domain, not just this exact address. Off by default.'
+        )
+      );
       row.appendChild(text);
       form.appendChild(row);
     }
@@ -1406,7 +1616,9 @@ function init() {
     // existing login with a seed) pushes its own poll/listener teardown into editorCleanups.
     const hasTotp = !isNew && itemType === 'login' && !!(meta && meta.hasTotp);
     for (const spec of layout.secret) {
-      form.appendChild(buildSecretField(spec, { vaultId, isNew, itemId: meta && meta.id, secretStates, secretInputs, hasTotp }));
+      form.appendChild(
+        buildSecretField(spec, { vaultId, isNew, itemId: meta && meta.id, secretStates, secretInputs, hasTotp })
+      );
     }
 
     // DD6 crux: register the secret-input WIPE into the editorCleanups registry (today it was
@@ -1425,23 +1637,36 @@ function init() {
         for (const [name, input] of Object.entries(nonSecretInputs)) nonSecretValues[name] = input.value;
         const matchMode = matchModeCheckbox && matchModeCheckbox.checked ? 'registrable-domain' : 'exact';
         const { item, unchangedSecrets } = assembleSave({
-          type: itemType, id: meta && meta.id, nonSecretValues, secretStates, matchMode,
+          type: itemType,
+          id: meta && meta.id,
+          nonSecretValues,
+          secretStates,
+          matchMode
         });
         // Synchronous pre-roundtrip wipe (shrinks the reveal window) — IN ADDITION to the
         // registered cleanup drained just below on success.
         wipeSecretInputs(secretInputs);
-        Promise.resolve(bridge.vaultItemSave({ vaultId, item, unchangedSecrets })).then((res) => {
-          if (!res || res.locked) { runEditorCleanups(); handle.close(); refresh(); return; }
-          runEditorCleanups(); // drain the registered wipe + TOTP teardown BEFORE close.
-          handle.close();
-          refresh();
-        }).catch(() => { handle.setStatus('Could not save.'); });
+        Promise.resolve(bridge.vaultItemSave({ vaultId, item, unchangedSecrets }))
+          .then((res) => {
+            if (!res || res.locked) {
+              runEditorCleanups();
+              handle.close();
+              refresh();
+              return;
+            }
+            runEditorCleanups(); // drain the registered wipe + TOTP teardown BEFORE close.
+            handle.close();
+            refresh();
+          })
+          .catch(() => {
+            handle.setStatus('Could not save.');
+          });
       },
       onCancel: () => {
         // Esc / backdrop / Cancel: drain the registry (the registered wipe zeroes every secret
         // input; the TOTP cleanup stops the poll + removes its listeners) BEFORE openModal closes.
         runEditorCleanups();
-      },
+      }
     });
   }
 
@@ -1458,7 +1683,8 @@ function init() {
     const lab = el('label', 'vault-field-label', label);
     row.appendChild(lab);
 
-    const input = /** @type {HTMLInputElement|HTMLTextAreaElement} */
+    const input =
+      /** @type {HTMLInputElement|HTMLTextAreaElement} */
       (el(multiline ? 'textarea' : 'input', 'vault-input'));
     if (!multiline) /** @type {HTMLInputElement} */ (input).type = 'text';
     // Masked-until-reveal for an existing item: empty value, MASK placeholder.
@@ -1477,7 +1703,9 @@ function init() {
       // Clear a PURE reveal (shown but not edited) on blur; keep in-progress edits.
       if (st.revealed && !st.touched) {
         ctx.secretStates[name] = hideState(st);
-        revealing = true; input.value = ''; revealing = false;
+        revealing = true;
+        input.value = '';
+        revealing = false;
         setRevealLabel();
       }
     });
@@ -1508,15 +1736,25 @@ function init() {
         if (st.revealed) {
           // Hide → clear plaintext from the DOM + re-mask.
           ctx.secretStates[name] = hideState(st);
-          revealing = true; input.value = ''; revealing = false;
+          revealing = true;
+          input.value = '';
+          revealing = false;
         } else {
-          bridge.vaultReveal({ vaultId: ctx.vaultId, itemId: ctx.itemId }).then((res) => {
-            if (!res || res.locked) { refresh(); return; }
-            const secret = res.item ? (res.item[name] == null ? '' : String(res.item[name])) : '';
-            ctx.secretStates[name] = revealState(ctx.secretStates[name], secret);
-            revealing = true; input.value = secret; revealing = false;
-            setRevealLabel();
-          }).catch(() => {});
+          bridge
+            .vaultReveal({ vaultId: ctx.vaultId, itemId: ctx.itemId })
+            .then((res) => {
+              if (!res || res.locked) {
+                refresh();
+                return;
+              }
+              const secret = res.item ? (res.item[name] == null ? '' : String(res.item[name])) : '';
+              ctx.secretStates[name] = revealState(ctx.secretStates[name], secret);
+              revealing = true;
+              input.value = secret;
+              revealing = false;
+              setRevealLabel();
+            })
+            .catch(() => {});
           return;
         }
         setRevealLabel();
@@ -1527,13 +1765,21 @@ function init() {
       // WITHOUT putting it in the DOM (reuses the existing clipboard:write sink).
       // { secret: true } marks this a SECRET copy so main auto-clears the clipboard
       // ~20s later if it still holds this exact value (squawk 0021).
-      controls.appendChild(iconButton('copy', 'Copy', () => {
-        bridge.vaultReveal({ vaultId: ctx.vaultId, itemId: ctx.itemId }).then((res) => {
-          if (!res || res.locked) { refresh(); return; }
-          const secret = res.item ? (res.item[name] == null ? '' : String(res.item[name])) : '';
-          bridge.clipboardWrite(secret, { secret: true });
-        }).catch(() => {});
-      }));
+      controls.appendChild(
+        iconButton('copy', 'Copy', () => {
+          bridge
+            .vaultReveal({ vaultId: ctx.vaultId, itemId: ctx.itemId })
+            .then((res) => {
+              if (!res || res.locked) {
+                refresh();
+                return;
+              }
+              const secret = res.item ? (res.item[name] == null ? '' : String(res.item[name])) : '';
+              bridge.clipboardWrite(secret, { secret: true });
+            })
+            .catch(() => {});
+        })
+      );
       wrap.appendChild(controls);
     }
 
@@ -1592,22 +1838,24 @@ function init() {
     const status = el('span', 'vault-gen-status');
     status.setAttribute('role', 'status');
 
-    topRow.appendChild(button('Generate', 'vault-btn small', () => {
-      const opts = { length: Number(lenInput.value) };
-      for (const cls of CLASS_NAMES) opts[cls] = classToggles[cls].checked;
-      let generated;
-      try {
-        generated = generatePassword(opts);
-      } catch (err) {
-        status.textContent = /** @type {Error} */ (err).message.replace(/^password-generator:\s*/, '');
-        return;
-      }
-      status.textContent = '';
-      input.value = generated;
-      // Programmatic set: reflect it as a real user edit so save sends it verbatim.
-      secretStates[name] = editState(secretStates[name], generated);
-      afterSet();
-    }));
+    topRow.appendChild(
+      button('Generate', 'vault-btn small', () => {
+        const opts = { length: Number(lenInput.value) };
+        for (const cls of CLASS_NAMES) opts[cls] = classToggles[cls].checked;
+        let generated;
+        try {
+          generated = generatePassword(opts);
+        } catch (err) {
+          status.textContent = /** @type {Error} */ (err).message.replace(/^password-generator:\s*/, '');
+          return;
+        }
+        status.textContent = '';
+        input.value = generated;
+        // Programmatic set: reflect it as a real user edit so save sends it verbatim.
+        secretStates[name] = editState(secretStates[name], generated);
+        afterSet();
+      })
+    );
     gen.appendChild(topRow);
 
     // Row 2: the character-class toggles, grouped on one line so the four checkboxes read
@@ -1655,27 +1903,46 @@ function init() {
     let timer = null;
 
     function clearTimer() {
-      if (timer !== null) { clearTimeout(timer); timer = null; }
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
     }
 
     function tick() {
       if (stopped) return;
       countEl.textContent = `${secondsRemaining}s`;
       clearTimer();
-      if (secondsRemaining <= 0) { fetchCode(); return; } // period boundary → re-fetch.
-      timer = setTimeout(() => { secondsRemaining -= 1; tick(); }, 1000);
+      if (secondsRemaining <= 0) {
+        fetchCode();
+        return;
+      } // period boundary → re-fetch.
+      timer = setTimeout(() => {
+        secondsRemaining -= 1;
+        tick();
+      }, 1000);
     }
 
     function fetchCode() {
       if (stopped || !window.goldfinchInternal) return;
-      window.goldfinchInternal.vaultTotpCode({ vaultId, itemId }).then((res) => {
-        if (stopped) return;
-        if (!res || res.locked) { refresh(); return; } // idle-lock mid-poll → unlock path.
-        if (res.code == null) { codeEl.textContent = '—'; countEl.textContent = ''; return; }
-        codeEl.textContent = res.code;
-        secondsRemaining = typeof res.secondsRemaining === 'number' ? res.secondsRemaining : 0;
-        tick();
-      }).catch(() => {});
+      window.goldfinchInternal
+        .vaultTotpCode({ vaultId, itemId })
+        .then((res) => {
+          if (stopped) return;
+          if (!res || res.locked) {
+            refresh();
+            return;
+          } // idle-lock mid-poll → unlock path.
+          if (res.code == null) {
+            codeEl.textContent = '—';
+            countEl.textContent = '';
+            return;
+          }
+          codeEl.textContent = res.code;
+          secondsRemaining = typeof res.secondsRemaining === 'number' ? res.secondsRemaining : 0;
+          tick();
+        })
+        .catch(() => {});
     }
 
     function start() {
@@ -1689,7 +1956,10 @@ function init() {
     }
 
     // Stop polling while the page is hidden or the window is blurred; resume on return.
-    const onVisibility = () => { if (document.hidden) stop(); else start(); };
+    const onVisibility = () => {
+      if (document.hidden) stop();
+      else start();
+    };
     const onBlur = () => stop();
     const onFocus = () => start();
     document.addEventListener('visibilitychange', onVisibility);
@@ -1805,10 +2075,12 @@ function init() {
     Promise.all([
       window.goldfinchInternal.vaultState(),
       Promise.resolve(window.goldfinchInternal.jarsList()).catch(() => [])
-    ]).then(([state, jars]) => {
-      jarRows = Array.isArray(jars) ? jars : [];
-      render(state);
-    }).catch(() => {});
+    ])
+      .then(([state, jars]) => {
+        jarRows = Array.isArray(jars) ? jars : [];
+        render(state);
+      })
+      .catch(() => {});
   }
 
   // M12 F3 Leg 4: refresh on every vault lock-state transition (setup / unlock / auto-lock)

@@ -12,16 +12,8 @@
  * }} deps
  */
 export function createJarsNav(deps) {
-  const {
-    document,
-    Node,
-    navEl,
-    IntersectionObserver,
-    isSafeColor,
-    fallbackColor,
-    getSectionRefs,
-    sectionSetKey
-  } = deps;
+  const { document, Node, navEl, IntersectionObserver, isSafeColor, fallbackColor, getSectionRefs, sectionSetKey } =
+    deps;
 
   /** @type {Map<string, any>} */
   const navMap = new Map();
@@ -121,23 +113,26 @@ export function createJarsNav(deps) {
     }
 
     const visible = new Set();
-    scrollObserver = new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        if (entry.isIntersecting) {
-          visible.add(entry.target.id);
-          const rowId = entry.target.id.slice('jar-'.length);
-          getSectionRefs(rowId)?.historyPanel?.onExpanded();
-        } else {
-          visible.delete(entry.target.id);
+    scrollObserver = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            visible.add(entry.target.id);
+            const rowId = entry.target.id.slice('jar-'.length);
+            getSectionRefs(rowId)?.historyPanel?.onExpanded();
+          } else {
+            visible.delete(entry.target.id);
+          }
         }
-      }
-      for (const section of sections) {
-        if (visible.has(section.id)) {
-          setActiveNav(section.id);
-          return;
+        for (const section of sections) {
+          if (visible.has(section.id)) {
+            setActiveNav(section.id);
+            return;
+          }
         }
-      }
-    }, { rootMargin: '0px 0px -50% 0px', threshold: 0 });
+      },
+      { rootMargin: '0px 0px -50% 0px', threshold: 0 }
+    );
     for (const section of sections) scrollObserver.observe(section);
   }
 

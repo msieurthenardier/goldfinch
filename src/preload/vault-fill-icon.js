@@ -150,7 +150,7 @@ function createVaultIconController({
   findAllCardFields,
   getEnabled,
   getVaultLocked,
-  now,
+  now
 }) {
   const cardEntries = typeof findAllCardFields === 'function' ? findAllCardFields : () => [];
   const clock = typeof now === 'function' ? now : Date.now;
@@ -408,7 +408,7 @@ function createVaultIconController({
   function handleFocusIn(e) {
     if (!getEnabled()) return;
     const target = e && e.target;
-    focusedField = (target && anchorKinds().has(target)) ? target : null;
+    focusedField = target && anchorKinds().has(target) ? target : null;
     placeVaultIcons();
   }
 
@@ -435,7 +435,7 @@ function createVaultIconController({
     handleFocusIn,
     handleFocusOut,
     consumeFillTarget,
-    setVaultLocked,
+    setVaultLocked
   };
 }
 

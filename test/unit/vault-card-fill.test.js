@@ -25,7 +25,7 @@ const FAST_SCRYPT = { algo: 'scrypt', N: 2 ** 12, r: 8, p: 1, maxmem: 64 * 1024 
 const MASTER = 'correct horse battery staple';
 const JARS = [
   { id: 'work', partition: 'persist:container:work' },
-  { id: 'personal', partition: 'persist:container:personal' },
+  { id: 'personal', partition: 'persist:container:personal' }
 ];
 const A = 'https://a.example';
 const SHOP = 'https://shop.unrelated.test';
@@ -38,11 +38,15 @@ const CARD = {
   last4: '4242',
   number: '4242424242424242',
   cvv: '123',
-  expiry: '12/28',
+  expiry: '12/28'
 };
 
-function tmpDir() { return fs.mkdtempSync(path.join(os.tmpdir(), 'gf-card-')); }
-function rm(dir) { fs.rmSync(dir, { recursive: true, force: true }); }
+function tmpDir() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'gf-card-'));
+}
+function rm(dir) {
+  fs.rmSync(dir, { recursive: true, force: true });
+}
 
 // wcId map:
 //   10 → work-jar tab @ A     12 → work-jar tab @ an UNRELATED merchant
@@ -54,14 +58,18 @@ async function makeHarness(dir) {
   const globalCard = store.saveItem('global', { ...CARD, title: 'Shared Amex', brand: 'Amex', last4: '0005' });
   const personalCard = store.saveItem('personal', { ...CARD, title: 'Other jar card' });
   const workLogin = store.saveItem('work', {
-    type: 'login', title: 'Work', username: 'w@a', password: 'work-pass', origin: A,
+    type: 'login',
+    title: 'Work',
+    username: 'w@a',
+    password: 'work-pass',
+    origin: A
   });
 
   const urls = { 10: A + '/login', 12: SHOP + '/checkout', 20: SHOP + '/checkout' };
   const entries = new Map([
     [10, { partition: 'persist:container:work', trusted: false }],
     [12, { partition: 'persist:container:work', trusted: false }],
-    [20, { partition: 'burner:1', trusted: false }],
+    [20, { partition: 'burner:1', trusted: false }]
   ]);
 
   const fillCalls = [];
@@ -72,7 +80,7 @@ async function makeHarness(dir) {
     getTabEntry: (id) => entries.get(id),
     listJars: () => JARS,
     fillDelegate: (arg) => fillCalls.push(arg),
-    fillCardDelegate: (arg) => cardCalls.push(arg),
+    fillCardDelegate: (arg) => cardCalls.push(arg)
   });
   return { store, human, fillCalls, cardCalls, workCard, globalCard, personalCard, workLogin };
 }
@@ -89,9 +97,11 @@ test('a card fills at an UNRELATED merchant origin — the no-origin-gate decisi
     assert.equal(cardCalls.length, 1);
     assert.deepEqual(cardCalls[0], {
       wcId: 12,
-      card: { number: '4242424242424242', cardholder: 'A Lovelace', expiry: '12/28', cvv: '123' },
+      card: { number: '4242424242424242', cardholder: 'A Lovelace', expiry: '12/28', cvv: '123' }
     });
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('a global card fills on a jar tab at an unrelated origin', async () => {
@@ -100,7 +110,9 @@ test('a global card fills on a jar tab at an unrelated origin', async () => {
     const { human, cardCalls, globalCard } = await makeHarness(dir);
     assert.deepEqual(human.fillHuman({ wcId: 12, vaultId: 'global', itemId: globalCard.id }), { filled: true });
     assert.equal(cardCalls.length, 1);
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('the card fill result carries NO card data', async () => {
@@ -112,7 +124,9 @@ test('the card fill result carries NO card data', async () => {
     assert.ok(!json.includes('4242424242424242'), 'no PAN in the fill result');
     assert.ok(!json.includes('123'), 'no CVV in the fill result');
     assert.deepEqual(Object.keys(res), ['filled']);
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('the card rides the CARD channel, never the login credential channel', async () => {
@@ -122,7 +136,9 @@ test('the card rides the CARD channel, never the login credential channel', asyn
     human.fillHuman({ wcId: 12, vaultId: 'work', itemId: workCard.id });
     assert.equal(fillCalls.length, 0, 'the login fill delegate is never called for a card');
     assert.equal(cardCalls.length, 1);
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 // --- every OTHER gate still applies ---------------------------------------
@@ -132,28 +148,32 @@ test('a LOCKED vault refuses a card fill', async () => {
   try {
     const { store, human, cardCalls, workCard } = await makeHarness(dir);
     store.lockNow();
-    assert.deepEqual(
-      human.fillHuman({ wcId: 12, vaultId: 'work', itemId: workCard.id }),
-      { filled: false, reason: 'locked' }
-    );
+    assert.deepEqual(human.fillHuman({ wcId: 12, vaultId: 'work', itemId: workCard.id }), {
+      filled: false,
+      reason: 'locked'
+    });
     assert.equal(cardCalls.length, 0);
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('a BURNER tab refuses a card fill, global vaultId included', async () => {
   const dir = tmpDir();
   try {
     const { human, cardCalls, globalCard, workCard } = await makeHarness(dir);
-    assert.deepEqual(
-      human.fillHuman({ wcId: 20, vaultId: 'global', itemId: globalCard.id }),
-      { filled: false, reason: 'ineligible' }
-    );
-    assert.deepEqual(
-      human.fillHuman({ wcId: 20, vaultId: 'work', itemId: workCard.id }),
-      { filled: false, reason: 'ineligible' }
-    );
+    assert.deepEqual(human.fillHuman({ wcId: 20, vaultId: 'global', itemId: globalCard.id }), {
+      filled: false,
+      reason: 'ineligible'
+    });
+    assert.deepEqual(human.fillHuman({ wcId: 20, vaultId: 'work', itemId: workCard.id }), {
+      filled: false,
+      reason: 'ineligible'
+    });
     assert.equal(cardCalls.length, 0);
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('a CROSS-JAR vaultId refuses a card fill (jar scope survives the dropped origin gate)', async () => {
@@ -161,24 +181,28 @@ test('a CROSS-JAR vaultId refuses a card fill (jar scope survives the dropped or
   try {
     const { human, cardCalls, personalCard } = await makeHarness(dir);
     // wcId 12 is a WORK tab; the card lives in the PERSONAL vault.
-    assert.deepEqual(
-      human.fillHuman({ wcId: 12, vaultId: 'personal', itemId: personalCard.id }),
-      { filled: false, reason: 'out-of-scope' }
-    );
+    assert.deepEqual(human.fillHuman({ wcId: 12, vaultId: 'personal', itemId: personalCard.id }), {
+      filled: false,
+      reason: 'out-of-scope'
+    });
     assert.equal(cardCalls.length, 0);
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('a closed tab refuses a card fill', async () => {
   const dir = tmpDir();
   try {
     const { human, cardCalls, workCard } = await makeHarness(dir);
-    assert.deepEqual(
-      human.fillHuman({ wcId: 30, vaultId: 'work', itemId: workCard.id }),
-      { filled: false, reason: 'ineligible' }
-    );
+    assert.deepEqual(human.fillHuman({ wcId: 30, vaultId: 'work', itemId: workCard.id }), {
+      filled: false,
+      reason: 'ineligible'
+    });
     assert.equal(cardCalls.length, 0);
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('an omitted fillCardDelegate refuses rather than silently dropping the fill', async () => {
@@ -192,14 +216,16 @@ test('an omitted fillCardDelegate refuses rather than silently dropping the fill
       fromId: () => ({ getURL: () => SHOP + '/checkout' }),
       getTabEntry: () => ({ partition: 'persist:container:work', trusted: false }),
       listJars: () => JARS,
-      fillDelegate: () => {},
+      fillDelegate: () => {}
       // fillCardDelegate deliberately omitted
     });
-    assert.deepEqual(
-      human.fillHuman({ wcId: 12, vaultId: 'work', itemId: card.id }),
-      { filled: false, reason: 'ineligible' }
-    );
-  } finally { rm(dir); }
+    assert.deepEqual(human.fillHuman({ wcId: 12, vaultId: 'work', itemId: card.id }), {
+      filled: false,
+      reason: 'ineligible'
+    });
+  } finally {
+    rm(dir);
+  }
 });
 
 // --- the login path is untouched by the card branch -----------------------
@@ -209,12 +235,14 @@ test('a LOGIN still refuses on an origin mismatch (the card branch did not widen
   try {
     const { human, fillCalls, workLogin } = await makeHarness(dir);
     // wcId 12 is at SHOP; the login is stored for A.
-    assert.deepEqual(
-      human.fillHuman({ wcId: 12, vaultId: 'work', itemId: workLogin.id }),
-      { filled: false, reason: 'origin-mismatch' }
-    );
+    assert.deepEqual(human.fillHuman({ wcId: 12, vaultId: 'work', itemId: workLogin.id }), {
+      filled: false,
+      reason: 'origin-mismatch'
+    });
     assert.equal(fillCalls.length, 0);
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('a login still fills normally at its own origin', async () => {
@@ -224,7 +252,9 @@ test('a login still fills normally at its own origin', async () => {
     assert.deepEqual(human.fillHuman({ wcId: 10, vaultId: 'work', itemId: workLogin.id }), { filled: true });
     assert.deepEqual(fillCalls[0].credential, { username: 'w@a', password: 'work-pass' });
     assert.equal(cardCalls.length, 0);
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 // --- the picker model ------------------------------------------------------
@@ -242,7 +272,9 @@ test('reachableItems merges origin-matched logins with jar-scoped cards, each ty
     assert.deepEqual(cards.map((c) => c.vaultId).sort(), ['global', 'work']);
     // Logins are listed before cards.
     assert.equal(rows[0].type, 'login');
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('cards surface at an unrelated merchant where NO login matches', async () => {
@@ -251,9 +283,15 @@ test('cards surface at an unrelated merchant where NO login matches', async () =
     const { human } = await makeHarness(dir);
     const rows = human.reachableItems(12); // work tab at SHOP
 
-    assert.deepEqual(rows.filter((r) => r.type === 'login'), [], 'no login matches this origin');
+    assert.deepEqual(
+      rows.filter((r) => r.type === 'login'),
+      [],
+      'no login matches this origin'
+    );
     assert.equal(rows.filter((r) => r.type === 'card').length, 2, 'both reachable cards still offered');
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('the picker model is METADATA ONLY — no PAN, CVV or expiry anywhere', async () => {
@@ -265,10 +303,7 @@ test('the picker model is METADATA ONLY — no PAN, CVV or expiry anywhere', asy
     assert.ok(cards.length > 0);
 
     for (const row of cards) {
-      assert.deepEqual(
-        Object.keys(row).sort(),
-        ['brand', 'cardholder', 'id', 'last4', 'title', 'type', 'vaultId'],
-      );
+      assert.deepEqual(Object.keys(row).sort(), ['brand', 'cardholder', 'id', 'last4', 'title', 'type', 'vaultId']);
       for (const secret of ['number', 'cvv', 'expiry']) {
         assert.ok(!(secret in row), `no ${secret} key on a picker row`);
       }
@@ -277,7 +312,9 @@ test('the picker model is METADATA ONLY — no PAN, CVV or expiry anywhere', asy
     assert.ok(!json.includes('4242424242424242'), 'no PAN in the picker model');
     assert.ok(!json.includes('"123"'), 'no CVV in the picker model');
     assert.ok(!json.includes('12/28'), 'no expiry in the picker model');
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('a BURNER tab reaches no cards (no metadata leak to a non-persistent tab)', async () => {
@@ -285,7 +322,9 @@ test('a BURNER tab reaches no cards (no metadata leak to a non-persistent tab)',
   try {
     const { human } = await makeHarness(dir);
     assert.deepEqual(human.reachableItems(20), []);
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('a LOCKED vault reaches no cards', async () => {
@@ -294,5 +333,7 @@ test('a LOCKED vault reaches no cards', async () => {
     const { store, human } = await makeHarness(dir);
     store.lockNow();
     assert.deepEqual(human.reachableItems(12), []);
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });

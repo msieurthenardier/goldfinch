@@ -61,7 +61,10 @@ test('chrome index.html CSP: img-src/media-src drop http:/https: and gain goldfi
   const imgSrc = directive(csp, 'img-src');
   const mediaSrc = directive(csp, 'media-src');
 
-  for (const [name, value] of [['img-src', imgSrc], ['media-src', mediaSrc]]) {
+  for (const [name, value] of [
+    ['img-src', imgSrc],
+    ['media-src', mediaSrc]
+  ]) {
     assert.equal(/\bhttp:/.test(value), false, `${name} must not contain http: — got "${value}"`);
     assert.equal(/\bhttps:/.test(value), false, `${name} must not contain https: — got "${value}"`);
     assert.equal(/\bgoldfinch-media:/.test(value), true, `${name} must contain goldfinch-media: — got "${value}"`);
@@ -76,6 +79,10 @@ test('overlay documents stay unreachable from the proxy scheme and the open web 
     const csp = extractCsp(overlayPath);
     assert.equal(/\bhttp:/.test(csp), false, `${overlayPath}: CSP must not contain http: — got "${csp}"`);
     assert.equal(/\bhttps:/.test(csp), false, `${overlayPath}: CSP must not contain https: — got "${csp}"`);
-    assert.equal(/\bgoldfinch-media:/.test(csp), false, `${overlayPath}: CSP must not contain goldfinch-media: — got "${csp}"`);
+    assert.equal(
+      /\bgoldfinch-media:/.test(csp),
+      false,
+      `${overlayPath}: CSP must not contain goldfinch-media: — got "${csp}"`
+    );
   }
 });

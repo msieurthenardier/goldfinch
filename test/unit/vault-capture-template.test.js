@@ -14,7 +14,9 @@ const assert = require('node:assert/strict');
 
 const { createDocument } = require('./helpers/jars-page-dom');
 const {
-  buildVaultCaptureCard, renderVaultCaptureCard, selectedVaultId,
+  buildVaultCaptureCard,
+  renderVaultCaptureCard,
+  selectedVaultId
 } = require('../../src/shared/vault-capture-template.js');
 
 test('buildVaultCaptureCard: a centered backdrop + a role="dialog" card with Save/Cancel', () => {
@@ -33,8 +35,14 @@ test('renderVaultCaptureCard (save): Save heading + a vault radio choice, defaul
   const document = createDocument();
   const refs = buildVaultCaptureCard(document);
   const model = {
-    origin: 'https://a.example', username: 'me@a', mode: 'save', defaultVaultId: 'work',
-    choices: [{ vaultId: 'work', label: 'Work' }, { vaultId: 'global', label: 'Global' }],
+    origin: 'https://a.example',
+    username: 'me@a',
+    mode: 'save',
+    defaultVaultId: 'work',
+    choices: [
+      { vaultId: 'work', label: 'Work' },
+      { vaultId: 'global', label: 'Global' }
+    ]
   };
   const { mode, choiceInputs } = renderVaultCaptureCard(document, refs, model);
 
@@ -72,7 +80,13 @@ test('renderVaultCaptureCard (update): Update heading and NO vault choice', () =
 test('renderVaultCaptureCard: a null username renders a "(no username)" placeholder', () => {
   const document = createDocument();
   const refs = buildVaultCaptureCard(document);
-  renderVaultCaptureCard(document, refs, { origin: 'https://a.example', username: null, mode: 'save', defaultVaultId: 'work', choices: ['work'] });
+  renderVaultCaptureCard(document, refs, {
+    origin: 'https://a.example',
+    username: null,
+    mode: 'save',
+    defaultVaultId: 'work',
+    choices: ['work']
+  });
   assert.equal(refs.usernameValue.textContent, '(no username)');
 });
 
@@ -80,7 +94,10 @@ test('renderVaultCaptureCard: string choices render, global labeled "Global", fi
   const document = createDocument();
   const refs = buildVaultCaptureCard(document);
   const { choiceInputs } = renderVaultCaptureCard(document, refs, {
-    origin: 'https://a.example', username: 'me@a', mode: 'save', choices: ['work', 'global'],
+    origin: 'https://a.example',
+    username: 'me@a',
+    mode: 'save',
+    choices: ['work', 'global']
   });
   // No defaultVaultId → the first choice is checked.
   assert.equal(choiceInputs[0].checked, true);
@@ -93,9 +110,21 @@ test('renderVaultCaptureCard: string choices render, global labeled "Global", fi
 test('renderVaultCaptureCard: re-render replaces prior content + clears the error line', () => {
   const document = createDocument();
   const refs = buildVaultCaptureCard(document);
-  renderVaultCaptureCard(document, refs, { origin: 'https://a.example', username: 'x', mode: 'save', defaultVaultId: 'work', choices: ['work', 'global'] });
+  renderVaultCaptureCard(document, refs, {
+    origin: 'https://a.example',
+    username: 'x',
+    mode: 'save',
+    defaultVaultId: 'work',
+    choices: ['work', 'global']
+  });
   refs.error.textContent = 'Couldn’t save the password';
-  const { choiceInputs } = renderVaultCaptureCard(document, refs, { origin: 'https://b.example', username: 'y', mode: 'update', defaultVaultId: 'work', choices: [] });
+  const { choiceInputs } = renderVaultCaptureCard(document, refs, {
+    origin: 'https://b.example',
+    username: 'y',
+    mode: 'update',
+    defaultVaultId: 'work',
+    choices: []
+  });
   assert.equal(refs.error.textContent, '', 'error cleared on re-render');
   assert.equal(refs.originValue.textContent, 'https://b.example');
   assert.equal(refs.choices.children.length, 0, 'prior save choices removed on the update re-render');
@@ -104,6 +133,18 @@ test('renderVaultCaptureCard: re-render replaces prior content + clears the erro
 
 test('selectedVaultId: honors the checked radio, else the first, else null', () => {
   assert.equal(selectedVaultId([]), null);
-  assert.equal(selectedVaultId([{ checked: false, value: 'a' }, { checked: true, value: 'b' }]), 'b');
-  assert.equal(selectedVaultId([{ checked: false, value: 'a' }, { checked: false, value: 'b' }]), 'a');
+  assert.equal(
+    selectedVaultId([
+      { checked: false, value: 'a' },
+      { checked: true, value: 'b' }
+    ]),
+    'b'
+  );
+  assert.equal(
+    selectedVaultId([
+      { checked: false, value: 'a' },
+      { checked: false, value: 'b' }
+    ]),
+    'a'
+  );
 });

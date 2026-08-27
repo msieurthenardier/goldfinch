@@ -37,7 +37,7 @@ function createPushCache(initial) {
     /** @returns {T} the cached value */
     get() {
       return value;
-    },
+    }
   };
 }
 

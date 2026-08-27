@@ -2,13 +2,7 @@
 
 // Construct the three process-wide push helpers from live authorities. No
 // cache is introduced: records and webContents are enumerated per broadcast.
-function createBroadcasters({
-  registry,
-  webContents,
-  isInternalContents,
-  closedTabStack,
-  buildMoveTargets
-}) {
+function createBroadcasters({ registry, webContents, isInternalContents, closedTabStack, buildMoveTargets }) {
   function liveChrome(record) {
     const contents = record.chromeView.webContents;
     return contents && !contents.isDestroyed() ? contents : null;

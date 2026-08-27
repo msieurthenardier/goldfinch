@@ -20,7 +20,10 @@ const { makeAutomationToggle } = require('../../src/main/automation/toggle');
 // A manually-resolved deferred — the test resolves it to release a pending `start`.
 function deferred() {
   let resolve, reject;
-  const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+  const promise = new Promise((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
   return { promise, resolve, reject };
 }
 
@@ -36,25 +39,37 @@ function makeHarness({ initialServer = null, devOverride = false, startBlocker =
     calls.start += 1;
     if (startBlocker) await startBlocker.promise; // gate overlap deterministically
     // Mirror startMcpServerInstance: install a fresh server into the slot.
-    server = { stop: async () => { calls.stop += 1; } };
+    server = {
+      stop: async () => {
+        calls.stop += 1;
+      }
+    };
   };
   // stop() mediates the current server, matching main.js's `() => mcpServer.stop()`.
-  const stop = async () => { if (server) await server.stop(); };
+  const stop = async () => {
+    if (server) await server.stop();
+  };
 
   const toggle = makeAutomationToggle({
     start,
     stop,
     getServer: () => server,
-    setServer: (s) => { server = s; },
+    setServer: (s) => {
+      server = s;
+    },
     isDevOverride: () => dev,
-    setStatus: (s) => { calls.statusWrites.push(s); },
+    setStatus: (s) => {
+      calls.statusWrites.push(s);
+    }
   });
 
   return {
     toggle,
     calls,
     getServer: () => server,
-    setDevOverride: (v) => { dev = v; },
+    setDevOverride: (v) => {
+      dev = v;
+    }
   };
 }
 
@@ -82,8 +97,8 @@ test('flip-ON then flip-OFF overlap → final state is OFF (no lost no-op)', asy
   const blocker = deferred();
   const h = makeHarness({ initialServer: null, startBlocker: blocker });
 
-  const pOn = h.toggle.applyEnabledChange(true);   // starts, blocked
-  const pOff = h.toggle.applyEnabledChange(false);  // queued AFTER the start
+  const pOn = h.toggle.applyEnabledChange(true); // starts, blocked
+  const pOff = h.toggle.applyEnabledChange(false); // queued AFTER the start
 
   await Promise.resolve();
   blocker.resolve();
@@ -117,7 +132,12 @@ test('rejection isolation — a prior op whose stop() rejects does not wedge the
   // Count stop attempts directly so we can prove the NEXT op's body ran even though the
   // server stays present after the failing teardown (stop() threw before setServer(null)).
   let stopAttempts = 0;
-  const badServer = { stop: async () => { stopAttempts += 1; throw new Error('stop failed'); } };
+  const badServer = {
+    stop: async () => {
+      stopAttempts += 1;
+      throw new Error('stop failed');
+    }
+  };
   const h = makeHarness({ initialServer: badServer });
 
   const pOff = h.toggle.applyEnabledChange(false);
@@ -164,7 +184,7 @@ test('rebind concurrent with flip-ON is serialized (no stop()-on-null)', async (
   const blocker = deferred();
   const h = makeHarness({ initialServer: { stop: async () => {} }, startBlocker: blocker });
 
-  const pRebind = h.toggle.rebind();           // stop old, then blocked start
+  const pRebind = h.toggle.rebind(); // stop old, then blocked start
   const pFlipOn = h.toggle.applyEnabledChange(true); // queued; server present → no start
 
   await Promise.resolve();

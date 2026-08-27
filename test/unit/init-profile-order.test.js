@@ -41,20 +41,45 @@ function makeWorld() {
       assert.equal(name, 'userData', 'consumers resolve the userData dir');
       order.push('getPath');
       return userData;
-    },
+    }
   };
   const appDb = {
     open: (p) => {
       order.push('appDb.open');
       order.push(`appDb.open:${p}`);
-    },
+    }
   };
   const stores = {
-    shields: { load: (p) => { order.push('shields.load'); order.push(`shields.load:${p}`); } },
-    settings: { load: (p) => { order.push('settings.load'); order.push(`settings.load:${p}`); } },
-    jars: { load: (p) => { order.push('jars.load'); order.push(`jars.load:${p}`); } },
-    downloads: { load: (p) => { order.push('downloads.load'); order.push(`downloads.load:${p}`); } },
-    bookmarks: { load: (p) => { order.push('bookmarks.load'); order.push(`bookmarks.load:${p}`); } },
+    shields: {
+      load: (p) => {
+        order.push('shields.load');
+        order.push(`shields.load:${p}`);
+      }
+    },
+    settings: {
+      load: (p) => {
+        order.push('settings.load');
+        order.push(`settings.load:${p}`);
+      }
+    },
+    jars: {
+      load: (p) => {
+        order.push('jars.load');
+        order.push(`jars.load:${p}`);
+      }
+    },
+    downloads: {
+      load: (p) => {
+        order.push('downloads.load');
+        order.push(`downloads.load:${p}`);
+      }
+    },
+    bookmarks: {
+      load: (p) => {
+        order.push('bookmarks.load');
+        order.push(`bookmarks.load:${p}`);
+      }
+    }
   };
   return { app, appDb, stores, order };
 }
@@ -80,10 +105,7 @@ test('appDb.open runs before every getPath(userData) store-load consumer', () =>
   // And every store received the SAME userData path this function was given
   // (this module trusts app.getPath('userData') verbatim — the redirect, if
   // any, already happened upstream in main.js before this function ran).
-  assert.ok(
-    w.order.includes('appDb.open:/home/x/.config/goldfinch-dev'),
-    'appDb.open got the userData path as given'
-  );
+  assert.ok(w.order.includes('appDb.open:/home/x/.config/goldfinch-dev'), 'appDb.open got the userData path as given');
   assert.ok(
     w.order.includes('shields.load:/home/x/.config/goldfinch-dev'),
     'shields.load got the userData path as given'
@@ -92,10 +114,7 @@ test('appDb.open runs before every getPath(userData) store-load consumer', () =>
     w.order.includes('settings.load:/home/x/.config/goldfinch-dev'),
     'settings.load got the userData path as given'
   );
-  assert.ok(
-    w.order.includes('jars.load:/home/x/.config/goldfinch-dev'),
-    'jars.load got the userData path as given'
-  );
+  assert.ok(w.order.includes('jars.load:/home/x/.config/goldfinch-dev'), 'jars.load got the userData path as given');
   assert.ok(
     w.order.includes('downloads.load:/home/x/.config/goldfinch-dev'),
     'downloads.load got the userData path as given'

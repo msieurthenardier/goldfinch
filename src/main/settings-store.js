@@ -182,11 +182,7 @@ const VALIDATORS = {
   // different stored things. The Settings Clear button (M16 F2 Leg 1) and the
   // welcome surface's own preference writes are the paths that produce it now;
   // it is also DEFAULTS.homePage itself as of M16 F2 Leg 2 / DD5.
-  homePage: (v) =>
-    v === null ||
-    (typeof v === 'string' &&
-      isSafeTabUrl(v) &&
-      v.trim().toLowerCase() !== 'about:blank'),
+  homePage: (v) => v === null || (typeof v === 'string' && isSafeTabUrl(v) && v.trim().toLowerCase() !== 'about:blank'),
 
   // searchEngine (M16 F1 / DD1, DD2): null (unset — see homePage above) or
   // membership in the curated table's id set. Deliberately a MEMBERSHIP check,
@@ -229,26 +225,21 @@ const VALIDATORS = {
     v !== null &&
     typeof v === 'object' &&
     !Array.isArray(v) &&
-    Object.values(/** @type {object} */ (v)).every(
-      (x) => typeof x === 'string' && HEX64.test(x)
-    ),
+    Object.values(/** @type {object} */ (v)).every((x) => typeof x === 'string' && HEX64.test(x)),
 
   // automationAdminKeyHash: '' (no admin key) or a 64-char lowercase-hex digest.
-  automationAdminKeyHash: (v) =>
-    typeof v === 'string' && (v === '' || HEX64.test(v)),
+  automationAdminKeyHash: (v) => typeof v === 'string' && (v === '' || HEX64.test(v)),
 
   // automationPort: an integer in the registered/dynamic port range [1024, 65535].
   // Number.isInteger rejects strings, null, arrays, booleans, and non-integers —
   // no extra guards needed.
-  automationPort: (v) =>
-    typeof v === 'number' && Number.isInteger(v) && v >= 1024 && v <= 65535,
+  automationPort: (v) => typeof v === 'number' && Number.isInteger(v) && v >= 1024 && v <= 65535,
 
   // vaultAutoLockMinutes: an integer in [1, 1440] (1 min .. 24 h). The
   // automationPort integer-range validator is the template — Number.isInteger
   // rejects strings, null, arrays, booleans, and non-integers; the bounds reject
   // 0/negative and anything over a day.
-  vaultAutoLockMinutes: (v) =>
-    typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 1440
+  vaultAutoLockMinutes: (v) => typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 1440
 };
 
 // ---------------------------------------------------------------------------
@@ -357,10 +348,7 @@ function migrateStored(stored) {
     return { stored, migrated: false };
   }
   // An absent/non-integer version cannot prove v2+ — treat as v1 (migrate).
-  const from =
-    typeof stored.version === 'number' && Number.isInteger(stored.version)
-      ? stored.version
-      : 1;
+  const from = typeof stored.version === 'number' && Number.isInteger(stored.version) ? stored.version : 1;
   if (from >= DEFAULTS.version) {
     return { stored, migrated: false };
   }

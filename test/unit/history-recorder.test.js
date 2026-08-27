@@ -36,7 +36,13 @@ function makeBroadcast() {
   return broadcast;
 }
 
-function makeRecorder({ jars = [JAR_A, JAR_B], store = makeStore(), broadcast = makeBroadcast(), now, suppressionMs } = {}) {
+function makeRecorder({
+  jars = [JAR_A, JAR_B],
+  store = makeStore(),
+  broadcast = makeBroadcast(),
+  now,
+  suppressionMs
+} = {}) {
   return {
     store,
     broadcast,
@@ -103,7 +109,11 @@ test('handleNavigation: internal partition returns null, zero store calls', () =
 
 test('handleNavigation: unknown/unregistered partition returns null, zero store calls', () => {
   const { recorder, store } = makeRecorder();
-  const result = recorder.handleNavigation({ wcId: 1, partition: 'persist:container:ghost', url: 'https://example.com/' });
+  const result = recorder.handleNavigation({
+    wcId: 1,
+    partition: 'persist:container:ghost',
+    url: 'https://example.com/'
+  });
   assert.equal(result, null);
   assert.equal(store.calls.length, 0);
 });
@@ -186,7 +196,11 @@ test('handleNavigation: suppression does not self-extend — a suppressed hit do
   // If suppression had self-extended from the suppressed hit's ts (1_020_000), this would still
   // be suppressed (only 15s later). It must record, proving ts stayed at the original 1_000_000.
   const third = recorder.handleNavigation({ wcId: 1, partition: JAR_A.partition, url: 'https://example.com/' });
-  assert.equal(typeof third, 'number', 'suppression window measured from the original recorded ts, not the suppressed hit');
+  assert.equal(
+    typeof third,
+    'number',
+    'suppression window measured from the original recorded ts, not the suppressed hit'
+  );
   assert.equal(store.calls.length, 2);
 });
 

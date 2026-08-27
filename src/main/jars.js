@@ -75,18 +75,54 @@ const DEFAULT_RETENTION_DAYS = 30;
 
 // New-install seed (v2): Personal (default) + Work.
 const FRESH_SEED = [
-  { id: 'personal', name: 'Personal', color: '#4caf50', partition: 'persist:container:personal', retentionDays: DEFAULT_RETENTION_DAYS },
-  { id: 'work', name: 'Work', color: '#2196f3', partition: 'persist:container:work', retentionDays: DEFAULT_RETENTION_DAYS }
+  {
+    id: 'personal',
+    name: 'Personal',
+    color: '#4caf50',
+    partition: 'persist:container:personal',
+    retentionDays: DEFAULT_RETENTION_DAYS
+  },
+  {
+    id: 'work',
+    name: 'Work',
+    color: '#2196f3',
+    partition: 'persist:container:work',
+    retentionDays: DEFAULT_RETENTION_DAYS
+  }
 ];
 
 // Legacy-install seed (DD3c): the four-jar set a pre-v2 profile shipped with,
 // used by load() when there is no readable store but the base partition dir
 // proves the app has run before.
 const LEGACY_DEFAULTS = [
-  { id: 'default', name: 'Default', color: '#9aa0ac', partition: 'persist:goldfinch', retentionDays: DEFAULT_RETENTION_DAYS },
-  { id: 'personal', name: 'Personal', color: '#4caf50', partition: 'persist:container:personal', retentionDays: DEFAULT_RETENTION_DAYS },
-  { id: 'work', name: 'Work', color: '#2196f3', partition: 'persist:container:work', retentionDays: DEFAULT_RETENTION_DAYS },
-  { id: 'banking', name: 'Banking', color: '#f5c518', partition: 'persist:container:banking', retentionDays: DEFAULT_RETENTION_DAYS }
+  {
+    id: 'default',
+    name: 'Default',
+    color: '#9aa0ac',
+    partition: 'persist:goldfinch',
+    retentionDays: DEFAULT_RETENTION_DAYS
+  },
+  {
+    id: 'personal',
+    name: 'Personal',
+    color: '#4caf50',
+    partition: 'persist:container:personal',
+    retentionDays: DEFAULT_RETENTION_DAYS
+  },
+  {
+    id: 'work',
+    name: 'Work',
+    color: '#2196f3',
+    partition: 'persist:container:work',
+    retentionDays: DEFAULT_RETENTION_DAYS
+  },
+  {
+    id: 'banking',
+    name: 'Banking',
+    color: '#f5c518',
+    partition: 'persist:container:banking',
+    retentionDays: DEFAULT_RETENTION_DAYS
+  }
 ];
 
 let containers = FRESH_SEED.map((c) => ({ ...c }));

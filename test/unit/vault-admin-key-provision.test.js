@@ -34,7 +34,7 @@ function makeStore(dir, overrides = {}) {
     scryptParams: FAST_SCRYPT,
     getAutoLockMinutes: () => 10,
     listJars: () => JARS,
-    ...overrides,
+    ...overrides
   });
 }
 function vaultPath(dir, id) {
@@ -90,8 +90,14 @@ test('rotateAdminKey: new key opens the seal + ALL vaults (global + jar); only m
     const s = makeStore(dir);
     const keys = s.openAllWithAdminKey(newPriv);
     assert.deepEqual([...keys.keys()].sort(), ['global', 'work'], 'admin key opens all vaults');
-    assert.deepEqual(s.readVaultItems('global', keys.get('global')).map((i) => i.title), ['GlobalKept']);
-    assert.deepEqual(s.readVaultItems('work', keys.get('work')).map((i) => i.title), ['WorkKept']);
+    assert.deepEqual(
+      s.readVaultItems('global', keys.get('global')).map((i) => i.title),
+      ['GlobalKept']
+    );
+    assert.deepEqual(
+      s.readVaultItems('work', keys.get('work')).map((i) => i.title),
+      ['WorkKept']
+    );
     for (const k of keys.values()) k.fill(0);
   } finally {
     rm(dir);
@@ -110,7 +116,10 @@ test('rotateAdminKey: the OLD admin private key no longer opens the seal after r
     const s = makeStore(dir);
     // The re-sealed manager.mrk.admin is bound to the NEW public key — the old private key's
     // ECDH derives the wrong wrapping key → GCM auth fails → VaultAuthError.
-    assert.throws(() => s.openAllWithAdminKey(oldPriv), (e) => e instanceof vs.VaultAuthError);
+    assert.throws(
+      () => s.openAllWithAdminKey(oldPriv),
+      (e) => e instanceof vs.VaultAuthError
+    );
     // The new key still works (sanity — invalidation is scoped to the old key only).
     const keys = s.openAllWithAdminKey(newPriv);
     assert.ok(keys.has('global'));
@@ -136,7 +145,10 @@ test('rotateAdminKey: from-scratch PROVISION — a setup manager whose admin key
     // The provisioned key is immediately usable — it opens the seal + reads items.
     const s = makeStore(dir);
     const keys = s.openAllWithAdminKey(provisioned);
-    assert.deepEqual(s.readVaultItems('global', keys.get('global')).map((i) => i.title), ['Provisioned']);
+    assert.deepEqual(
+      s.readVaultItems('global', keys.get('global')).map((i) => i.title),
+      ['Provisioned']
+    );
     for (const k of keys.values()) k.fill(0);
   } finally {
     rm(dir);
@@ -189,10 +201,7 @@ test('rotateAdminKey: while LOCKED throws VaultLockedError (route to unlock)', a
     const store = makeStore(dir);
     await store.setup({ masterPassword: MASTER });
     store.lockNow();
-    await assert.rejects(
-      store.rotateAdminKey({ masterPassword: MASTER }),
-      (e) => e instanceof vs.VaultLockedError
-    );
+    await assert.rejects(store.rotateAdminKey({ masterPassword: MASTER }), (e) => e instanceof vs.VaultLockedError);
   } finally {
     rm(dir);
   }

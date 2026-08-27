@@ -106,7 +106,26 @@ const find = require('./find');
  *   `unknown-jar` code rather than a silent empty result.
  * @returns {{ [op: string]: (...args: any[]) => any }}
  */
-function createEngine(getChromeContents, { allowInternal = false, getDownloads = null, grabWindow = null, listWindows = null, listPopups = null, enumerateWindows = null, isTabViewWcId = null, isPopupWcId = null, isChromeContents = null, isSheetContents = null, sheetMenuFor = null, chromeForTab = null, raiseWindowForTab = null, getHistoryReads = null, isKnownJar = null } = {}) {
+function createEngine(
+  getChromeContents,
+  {
+    allowInternal = false,
+    getDownloads = null,
+    grabWindow = null,
+    listWindows = null,
+    listPopups = null,
+    enumerateWindows = null,
+    isTabViewWcId = null,
+    isPopupWcId = null,
+    isChromeContents = null,
+    isSheetContents = null,
+    sheetMenuFor = null,
+    chromeForTab = null,
+    raiseWindowForTab = null,
+    getHistoryReads = null,
+    isKnownJar = null
+  } = {}
+) {
   const fromId = (/** @type {number} */ id) => webContents.fromId(id);
 
   /**
@@ -164,7 +183,25 @@ function createEngine(getChromeContents, { allowInternal = false, getDownloads =
     // half (same conditional-spread idiom) and allowSheet the op half (per-call, below).
     // listPopups / isPopupWcId (M14 F2 L2, DD1a) ride base by the SAME
     // conditional-spread idiom: absent → no popup rows / no popup widening.
-    const base = { fromId, chromeContents, executeInRenderer, executeInChrome, allowInternal, fromPartition: session.fromPartition, grabWindow, ...(allowSheet === true ? { allowSheet: true } : {}), ...(typeof listWindows === 'function' ? { listWindows } : {}), ...(typeof listPopups === 'function' ? { listPopups } : {}), ...(typeof isTabViewWcId === 'function' ? { isTabViewWcId } : {}), ...(typeof isPopupWcId === 'function' ? { isPopupWcId } : {}), ...(typeof isChromeContents === 'function' ? { isChromeContents } : {}), ...(typeof isSheetContents === 'function' ? { isSheetContents } : {}), ...(typeof sheetMenuFor === 'function' ? { sheetMenuFor } : {}), ...(typeof chromeForTab === 'function' ? { chromeForTab } : {}), ...(typeof raiseWindowForTab === 'function' ? { raiseWindowForTab } : {}) };
+    const base = {
+      fromId,
+      chromeContents,
+      executeInRenderer,
+      executeInChrome,
+      allowInternal,
+      fromPartition: session.fromPartition,
+      grabWindow,
+      ...(allowSheet === true ? { allowSheet: true } : {}),
+      ...(typeof listWindows === 'function' ? { listWindows } : {}),
+      ...(typeof listPopups === 'function' ? { listPopups } : {}),
+      ...(typeof isTabViewWcId === 'function' ? { isTabViewWcId } : {}),
+      ...(typeof isPopupWcId === 'function' ? { isPopupWcId } : {}),
+      ...(typeof isChromeContents === 'function' ? { isChromeContents } : {}),
+      ...(typeof isSheetContents === 'function' ? { isSheetContents } : {}),
+      ...(typeof sheetMenuFor === 'function' ? { sheetMenuFor } : {}),
+      ...(typeof chromeForTab === 'function' ? { chromeForTab } : {}),
+      ...(typeof raiseWindowForTab === 'function' ? { raiseWindowForTab } : {})
+    };
     // activateTab returns Promise<boolean> (the executeInRenderer result) but the input.js deps
     // type declares activate as (id: number) => Promise<void>. The boolean result is unused by
     // actOn; cast via @type to satisfy the narrower type without widening the input module's API.
@@ -208,18 +245,29 @@ function createEngine(getChromeContents, { allowInternal = false, getDownloads =
     click: (/** @type {number} */ wcId, /** @type {number} */ x, /** @type {number} */ y, /** @type {any} */ opts) =>
       input.click(wcId, x, y, deps(), opts),
     typeText: (/** @type {number} */ wcId, /** @type {string} */ text) => input.typeText(wcId, text, deps()),
-    scroll: (/** @type {number} */ wcId, /** @type {number} */ x, /** @type {number} */ y, /** @type {number} */ dx, /** @type {number} */ dy) =>
-      input.scroll(wcId, x, y, dx, dy, deps()),
-    pressKey: (/** @type {number} */ wcId, /** @type {string} */ name, /** @type {string[]|undefined} */ modifiers) => input.pressKey(wcId, name, modifiers, deps()),
-    dragPointer: (/** @type {number} */ wcId, /** @type {{x:number,y:number}} */ from, /** @type {{x:number,y:number}} */ to, /** @type {any} */ opts) =>
-      input.dragPointer(wcId, from, to, deps(), opts),
+    scroll: (
+      /** @type {number} */ wcId,
+      /** @type {number} */ x,
+      /** @type {number} */ y,
+      /** @type {number} */ dx,
+      /** @type {number} */ dy
+    ) => input.scroll(wcId, x, y, dx, dy, deps()),
+    pressKey: (/** @type {number} */ wcId, /** @type {string} */ name, /** @type {string[]|undefined} */ modifiers) =>
+      input.pressKey(wcId, name, modifiers, deps()),
+    dragPointer: (
+      /** @type {number} */ wcId,
+      /** @type {{x:number,y:number}} */ from,
+      /** @type {{x:number,y:number}} */ to,
+      /** @type {any} */ opts
+    ) => input.dragPointer(wcId, from, to, deps(), opts),
     getZoom: (/** @type {number} */ wcId) => zoom.getZoom(wcId, deps()),
     setZoom: (/** @type {number} */ wcId, /** @type {number} */ factor) => zoom.setZoom(wcId, factor, deps()),
     // M15 F3 L1 (DD1a/DD1b) — ONE of the THREE `allowSheet` opt-ins (the others are readDom
     // and readAxTree below). These three, and only these three, may resolve the menu-overlay
     // sheet, and only while its current menuType is in AUTOMATABLE_MENU_TYPES. Adding a fourth
     // is a security decision — read resolve.js's guard-3 comment before you do.
-    captureScreenshot: (/** @type {number} */ wcId, /** @type {any} */ opts) => observe.captureScreenshot(wcId, deps({ allowSheet: true }), opts),
+    captureScreenshot: (/** @type {number} */ wcId, /** @type {any} */ opts) =>
+      observe.captureScreenshot(wcId, deps({ allowSheet: true }), opts),
     // F7 DD3: accepts the windowId discriminator (omitted → last-focused). Its WIRE
     // SHAPE IS UNCHANGED — a bare base64 string, because mcp-tools.js's imageResult
     // consumes it POSITIONALLY. Wrapping it to add windowId would yield a malformed
@@ -247,13 +295,17 @@ function createEngine(getChromeContents, { allowInternal = false, getDownloads =
     },
     // M15 F3 L1 (DD1a/DD1b) — the other TWO `allowSheet` opt-ins. See captureScreenshot above.
     readDom: (/** @type {number} */ wcId) => observe.readDom(wcId, deps({ allowSheet: true })),
-    readAxTree: (/** @type {number} */ wcId, /** @type {any} */ opts) => observe.readAxTree(wcId, deps({ allowSheet: true }), opts),
-    evaluate: (/** @type {number} */ wcId, /** @type {string} */ expression) => observe.evaluate(wcId, expression, deps()),
-    injectScript: (/** @type {number} */ wcId, /** @type {string} */ script) => observe.injectScript(wcId, script, deps()),
+    readAxTree: (/** @type {number} */ wcId, /** @type {any} */ opts) =>
+      observe.readAxTree(wcId, deps({ allowSheet: true }), opts),
+    evaluate: (/** @type {number} */ wcId, /** @type {string} */ expression) =>
+      observe.evaluate(wcId, expression, deps()),
+    injectScript: (/** @type {number} */ wcId, /** @type {string} */ script) =>
+      observe.injectScript(wcId, script, deps()),
     openDevTools: (/** @type {number} */ wcId) => observe.openDevTools(wcId, deps()),
     closeDevTools: (/** @type {number} */ wcId) => observe.closeDevTools(wcId, deps()),
     printToPDF: (/** @type {number} */ wcId) => print.printToPDF(wcId, deps()),
-    findInPage: (/** @type {number} */ wcId, /** @type {string} */ text, /** @type {any} */ opts) => find.findInPage(wcId, text, deps(), opts),
+    findInPage: (/** @type {number} */ wcId, /** @type {string} */ text, /** @type {any} */ opts) =>
+      find.findInPage(wcId, text, deps(), opts),
     stopFindInPage: (/** @type {number} */ wcId) => find.stopFindInPage(wcId, deps()),
     // F7 DD3: an optional windowId discriminator; omitted → the last-focused chrome
     // (F6's accessor, kept — an OS-focus read would regress determinism under WSLg).
@@ -264,18 +316,19 @@ function createEngine(getChromeContents, { allowInternal = false, getDownloads =
     // what keeps enumerateWindows "the flight's SINGLE discovery primitive" rather
     // than letting a second topology source drift alongside it.
     getChromeTarget: (/** @type {{ windowId?: number }} */ { windowId } = {}) => {
-      const row = requireWindow(windowId);   // throws no-such-window on an unknown id
+      const row = requireWindow(windowId); // throws no-such-window on an unknown id
       const cc = getChromeContents(windowId);
       // Kept VERBATIM: a null chrome is a DISTINCT, already-pinned condition from
       // no-such-window (the window exists but its view is closed/starting up).
-      if (!cc) throw new Error('automation: chrome-window-unavailable — chrome contents is null (closed or starting up)');
+      if (!cc)
+        throw new Error('automation: chrome-window-unavailable — chrome contents is null (closed or starting up)');
       // windowId from the RESOLVED row when supplied; otherwise from the census row
       // whose chrome IS this one — never re-derived from a second source.
       const resolved = row
         ? row.windowId
-        : (typeof enumerateWindows === 'function'
+        : typeof enumerateWindows === 'function'
           ? (enumerateWindows().find((/** @type {any} */ r) => r.chromeWcId === cc.id) || {}).windowId
-          : undefined);
+          : undefined;
       return { wcId: cc.id, kind: 'chrome', url: cc.getURL(), ...(resolved != null ? { windowId: resolved } : {}) };
     },
     // App-level downloads view (Flight 5, DD6): no wcId, admin-only via the scope façade.
@@ -292,7 +345,10 @@ function createEngine(getChromeContents, { allowInternal = false, getDownloads =
     // isKnownJar); the own-jar-vs-foreign-jar confinement compare happens in scope.js.
     // query and before are mutually exclusive (search has no cursor); query present
     // (non-empty string) → search, else → listRecent (before passes through as a cursor).
-    getHistory: (/** @type {string} */ jarId, /** @type {{ query?: string, limit?: number, before?: number }} */ opts = {}) => {
+    getHistory: (
+      /** @type {string} */ jarId,
+      /** @type {{ query?: string, limit?: number, before?: number }} */ opts = {}
+    ) => {
       if (typeof jarId !== 'string' || jarId.length === 0) {
         throw new Error('automation: bad-args — jarId required');
       }
@@ -303,11 +359,12 @@ function createEngine(getChromeContents, { allowInternal = false, getDownloads =
       if (query != null && before != null) {
         throw new Error('automation: bad-args — query does not page');
       }
-      const visits = typeof query === 'string' && query.length > 0
-        ? getHistoryReads.search(jarId, query, { limit })
-        : getHistoryReads.listRecent(jarId, { limit, before });
+      const visits =
+        typeof query === 'string' && query.length > 0
+          ? getHistoryReads.search(jarId, query, { limit })
+          : getHistoryReads.listRecent(jarId, { limit, before });
       return { jarId, visits };
-    },
+    }
   };
 }
 

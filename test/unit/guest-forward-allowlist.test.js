@@ -19,7 +19,16 @@ const { keydownToAction } = require('../../src/shared/keydown-action');
 // WEB guests: the full chrome-class set (design-review enumeration — 6 actions)
 // ---------------------------------------------------------------------------
 
-const WEB_FORWARDABLE = ['new-tab', 'close-tab', 'new-window', 'focus-address', 'toggle-panel', 'toggle-privacy', 'reload', 'reopen-closed-tab'];
+const WEB_FORWARDABLE = [
+  'new-tab',
+  'close-tab',
+  'new-window',
+  'focus-address',
+  'toggle-panel',
+  'toggle-privacy',
+  'reload',
+  'reopen-closed-tab'
+];
 
 for (const action of WEB_FORWARDABLE) {
   test(`web guest: '${action}' is forwardable (chrome-class parity set)`, () => {
@@ -132,10 +141,17 @@ test('Ctrl+N classifies to new-window end-to-end and forwards on both guest kind
 // ---------------------------------------------------------------------------
 
 const TAB_CYCLE_JUMP = [
-  'tab-next', 'tab-prev',
-  'tab-jump-1', 'tab-jump-2', 'tab-jump-3', 'tab-jump-4',
-  'tab-jump-5', 'tab-jump-6', 'tab-jump-7', 'tab-jump-8',
-  'tab-jump-last',
+  'tab-next',
+  'tab-prev',
+  'tab-jump-1',
+  'tab-jump-2',
+  'tab-jump-3',
+  'tab-jump-4',
+  'tab-jump-5',
+  'tab-jump-6',
+  'tab-jump-7',
+  'tab-jump-8',
+  'tab-jump-last'
 ];
 
 for (const action of TAB_CYCLE_JUMP) {
@@ -198,7 +214,7 @@ test('Ctrl+Shift+B classifies to toggle-bookmarks-bar end-to-end and forwards on
   assert.equal(isChromeActionForwardable(action, 'internal'), true);
 });
 
-test('isRepeatSafeAction(\'bookmark-page\') and (\'toggle-bookmarks-bar\') are false (not tab-* prefixed — held key must not repeat-fire)', () => {
+test("isRepeatSafeAction('bookmark-page') and ('toggle-bookmarks-bar') are false (not tab-* prefixed — held key must not repeat-fire)", () => {
   assert.equal(isRepeatSafeAction('bookmark-page'), false);
   assert.equal(isRepeatSafeAction('toggle-bookmarks-bar'), false);
 });
@@ -221,7 +237,16 @@ for (const action of TAB_CYCLE_JUMP) {
 // reopen-closed-tab precedent) — windows are heavier than tabs, and a held
 // Ctrl+N under guest focus must not machine-gun BaseWindows. This loop is the
 // dedicated pin the leg AC names.
-const NOT_REPEAT_SAFE = ['new-tab', 'close-tab', 'new-window', 'focus-address', 'toggle-panel', 'toggle-privacy', 'reload', 'reopen-closed-tab'];
+const NOT_REPEAT_SAFE = [
+  'new-tab',
+  'close-tab',
+  'new-window',
+  'focus-address',
+  'toggle-panel',
+  'toggle-privacy',
+  'reload',
+  'reopen-closed-tab'
+];
 
 for (const action of NOT_REPEAT_SAFE) {
   test(`isRepeatSafeAction('${action}') is false (held key must not stack/repeat-fire)`, () => {

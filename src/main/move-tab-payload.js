@@ -65,8 +65,8 @@ function validateMoveTabPayload(payload) {
       name: container.name,
       color: container.color,
       partition: container.partition,
-      ...(container.burner === true ? { burner: true } : {}),
-    },
+      ...(container.burner === true ? { burner: true } : {})
+    }
   };
 }
 
@@ -87,7 +87,7 @@ function buildAdoptPayload(p, wc) {
     url: (live && live.getURL()) || p.url,
     title: (live && live.getTitle()) || p.title,
     favicon: p.favicon,
-    container: p.container,
+    container: p.container
   };
 }
 

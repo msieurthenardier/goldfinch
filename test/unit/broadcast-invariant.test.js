@@ -339,7 +339,7 @@ const INLINE_CALLBACK_REGISTRARS = [
   'register-overlay-ipc.js',
   'register-settings-ipc.js',
   'register-tab-ipc.js',
-  'register-vault-ipc.js',
+  'register-vault-ipc.js'
 ];
 const NAMED_FUNCTION_REGISTRARS = ['register-bookmarks-ipc.js', 'jar-registry-ipc.js', 'jar-data-ipc.js'];
 
@@ -372,13 +372,22 @@ test('every settings-mutating registrar handler in production source broadcasts 
   }
   // Sanity: fail loudly if the extraction itself breaks (e.g. a future refactor
   // changes the registration shape) rather than silently scanning zero handlers.
-  assert.ok(all.length > 140, `expected well over a hundred registrar handlers across nine modules, found ${all.length}`);
+  assert.ok(
+    all.length > 140,
+    `expected well over a hundred registrar handlers across nine modules, found ${all.length}`
+  );
 
   const violations = all
-    .filter((r) => mutatesSettings(r.slice, r.mutationHelperNames) && !broadcastsSettingsChanged(r.slice, r.helperNames))
+    .filter(
+      (r) => mutatesSettings(r.slice, r.mutationHelperNames) && !broadcastsSettingsChanged(r.slice, r.helperNames)
+    )
     .filter((r) => !ALLOWLIST.has(r.label))
     .map((r) => r.label);
-  assert.deepEqual(violations, [], `handler(s) mutate settings without broadcasting settings-changed: ${violations.join(', ')}`);
+  assert.deepEqual(
+    violations,
+    [],
+    `handler(s) mutate settings without broadcasting settings-changed: ${violations.join(', ')}`
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -393,7 +402,7 @@ test('every settings-mutating settings registrar handler broadcasts settings-cha
     ['automation:jar-key-mint', ['personal']],
     ['automation:jar-key-revoke', ['personal']],
     ['automation:admin-key-mint', []],
-    ['automation:admin-key-revoke', []],
+    ['automation:admin-key-revoke', []]
   ];
   for (const [channel, args] of mutations) {
     h.events.length = 0;
@@ -406,7 +415,10 @@ test('every settings-mutating settings registrar handler broadcasts settings-cha
   }
   h.events.length = 0;
   h.send('unpin-toolbar-item', 'media');
-  assert.equal(h.events.some((event) => event[0] === 'broadcast' && event[1] === 'settings-changed'), true);
+  assert.equal(
+    h.events.some((event) => event[0] === 'broadcast' && event[1] === 'settings-changed'),
+    true
+  );
 });
 
 test('jar removal revokes settings then broadcasts settings-changed before jars-changed', async (t) => {
@@ -432,7 +444,8 @@ test('the allowlist is empty — the automation:set-port gap this net found is f
 // ---------------------------------------------------------------------------
 test('mutatesSettings/broadcastsSettingsChanged classify a synthetic mutating-without-broadcasting handler', () => {
   const bad = "ipcMain.handle('x', () => { settings.set('k', 1); return true; })";
-  const good = "ipcMain.handle('x', () => { settings.set('k', 1); broadcastToChromeAndInternal('settings-changed', settings.getAll()); })";
+  const good =
+    "ipcMain.handle('x', () => { settings.set('k', 1); broadcastToChromeAndInternal('settings-changed', settings.getAll()); })";
   assert.equal(mutatesSettings(bad), true);
   assert.equal(broadcastsSettingsChanged(bad), false);
   assert.equal(mutatesSettings(good), true);
@@ -444,7 +457,7 @@ test('mutatesSettings credits a handler that mutates only indirectly, through a 
   // mutation marker at all, but which calls a module-scope helper that wraps one —
   // the same DRY shape register-settings-ipc.js already uses on the broadcast side
   // with broadcastSettings().
-  const genuineMutationHelper = "const setPref = (k, v) => settings.set(k, v);";
+  const genuineMutationHelper = 'const setPref = (k, v) => settings.set(k, v);';
   const mutationHelperNames = extractMutationHelperNames(genuineMutationHelper);
   assert.deepEqual([...mutationHelperNames], ['setPref']);
 
@@ -481,8 +494,7 @@ test('mutatesSettings credits a handler that mutates only indirectly, through a 
 
   // A handler locally shadowing the credited helper name must not be credited either
   // (Finding B, reused as-is for the mutation side).
-  const shadowedHandler =
-    "ipcMain.on('toggle-y', () => { const setPref = () => {}; setPref('k', 1); })";
+  const shadowedHandler = "ipcMain.on('toggle-y', () => { const setPref = () => {}; setPref('k', 1); })";
   assert.equal(
     mutatesSettings(shadowedHandler, mutationHelperNames),
     false,
@@ -492,7 +504,8 @@ test('mutatesSettings credits a handler that mutates only indirectly, through a 
 
 test('extractBroadcastHelperNames credits a genuine broadcast helper but NOT a decoy that merely mentions the marker string (squawk 0001 review finding)', () => {
   const genuine = "const broadcastSettings = () => broadcast('settings-changed', settings.getAll());";
-  const genuineViaFanout = "const broadcastSettings = () => broadcastToChromeAndInternal('settings-changed', settings.getAll());";
+  const genuineViaFanout =
+    "const broadcastSettings = () => broadcastToChromeAndInternal('settings-changed', settings.getAll());";
   const decoy = "const fakeBroadcastHelper = () => 'settings-changed marker but does nothing';";
 
   assert.deepEqual([...extractBroadcastHelperNames(genuine)], ['broadcastSettings']);
@@ -584,7 +597,7 @@ test('broadcastsSettingsChanged rejects a decoy METHOD call and a locally-shadow
   const decoyMethodCall =
     "ipcMain.on('probe-decoy-method', () => { " +
     "settings.set('automationPort', 1); " +
-    "const fakeBroadcast = { broadcast: () => {} }; " +
+    'const fakeBroadcast = { broadcast: () => {} }; ' +
     "fakeBroadcast.broadcast('settings-changed', 'noop'); " +
     '})';
   assert.equal(mutatesSettings(decoyMethodCall), true);
@@ -758,12 +771,18 @@ function makeBookmarksIpcHarness() {
   const bookmarksStore = require('../../src/main/bookmarks-store');
   bookmarksStore.load(dir);
 
-  const jars = { list: () => [{ id: JAR_ID, name: 'Personal', color: '#4caf50', partition: 'persist:container:personal' }] };
+  const jars = {
+    list: () => [{ id: JAR_ID, name: 'Personal', color: '#4caf50', partition: 'persist:container:personal' }]
+  };
 
   /** @type {Array<{ channel: string, payload: any }>} */
   const events = [];
   const handlers = {};
-  const ipcMain = { handle: (channel, fn) => { handlers[channel] = fn; } };
+  const ipcMain = {
+    handle: (channel, fn) => {
+      handlers[channel] = fn;
+    }
+  };
   const broadcast = (channel, payload) => events.push({ channel, payload });
 
   registerBookmarksIpc({ ipcMain, bookmarksStore, jars, broadcast });

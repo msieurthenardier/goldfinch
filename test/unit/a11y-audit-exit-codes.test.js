@@ -33,7 +33,7 @@ test('a11y-audit exit codes: fail() exits 2, violations branch exits 1, clean br
   assert.equal(
     failMatch[1],
     '2',
-    'fail() (apparatus/setup failure) must exit 2 — distinct from the violations branch\'s exit 1, ' +
+    "fail() (apparatus/setup failure) must exit 2 — distinct from the violations branch's exit 1, " +
       'so a caller can tell "not run" from "red" (squawk 0031)'
   );
 

@@ -310,8 +310,9 @@ contextBridge.exposeInMainWorld('goldfinch', {
   // re-click close, no focus move) | 'superseded' (default) | 'escape' | 'blur' |
   // 'navigation' | 'input-empty' | 'activated' (`input-empty` restores chrome
   // WebContents focus when a focused sheet auto-closes).
-  menuOverlayClose: (/** @type {{ reason?: 'toggle' | 'superseded' | 'escape' | 'blur' | 'navigation' | 'input-empty' | 'activated' }} */ payload = {}) =>
-    ipcRenderer.send('menu-overlay:close', { reason: payload.reason }),
+  menuOverlayClose: (
+    /** @type {{ reason?: 'toggle' | 'superseded' | 'escape' | 'blur' | 'navigation' | 'input-empty' | 'activated' }} */ payload = {}
+  ) => ipcRenderer.send('menu-overlay:close', { reason: payload.reason }),
   // Channel 6: an item was activated on the sheet — {menuType, id}; chrome executes the action.
   onMenuOverlayActivated: (cb) => ipcRenderer.on('menu-overlay-activated', (_e, d) => cb(d)),
   // Channel 7: the menu closed for ANY reason — {menuType, reason, token}; chrome drops
@@ -433,6 +434,9 @@ contextBridge.exposeInMainWorld('goldfinch', {
   // renderer-only: the guest webview uses webview-preload.js (no automationDevInvoke there),
   // and main.js also rejects any sender that isn't mainWindow.webContents.
   ...(isMcpAutomationEnabled(process.argv)
-    ? { automationDevInvoke: (/** @type {string} */ op, /** @type {any[]} */ args) => ipcRenderer.invoke('automation:dev-invoke', { op, args }) }
+    ? {
+        automationDevInvoke: (/** @type {string} */ op, /** @type {any[]} */ args) =>
+          ipcRenderer.invoke('automation:dev-invoke', { op, args })
+      }
     : {})
 });

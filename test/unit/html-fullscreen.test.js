@@ -32,9 +32,13 @@ function setup() {
       win: {
         id,
         destroyed: false,
-        isDestroyed() { return this.destroyed; },
+        isDestroyed() {
+          return this.destroyed;
+        },
         contentBounds: { width: FULL.width, height: FULL.height },
-        getContentBounds() { return { ...this.contentBounds }; },
+        getContentBounds() {
+          return { ...this.contentBounds };
+        },
         contentView: { addChildView: (view) => log.push(['add-view', id, view.webContents.id]) }
       },
       tabViews: new Map(),
@@ -52,13 +56,23 @@ function setup() {
       webContents: {
         id: wcId,
         destroyed: false,
-        isDestroyed() { return this.destroyed; },
+        isDestroyed() {
+          return this.destroyed;
+        },
         // Rejected on purpose: the module MUST attach its own .catch — a
         // missing one would surface as an unhandled rejection in this suite.
-        executeJavaScript: (code) => { log.push(['exec', wcId, code]); return Promise.reject(new Error('no page')); }
+        executeJavaScript: (code) => {
+          log.push(['exec', wcId, code]);
+          return Promise.reject(new Error('no page'));
+        }
       },
-      setBounds(b) { this.bounds = { ...b }; log.push(['bounds', wcId, { ...b }]); },
-      getBounds() { return { ...this.bounds }; }
+      setBounds(b) {
+        this.bounds = { ...b };
+        log.push(['bounds', wcId, { ...b }]);
+      },
+      getBounds() {
+        return { ...this.bounds };
+      }
     };
     record.tabViews.set(wcId, { view, trusted: false, active: false });
     return view;
@@ -73,7 +87,9 @@ function armedRecord(h, { withOverlays = false } = {}) {
   if (withOverlays) {
     record.findOverlay = {
       sessionWcId: null,
-      isSessionActive(wcId) { return this.sessionWcId === wcId; },
+      isSessionActive(wcId) {
+        return this.sessionWcId === wcId;
+      },
       hide: () => h.log.push(['hide-find']),
       show: () => h.log.push(['show-find']),
       syncBounds: (b) => h.log.push(['sync-find', { ...b }])
@@ -94,8 +110,15 @@ test('enter snapshots the slot rect, expands in ONE step, raises the guest, and 
   const boundsIdx = h.log.findIndex((x) => x[0] === 'bounds');
   const raiseIdx = h.log.findIndex((x) => x[0] === 'add-view');
   assert.ok(raiseIdx > boundsIdx, 'raise (re-add) follows the expand');
-  assert.ok(h.log.some((x) => x[0] === 'hide-find'), 'find overlay hidden (tab-hide mirror)');
-  assert.deepEqual(h.log.find((x) => x[0] === 'close-menu'), ['close-menu', 'tab-hide'], 'sheet closed with a tab-lifecycle-family reason');
+  assert.ok(
+    h.log.some((x) => x[0] === 'hide-find'),
+    'find overlay hidden (tab-hide mirror)'
+  );
+  assert.deepEqual(
+    h.log.find((x) => x[0] === 'close-menu'),
+    ['close-menu', 'tab-hide'],
+    'sheet closed with a tab-lifecycle-family reason'
+  );
 });
 
 test('enter refuses a background tab: no mode, and the page is asked to exit', () => {
@@ -108,7 +131,10 @@ test('enter refuses a background tab: no mode, and the page is asked to exit', (
   h.htmlFullscreen.enter(102);
   assert.equal(record.htmlFullscreen, null);
   assert.deepEqual(back.bounds, SLOT, 'background guest bounds untouched');
-  assert.deepEqual(h.log.find((x) => x[0] === 'exec'), ['exec', 102, 'document.exitFullscreen()']);
+  assert.deepEqual(
+    h.log.find((x) => x[0] === 'exec'),
+    ['exec', 102, 'document.exitFullscreen()']
+  );
 });
 
 test('double enter is idempotent — the slot snapshot is NOT overwritten with the full rect', () => {
@@ -116,7 +142,11 @@ test('double enter is idempotent — the slot snapshot is NOT overwritten with t
   const { record } = armedRecord(h);
   h.htmlFullscreen.enter(101);
   h.htmlFullscreen.enter(101);
-  assert.deepEqual(record.htmlFullscreen.savedBounds, SLOT, 're-snapshot would capture the full-window rect and wedge restore');
+  assert.deepEqual(
+    record.htmlFullscreen.savedBounds,
+    SLOT,
+    're-snapshot would capture the full-window rect and wedge restore'
+  );
   assert.equal(h.log.filter((x) => x[0] === 'bounds').length, 1, 'no second setBounds step');
 });
 
@@ -161,7 +191,10 @@ test('exit skips the find restore when no session is active on that tab', () => 
   h.htmlFullscreen.enter(101);
   h.log.length = 0;
   h.htmlFullscreen.exit(101);
-  assert.equal(h.log.some((x) => x[0] === 'show-find'), false);
+  assert.equal(
+    h.log.some((x) => x[0] === 'show-find'),
+    false
+  );
   assert.equal(record.htmlFullscreen, null);
 });
 
@@ -210,7 +243,10 @@ test('forceExit asks the live page to leave, restores synchronously, and a follo
   // Synchronous by contract: state is restored on RETURN, not on a later tick.
   assert.equal(record.htmlFullscreen, null);
   assert.deepEqual(view.bounds, SLOT);
-  assert.deepEqual(h.log.find((x) => x[0] === 'exec'), ['exec', 101, 'document.exitFullscreen()']);
+  assert.deepEqual(
+    h.log.find((x) => x[0] === 'exec'),
+    ['exec', 101, 'document.exitFullscreen()']
+  );
 
   // The page-side exit ask will still fire 'leave-html-full-screen' → exit():
   // mode already cleared → restore must not run twice.
@@ -228,8 +264,15 @@ test('forceExit on destroyed contents is record cleanup only — no view touch, 
 
   h.htmlFullscreen.forceExit(record);
   assert.equal(record.htmlFullscreen, null);
-  assert.equal(h.log.some((x) => x[0] === 'bounds'), false, 'restore path never touches a destroyed view');
-  assert.equal(h.log.some((x) => x[0] === 'exec'), false);
+  assert.equal(
+    h.log.some((x) => x[0] === 'bounds'),
+    false,
+    'restore path never touches a destroyed view'
+  );
+  assert.equal(
+    h.log.some((x) => x[0] === 'exec'),
+    false
+  );
 });
 
 test('forceExit after the tab entry is gone (tab-close edge) clears the mode without a convergence send', () => {
@@ -304,7 +347,9 @@ function setupWithExitObserver() {
       bounds: { ...SLOT },
       webContents: { id: 10, isDestroyed: () => false, executeJavaScript: () => Promise.resolve() },
       setBounds() {},
-      getBounds() { return { ...SLOT }; }
+      getBounds() {
+        return { ...SLOT };
+      }
     },
     trusted: false,
     active: true

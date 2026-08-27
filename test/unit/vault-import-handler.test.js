@@ -19,8 +19,12 @@ function makeIpc() {
   return {
     handlers,
     listeners,
-    on(channel, fn) { listeners.set(channel, fn); },
-    handle(channel, fn) { handlers.set(channel, fn); },
+    on(channel, fn) {
+      listeners.set(channel, fn);
+    },
+    handle(channel, fn) {
+      handlers.set(channel, fn);
+    }
   };
 }
 
@@ -33,7 +37,7 @@ function makeHarness({ importResult, importThrows } = {}) {
   const sheet = {
     getView: () => ({ webContents: sheetSender }),
     getCurrentMenu: () => ({ token: 7, menuType: 'vault-import' }),
-    closeMenuOverlay: (reason, token) => closeCalls.push([reason, token]),
+    closeMenuOverlay: (reason, token) => closeCalls.push([reason, token])
   };
   const rec = { sheet, win };
   const registry = { records: () => [rec], getWindowForChrome: () => null };
@@ -55,11 +59,12 @@ function makeHarness({ importResult, importThrows } = {}) {
   };
 
   registerOverlayIpc({
-    ipcMain, registry,
+    ipcMain,
+    registry,
     chromeForAttachment: (w) => (w === win ? chrome : null),
     chromeForTab: () => null,
     sanitizeActivatedValue: (v) => (typeof v === 'string' && v.length <= 24 ? v : undefined),
-    vaultImport,
+    vaultImport
   });
 
   const handler = ipcMain.handlers.get('menu-overlay:vault-import');
@@ -69,9 +74,11 @@ function makeHarness({ importResult, importThrows } = {}) {
 test('the import handler is GATED on the vaultImport injection (offline overlay tests omit it)', () => {
   const ipcMain = makeIpc();
   registerOverlayIpc({
-    ipcMain, registry: { records: () => [], getWindowForChrome: () => null },
-    chromeForAttachment: () => null, chromeForTab: () => null,
-    sanitizeActivatedValue: () => undefined,
+    ipcMain,
+    registry: { records: () => [], getWindowForChrome: () => null },
+    chromeForAttachment: () => null,
+    chromeForTab: () => null,
+    sanitizeActivatedValue: () => undefined
     // no vaultImport
   });
   assert.equal(ipcMain.handlers.has('menu-overlay:vault-import'), false);
@@ -89,8 +96,14 @@ test('valid import → { ok:true }; Buffer + secretKind hand-off; BOTH arrays ze
   assert.equal(captured.bytes, 'correct horse battery staple');
   assert.equal(captured.secretKind, 'master', 'the NON-SECRET secretKind is forwarded');
   // DUAL-zeroize: both the copied Buffer AND the incoming Uint8Array are cleared.
-  assert.ok(captured.buffer.every((b) => b === 0), 'copied Buffer zeroized in finally');
-  assert.ok(secret.every((b) => b === 0), 'incoming Uint8Array zeroized in finally');
+  assert.ok(
+    captured.buffer.every((b) => b === 0),
+    'copied Buffer zeroized in finally'
+  );
+  assert.ok(
+    secret.every((b) => b === 0),
+    'incoming Uint8Array zeroized in finally'
+  );
   assert.deepEqual(closeCalls, [['activated', 7]]);
   assert.deepEqual(chromeSends, [], 'import opens no follow-up sheet');
 });
@@ -117,16 +130,23 @@ test('WRONG secret → { ok:false }: sheet NOT closed (re-prompt); both arrays s
   assert.equal(captured.called, 1, 'the delegate ran (the wrong secret is judged in main)');
   assert.deepEqual(closeCalls, [], 'the sheet stays open to re-prompt');
   assert.deepEqual(chromeSends, []);
-  assert.ok(secret.every((b) => b === 0), 'incoming Uint8Array zeroized on refusal');
-  assert.ok(captured.buffer.every((b) => b === 0), 'copied Buffer zeroized on refusal');
+  assert.ok(
+    secret.every((b) => b === 0),
+    'incoming Uint8Array zeroized on refusal'
+  );
+  assert.ok(
+    captured.buffer.every((b) => b === 0),
+    'copied Buffer zeroized on refusal'
+  );
 });
 
 test('COLLISION reason → { ok:false, reason:"collision" }: sheet NOT closed (surfaces "already exists"); both arrays zeroed (M12 F5 HAT tail)', async () => {
   // The main.js delegate maps a coded VaultCollisionError to { ok:false, reason:'collision' } (a
   // RETURN, not a throw) so the handler forwards the NON-SECRET reason and the dual-zeroize runs
   // uniformly — distinguishing a destination collision from a wrong secret at the sheet.
-  const { handler, sheetSender, closeCalls, chromeSends, captured } =
-    makeHarness({ importResult: { ok: false, reason: 'collision' } });
+  const { handler, sheetSender, closeCalls, chromeSends, captured } = makeHarness({
+    importResult: { ok: false, reason: 'collision' }
+  });
   const secret = new TextEncoder().encode('correct horse battery staple');
 
   const res = await handler({ sender: sheetSender }, { token: 7, secret, secretKind: 'master' });
@@ -134,8 +154,14 @@ test('COLLISION reason → { ok:false, reason:"collision" }: sheet NOT closed (s
   assert.deepEqual(res, { ok: false, reason: 'collision' });
   assert.deepEqual(closeCalls, [], 'the sheet stays open to surface the collision message');
   assert.deepEqual(chromeSends, []);
-  assert.ok(secret.every((b) => b === 0), 'incoming Uint8Array zeroized on collision');
-  assert.ok(captured.buffer.every((b) => b === 0), 'copied Buffer zeroized on collision');
+  assert.ok(
+    secret.every((b) => b === 0),
+    'incoming Uint8Array zeroized on collision'
+  );
+  assert.ok(
+    captured.buffer.every((b) => b === 0),
+    'copied Buffer zeroized on collision'
+  );
 });
 
 test('a delegate THROW (non-auth error, e.g. collision) rejects the invoke but still zeroizes both arrays; sheet not closed', async () => {
@@ -145,15 +171,24 @@ test('a delegate THROW (non-auth error, e.g. collision) rejects the invoke but s
 
   await assert.rejects(handler({ sender: sheetSender }, { token: 7, secret, secretKind: 'master' }), /already exists/);
 
-  assert.ok(secret.every((b) => b === 0), 'incoming Uint8Array zeroized even on throw');
-  assert.ok(captured.buffer.every((b) => b === 0), 'copied Buffer zeroized even on throw');
+  assert.ok(
+    secret.every((b) => b === 0),
+    'incoming Uint8Array zeroized even on throw'
+  );
+  assert.ok(
+    captured.buffer.every((b) => b === 0),
+    'copied Buffer zeroized even on throw'
+  );
   assert.deepEqual(closeCalls, [], 'sheet not closed on failure');
 });
 
 test('wrong sender → { ok:false }, import never called', async () => {
   const { handler, captured } = makeHarness();
   const secret = new TextEncoder().encode('hunter2');
-  const res = await handler({ sender: { isDestroyed: () => false } /* not the sheet */ }, { token: 7, secret, secretKind: 'master' });
+  const res = await handler(
+    { sender: { isDestroyed: () => false } /* not the sheet */ },
+    { token: 7, secret, secretKind: 'master' }
+  );
   assert.deepEqual(res, { ok: false });
   assert.equal(captured.called, 0, 'import never called for a foreign sender');
 });
@@ -168,7 +203,10 @@ test('stale token → { ok:false }, import never called', async () => {
 
 test('a non-Uint8Array secret → { ok:false }', async () => {
   const { handler, sheetSender, captured } = makeHarness();
-  const res = await handler({ sender: sheetSender }, { token: 7, secret: 'hunter2' /* string */, secretKind: 'master' });
+  const res = await handler(
+    { sender: sheetSender },
+    { token: 7, secret: 'hunter2' /* string */, secretKind: 'master' }
+  );
   assert.deepEqual(res, { ok: false });
   assert.equal(captured.called, 0);
 });

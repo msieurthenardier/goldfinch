@@ -60,11 +60,19 @@ interface MenuOverlayBridge {
    * password rides as a Uint8Array `secret` beside the NON-SECRET username (never
    * channel-4 activated). Returns { answered } — false re-prompts (challenge gone);
    * true closes it (the main-side auth store owns the 'activated' close). */
-  authSubmit(payload: { token: number; username: string; secret: Uint8Array }): Promise<{ answered: boolean; reason?: string }>;
+  authSubmit(payload: {
+    token: number;
+    username: string;
+    secret: Uint8Array;
+  }): Promise<{ answered: boolean; reason?: string }>;
   /** sheet → main: the DEDICATED vault-capture save channel (M12 F2 Leg 4, DD7). The
    * chosen vaultId + the stashed captureId (+ token) — NEVER the captured password
    * (held only in the main-side record). Returns { saved }; false re-prompts the sheet. */
-  captureSave(payload: { token: number; captureId: string; vaultId?: string }): Promise<{ saved: boolean; reason?: string }>;
+  captureSave(payload: {
+    token: number;
+    captureId: string;
+    vaultId?: string;
+  }): Promise<{ saved: boolean; reason?: string }>;
   /** sheet → main: the DEDICATED vault-set master-password setup channel (M12 F3 Leg 4).
    * Mirrors unlockVault — the password rides as a Uint8Array. Returns { ok }; false
    * re-prompts the sheet, true closes it (main also opens vault-recovery-show). */
@@ -79,7 +87,11 @@ interface MenuOverlayBridge {
    * (master | recovery). The destination target + the bundle are held main-side. Returns
    * { ok, reason? }; ok:false re-prompts (wrong secret) or, with reason:'collision' (M12 F5 HAT
    * tail), surfaces a truthful "already exists" message; ok:true closes it (main runs the import). */
-  importVault(payload: { token: number; secret: Uint8Array; secretKind: 'master' | 'recovery' }): Promise<{ ok: boolean; reason?: string }>;
+  importVault(payload: {
+    token: number;
+    secret: Uint8Array;
+    secretKind: 'master' | 'recovery';
+  }): Promise<{ ok: boolean; reason?: string }>;
   /** sheet → main: the DEDICATED recovery-key ROTATION channel (M12 F4 Leg 2). Used when the
    * reused vault-stepup sheet is in mode 'rotate-recovery'; the master password rides as a
    * Uint8Array. Returns { ok }; false re-prompts (wrong master password), true closes it (main
@@ -98,7 +110,11 @@ interface MenuOverlayBridge {
    * recovery key + new master password ride as Uint8Arrays (the confirm check is renderer-side).
    * Returns { ok }; false re-prompts (wrong recovery key), true closes it (the store installs the
    * MRK — the user ends unlocked). */
-  recoverMaster(payload: { token: number; recoverySecret: Uint8Array; newSecret: Uint8Array }): Promise<{ ok: boolean }>;
+  recoverMaster(payload: {
+    token: number;
+    recoverySecret: Uint8Array;
+    newSecret: Uint8Array;
+  }): Promise<{ ok: boolean }>;
   /** sheet → main: copy a string to the OS clipboard (M12 F3 Leg 4 recovery-show Copy).
    * One-way; sender-validated main-side. */
   copyText(text: string): void;
@@ -108,7 +124,13 @@ interface MenuOverlayBridge {
    * { ok }; false keeps the card open with a generic inline error (rejection path (a) —
    * a pre-forward validation failure), true means main already closed the sheet
    * (close-only-on-success). */
-  bookmarkEditSubmit(payload: { token: number; id: string; action: 'save' | 'remove'; name?: string; url?: string }): Promise<{ ok: boolean }>;
+  bookmarkEditSubmit(payload: {
+    token: number;
+    id: string;
+    action: 'save' | 'remove';
+    name?: string;
+    url?: string;
+  }): Promise<{ ok: boolean }>;
   /** sheet → main: the DEDICATED bookmarks-overflow DROP-INDEX channel (M15 F3 Leg 5a,
    * AC8). One-way — a bar item was released over the sheet's row list at snapshot-local
    * insertion index `index`. Carries NO bookmark id, url, or jar: the chrome resolves all

@@ -20,9 +20,18 @@ const { withDebuggerSession } = require('./cdp');
 // ---------------------------------------------------------------------------
 
 const KEY_MAP = {
-  Tab: 'Tab', Enter: 'Enter', Escape: 'Escape', Space: 'Space',
-  ArrowRight: 'Right', ArrowLeft: 'Left', ArrowDown: 'Down', ArrowUp: 'Up',
-  Home: 'Home', End: 'End', Delete: 'Delete', Backspace: 'Backspace',
+  Tab: 'Tab',
+  Enter: 'Enter',
+  Escape: 'Escape',
+  Space: 'Space',
+  ArrowRight: 'Right',
+  ArrowLeft: 'Left',
+  ArrowDown: 'Down',
+  ArrowUp: 'Up',
+  Home: 'Home',
+  End: 'End',
+  Delete: 'Delete',
+  Backspace: 'Backspace'
 };
 
 // Canonical Electron modifier vocabulary. Electron `^42` sendInputEvent accepts
@@ -33,10 +42,14 @@ const KEY_MAP = {
 // map below is defensive for callers that pass the common variants directly.
 const CANONICAL_MODIFIERS = ['control', 'shift', 'alt', 'meta'];
 const MODIFIER_ALIASES = {
-  control: 'control', ctrl: 'control',
+  control: 'control',
+  ctrl: 'control',
   shift: 'shift',
-  alt: 'alt', option: 'alt',
-  meta: 'meta', cmd: 'meta', command: 'meta',
+  alt: 'alt',
+  option: 'alt',
+  meta: 'meta',
+  cmd: 'meta',
+  command: 'meta'
 };
 
 /**
@@ -52,11 +65,14 @@ const MODIFIER_ALIASES = {
  */
 function normalizeModifier(mod) {
   const canonical = MODIFIER_ALIASES[String(mod).toLowerCase()];
-  if (!canonical) throw new Error(
-    'automation: unknown modifier ' + mod +
-    ' (known: ' + CANONICAL_MODIFIERS.join(', ') +
-    '; aliases: ctrl, cmd, command, option)'
-  );
+  if (!canonical)
+    throw new Error(
+      'automation: unknown modifier ' +
+        mod +
+        ' (known: ' +
+        CANONICAL_MODIFIERS.join(', ') +
+        '; aliases: ctrl, cmd, command, option)'
+    );
   return canonical;
 }
 
@@ -83,20 +99,26 @@ function normalizeModifier(mod) {
 function keyEvents(name, modifiers = []) {
   let keyCode;
   const intrinsic = [];
-  if (name === 'ShiftTab') { keyCode = 'Tab'; intrinsic.push('shift'); }
-  else if (KEY_MAP[name]) { keyCode = KEY_MAP[name]; }
-  else if (typeof name === 'string' && /^[a-z0-9=+-]$/i.test(name)) {
+  if (name === 'ShiftTab') {
+    keyCode = 'Tab';
+    intrinsic.push('shift');
+  } else if (KEY_MAP[name]) {
+    keyCode = KEY_MAP[name];
+  } else if (typeof name === 'string' && /^[a-z0-9=+-]$/i.test(name)) {
     // Single printable letter/digit/zoom-symbol → Electron Accelerator keyCode for chord use.
     // Letters use the uppercase form (Accelerator convention); digits stay as-is; the zoom
     // symbols (=/-/+) are case-invariant so they flow through as their literal character
     // (so Ctrl+= for zoom-in builds correctly — the keyboard zoom behavior test needs this).
     keyCode = /[a-z]/i.test(name) ? name.toUpperCase() : name;
   }
-  if (!keyCode) throw new Error(
-    'automation: unknown key ' + name +
-    ' (known: ' + Object.keys(KEY_MAP).join(', ') +
-    ', ShiftTab, or a single letter/digit)'
-  );
+  if (!keyCode)
+    throw new Error(
+      'automation: unknown key ' +
+        name +
+        ' (known: ' +
+        Object.keys(KEY_MAP).join(', ') +
+        ', ShiftTab, or a single letter/digit)'
+    );
   // Normalize + validate the caller's modifiers, then merge with the composite's
   // intrinsic modifier and de-dupe (preserving canonical order so an empty list
   // yields the same modifiers:[] as before — AC4 byte-identical).
@@ -105,7 +127,7 @@ function keyEvents(name, modifiers = []) {
   const finalModifiers = CANONICAL_MODIFIERS.filter((m) => merged.includes(m));
   return [
     { type: 'keyDown', keyCode, modifiers: finalModifiers },
-    { type: 'keyUp', keyCode, modifiers: finalModifiers },
+    { type: 'keyUp', keyCode, modifiers: finalModifiers }
   ];
 }
 
@@ -132,7 +154,7 @@ function mouseClickEvents(x, y, { button = 'left', clickCount = 1 } = {}) {
     // buttons bitmask (1 down / 0 up) mirrors the recipe proven by the Flight 1-3 CDP apparatus
     // (since removed) so a page's event.buttons sees the press. Confirmed live in Flight-1 Leg 6.
     { type: 'mouseDown', x, y, button, clickCount, buttons: 1 },
-    { type: 'mouseUp',   x, y, button, clickCount, buttons: 0 },
+    { type: 'mouseUp', x, y, button, clickCount, buttons: 0 }
   ];
 }
 
@@ -176,7 +198,7 @@ function dragEvents(from, to, steps = 12) {
   const events = [
     { type: 'mouseMove', x: from.x, y: from.y },
     // buttons:1 mirrors mouseClickEvents' proven recipe — a page's event.buttons sees the press.
-    { type: 'mouseDown', x: from.x, y: from.y, button: 'left', clickCount: 1, buttons: 1 },
+    { type: 'mouseDown', x: from.x, y: from.y, button: 'left', clickCount: 1, buttons: 1 }
   ];
   for (let i = 1; i <= n; i++) {
     const t = i / n;
@@ -232,7 +254,7 @@ async function actOn(wcId, events, deps) {
   // on the second resolve (DD6 / Leg 2).
   let wc = resolveContents(wcId, deps);
   if (classifyContents(wc, chromeContents, isChromeContents) === 'guest' && typeof activate === 'function') {
-    await activate(wcId);                      // DD3 foreground-to-act (guest only)
+    await activate(wcId); // DD3 foreground-to-act (guest only)
     // Re-resolve AFTER the async activate: the pre-activate handle may be stale by now,
     // and re-resolving re-applies the DD5 guard post-activation. Always resolve immediately
     // before acting (the discipline the rest of the module group follows).
@@ -314,12 +336,7 @@ const DRAG_STEP_DELAY_MS = 4;
  * @param {{ steps?: number, stepDelayMs?: number }} [opts]
  */
 const dragPointer = (wcId, from, to, deps, opts) =>
-  actOnPaced(
-    wcId,
-    dragEvents(from, to, opts && opts.steps),
-    deps,
-    (opts && opts.stepDelayMs) ?? DRAG_STEP_DELAY_MS
-  );
+  actOnPaced(wcId, dragEvents(from, to, opts && opts.steps), deps, (opts && opts.stepDelayMs) ?? DRAG_STEP_DELAY_MS);
 
 /**
  * Scroll via the in-process CDP debugger (Input.dispatchMouseEvent / mouseWheel).
@@ -363,9 +380,9 @@ const dragPointer = (wcId, from, to, deps, opts) =>
  */
 async function scroll(wcId, x, y, dx, dy, deps) {
   const { chromeContents, isChromeContents, activate } = deps;
-  let wc = resolveContents(wcId, deps);  // throws bad/dead/internal (DD6); allowInternal forwarded
+  let wc = resolveContents(wcId, deps); // throws bad/dead/internal (DD6); allowInternal forwarded
   if (classifyContents(wc, chromeContents, isChromeContents) === 'guest' && typeof activate === 'function') {
-    await activate(wcId);                // DD5 foreground-to-act (guest only)
+    await activate(wcId); // DD5 foreground-to-act (guest only)
     // Re-resolve AFTER the async activate: the pre-activate handle may be stale, and
     // re-resolving re-applies the DD6 guard post-activation (the Flight-1 discipline).
     wc = resolveContents(wcId, deps);
@@ -379,7 +396,7 @@ async function scroll(wcId, x, y, dx, dy, deps) {
       x,
       y,
       deltaX: dx,
-      deltaY: dy,
+      deltaY: dy
     });
     // Success → return void; engine serializes void ops to {"ok":true}.
   });
@@ -409,5 +426,5 @@ module.exports = {
   typeText,
   scroll,
   pressKey,
-  dragPointer,
+  dragPointer
 };

@@ -57,7 +57,10 @@ test('manage-jars sentinel follows new-container, with a pinned label and no var
   const model = buildContainerModel([DEFAULT]);
   const newContainerIdx = model.findIndex((m) => 'id' in m && m.id === 'action:new-container');
   const manageJarsIdx = model.findIndex((m) => 'id' in m && m.id === 'action:manage-jars');
-  assert.ok(newContainerIdx >= 0 && manageJarsIdx === newContainerIdx + 1, 'manage-jars immediately follows new-container');
+  assert.ok(
+    newContainerIdx >= 0 && manageJarsIdx === newContainerIdx + 1,
+    'manage-jars immediately follows new-container'
+  );
   assert.equal(model[newContainerIdx].label, 'New Jar');
   assert.equal(model[newContainerIdx].variant, undefined);
   assert.equal(model[manageJarsIdx].label, 'Manage jars…');
@@ -125,7 +128,7 @@ test("minting a jar named 'Burner' remaps to id jar-burner (reserved namespace)"
 // the namespaced model ids were designed to tolerate a literal `burner`-id jar
 // (e.g. from a legacy profile) rendering distinctly from the burner sentinel —
 // that tolerance must survive even though add() can no longer mint the id.
-test("a literal burner-id jar (hand-built) still renders distinct from action:burner", () => {
+test('a literal burner-id jar (hand-built) still renders distinct from action:burner', () => {
   const model = buildContainerModel([
     { id: 'burner', name: 'Burner', color: '#ff8c42', partition: 'persist:container:burner' }
   ]);

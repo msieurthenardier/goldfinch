@@ -24,7 +24,12 @@ test('hidden when zero jar keys enabled and admin not enabled', () => {
 });
 
 test('visible (idle) when >=1 jar key enabled, even with zero active connections', () => {
-  const model = buildAutomationIndicatorModel({ enabledJarKeyCount: 2, adminKeyEnabled: false, activeJarIds: [], containers: CONTAINERS });
+  const model = buildAutomationIndicatorModel({
+    enabledJarKeyCount: 2,
+    adminKeyEnabled: false,
+    activeJarIds: [],
+    containers: CONTAINERS
+  });
   assert.equal(model.visible, true);
   assert.equal(model.count, 2);
   assert.equal(model.mode, 'idle');
@@ -32,7 +37,12 @@ test('visible (idle) when >=1 jar key enabled, even with zero active connections
 });
 
 test('visible (idle) when ONLY the admin key is enabled, count is 0 (never counts admin)', () => {
-  const model = buildAutomationIndicatorModel({ enabledJarKeyCount: 0, adminKeyEnabled: true, activeJarIds: [], adminActive: false });
+  const model = buildAutomationIndicatorModel({
+    enabledJarKeyCount: 0,
+    adminKeyEnabled: true,
+    activeJarIds: [],
+    adminActive: false
+  });
   assert.deepEqual(model, { visible: true, count: 0, mode: 'idle', color: null });
 });
 
@@ -52,16 +62,22 @@ test('missing input object entirely never throws (all-defaults hidden)', () => {
 // Mode: jar — exactly one distinct active (non-admin) jar with a resolvable color.
 // ---------------------------------------------------------------------------
 
-test('mode=jar with the active jar\'s color when exactly one distinct active jar resolves', () => {
+test("mode=jar with the active jar's color when exactly one distinct active jar resolves", () => {
   const model = buildAutomationIndicatorModel({
-    enabledJarKeyCount: 2, adminKeyEnabled: false, activeJarIds: ['work'], adminActive: false, containers: CONTAINERS,
+    enabledJarKeyCount: 2,
+    adminKeyEnabled: false,
+    activeJarIds: ['work'],
+    adminActive: false,
+    containers: CONTAINERS
   });
   assert.deepEqual(model, { visible: true, count: 2, mode: 'jar', color: '#2196f3' });
 });
 
 test('duplicate active sessions on the SAME jar still resolve to a single distinct jar (mode=jar)', () => {
   const model = buildAutomationIndicatorModel({
-    enabledJarKeyCount: 2, activeJarIds: ['work', 'work', 'work'], containers: CONTAINERS,
+    enabledJarKeyCount: 2,
+    activeJarIds: ['work', 'work', 'work'],
+    containers: CONTAINERS
   });
   assert.equal(model.mode, 'jar');
   assert.equal(model.color, '#2196f3');
@@ -69,7 +85,9 @@ test('duplicate active sessions on the SAME jar still resolve to a single distin
 
 test('a stale/unknown active jarId (not in containers) downgrades to mode=multi, never throws', () => {
   const model = buildAutomationIndicatorModel({
-    enabledJarKeyCount: 2, activeJarIds: ['deleted-jar'], containers: CONTAINERS,
+    enabledJarKeyCount: 2,
+    activeJarIds: ['deleted-jar'],
+    containers: CONTAINERS
   });
   assert.equal(model.mode, 'multi');
   assert.equal(model.color, null);
@@ -78,7 +96,9 @@ test('a stale/unknown active jarId (not in containers) downgrades to mode=multi,
 test('an active jar whose stored color fails isSafeColor downgrades to mode=multi (defense in depth)', () => {
   const hostile = { id: 'work', color: 'red;background:url(evil)' };
   const model = buildAutomationIndicatorModel({
-    enabledJarKeyCount: 1, activeJarIds: ['work'], containers: [hostile],
+    enabledJarKeyCount: 1,
+    activeJarIds: ['work'],
+    containers: [hostile]
   });
   assert.equal(model.mode, 'multi');
   assert.equal(model.color, null);
@@ -86,7 +106,9 @@ test('an active jar whose stored color fails isSafeColor downgrades to mode=mult
 
 test('an active jar with a non-string color downgrades to mode=multi, never throws', () => {
   const model = buildAutomationIndicatorModel({
-    enabledJarKeyCount: 1, activeJarIds: ['work'], containers: [{ id: 'work', color: null }],
+    enabledJarKeyCount: 1,
+    activeJarIds: ['work'],
+    containers: [{ id: 'work', color: null }]
   });
   assert.equal(model.mode, 'multi');
   assert.equal(model.color, null);
@@ -104,14 +126,18 @@ test('missing containers array with an active jar never throws (downgrades to mu
 
 test('mode=multi (neutral, no color) when more than one distinct jar is active simultaneously', () => {
   const model = buildAutomationIndicatorModel({
-    enabledJarKeyCount: 2, activeJarIds: ['work', 'personal'], containers: CONTAINERS,
+    enabledJarKeyCount: 2,
+    activeJarIds: ['work', 'personal'],
+    containers: CONTAINERS
   });
   assert.deepEqual(model, { visible: true, count: 2, mode: 'multi', color: null });
 });
 
 test('null/undefined/empty-string entries in activeJarIds are ignored when counting distinct jars', () => {
   const model = buildAutomationIndicatorModel({
-    enabledJarKeyCount: 1, activeJarIds: ['work', null, undefined, ''], containers: CONTAINERS,
+    enabledJarKeyCount: 1,
+    activeJarIds: ['work', null, undefined, ''],
+    containers: CONTAINERS
   });
   assert.equal(model.mode, 'jar');
   assert.equal(model.color, '#2196f3');
@@ -124,28 +150,44 @@ test('null/undefined/empty-string entries in activeJarIds are ignored when count
 
 test('mode=admin (rainbow, no fixed color) when the admin key is enabled and active', () => {
   const model = buildAutomationIndicatorModel({
-    enabledJarKeyCount: 2, adminKeyEnabled: true, adminActive: true, activeJarIds: [], containers: CONTAINERS,
+    enabledJarKeyCount: 2,
+    adminKeyEnabled: true,
+    adminActive: true,
+    activeJarIds: [],
+    containers: CONTAINERS
   });
   assert.deepEqual(model, { visible: true, count: 2, mode: 'admin', color: null });
 });
 
 test('admin trumps a concurrently active single jar', () => {
   const model = buildAutomationIndicatorModel({
-    enabledJarKeyCount: 2, adminKeyEnabled: true, adminActive: true, activeJarIds: ['work'], containers: CONTAINERS,
+    enabledJarKeyCount: 2,
+    adminKeyEnabled: true,
+    adminActive: true,
+    activeJarIds: ['work'],
+    containers: CONTAINERS
   });
   assert.equal(model.mode, 'admin');
 });
 
 test('admin trumps concurrently active multiple jars', () => {
   const model = buildAutomationIndicatorModel({
-    enabledJarKeyCount: 2, adminKeyEnabled: true, adminActive: true, activeJarIds: ['work', 'personal'], containers: CONTAINERS,
+    enabledJarKeyCount: 2,
+    adminKeyEnabled: true,
+    adminActive: true,
+    activeJarIds: ['work', 'personal'],
+    containers: CONTAINERS
   });
   assert.equal(model.mode, 'admin');
 });
 
 test('adminActive true but the admin key is NOT enabled never renders admin mode (falls through to jar/multi/idle)', () => {
   const model = buildAutomationIndicatorModel({
-    enabledJarKeyCount: 1, adminKeyEnabled: false, adminActive: true, activeJarIds: ['work'], containers: CONTAINERS,
+    enabledJarKeyCount: 1,
+    adminKeyEnabled: false,
+    adminActive: true,
+    activeJarIds: ['work'],
+    containers: CONTAINERS
   });
   assert.equal(model.mode, 'jar');
   assert.equal(model.color, '#2196f3');
@@ -153,7 +195,11 @@ test('adminActive true but the admin key is NOT enabled never renders admin mode
 
 test('admin enabled but NOT currently active, with no jar connections either, stays idle', () => {
   const model = buildAutomationIndicatorModel({
-    enabledJarKeyCount: 1, adminKeyEnabled: true, adminActive: false, activeJarIds: [], containers: CONTAINERS,
+    enabledJarKeyCount: 1,
+    adminKeyEnabled: true,
+    adminActive: false,
+    activeJarIds: [],
+    containers: CONTAINERS
   });
   assert.equal(model.mode, 'idle');
 });

@@ -119,7 +119,7 @@ function buildWindowCensus(records, lastFocusedRecord, popupEntries) {
       // Identity compare, never an invented fallback — see the note above.
       lastFocused: !!lastFocusedRecord && rec === lastFocusedRecord,
       sheetVisible: viewVisible(rec.sheet),
-      findVisible: viewVisible(rec.findOverlay),
+      findVisible: viewVisible(rec.findOverlay)
     };
     // ABSENT ⇒ never created. Assigned conditionally so the key does not exist at
     // all (rather than existing as undefined/null) — pinned by test.
@@ -135,7 +135,7 @@ function buildWindowCensus(records, lastFocusedRecord, popupEntries) {
       popupWcId: p.popupWcId,
       openerWindowId: p.openerWindowId,
       url: p.url,
-      title: p.title,
+      title: p.title
     });
   }
   return out;

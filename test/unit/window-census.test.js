@@ -15,22 +15,36 @@ const { buildWindowCensus } = require('../../src/main/window-census');
 /** A manager fake exposing ONLY the two members DD2 reads: isVisible() + getView(). */
 const mgr = (wcId, visible, { destroyed = false, viewNull = false } = {}) => ({
   isVisible: () => visible,
-  getView: () => (viewNull ? null : { webContents: { id: wcId, isDestroyed: () => destroyed } }),
+  getView: () => (viewNull ? null : { webContents: { id: wcId, isDestroyed: () => destroyed } })
 });
 
 /** A registry record fake. */
-const rec = ({ id, chromeWcId = id * 10, booted = true, activeTabWcId = null, sheet = null, findOverlay = null } = {}) => ({
+const rec = ({
+  id,
+  chromeWcId = id * 10,
+  booted = true,
+  activeTabWcId = null,
+  sheet = null,
+  findOverlay = null
+} = {}) => ({
   win: { id },
   chromeView: { webContents: { id: chromeWcId } },
   tabViews: new Map(),
   activeTabWcId,
   bootConfigServed: booted,
   sheet,
-  findOverlay,
+  findOverlay
 });
 
 test('window-census: one record → one row carrying every AC5 field', () => {
-  const r = rec({ id: 1, chromeWcId: 11, booted: true, activeTabWcId: 55, sheet: mgr(77, true), findOverlay: mgr(88, false) });
+  const r = rec({
+    id: 1,
+    chromeWcId: 11,
+    booted: true,
+    activeTabWcId: 55,
+    sheet: mgr(77, true),
+    findOverlay: mgr(88, false)
+  });
   const [row] = buildWindowCensus([r], r);
   assert.deepEqual(row, {
     windowId: 1,
@@ -41,16 +55,22 @@ test('window-census: one record → one row carrying every AC5 field', () => {
     sheetVisible: true,
     findVisible: false,
     sheetWcId: 77,
-    findWcId: 88,
+    findWcId: 88
   });
 });
 
 test('window-census: two records → INSERTION ORDER preserved', () => {
   const a = rec({ id: 1 });
   const b = rec({ id: 2 });
-  assert.deepEqual(buildWindowCensus([a, b], a).map((r) => r.windowId), [1, 2]);
+  assert.deepEqual(
+    buildWindowCensus([a, b], a).map((r) => r.windowId),
+    [1, 2]
+  );
   // The census does not sort — a later-created window stays later.
-  assert.deepEqual(buildWindowCensus([b, a], a).map((r) => r.windowId), [2, 1]);
+  assert.deepEqual(
+    buildWindowCensus([b, a], a).map((r) => r.windowId),
+    [2, 1]
+  );
 });
 
 test('window-census: booted mirrors bootConfigServed BOTH ways', () => {
@@ -105,7 +125,10 @@ test('window-census: TWO windows can report sheetVisible true simultaneously (th
   const a = rec({ id: 1, sheet: mgr(77, true) });
   const b = rec({ id: 2, sheet: mgr(88, true) });
   const rows = buildWindowCensus([a, b], a);
-  assert.deepEqual(rows.map((r) => r.sheetVisible), [true, true]);
+  assert.deepEqual(
+    rows.map((r) => r.sheetVisible),
+    [true, true]
+  );
   assert.notEqual(rows[0].sheetWcId, rows[1].sheetWcId); // two DISTINCT sheets
 });
 
@@ -114,7 +137,10 @@ test('window-census: lastFocused is true for EXACTLY one row', () => {
   const b = rec({ id: 2 });
   const c = rec({ id: 3 });
   const rows = buildWindowCensus([a, b, c], b);
-  assert.deepEqual(rows.map((r) => r.lastFocused), [false, true, false]);
+  assert.deepEqual(
+    rows.map((r) => r.lastFocused),
+    [false, true, false]
+  );
 });
 
 test('window-census: ZERO rows are lastFocused when the record matches none — the census NEVER invents a fallback', () => {
@@ -124,9 +150,18 @@ test('window-census: ZERO rows are lastFocused when the record matches none — 
   const a = rec({ id: 1 });
   const b = rec({ id: 2 });
   const stranger = rec({ id: 99 });
-  assert.deepEqual(buildWindowCensus([a, b], stranger).map((r) => r.lastFocused), [false, false]);
-  assert.deepEqual(buildWindowCensus([a, b], null).map((r) => r.lastFocused), [false, false]);
-  assert.deepEqual(buildWindowCensus([a, b], undefined).map((r) => r.lastFocused), [false, false]);
+  assert.deepEqual(
+    buildWindowCensus([a, b], stranger).map((r) => r.lastFocused),
+    [false, false]
+  );
+  assert.deepEqual(
+    buildWindowCensus([a, b], null).map((r) => r.lastFocused),
+    [false, false]
+  );
+  assert.deepEqual(
+    buildWindowCensus([a, b], undefined).map((r) => r.lastFocused),
+    [false, false]
+  );
 });
 
 test('window-census: lastFocused compares by IDENTITY, not by window id', () => {
@@ -134,7 +169,10 @@ test('window-census: lastFocused compares by IDENTITY, not by window id', () => 
   // contract (main.js passes registry.getLastFocused()'s actual record).
   const a = rec({ id: 1 });
   const twin = rec({ id: 1 });
-  assert.deepEqual(buildWindowCensus([a], twin).map((r) => r.lastFocused), [false]);
+  assert.deepEqual(
+    buildWindowCensus([a], twin).map((r) => r.lastFocused),
+    [false]
+  );
 });
 
 test('window-census: ZERO NEW STATE — mutating a record between two calls is reflected in the second', () => {
@@ -175,7 +213,12 @@ test('window-census: empty / null records → empty array', () => {
 
 test('window-census: a manager whose isVisible() throws → visible false, no throw (mid-teardown tolerance)', () => {
   const r = rec({ id: 1 });
-  r.sheet = { isVisible: () => { throw new Error('destroyed'); }, getView: () => null };
+  r.sheet = {
+    isVisible: () => {
+      throw new Error('destroyed');
+    },
+    getView: () => null
+  };
   const [row] = buildWindowCensus([r], r);
   assert.equal(row.sheetVisible, false);
 });
@@ -193,12 +236,20 @@ test('window-census (popups): entries append after window rows in the exact leg 
   const b = rec({ id: 2 });
   const rows = buildWindowCensus([a, b], a, [
     { popupWcId: 701, openerWindowId: 1, url: 'https://popup.example/', title: 'P1' },
-    { popupWcId: 702, openerWindowId: 2, url: 'https://popup2.example/', title: 'P2' },
+    { popupWcId: 702, openerWindowId: 2, url: 'https://popup2.example/', title: 'P2' }
   ]);
   assert.equal(rows.length, 4);
-  assert.deepEqual(rows.map((r) => r.windowId), [1, 2, undefined, undefined], 'popup entries have no windowId key');
+  assert.deepEqual(
+    rows.map((r) => r.windowId),
+    [1, 2, undefined, undefined],
+    'popup entries have no windowId key'
+  );
   assert.deepEqual(rows[2], { popupWcId: 701, openerWindowId: 1, url: 'https://popup.example/', title: 'P1' });
-  assert.equal('windowId' in rows[2], false, 'discriminate on popupWcId presence — a find(r => r.windowId === …) skips popups');
+  assert.equal(
+    'windowId' in rows[2],
+    false,
+    'discriminate on popupWcId presence — a find(r => r.windowId === …) skips popups'
+  );
   assert.deepEqual(rows[3], { popupWcId: 702, openerWindowId: 2, url: 'https://popup2.example/', title: 'P2' });
 });
 
@@ -214,7 +265,7 @@ test('window-census (popups): malformed entries (no numeric popupWcId) are skipp
     null,
     {},
     { popupWcId: 'not-a-number', openerWindowId: 1, url: 'x', title: 'x' },
-    { popupWcId: 701, openerWindowId: 1, url: 'https://ok.example/', title: 'OK' },
+    { popupWcId: 701, openerWindowId: 1, url: 'https://ok.example/', title: 'OK' }
   ]);
   assert.equal(rows.length, 2, 'only the well-formed entry appended');
   assert.equal(rows[1].popupWcId, 701);

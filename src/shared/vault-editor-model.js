@@ -29,37 +29,35 @@ const EDITOR_LAYOUT = {
     nonSecret: [
       { name: 'title', label: 'Name' },
       { name: 'username', label: 'Username' },
-      { name: 'origin', label: 'Website' },
+      { name: 'origin', label: 'Website' }
     ],
     secret: [
       { name: 'password', label: 'Password' },
       { name: 'totp', label: 'Authenticator secret' },
-      { name: 'notes', label: 'Notes', multiline: true },
-    ],
+      { name: 'notes', label: 'Notes', multiline: true }
+    ]
   },
   card: {
     nonSecret: [
       { name: 'title', label: 'Name' },
       { name: 'cardholder', label: 'Cardholder' },
       { name: 'brand', label: 'Brand' },
-      { name: 'last4', label: 'Last 4 digits' },
+      { name: 'last4', label: 'Last 4 digits' }
     ],
     secret: [
       { name: 'number', label: 'Card number' },
       { name: 'cvv', label: 'Security code' },
       { name: 'expiry', label: 'Expiry' },
-      { name: 'notes', label: 'Notes', multiline: true },
-    ],
+      { name: 'notes', label: 'Notes', multiline: true }
+    ]
   },
   note: {
     // A note item's content IS its body — it carries NO separate generic "Notes" annotations
     // field (that redundant second field made a note show both "Note" and "Notes"). login/card
     // keep their `notes` field for annotations ON a credential; a note doesn't need one.
     nonSecret: [{ name: 'title', label: 'Name' }],
-    secret: [
-      { name: 'body', label: 'Note', multiline: true },
-    ],
-  },
+    secret: [{ name: 'body', label: 'Note', multiline: true }]
+  }
 };
 
 /** @type {Array<'login'|'card'|'note'>} */
@@ -248,5 +246,5 @@ export {
   initialSecretStates,
   assembleSave,
   partitionItemsByType,
-  safeHttpUrl,
+  safeHttpUrl
 };

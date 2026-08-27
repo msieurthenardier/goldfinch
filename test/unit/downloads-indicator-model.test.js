@@ -17,16 +17,23 @@ const {
   reduce,
   deriveModel,
   RECENT_CAP,
-  IDLE_TIMEOUT_MS,
+  IDLE_TIMEOUT_MS
 } = require('../../src/renderer/chrome/downloads-indicator-model');
 
 const T0 = 1_000_000; // arbitrary base timestamp
 
 function progress(id, extra = {}) {
-  return { type: 'progress', d: { id, filename: `file-${id}.bin`, received: 1, total: 10, state: 'progressing', ...extra } };
+  return {
+    type: 'progress',
+    d: { id, filename: `file-${id}.bin`, received: 1, total: 10, state: 'progressing', ...extra }
+  };
 }
 function done(id, now, extra = {}) {
-  return { type: 'done', d: { id, filename: `file-${id}.bin`, state: 'completed', savePath: `/dl/file-${id}.bin`, ...extra }, now };
+  return {
+    type: 'done',
+    d: { id, filename: `file-${id}.bin`, state: 'completed', savePath: `/dl/file-${id}.bin`, ...extra },
+    now
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -79,13 +86,19 @@ test('done removes from in-flight and prepends to recent; visible + attention (u
 test('done newest-first ordering', () => {
   let s = reduce(initialState(), done(1, T0));
   s = reduce(s, done(2, T0 + 1));
-  assert.deepEqual(s.recent.map((e) => e.id), [2, 1]);
+  assert.deepEqual(
+    s.recent.map((e) => e.id),
+    [2, 1]
+  );
 });
 
 test('a completion after a five-minute gap starts a new recent epoch', () => {
   let s = reduce(initialState(), done(1, T0));
   s = reduce(s, done(2, T0 + IDLE_TIMEOUT_MS));
-  assert.deepEqual(s.recent.map((entry) => entry.id), [2]);
+  assert.deepEqual(
+    s.recent.map((entry) => entry.id),
+    [2]
+  );
 });
 
 test('done for an id never seen in progress still records a recent entry (no crash)', () => {
@@ -110,11 +123,14 @@ test('hydrate seeds active + the whole live recent epoch and excludes failed row
       { id: 1, filename: 'active', state: 'progressing', active: true },
       { id: 2, filename: 'fresh', state: 'completed', active: false, endTime: T0 - 2 * 60 * 1000 },
       { id: 3, filename: 'failed', state: 'cancelled', active: false, endTime: T0 - 1 },
-      { id: 4, filename: 'older-in-epoch', state: 'completed', active: false, endTime: T0 - 6 * 60 * 1000 },
-    ],
+      { id: 4, filename: 'older-in-epoch', state: 'completed', active: false, endTime: T0 - 6 * 60 * 1000 }
+    ]
   });
   assert.deepEqual([...s.inFlight.keys()], [1]);
-  assert.deepEqual(s.recent.map((entry) => entry.id), [2, 4]);
+  assert.deepEqual(
+    s.recent.map((entry) => entry.id),
+    [2, 4]
+  );
   assert.equal(s.lastCompletionAt, T0 - 2 * 60 * 1000);
 });
 
@@ -124,8 +140,8 @@ test('hydrate excludes the whole completion epoch once the newest completion exp
     now: T0,
     d: [
       { id: 1, filename: 'newest-old', state: 'completed', active: false, endTime: T0 - IDLE_TIMEOUT_MS },
-      { id: 2, filename: 'older', state: 'completed', active: false, endTime: T0 - IDLE_TIMEOUT_MS - 1 },
-    ],
+      { id: 2, filename: 'older', state: 'completed', active: false, endTime: T0 - IDLE_TIMEOUT_MS - 1 }
+    ]
   });
   assert.deepEqual(s.recent, []);
   assert.equal(s.lastCompletionAt, null);
@@ -134,8 +150,10 @@ test('hydrate excludes the whole completion epoch once the newest completion exp
 test('hydrate never overwrites ids already observed from the live event stream', () => {
   let s = reduce(initialState(), progress(8, { received: 9 }));
   s = reduce(s, {
-    type: 'hydrate', now: T0, seen: new Set([8]),
-    d: [{ id: 8, filename: 'stale', state: 'progressing', active: true, received: 1 }],
+    type: 'hydrate',
+    now: T0,
+    seen: new Set([8]),
+    d: [{ id: 8, filename: 'stale', state: 'progressing', active: true, received: 1 }]
   });
   assert.equal(s.inFlight.get(8).received, 9);
   assert.equal(s.inFlight.get(8).filename, 'file-8.bin');
@@ -192,7 +210,10 @@ test('26 dones evict to the 25 newest', () => {
   assert.equal(s.recent.length, 25);
   assert.equal(s.recent[0].id, 26); // newest kept at head
   assert.equal(s.recent[s.recent.length - 1].id, 2); // id 1 evicted (oldest)
-  assert.equal(s.recent.some((e) => e.id === 1), false);
+  assert.equal(
+    s.recent.some((e) => e.id === 1),
+    false
+  );
 });
 
 // ---------------------------------------------------------------------------

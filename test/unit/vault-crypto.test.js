@@ -25,9 +25,9 @@ function samplePayload() {
   return {
     items: [
       { id: 'a', type: 'login', title: 'Example', username: 'user@example.com', password: 'hunter2' },
-      { id: 'b', type: 'note', title: 'Recovery', body: 'multi\nline\ntext' },
+      { id: 'b', type: 'note', title: 'Recovery', body: 'multi\nline\ntext' }
     ],
-    meta: { updated: 1234567890, count: 2 },
+    meta: { updated: 1234567890, count: 2 }
   };
 }
 
@@ -56,7 +56,7 @@ async function buildFullVault() {
     master,
     recEnv,
     accEnv,
-    adminEnv,
+    adminEnv
   };
 }
 
@@ -203,7 +203,10 @@ test('revoke: removing one envelope leaves the others functional', async () => {
   assert.ok((await vc.unwrapMaster(master, MASTER_PW, { params: FAST_SCRYPT })).equals(v.vaultKey));
   assert.ok(vc.openAdminSeal(admin, v.admin.privateKey).equals(v.vaultKey));
   // The revoked access envelope is gone.
-  assert.equal(reparsed.envelopes.find((e) => e.keyId === v.access.keyId), undefined);
+  assert.equal(
+    reparsed.envelopes.find((e) => e.keyId === v.access.keyId),
+    undefined
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -240,8 +243,12 @@ test('parseVault rejects a document with duplicate keyIds', () => {
   const env = vc.wrapAccess(key, vc.generateAccessKey().secret, 'x');
   // Hand-craft a document that bypasses serialize's guard.
   const doc = JSON.stringify({
-    format: 'gfvault', version: 1, vaultId: 'abc', kdf: FAST_SCRYPT,
-    envelopes: [env, { ...env }], items,
+    format: 'gfvault',
+    version: 1,
+    vaultId: 'abc',
+    kdf: FAST_SCRYPT,
+    envelopes: [env, { ...env }],
+    items
   });
   assert.throws(() => vc.parseVault(doc), vc.VaultFormatError);
 });
@@ -343,7 +350,9 @@ test('re-wrap only: rotating the recovery key re-wraps the same vault key', () =
 
 test('serialize/parse: round-trips a single self-contained versioned document', async () => {
   const v = await buildFullVault();
-  const doc = vc.parseVault(vc.serializeVault({ vaultId: 'vault-123', kdf: FAST_SCRYPT, envelopes: v.envelopes, items: v.items }));
+  const doc = vc.parseVault(
+    vc.serializeVault({ vaultId: 'vault-123', kdf: FAST_SCRYPT, envelopes: v.envelopes, items: v.items })
+  );
   assert.equal(doc.format, 'gfvault');
   assert.equal(doc.version, 1);
   assert.equal(doc.vaultId, 'vault-123');
@@ -382,12 +391,18 @@ test('parseVault: rejects a malformed items blob and malformed envelopes', () =>
   const key = vc.newVaultKey();
   const items = vc.encryptItems({}, key);
   assert.throws(
-    () => vc.parseVault(JSON.stringify({ format: 'gfvault', version: 1, kdf: FAST_SCRYPT, envelopes: [], items: { iv: 'x' } })),
-    vc.VaultFormatError,
+    () =>
+      vc.parseVault(
+        JSON.stringify({ format: 'gfvault', version: 1, kdf: FAST_SCRYPT, envelopes: [], items: { iv: 'x' } })
+      ),
+    vc.VaultFormatError
   );
   assert.throws(
-    () => vc.parseVault(JSON.stringify({ format: 'gfvault', version: 1, kdf: FAST_SCRYPT, envelopes: [{ keyId: 'x' }], items })),
-    vc.VaultFormatError,
+    () =>
+      vc.parseVault(
+        JSON.stringify({ format: 'gfvault', version: 1, kdf: FAST_SCRYPT, envelopes: [{ keyId: 'x' }], items })
+      ),
+    vc.VaultFormatError
   );
 });
 
@@ -432,7 +447,10 @@ test('TOTP: the product default (6 digits) is the low 6 of the RFC vector', () =
 
 test('TOTP: honors algorithm / digits / period overrides', () => {
   // A period override changes the counter: period=60 halves the 59s counter to 0.
-  assert.equal(vc.totp(RFC_SECRET, { digits: 8, period: 60 }, 59 * 1000), vc.totp(RFC_SECRET, { digits: 8, period: 60 }, 0));
+  assert.equal(
+    vc.totp(RFC_SECRET, { digits: 8, period: 60 }, 59 * 1000),
+    vc.totp(RFC_SECRET, { digits: 8, period: 60 }, 0)
+  );
   // SHA-256 / SHA-512 differ from SHA-1 for the same secret (algorithm is wired).
   const t = 59 * 1000;
   assert.notEqual(vc.totp(RFC_SECRET, { digits: 8, algorithm: 'SHA256' }, t), vc.totp(RFC_SECRET, { digits: 8 }, t));
@@ -448,8 +466,10 @@ test('TOTP: counter increments exactly at a period boundary', () => {
 });
 
 test('parseOtpauth: extracts secret + parameters from an otpauth URI', () => {
-  const uri = 'otpauth://totp/ACME%20Co:alice@example.com?secret=' + RFC_SECRET
-    + '&issuer=ACME%20Co&algorithm=SHA256&digits=8&period=60';
+  const uri =
+    'otpauth://totp/ACME%20Co:alice@example.com?secret=' +
+    RFC_SECRET +
+    '&issuer=ACME%20Co&algorithm=SHA256&digits=8&period=60';
   const parsed = vc.parseOtpauth(uri);
   assert.equal(parsed.secret, RFC_SECRET);
   assert.equal(parsed.algorithm, 'SHA256');
@@ -458,7 +478,10 @@ test('parseOtpauth: extracts secret + parameters from an otpauth URI', () => {
   assert.equal(parsed.issuer, 'ACME Co');
   assert.equal(parsed.label, 'ACME Co:alice@example.com');
   // The parsed parameters feed straight back into totp.
-  assert.equal(vc.totp(parsed.secret, parsed, 59 * 1000), vc.totp(RFC_SECRET, { digits: 8, algorithm: 'SHA256', period: 60 }, 59 * 1000));
+  assert.equal(
+    vc.totp(parsed.secret, parsed, 59 * 1000),
+    vc.totp(RFC_SECRET, { digits: 8, algorithm: 'SHA256', period: 60 }, 59 * 1000)
+  );
 });
 
 test('parseOtpauth: defaults when parameters are omitted', () => {
@@ -494,6 +517,6 @@ test('production scrypt params derive a key; too-low maxmem throws', async () =>
   const tooLow = { algo: 'scrypt', N, r, p, maxmem: 128 * N * r - 1 };
   await assert.rejects(
     () => vc.deriveMasterKey(MASTER_PW, salt, tooLow),
-    (err) => /** @type {any} */ (err).code === 'ERR_CRYPTO_INVALID_SCRYPT_PARAMS',
+    (err) => /** @type {any} */ (err).code === 'ERR_CRYPTO_INVALID_SCRYPT_PARAMS'
   );
 });

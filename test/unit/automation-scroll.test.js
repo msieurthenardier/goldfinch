@@ -28,8 +28,10 @@ function makeGuestWc(id) {
   return {
     id,
     session: { __goldfinchInternal: false },
-    isDestroyed() { return false; },
-    debugger: null,  // tests must attach a fake debugger before use
+    isDestroyed() {
+      return false;
+    },
+    debugger: null // tests must attach a fake debugger before use
   };
 }
 
@@ -37,7 +39,9 @@ function makeInternalWc(id) {
   return {
     id,
     session: { __goldfinchInternal: true },
-    isDestroyed() { return false; },
+    isDestroyed() {
+      return false;
+    }
   };
 }
 
@@ -45,7 +49,9 @@ function makeDestroyedWc(id) {
   return {
     id,
     session: { __goldfinchInternal: false },
-    isDestroyed() { return true; },
+    isDestroyed() {
+      return true;
+    }
   };
 }
 
@@ -66,7 +72,9 @@ function makeFakeFromId(map) {
 function makeDebugger({ attachThrows = false, detachThrows = false, sendImpl } = {}) {
   const log = [];
   return {
-    _log: log, _detached: 0, _attached: 0,
+    _log: log,
+    _detached: 0,
+    _attached: 0,
     attach(/** @type {string} */ v) {
       log.push(['attach', v]);
       if (attachThrows) throw new Error('already attached');
@@ -81,21 +89,22 @@ function makeDebugger({ attachThrows = false, detachThrows = false, sendImpl } =
       log.push(['send', method, params]);
       if (sendImpl) return sendImpl(method, params);
       return Promise.resolve({});
-    },
+    }
   };
 }
 
 // A controllable deferred promise (for concurrent-lock tests).
 function makeDeferred() {
   let resolve, reject;
-  const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+  const promise = new Promise((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
   return { promise, resolve, reject };
 }
 
 // Canned AX nodes for readAxTree cross-tests.
-const CANNED_AX_NODES = [
-  { nodeId: '1', role: { value: 'RootWebArea' } },
-];
+const CANNED_AX_NODES = [{ nodeId: '1', role: { value: 'RootWebArea' } }];
 
 // ---------------------------------------------------------------------------
 // scroll — happy path: CDP sequence
@@ -109,7 +118,7 @@ test('scroll: happy path — attach("1.3"), Input.dispatchMouseEvent with correc
   const deps = {
     fromId: makeFakeFromId({ 500: guestWc }),
     chromeContents: null,
-    activate: async () => {},
+    activate: async () => {}
   };
 
   const result = await scroll(500, 10, 20, 30, 40, deps);
@@ -118,16 +127,14 @@ test('scroll: happy path — attach("1.3"), Input.dispatchMouseEvent with correc
   assert.deepEqual(dbg._log[0], ['attach', '1.3']);
 
   // Input.dispatchMouseEvent called with the correct params
-  const sendEntry = dbg._log.find(
-    (e) => e[0] === 'send' && e[1] === 'Input.dispatchMouseEvent'
-  );
+  const sendEntry = dbg._log.find((e) => e[0] === 'send' && e[1] === 'Input.dispatchMouseEvent');
   assert.ok(sendEntry, 'Input.dispatchMouseEvent must be sent');
   assert.deepEqual(sendEntry[2], {
     type: 'mouseWheel',
     x: 10,
     y: 20,
     deltaX: 30,
-    deltaY: 40,
+    deltaY: 40
   });
 
   // detach ran in the finally exactly once
@@ -146,7 +153,10 @@ test('scroll: happy path — attach("1.3"), Input.dispatchMouseEvent with correc
 test('scroll: coordinates and deltas propagate to dispatchMouseEvent', async () => {
   let captured;
   const dbg = makeDebugger({
-    sendImpl: (method, params) => { captured = { method, params }; return Promise.resolve({}); },
+    sendImpl: (method, params) => {
+      captured = { method, params };
+      return Promise.resolve({});
+    }
   });
   const guestWc = makeGuestWc(501);
   guestWc.debugger = dbg;
@@ -191,8 +201,11 @@ test('scroll: attach-throw → returns { debugger-unavailable, attach-failed }, 
 
   // lock released — a subsequent call re-attempts attach (and throws again → refusal)
   const second = await scroll(503, 0, 0, 0, 0, deps);
-  assert.deepEqual(second, { automation: 'debugger-unavailable', reason: 'attach-failed', wcId: 503 },
-    'lock released even on the attach-throw path');
+  assert.deepEqual(
+    second,
+    { automation: 'debugger-unavailable', reason: 'attach-failed', wcId: 503 },
+    'lock released even on the attach-throw path'
+  );
 });
 
 test('scroll: concurrent-lock refusal — second un-awaited call returns { locked }, attach called ONCE', async () => {
@@ -201,14 +214,14 @@ test('scroll: concurrent-lock refusal — second un-awaited call returns { locke
     sendImpl: (method) => {
       if (method === 'Input.dispatchMouseEvent') return deferred.promise;
       return Promise.resolve({});
-    },
+    }
   });
   const guestWc = makeGuestWc(504);
   guestWc.debugger = dbg;
 
   const deps = { fromId: makeFakeFromId({ 504: guestWc }), chromeContents: null, activate: async () => {} };
 
-  const firstP = scroll(504, 0, 0, 0, 120, deps);   // NOT awaited — parked on the deferred
+  const firstP = scroll(504, 0, 0, 0, 120, deps); // NOT awaited — parked on the deferred
   const second = await scroll(504, 0, 0, 0, 120, deps); // hits the synchronous lock
 
   assert.deepEqual(second, { automation: 'debugger-unavailable', reason: 'locked', wcId: 504 });
@@ -231,7 +244,7 @@ test('scroll: concurrent-lock refusal — second un-awaited call returns { locke
 test('scroll: detach-in-finally on sendCommand throw — dispatchMouseEvent rejects → scroll REJECTS; detach ran; lock released', async () => {
   const boom = new Error('CDP dispatchMouseEvent failed');
   const dbg = makeDebugger({
-    sendImpl: () => Promise.reject(boom),
+    sendImpl: () => Promise.reject(boom)
   });
   const guestWc = makeGuestWc(505);
   guestWc.debugger = dbg;
@@ -239,7 +252,10 @@ test('scroll: detach-in-finally on sendCommand throw — dispatchMouseEvent reje
   const deps = { fromId: makeFakeFromId({ 505: guestWc }), chromeContents: null, activate: async () => {} };
 
   // post-attach sendCommand failure PROPAGATES (not a refusal — the debugger WAS available)
-  await assert.rejects(() => scroll(505, 0, 0, 0, 0, deps), (err) => err === boom);
+  await assert.rejects(
+    () => scroll(505, 0, 0, 0, 0, deps),
+    (err) => err === boom
+  );
   assert.equal(dbg._detached, 1, 'detach must run in the finally even when dispatchMouseEvent rejects');
 
   // lock released — a subsequent (healthy) call succeeds
@@ -257,7 +273,7 @@ test('scroll: detach() throws on happy path — original void return is preserve
   const result = await scroll(506, 0, 0, 0, 0, {
     fromId: makeFakeFromId({ 506: guestWc }),
     chromeContents: null,
-    activate: async () => {},
+    activate: async () => {}
   });
 
   assert.equal(result, undefined, 'a throwing detach() must not mask the void success value');
@@ -268,14 +284,19 @@ test('scroll: detach() throws AND dispatchMouseEvent rejects — ORIGINAL reject
   const boom = new Error('CDP dispatchMouseEvent failed');
   const dbg = makeDebugger({
     detachThrows: true,
-    sendImpl: () => Promise.reject(boom),
+    sendImpl: () => Promise.reject(boom)
   });
   const guestWc = makeGuestWc(507);
   guestWc.debugger = dbg;
 
   await assert.rejects(
-    () => scroll(507, 0, 0, 0, 0, { fromId: makeFakeFromId({ 507: guestWc }), chromeContents: null, activate: async () => {} }),
-    (err) => err === boom,
+    () =>
+      scroll(507, 0, 0, 0, 0, {
+        fromId: makeFakeFromId({ 507: guestWc }),
+        chromeContents: null,
+        activate: async () => {}
+      }),
+    (err) => err === boom
   );
   assert.equal(dbg._detached, 1, 'detach was attempted in the finally');
 });
@@ -288,14 +309,19 @@ test('scroll: guest — activate called BEFORE attach (ordering via shared callL
   const callLog = [];
   const dbg = makeDebugger();
   const origAttach = dbg.attach.bind(dbg);
-  dbg.attach = (v) => { callLog.push({ what: 'attach' }); origAttach(v); };
+  dbg.attach = (v) => {
+    callLog.push({ what: 'attach' });
+    origAttach(v);
+  };
   const guestWc = makeGuestWc(508);
   guestWc.debugger = dbg;
 
   const deps = {
     fromId: makeFakeFromId({ 508: guestWc }),
     chromeContents: null,
-    activate: async (/** @type {number} */ id) => { callLog.push({ what: 'activate', id }); },
+    activate: async (/** @type {number} */ id) => {
+      callLog.push({ what: 'activate', id });
+    }
   };
 
   await scroll(508, 0, 0, 0, 0, deps);
@@ -316,7 +342,9 @@ test('scroll: guest — activate called exactly once with the wcId', async () =>
   const deps = {
     fromId: makeFakeFromId({ 509: guestWc }),
     chromeContents: null,
-    activate: async (/** @type {number} */ id) => { activateCalls.push(id); },
+    activate: async (/** @type {number} */ id) => {
+      activateCalls.push(id);
+    }
   };
 
   await scroll(509, 0, 0, 0, 0, deps);
@@ -332,8 +360,10 @@ test('scroll: chrome target — activate NOT called (chrome is always live)', as
 
   const deps = {
     fromId: makeFakeFromId({ 510: chromeWc }),
-    chromeContents: chromeWc,  // classify as 'chrome'
-    activate: async (id) => { activateCalls.push(id); },
+    chromeContents: chromeWc, // classify as 'chrome'
+    activate: async (id) => {
+      activateCalls.push(id);
+    }
   };
 
   const result = await scroll(510, 0, 0, 0, 0, deps);
@@ -343,7 +373,7 @@ test('scroll: chrome target — activate NOT called (chrome is always live)', as
   assert.equal(chromeWc.debugger._attached, 1, 'attach must still run for the chrome target');
 });
 
-test('scroll: RE-RESOLVE proof — the SECOND (post-activate) handle\'s debugger is the one attached', async () => {
+test("scroll: RE-RESOLVE proof — the SECOND (post-activate) handle's debugger is the one attached", async () => {
   const firstHandle = makeGuestWc(511);
   firstHandle.debugger = makeDebugger();
   const secondHandle = makeGuestWc(511);
@@ -393,7 +423,9 @@ test('scroll: internal-session wcId → throws, no lock acquired, no attach', as
   const deps = {
     fromId: makeFakeFromId({ 577: internalWc }),
     chromeContents: null,
-    activate: async (id) => { activateCalls.push(id); },
+    activate: async (id) => {
+      activateCalls.push(id);
+    }
   };
 
   await assert.rejects(
@@ -407,7 +439,7 @@ test('scroll: internal-session wcId → throws, no lock acquired, no attach', as
   const ok = await scroll(578, 0, 0, 0, 0, {
     fromId: makeFakeFromId({ 578: guestWc }),
     chromeContents: null,
-    activate: async () => {},
+    activate: async () => {}
   });
   assert.equal(ok, undefined, 'lock untouched — valid call after the internal-session reject succeeds');
 });
@@ -422,7 +454,7 @@ test('shared lock: a held scroll lock makes readAxTree return "locked" for the s
   // The debugger is NOT swapped mid-flight — the same fake debugger object is used throughout.
   const deferred = makeDeferred();
   const dbg = makeDebugger({
-    sendImpl: () => deferred.promise,  // parks ALL sendCommand calls — scroll's dispatchMouseEvent
+    sendImpl: () => deferred.promise // parks ALL sendCommand calls — scroll's dispatchMouseEvent
   });
   const guestWc = makeGuestWc(600);
   guestWc.debugger = dbg;
@@ -430,15 +462,18 @@ test('shared lock: a held scroll lock makes readAxTree return "locked" for the s
   const deps = {
     fromId: makeFakeFromId({ 600: guestWc }),
     chromeContents: null,
-    activate: async () => {},
+    activate: async () => {}
   };
 
-  const scrollP = scroll(600, 0, 0, 0, 0, deps);  // NOT awaited — parks on deferred
+  const scrollP = scroll(600, 0, 0, 0, 0, deps); // NOT awaited — parks on deferred
 
   // readAxTree on the SAME wcId must hit the synchronous lock and return 'locked'
   const axResult = await readAxTree(600, deps);
-  assert.deepEqual(axResult, { automation: 'debugger-unavailable', reason: 'locked', wcId: 600 },
-    'readAxTree must return locked when scroll holds the cdp.js lock for the same wcId');
+  assert.deepEqual(
+    axResult,
+    { automation: 'debugger-unavailable', reason: 'locked', wcId: 600 },
+    'readAxTree must return locked when scroll holds the cdp.js lock for the same wcId'
+  );
 
   // Resolve scroll → lock released
   deferred.resolve({});
@@ -461,7 +496,7 @@ test('shared lock: a held readAxTree lock makes scroll return "locked" for the s
     sendImpl: (method) => {
       if (method === 'Accessibility.getFullAXTree') return deferred.promise;
       return Promise.resolve({});
-    },
+    }
   });
   const guestWc = makeGuestWc(601);
   guestWc.debugger = dbg;
@@ -469,15 +504,18 @@ test('shared lock: a held readAxTree lock makes scroll return "locked" for the s
   const deps = {
     fromId: makeFakeFromId({ 601: guestWc }),
     chromeContents: null,
-    activate: async () => {},
+    activate: async () => {}
   };
 
-  const axP = readAxTree(601, deps);  // NOT awaited — parks on deferred (getFullAXTree)
+  const axP = readAxTree(601, deps); // NOT awaited — parks on deferred (getFullAXTree)
 
   // scroll on the SAME wcId must hit the synchronous lock and return 'locked'
   const scrollResult = await scroll(601, 0, 0, 0, 0, deps);
-  assert.deepEqual(scrollResult, { automation: 'debugger-unavailable', reason: 'locked', wcId: 601 },
-    'scroll must return locked when readAxTree holds the cdp.js lock for the same wcId');
+  assert.deepEqual(
+    scrollResult,
+    { automation: 'debugger-unavailable', reason: 'locked', wcId: 601 },
+    'scroll must return locked when readAxTree holds the cdp.js lock for the same wcId'
+  );
 
   // Resolve readAxTree → lock released
   deferred.resolve({ nodes: CANNED_AX_NODES });
@@ -495,7 +533,7 @@ test('shared lock: different wcIds can hold the lock concurrently (no cross-wcId
   const deferred603 = makeDeferred();
   const dbg602 = makeDebugger();
   const dbg603 = makeDebugger({
-    sendImpl: () => deferred603.promise,
+    sendImpl: () => deferred603.promise
   });
 
   const wc602 = makeGuestWc(602);
@@ -503,11 +541,11 @@ test('shared lock: different wcIds can hold the lock concurrently (no cross-wcId
   const wc603 = makeGuestWc(603);
   wc603.debugger = dbg603;
 
-  const fromId = (/** @type {number} */ id) => id === 602 ? wc602 : id === 603 ? wc603 : null;
+  const fromId = (/** @type {number} */ id) => (id === 602 ? wc602 : id === 603 ? wc603 : null);
   const deps = { fromId, chromeContents: null, activate: async () => {} };
 
   // Park wc603's scroll in the deferred
-  const scroll603P = scroll(603, 0, 0, 0, 0, deps);  // NOT awaited
+  const scroll603P = scroll(603, 0, 0, 0, 0, deps); // NOT awaited
 
   // wc602's scroll should succeed independently (different wcId)
   const result602 = await scroll(602, 0, 0, 0, 0, deps);

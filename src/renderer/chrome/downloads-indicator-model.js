@@ -55,7 +55,7 @@ export function reduce(state, event) {
         received: d.received,
         total: d.total,
         paused: d.paused,
-        state: d.state,
+        state: d.state
       });
       return { ...state, inFlight };
     }
@@ -71,8 +71,8 @@ export function reduce(state, event) {
       // A gap of five minutes starts a new completion epoch. This makes the
       // live reducer reconstructible from the canonical terminal history when
       // a later window hydrates.
-      const sameEpoch = eventNow == null || state.lastCompletionAt == null
-        || eventNow - state.lastCompletionAt < IDLE_TIMEOUT_MS;
+      const sameEpoch =
+        eventNow == null || state.lastCompletionAt == null || eventNow - state.lastCompletionAt < IDLE_TIMEOUT_MS;
       // Prepend newest-first, then truncate to the cap (evict oldest / tail).
       const recent = [
         {
@@ -82,14 +82,14 @@ export function reduce(state, event) {
           savePath: d.savePath ?? null,
           endTime: eventNow ?? undefined
         },
-        ...(sameEpoch ? state.recent : []).filter((entry) => entry.id !== d.id),
+        ...(sameEpoch ? state.recent : []).filter((entry) => entry.id !== d.id)
       ].slice(0, RECENT_CAP);
       return {
         ...state,
         inFlight,
         recent,
         acknowledged: false,
-        lastCompletionAt: eventNow ?? state.lastCompletionAt,
+        lastCompletionAt: eventNow ?? state.lastCompletionAt
       };
     }
     case 'hydrate': {
@@ -107,7 +107,7 @@ export function reduce(state, event) {
             received: row.received,
             total: row.total,
             paused: row.paused,
-            state: row.state,
+            state: row.state
           });
           continue;
         }
@@ -117,7 +117,7 @@ export function reduce(state, event) {
           filename: row.filename,
           state: row.state,
           savePath: null,
-          endTime: row.endTime,
+          endTime: row.endTime
         });
       }
       const candidates = [...recentById.values()].sort((a, b) => (b.endTime ?? 0) - (a.endTime ?? 0));
@@ -138,7 +138,7 @@ export function reduce(state, event) {
         ...state,
         inFlight,
         recent,
-        lastCompletionAt: epochActive ? latestAt : null,
+        lastCompletionAt: epochActive ? latestAt : null
       };
     }
     case 'acknowledge': {

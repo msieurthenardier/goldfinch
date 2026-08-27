@@ -8,11 +8,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const {
-  isMcpAutomationEnabled,
-  shouldAutoMint,
-  shouldBindAutomation,
-} = require('../../src/shared/automation-dev');
+const { isMcpAutomationEnabled, shouldAutoMint, shouldBindAutomation } = require('../../src/shared/automation-dev');
 
 describe('isMcpAutomationEnabled (the MCP dev gate, DD4)', () => {
   // --- true ONLY for the exact --automation-dev token ---
@@ -160,4 +156,3 @@ describe('shouldBindAutomation (toggle-binds decision predicate, Flight 8 / DD2)
     assert.doesNotThrow(() => shouldBindAutomation());
   });
 });
-

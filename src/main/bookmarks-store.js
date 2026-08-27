@@ -217,7 +217,15 @@ function update(jarId, id, patch = {}) {
   s.update(jarId, id, { url: nextUrl, title: nextTitle, icon: nextIcon });
   return {
     ok: true,
-    bookmark: toBookmark({ id, jarId, url: nextUrl, title: nextTitle, icon: nextIcon, position: entry.position, addedAt: entry.addedAt })
+    bookmark: toBookmark({
+      id,
+      jarId,
+      url: nextUrl,
+      title: nextTitle,
+      icon: nextIcon,
+      position: entry.position,
+      addedAt: entry.addedAt
+    })
   };
 }
 
@@ -235,7 +243,10 @@ function remove(jarId, id) {
   // 0..n-1, preserving their relative (position-ordered) order — L2-DD-A's
   // transactional rewrite, same primitive reorder() below uses.
   const remaining = s.listByJar(jarId);
-  s.reorderPositions(jarId, remaining.map((/** @type {any} */ r) => r.id));
+  s.reorderPositions(
+    jarId,
+    remaining.map((/** @type {any} */ r) => r.id)
+  );
   return { ok: true, bookmark: toBookmark(entry) };
 }
 
@@ -271,7 +282,10 @@ function reorder(jarId, ids) {
   for (const b of current) {
     if (!used.has(b.id)) next.push(b);
   }
-  s.reorderPositions(jarId, next.map((b) => b.id));
+  s.reorderPositions(
+    jarId,
+    next.map((b) => b.id)
+  );
   return { ok: true, bookmarks: list(jarId) };
 }
 

@@ -36,7 +36,7 @@
 const SCHEMA = {
   login: { nonSecret: ['title', 'username', 'origin'], secret: ['password', 'totp', 'notes'] },
   card: { nonSecret: ['title', 'cardholder', 'brand', 'last4'], secret: ['number', 'cvv', 'expiry', 'notes'] },
-  note: { nonSecret: ['title'], secret: ['body'] },
+  note: { nonSecret: ['title'], secret: ['body'] }
 };
 
 /** @type {ItemType[]} */

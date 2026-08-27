@@ -52,9 +52,7 @@ async function copyText(text, messageEl) {
 (function () {
   // Collect all sections that have a corresponding nav link.
   const sections = Array.from(document.querySelectorAll('main section[id]'));
-  const navLinks = Array.from(
-    document.querySelectorAll('nav[aria-label="Settings sections"] a[href^="#"]')
-  );
+  const navLinks = Array.from(document.querySelectorAll('nav[aria-label="Settings sections"] a[href^="#"]'));
 
   if (!sections.length || !navLinks.length) return;
 
@@ -171,7 +169,8 @@ async function copyText(text, messageEl) {
     // validator (isSafeTabUrl) requires a scheme and stays the actual gate.
     // This also trims (the field previously sent input.value raw) — an
     // intended side effect of routing through the shared helper.
-    window.goldfinchInternal.settingsSet('homePage', normalizeHomePageInput(input.value))
+    window.goldfinchInternal
+      .settingsSet('homePage', normalizeHomePageInput(input.value))
       .then(() => {
         status.textContent = 'Saved';
       })
@@ -181,7 +180,8 @@ async function copyText(text, messageEl) {
   });
 
   clearBtn.addEventListener('click', () => {
-    window.goldfinchInternal.settingsSet('homePage', null)
+    window.goldfinchInternal
+      .settingsSet('homePage', null)
       .then(() => {
         input.value = '';
         status.textContent = 'Cleared — new tabs will open the welcome page until you set one.';
@@ -266,7 +266,8 @@ async function copyText(text, messageEl) {
     // Cases note in the leg spec).
     input.addEventListener('change', () => {
       if (input.checked) {
-        window.goldfinchInternal.settingsSet('searchEngine', engine.id)
+        window.goldfinchInternal
+          .settingsSet('searchEngine', engine.id)
           .then(() => applyChecked(engine.id))
           .catch(() => {});
       }
@@ -290,7 +291,8 @@ async function copyText(text, messageEl) {
   }
 
   clearBtn.addEventListener('click', () => {
-    window.goldfinchInternal.settingsSet('searchEngine', null)
+    window.goldfinchInternal
+      .settingsSet('searchEngine', null)
       .then(() => applyChecked(null))
       .catch(() => {});
   });
@@ -298,7 +300,10 @@ async function copyText(text, messageEl) {
   // Populate from the persisted setting on load. searchEngine is never
   // `undefined` here (settingsGet resolves an id string or null — DD2), so
   // applyChecked runs unconditionally.
-  window.goldfinchInternal.settingsGet('searchEngine').then(applyChecked).catch(() => {});
+  window.goldfinchInternal
+    .settingsGet('searchEngine')
+    .then(applyChecked)
+    .catch(() => {});
 
   // Re-sync when another surface (another window's Settings page, the Clear
   // button above, or this radio group's own change) changes the setting.
@@ -383,7 +388,10 @@ async function copyText(text, messageEl) {
   }
 
   // Populate from the persisted toolbarPins on load.
-  window.goldfinchInternal.settingsGet('toolbarPins').then(apply).catch(() => {});
+  window.goldfinchInternal
+    .settingsGet('toolbarPins')
+    .then(apply)
+    .catch(() => {});
 
   // Click handler: flip the pin for the clicked key, write the full map.
   // settingsSet resolves to the full config object, not the toolbarPins value, so apply
@@ -391,7 +399,8 @@ async function copyText(text, messageEl) {
   for (const k of /** @type {Array<'media'|'shields'|'devtools'>} */ (['media', 'shields', 'devtools'])) {
     btns[k].addEventListener('click', () => {
       const next = { ...current, [k]: !current[k] };
-      window.goldfinchInternal.settingsSet('toolbarPins', next)
+      window.goldfinchInternal
+        .settingsSet('toolbarPins', next)
         .then(() => apply(next))
         .catch(() => {});
     });
@@ -417,7 +426,12 @@ async function copyText(text, messageEl) {
 
   // Populate from the persisted setting on load. Assign .checked directly — never
   // .click()/dispatchEvent('change'), which would echo-loop back through settingsSet.
-  window.goldfinchInternal.settingsGet('spellcheck').then((v) => { el.checked = v === true; }).catch(() => {});
+  window.goldfinchInternal
+    .settingsGet('spellcheck')
+    .then((v) => {
+      el.checked = v === true;
+    })
+    .catch(() => {});
 
   // Write a real boolean (the internal-settings-set side-effect uses value === true, so a
   // non-boolean truthy value would not silently enable — but we send a clean boolean anyway).
@@ -445,7 +459,12 @@ async function copyText(text, messageEl) {
   // Populate from the persisted setting on load. Assign .checked directly — never
   // .click()/dispatchEvent('change'), which would echo-loop back through settingsSet.
   // No live side-effect: the flag is read by main only at the next whenReady (startup-only).
-  window.goldfinchInternal.settingsGet('restoreSession').then((v) => { el.checked = v === true; }).catch(() => {});
+  window.goldfinchInternal
+    .settingsGet('restoreSession')
+    .then((v) => {
+      el.checked = v === true;
+    })
+    .catch(() => {});
 
   // Write a clean boolean on change (the strict validator rejects a non-boolean anyway).
   el.addEventListener('change', () => {
@@ -472,7 +491,12 @@ async function copyText(text, messageEl) {
   // Populate from the persisted setting on load. Assign .checked directly — never
   // .click()/dispatchEvent('change'), which would echo-loop back through settingsSet
   // (the restore-session checkbox's own idiom, byte-for-byte in shape).
-  window.goldfinchInternal.settingsGet('bookmarksBarEnabled').then((v) => { el.checked = v === true; }).catch(() => {});
+  window.goldfinchInternal
+    .settingsGet('bookmarksBarEnabled')
+    .then((v) => {
+      el.checked = v === true;
+    })
+    .catch(() => {});
 
   // Write a clean boolean on change (the strict validator rejects a non-boolean
   // anyway). Every open chrome window re-syncs live via the settings-changed
@@ -511,9 +535,18 @@ async function copyText(text, messageEl) {
   const copyConfigBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('automation-copy-config'));
 
   if (
-    !enabledToggle || !enabledNote || !statusLine || !addressInput || !copyBtn ||
-    !portInput || !portSaveBtn || !findPortBtn || !portNote || !messageEl ||
-    !configCodeEl || !copyConfigBtn
+    !enabledToggle ||
+    !enabledNote ||
+    !statusLine ||
+    !addressInput ||
+    !copyBtn ||
+    !portInput ||
+    !portSaveBtn ||
+    !findPortBtn ||
+    !portNote ||
+    !messageEl ||
+    !configCodeEl ||
+    !copyConfigBtn
   ) {
     return;
   }
@@ -576,9 +609,9 @@ async function copyText(text, messageEl) {
         goldfinch: {
           type: 'http',
           url: 'http://127.0.0.1:' + status.port + '/mcp',
-          headers: { Authorization: 'Bearer <your-key>' },
-        },
-      },
+          headers: { Authorization: 'Bearer <your-key>' }
+        }
+      }
     };
     configCodeEl.textContent = JSON.stringify(mcpConfig, null, 2);
 
@@ -589,15 +622,12 @@ async function copyText(text, messageEl) {
     } else {
       // DD2 (Flight 8): the Automation toggle is the sole bind gate — flipping it on
       // binds the surface live (no launch flag needed).
-      statusLine.textContent =
-        'Not running — turn on the Automation toggle to bind the surface';
+      statusLine.textContent = 'Not running — turn on the Automation toggle to bind the surface';
     }
 
     // DD2 (Flight 8): the toggle binds the surface live — a flip takes effect
     // immediately, so there is no "launch with a flag" caveat to surface.
-    enabledNote.textContent = status.enabled
-      ? ''
-      : 'Binds the local automation surface.';
+    enabledNote.textContent = status.enabled ? '' : 'Binds the local automation surface.';
 
     recomputePortNote();
   }
@@ -605,39 +635,52 @@ async function copyText(text, messageEl) {
   // Initial load: status, then the persisted toggle + pending port.
   // savedPort is seeded from whichever path resolves first; the second path
   // overwrites it so the persisted setting always wins when both complete.
-  window.goldfinchInternal.automationGetStatus().then((status) => {
-    renderStatus(status);
-    // Fallback: if the persisted-port path hasn't resolved yet, use the active
-    // port as the baseline so Save starts disabled.
-    if (savedPort === null && status && status.port != null) {
-      savedPort = status.port;
-      portInput.value = String(status.port);
+  window.goldfinchInternal
+    .automationGetStatus()
+    .then((status) => {
+      renderStatus(status);
+      // Fallback: if the persisted-port path hasn't resolved yet, use the active
+      // port as the baseline so Save starts disabled.
+      if (savedPort === null && status && status.port != null) {
+        savedPort = status.port;
+        portInput.value = String(status.port);
+        updatePortSaveDirty();
+      }
+    })
+    .catch(() => {});
+  window.goldfinchInternal
+    .settingsGet('automationEnabled')
+    .then((v) => {
+      enabledToggle.checked = !!v;
+    })
+    .catch(() => {});
+  window.goldfinchInternal
+    .settingsGet('automationPort')
+    .then((p) => {
+      if (p != null) {
+        // Persisted setting is the authoritative baseline — overwrite whatever
+        // the status path may have set so the field and dirty check agree.
+        savedPort = Number(p);
+        portInput.value = String(p);
+      }
+      recomputePortNote();
       updatePortSaveDirty();
-    }
-  }).catch(() => {});
-  window.goldfinchInternal.settingsGet('automationEnabled').then((v) => {
-    enabledToggle.checked = !!v;
-  }).catch(() => {});
-  window.goldfinchInternal.settingsGet('automationPort').then((p) => {
-    if (p != null) {
-      // Persisted setting is the authoritative baseline — overwrite whatever
-      // the status path may have set so the field and dirty check agree.
-      savedPort = Number(p);
-      portInput.value = String(p);
-    }
-    recomputePortNote();
-    updatePortSaveDirty();
-  }).catch(() => {});
+    })
+    .catch(() => {});
 
   // Enable toggle: write on change, then re-fetch status. DD2 (Flight 8): the toggle
   // is the sole bind gate, so a flip now DOES change the bind state live (ON →
   // start-from-null, OFF → stop-and-stay-stopped). Re-fetch after settingsSet resolves
   // so the status-line/address reflect the now-bound/unbound surface.
   enabledToggle.addEventListener('change', () => {
-    window.goldfinchInternal.settingsSet('automationEnabled', enabledToggle.checked)
+    window.goldfinchInternal
+      .settingsSet('automationEnabled', enabledToggle.checked)
       .then(() => {
         messageEl.textContent = '';
-        window.goldfinchInternal.automationGetStatus().then(renderStatus).catch(() => {});
+        window.goldfinchInternal
+          .automationGetStatus()
+          .then(renderStatus)
+          .catch(() => {});
       })
       .catch((e) => {
         messageEl.textContent = 'Not saved: ' + (e && e.message ? e.message : 'error');
@@ -650,7 +693,8 @@ async function copyText(text, messageEl) {
   // clears as pending == active). A validator rejection surfaces inline; the field
   // keeps the user's text for correction.
   portSaveBtn.addEventListener('click', () => {
-    window.goldfinchInternal.automationSetPort(Number(portInput.value))
+    window.goldfinchInternal
+      .automationSetPort(Number(portInput.value))
       .then((status) => {
         messageEl.textContent = 'Saved';
         renderStatus(status);
@@ -668,7 +712,8 @@ async function copyText(text, messageEl) {
   // Find free port: populate the field with the scanned port and save+rebind it; on
   // a null result the field is left unchanged.
   findPortBtn.addEventListener('click', () => {
-    window.goldfinchInternal.automationFindFreePort()
+    window.goldfinchInternal
+      .automationFindFreePort()
       .then((res) => {
         const port = res && res.port;
         if (port == null) {
@@ -676,15 +721,14 @@ async function copyText(text, messageEl) {
           return undefined;
         }
         portInput.value = String(port);
-        return window.goldfinchInternal.automationSetPort(port)
-          .then((status) => {
-            messageEl.textContent = 'Saved';
-            renderStatus(status);
-            // Advance baseline so Save is disabled after find-free-port completes.
-            savedPort = status.port;
-            portInput.value = String(status.port);
-            updatePortSaveDirty();
-          });
+        return window.goldfinchInternal.automationSetPort(port).then((status) => {
+          messageEl.textContent = 'Saved';
+          renderStatus(status);
+          // Advance baseline so Save is disabled after find-free-port completes.
+          savedPort = status.port;
+          portInput.value = String(status.port);
+          updatePortSaveDirty();
+        });
       })
       .catch(() => {
         messageEl.textContent = 'Invalid port (1024–65535)';
@@ -730,7 +774,7 @@ async function copyText(text, messageEl) {
 let _automationKeysOnce = null;
 function automationKeysOnce() {
   const bridge = window.goldfinchInternal;
-  if (!bridge) return Promise.resolve(null);            // null-safe off-origin (AC4)
+  if (!bridge) return Promise.resolve(null); // null-safe off-origin (AC4)
   if (!_automationKeysOnce) _automationKeysOnce = bridge.automationListKeys();
   return _automationKeysOnce;
 }
@@ -753,8 +797,16 @@ function automationKeysOnce() {
   const adminRevokeBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('automation-admin-revoke'));
 
   if (
-    !jarsContainer || !revealEl || !keyValue || !keyCopyBtn || !keyDoneBtn || !keyMessageEl ||
-    !adminBlock || !adminStatus || !adminMintBtn || !adminRevokeBtn
+    !jarsContainer ||
+    !revealEl ||
+    !keyValue ||
+    !keyCopyBtn ||
+    !keyDoneBtn ||
+    !keyMessageEl ||
+    !adminBlock ||
+    !adminStatus ||
+    !adminMintBtn ||
+    !adminRevokeBtn
   ) {
     return;
   }
@@ -873,7 +925,8 @@ function automationKeysOnce() {
    * @param {unknown} e
    */
   function showErr(e) {
-    keyMessageEl.textContent = 'Error: ' + (e && /** @type {any} */ (e).message ? /** @type {any} */ (e).message : 'failed');
+    keyMessageEl.textContent =
+      'Error: ' + (e && /** @type {any} */ (e).message ? /** @type {any} */ (e).message : 'failed');
   }
 
   /**
@@ -934,7 +987,8 @@ function automationKeysOnce() {
       mintBtn.disabled = !automationEnabled;
       mintBtn.addEventListener('click', () => {
         clearReveal();
-        bridge.automationJarKeyMint(jar.id)
+        bridge
+          .automationJarKeyMint(jar.id)
           .then(({ key }) => refresh().then(() => reveal(key)))
           .catch(showErr);
       });
@@ -988,8 +1042,13 @@ function automationKeysOnce() {
   // null key (env gate unset — defense-in-depth) shows no reveal.
   adminMintBtn.addEventListener('click', () => {
     clearReveal();
-    bridge.automationAdminKeyMint()
-      .then(({ key }) => refresh().then(() => { if (key) reveal(key); }))
+    bridge
+      .automationAdminKeyMint()
+      .then(({ key }) =>
+        refresh().then(() => {
+          if (key) reveal(key);
+        })
+      )
       .catch(showErr);
   });
 
@@ -1018,7 +1077,10 @@ function automationKeysOnce() {
   Promise.all([automationKeysOnce(), bridge.settingsGet('automationEnabled')])
     .then(([info, en]) => {
       automationEnabled = !!en;
-      if (info) { renderJars(info.jars); renderAdmin(info.adminEnabled, info.adminKeySet); }
+      if (info) {
+        renderJars(info.jars);
+        renderAdmin(info.adminEnabled, info.adminKeySet);
+      }
     })
     .catch(() => {});
 
@@ -1214,9 +1276,7 @@ function automationKeysOnce() {
 
     const outcome = document.createElement('span');
     outcome.className = 'activity-log-outcome';
-    outcome.textContent = e.outcome === 'error'
-      ? ('error' + (e.errorCode ? ': ' + e.errorCode : ''))
-      : 'ok';
+    outcome.textContent = e.outcome === 'error' ? 'error' + (e.errorCode ? ': ' + e.errorCode : '') : 'ok';
     row.appendChild(outcome);
 
     return row;
@@ -1274,7 +1334,9 @@ function automationKeysOnce() {
     const pages = pageCount(win.total, PAGE_SIZE);
 
     // Previous arrow (disabled on page 1).
-    pagerEl.appendChild(pagerButton('‹', 'Previous page', () => dispatch({ type: 'prev' }), { disabled: !win.hasPrev }));
+    pagerEl.appendChild(
+      pagerButton('‹', 'Previous page', () => dispatch({ type: 'prev' }), { disabled: !win.hasPrev })
+    );
 
     // Numbered buttons + ellipsis spans.
     for (const item of pageList(win.total, PAGE_SIZE, state.page, { edge: 1, around: 1 })) {
@@ -1288,16 +1350,20 @@ function automationKeysOnce() {
       }
       const n = /** @type {number} */ (item);
       const isCurrent = n === state.page;
-      pagerEl.appendChild(pagerButton(
-        String(n),
-        isCurrent ? 'Page ' + n + ', current page' : 'Page ' + n,
-        () => dispatch({ type: 'goto', page: n }),
-        { current: isCurrent }
-      ));
+      pagerEl.appendChild(
+        pagerButton(
+          String(n),
+          isCurrent ? 'Page ' + n + ', current page' : 'Page ' + n,
+          () => dispatch({ type: 'goto', page: n }),
+          { current: isCurrent }
+        )
+      );
     }
 
     // Next arrow (disabled on last page).
-    pagerEl.appendChild(pagerButton('›', 'Next page', () => dispatch({ type: 'next' }), { disabled: state.page >= pages }));
+    pagerEl.appendChild(
+      pagerButton('›', 'Next page', () => dispatch({ type: 'next' }), { disabled: state.page >= pages })
+    );
   }
 
   /**
@@ -1327,7 +1393,10 @@ function automationKeysOnce() {
 
   // Initial snapshot (catches sessions/log present before this page loaded) + live
   // updates. Listener removed on pagehide to prevent accumulation across reloads.
-  bridge.automationGetActivity().then(onSnapshot).catch(() => {});
+  bridge
+    .automationGetActivity()
+    .then(onSnapshot)
+    .catch(() => {});
   const h = bridge.onAutomationActivity(onSnapshot);
   window.addEventListener('pagehide', () => bridge.offAutomationActivity(h), { once: true });
 })();

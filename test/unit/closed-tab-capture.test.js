@@ -14,7 +14,7 @@ const {
   APPEND_SENTINEL,
   captureClosedTabEntry,
   captureWindowCloseEntries,
-  reopenStripIndex,
+  reopenStripIndex
 } = require('../../src/main/closed-tab-capture');
 
 // ---------------------------------------------------------------------------
@@ -22,15 +22,21 @@ const {
 // isDestroyed only, and tabViews entries through { view, partition, trusted }.
 // ---------------------------------------------------------------------------
 
-function makeWc({ url = 'https://example.com/', title = 'Example', destroyed = false, entries = [{ url }], index = 0 } = {}) {
+function makeWc({
+  url = 'https://example.com/',
+  title = 'Example',
+  destroyed = false,
+  entries = [{ url }],
+  index = 0
+} = {}) {
   return {
     isDestroyed: () => destroyed,
     getURL: () => url,
     getTitle: () => title,
     navigationHistory: {
       getAllEntries: () => entries,
-      getActiveIndex: () => index,
-    },
+      getActiveIndex: () => index
+    }
   };
 }
 
@@ -40,7 +46,7 @@ function makeTabEntry({ partition = 'persist:jar-work', trusted = false, wc = ma
 
 const JARS = [
   { id: 'work', partition: 'persist:jar-work' },
-  { id: 'play', partition: 'persist:jar-play' },
+  { id: 'play', partition: 'persist:jar-play' }
 ];
 
 // --- captureClosedTabEntry: allowlist + tagging -------------------------------
@@ -50,13 +56,13 @@ test('captureClosedTabEntry captures a persist-jar tab with windowId and the giv
     url: 'https://a.example/page',
     title: 'A Page',
     entries: [{ url: 'https://a.example/' }, { url: 'https://a.example/page' }],
-    index: 1,
+    index: 1
   });
   const entry = captureClosedTabEntry({
     tabEntry: makeTabEntry({ wc }),
     jarsList: JARS,
     stripIndex: 3,
-    windowId: 7,
+    windowId: 7
   });
   assert.ok(entry);
   assert.equal(entry.url, 'https://a.example/page');
@@ -74,7 +80,7 @@ test('captureClosedTabEntry excludes burner partitions (positive allowlist — n
     tabEntry: makeTabEntry({ partition: 'burner:1' }),
     jarsList: JARS,
     stripIndex: 0,
-    windowId: 1,
+    windowId: 1
   });
   assert.equal(entry, null);
 });
@@ -85,7 +91,7 @@ test('captureClosedTabEntry excludes trusted/internal tabs (belt-and-suspenders 
     tabEntry: makeTabEntry({ partition: 'persist:jar-work', trusted: true }),
     jarsList: JARS,
     stripIndex: 0,
-    windowId: 1,
+    windowId: 1
   });
   assert.equal(entry, null);
 });
@@ -95,7 +101,7 @@ test('captureClosedTabEntry excludes a destroyed webContents (nothing left to re
     tabEntry: makeTabEntry({ wc: makeWc({ destroyed: true }) }),
     jarsList: JARS,
     stripIndex: 0,
-    windowId: 1,
+    windowId: 1
   });
   assert.equal(entry, null);
 });
@@ -112,7 +118,10 @@ test('captureWindowCloseEntries captures persist-jar tabs in tabViews INSERTION 
     entries.map((e) => e.url),
     ['https://first.example/', 'https://second.example/', 'https://third.example/']
   );
-  assert.deepEqual(entries.map((e) => e.jarId), ['work', 'play', 'work']);
+  assert.deepEqual(
+    entries.map((e) => e.jarId),
+    ['work', 'play', 'work']
+  );
 });
 
 test('captureWindowCloseEntries tags every entry with the dying windowId and the append sentinel', () => {
@@ -160,7 +169,10 @@ test('captureWindowCloseEntries: a strip position with no tabViews entry (a welc
   tabViews.set(51, makeTabEntry({ wc: makeWc({ url: 'https://kept.example/' }) }));
   // wcId 52 would be the welcome tab's slot — no tab-create IPC, no entry here.
   const entries = captureWindowCloseEntries({ tabViews, jarsList: JARS, windowId: 6 });
-  assert.deepEqual(entries.map((e) => e.url), ['https://kept.example/']);
+  assert.deepEqual(
+    entries.map((e) => e.url),
+    ['https://kept.example/']
+  );
 });
 
 // --- reopenStripIndex: the DD4 pop rule ----------------------------------------

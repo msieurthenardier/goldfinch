@@ -39,7 +39,7 @@ const EXTRA_ESCAPES = {
   "'": '%27',
   '!': '%21',
   '~': '%7E',
-  '*': '%2A',
+  '*': '%2A'
 };
 
 function strictEncode(value) {

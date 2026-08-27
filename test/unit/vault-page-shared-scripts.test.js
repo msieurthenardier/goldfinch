@@ -50,7 +50,10 @@ function isSharedSrc(src) {
 
 test('vault.html loads at least its own controller script', () => {
   const tags = vaultScriptTags();
-  assert.ok(tags.some((t) => t.src === 'vault.js'), 'vault.html must load vault.js');
+  assert.ok(
+    tags.some((t) => t.src === 'vault.js'),
+    'vault.html must load vault.js'
+  );
 });
 
 test('vault.html: once any script is a module, every classic script tag carries defer (DD3)', () => {
@@ -65,7 +68,10 @@ test('vault.html: once any script is a module, every classic script tag carries 
 
 test('every script vault.html loads resolves to a real file on disk', () => {
   for (const { src } of vaultScriptTags()) {
-    assert.doesNotThrow(() => resolveScriptFile(src), `"${src}" should resolve under src/shared/ or src/renderer/pages/`);
+    assert.doesNotThrow(
+      () => resolveScriptFile(src),
+      `"${src}" should resolve under src/shared/ or src/renderer/pages/`
+    );
   }
 });
 

@@ -25,7 +25,18 @@ const { registerJarDataIpc } = require('./jar-data-ipc');
  *   bookmarksStore?: typeof import('./bookmarks-store')
  * }} deps
  */
-function registerJarIpc({ ipcMain, jars, session, rerollSeed, revokeJarKey, settings, broadcast, historyStore, getVaultStore, bookmarksStore }) {
+function registerJarIpc({
+  ipcMain,
+  jars,
+  session,
+  rerollSeed,
+  revokeJarKey,
+  settings,
+  broadcast,
+  historyStore,
+  getVaultStore,
+  bookmarksStore
+}) {
   const cookieSeen = appDb.createCookieSeenStore();
 
   // getDefault() returns the shared frozen BURNER when no persistent jar

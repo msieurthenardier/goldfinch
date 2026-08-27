@@ -34,12 +34,12 @@ const entry = (title, { destroyed = false, noTitleFn = false } = {}) => ({
     webContents: {
       id: nextId++,
       isDestroyed: () => destroyed,
-      ...(noTitleFn ? {} : { getTitle: () => title }),
-    },
+      ...(noTitleFn ? {} : { getTitle: () => title })
+    }
   },
   partition: 'persist:jar',
   trusted: false,
-  active: true,
+  active: true
 });
 
 /**
@@ -70,14 +70,14 @@ test('AC1 — THREE windows: TWO targets, the source excluded, captioned from ac
   const c = addWindow(registry, 'Wikipedia');
   assert.deepEqual(buildMoveTargets(registry.records(), a), [
     { windowId: b.win.id, label: 'GitHub' },
-    { windowId: c.win.id, label: 'Wikipedia' },
+    { windowId: c.win.id, label: 'Wikipedia' }
   ]);
   // And the exclusion is of the SOURCE, not of "the first record": asked from B,
   // the list is A and C. A builder that dropped records[0] would agree with the
   // reading above and disagree here.
   assert.deepEqual(buildMoveTargets(registry.records(), b), [
     { windowId: a.win.id, label: 'Source' },
-    { windowId: c.win.id, label: 'Wikipedia' },
+    { windowId: c.win.id, label: 'Wikipedia' }
   ]);
 });
 
@@ -103,7 +103,10 @@ test('AC3 — mutating the registry between BUILD and DISPATCH still targets the
 
   // BUILD: the menu the user is looking at.
   const built = buildMoveTargets(registry.records(), a);
-  assert.deepEqual(built.map((t) => t.windowId), [b.win.id, c.win.id]);
+  assert.deepEqual(
+    built.map((t) => t.windowId),
+    [b.win.id, c.win.id]
+  );
   // The user picks the FIRST item — window B.
   const picked = built[0].windowId;
 
@@ -171,9 +174,10 @@ test('the label falls back rather than throwing: no active tab, destroyed wc, bl
   const destroyed = addWindow(registry, 'Gone', { destroyed: true });
   const blank = addWindow(registry, '   ');
   const noFn = addWindow(registry, 'x', { noTitleFn: true });
-  assert.deepEqual(buildMoveTargets(registry.records(), a).map((t) => t.label), [
-    FALLBACK_LABEL, FALLBACK_LABEL, FALLBACK_LABEL, FALLBACK_LABEL,
-  ]);
+  assert.deepEqual(
+    buildMoveTargets(registry.records(), a).map((t) => t.label),
+    [FALLBACK_LABEL, FALLBACK_LABEL, FALLBACK_LABEL, FALLBACK_LABEL]
+  );
   assert.equal(noActive.activeTabWcId, null);
   assert.ok(destroyed && blank && noFn);
 });
@@ -217,7 +221,7 @@ test('null/garbage records are skipped, never emitted as half-rows', () => {
   const a = addWindow(registry, 'Source');
   const b = addWindow(registry, 'B');
   assert.deepEqual(buildMoveTargets([null, undefined, {}, ...registry.records()], a), [
-    { windowId: b.win.id, label: 'B' },
+    { windowId: b.win.id, label: 'B' }
   ]);
   assert.deepEqual(buildMoveTargets(null, a), []);
   assert.deepEqual(buildMoveTargets(undefined, a), []);

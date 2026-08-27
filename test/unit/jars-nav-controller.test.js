@@ -19,13 +19,17 @@ class El {
     this.className = '';
     this._textContent = '';
   }
-  get firstChild() { return this.children[0] || null; }
+  get firstChild() {
+    return this.children[0] || null;
+  }
   get nextSibling() {
     if (!this.parentNode) return null;
     const index = this.parentNode.children.indexOf(this);
     return this.parentNode.children[index + 1] || null;
   }
-  get textContent() { return this._textContent; }
+  get textContent() {
+    return this._textContent;
+  }
   set textContent(value) {
     this._textContent = String(value);
     if (value === '') {
@@ -33,7 +37,9 @@ class El {
       this.children = [];
     }
   }
-  appendChild(child) { return this.insertBefore(child, null); }
+  appendChild(child) {
+    return this.insertBefore(child, null);
+  }
   insertBefore(child, before) {
     if (child.parentNode) child.parentNode.children.splice(child.parentNode.children.indexOf(child), 1);
     const index = before == null ? this.children.length : this.children.indexOf(before);
@@ -50,8 +56,12 @@ class El {
     this.parentNode.children.splice(this.parentNode.children.indexOf(this), 1);
     this.parentNode = null;
   }
-  setAttribute(name, value) { this.attributes.set(name, String(value)); }
-  removeAttribute(name) { this.attributes.delete(name); }
+  setAttribute(name, value) {
+    this.attributes.set(name, String(value));
+  }
+  removeAttribute(name) {
+    this.attributes.delete(name);
+  }
 }
 
 class Observer {
@@ -63,8 +73,12 @@ class Observer {
     this.disconnected = false;
     Observer.instances.push(this);
   }
-  observe(target) { this.observed.push(target); }
-  disconnect() { this.disconnected = true; }
+  observe(target) {
+    this.observed.push(target);
+  }
+  disconnect() {
+    this.disconnected = true;
+  }
 }
 
 function harness() {
@@ -110,7 +124,8 @@ test('scroll observer is stable for an unchanged section set and activates histo
   const h = harness();
   const nav = await create(h);
   const historyCalls = [];
-  const root = new El('section'); root.id = 'jar-work';
+  const root = new El('section');
+  root.id = 'jar-work';
   h.sections.set('work', { root, historyPanel: { onExpanded: () => historyCalls.push('work') } });
   const rows = [{ id: 'work', name: 'Work', color: '#123456', isDefault: false }];
   nav.render(rows);

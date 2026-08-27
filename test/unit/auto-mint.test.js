@@ -20,7 +20,10 @@ describe('resolveAutoMintTarget (dev auto-mint target resolution, M06 F2 DD7)', 
   });
 
   it('returns null for a burner-id-shaped object even without reference identity (id-compare, not reference-compare)', () => {
-    assert.equal(resolveAutoMintTarget({ getDefault: () => ({ id: 'burner', name: 'Burner', color: '#ff8c42' }) }), null);
+    assert.equal(
+      resolveAutoMintTarget({ getDefault: () => ({ id: 'burner', name: 'Burner', color: '#ff8c42' }) }),
+      null
+    );
   });
 
   it('returns the legacy default jar id (migrated profile)', () => {

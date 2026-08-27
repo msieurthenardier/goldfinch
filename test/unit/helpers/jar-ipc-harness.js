@@ -156,9 +156,7 @@ function makeHarness(
 ) {
   appDb.open('', { memory: true });
   t.after(() => appDb.close());
-  appDb
-    .createDocumentStore('jars')
-    .write(JSON.stringify({ version: 2, defaultId, containers }), 0);
+  appDb.createDocumentStore('jars').write(JSON.stringify({ version: 2, defaultId, containers }), 0);
   const jars = freshStore();
   jars.load('');
 

@@ -326,11 +326,15 @@ function createMenuOverlayManager({
       // menu's channel 7 carries ITS token so chrome resets the right trigger —
       // delivered to the SUPERSEDED menu's attachment window's chrome (DD7:
       // window B's open must reset window A's trigger, not B's).
-      sendToChrome('menu-overlay-closed', {
-        menuType: currentMenu.menuType,
-        reason: 'superseded',
-        token: currentMenu.token
-      }, attachment ? attachment.win : null);
+      sendToChrome(
+        'menu-overlay-closed',
+        {
+          menuType: currentMenu.menuType,
+          reason: 'superseded',
+          token: currentMenu.token
+        },
+        attachment ? attachment.win : null
+      );
       // Close-observer, model-replace path (M14 F1 L2): the superseded menu is
       // over even though closeMenuOverlay never ran — observers (the auth
       // pending-challenge store) must see this close too.
@@ -361,9 +365,10 @@ function createMenuOverlayManager({
     // HAT FIX 1: conditional merge — a non-string/absent jarId (every
     // non-bookmark menuType, plus the bookmark-edit audit-seam fixture)
     // leaves the record at its pre-fix { menuType, token } shape exactly.
-    currentMenu = typeof payload.jarId === 'string'
-      ? { menuType: payload.menuType, token: payload.token, jarId: payload.jarId }
-      : { menuType: payload.menuType, token: payload.token };
+    currentMenu =
+      typeof payload.jarId === 'string'
+        ? { menuType: payload.menuType, token: payload.token, jarId: payload.jarId }
+        : { menuType: payload.menuType, token: payload.token };
     currentDismissible = payload.dismissible !== false; // DD5 — non-dismissible opt-out
     // Keep-focus is per menu session (opt-in, default off) and its grab budget resets
     // with it — a model-replace into a different menu must not inherit the prior one's
@@ -418,7 +423,11 @@ function createMenuOverlayManager({
     attachment = null; // the menu session is over — the next open records afresh
     // DD7: channel 7 + the refocus both target the ATTACHMENT window's chrome
     // (wrong-window delivery = stuck aria-expanded / focus into the wrong window).
-    sendToChrome('menu-overlay-closed', { menuType: closed.menuType, reason, token: closed.token }, att ? att.win : null);
+    sendToChrome(
+      'menu-overlay-closed',
+      { menuType: closed.menuType, reason, token: closed.token },
+      att ? att.win : null
+    );
     // Close-observer, single-close-path half (M14 F1 L2): after the channel-7
     // emit, with currentMenu already null — an observer re-opening a menu (the
     // auth re-present) sees isMenuOpen() === false.

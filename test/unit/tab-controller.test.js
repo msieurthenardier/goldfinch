@@ -8,13 +8,22 @@ const path = require('node:path');
 const moduleUrl = pathToFileURL(path.join(__dirname, '../../src/renderer/chrome/tab-controller.js')).href;
 
 class FakeClassList {
-  constructor() { this.values = new Set(); }
-  add(...names) { names.forEach((name) => this.values.add(name)); }
-  remove(...names) { names.forEach((name) => this.values.delete(name)); }
-  contains(name) { return this.values.has(name); }
+  constructor() {
+    this.values = new Set();
+  }
+  add(...names) {
+    names.forEach((name) => this.values.add(name));
+  }
+  remove(...names) {
+    names.forEach((name) => this.values.delete(name));
+  }
+  contains(name) {
+    return this.values.has(name);
+  }
   toggle(name, force) {
     const next = force === undefined ? !this.values.has(name) : !!force;
-    if (next) this.values.add(name); else this.values.delete(name);
+    if (next) this.values.add(name);
+    else this.values.delete(name);
     return next;
   }
 }
@@ -34,39 +43,67 @@ class FakeElement {
     this.tabIndex = 0;
     this._parts = new Map();
   }
-  set className(value) { value.split(/\s+/).filter(Boolean).forEach((name) => this.classList.add(name)); }
+  set className(value) {
+    value
+      .split(/\s+/)
+      .filter(Boolean)
+      .forEach((name) => this.classList.add(name));
+  }
   set innerHTML(value) {
     // Squawk 0020: keep the raw markup so tests can assert on the jar-color
     // dot's style attribute (isSafeColor guard), same as every real innerHTML sink.
     this._rawHTML = value;
-    for (const selector of ['.tab-title', '.tab-close', '.tab-fav']) this._parts.set(selector, new FakeElement(selector));
+    for (const selector of ['.tab-title', '.tab-close', '.tab-fav'])
+      this._parts.set(selector, new FakeElement(selector));
   }
-  get innerHTML() { return this._rawHTML || ''; }
-  setAttribute(name, value) { this.attributes.set(name, String(value)); }
-  getAttribute(name) { return this.attributes.get(name) ?? null; }
-  addEventListener(name, fn) { this.listeners.set(name, fn); }
-  appendChild(child) { child.parent = this; this.children.push(child); return child; }
+  get innerHTML() {
+    return this._rawHTML || '';
+  }
+  setAttribute(name, value) {
+    this.attributes.set(name, String(value));
+  }
+  getAttribute(name) {
+    return this.attributes.get(name) ?? null;
+  }
+  addEventListener(name, fn) {
+    this.listeners.set(name, fn);
+  }
+  appendChild(child) {
+    child.parent = this;
+    this.children.push(child);
+    return child;
+  }
   insertBefore(child, reference) {
     this.children = this.children.filter((item) => item !== child);
     const index = reference == null ? -1 : this.children.indexOf(reference);
     child.parent = this;
-    if (index < 0) this.children.push(child); else this.children.splice(index, 0, child);
+    if (index < 0) this.children.push(child);
+    else this.children.splice(index, 0, child);
   }
   remove() {
     if (this.parent) this.parent.children = this.parent.children.filter((item) => item !== this);
     this.parent = null;
   }
-  querySelector(selector) { return this._parts.get(selector) || null; }
-  getBoundingClientRect() { return { x: 10, y: 20, left: 10, top: 20, right: 210, bottom: 120, width: 200, height: 100 }; }
+  querySelector(selector) {
+    return this._parts.get(selector) || null;
+  }
+  getBoundingClientRect() {
+    return { x: 10, y: 20, left: 10, top: 20, right: 210, bottom: 120, width: 200, height: 100 };
+  }
 }
 
 function createHarness() {
   const tabs = new Map();
   const ctx = { tabs, activeTabId: null, tabSeq: 0, activeViewWcId: null, rafGeometryPending: false };
   const els = {
-    tabs: new FakeElement('tabs'), tabstrip: new FakeElement('tabstrip'), webviews: new FakeElement('webviews'),
-    address: new FakeElement('address'), privacyPanel: new FakeElement('privacy'),
-    toggleMedia: new FakeElement(), togglePrivacy: new FakeElement(), toggleDevtools: new FakeElement()
+    tabs: new FakeElement('tabs'),
+    tabstrip: new FakeElement('tabstrip'),
+    webviews: new FakeElement('webviews'),
+    address: new FakeElement('address'),
+    privacyPanel: new FakeElement('privacy'),
+    toggleMedia: new FakeElement(),
+    togglePrivacy: new FakeElement(),
+    toggleDevtools: new FakeElement()
   };
   els.privacyPanel.classList.add('collapsed');
   const documentListeners = new Map();
@@ -79,27 +116,61 @@ function createHarness() {
   let nextWcId = 100;
   const bridge = {
     internalPartition: 'goldfinch-internal',
-    tabCreate(payload) { calls.push(['tabCreate', payload]); return Promise.resolve(nextWcId++); },
-    tabSetActive(...args) { calls.push(['tabSetActive', ...args]); },
-    tabSetBounds(...args) { calls.push(['tabSetBounds', ...args]); },
-    tabHide(...args) { calls.push(['tabHide', ...args]); },
-    tabClose(...args) { calls.push(['tabClose', ...args]); },
-    tabDragStarted() {}, tabDragEnded() {}, tabAdoptByDrop: async () => ({ ok: true }),
+    tabCreate(payload) {
+      calls.push(['tabCreate', payload]);
+      return Promise.resolve(nextWcId++);
+    },
+    tabSetActive(...args) {
+      calls.push(['tabSetActive', ...args]);
+    },
+    tabSetBounds(...args) {
+      calls.push(['tabSetBounds', ...args]);
+    },
+    tabHide(...args) {
+      calls.push(['tabHide', ...args]);
+    },
+    tabClose(...args) {
+      calls.push(['tabClose', ...args]);
+    },
+    tabDragStarted() {},
+    tabDragEnded() {},
+    tabAdoptByDrop: async () => ({ ok: true }),
     // Squawk 0011: was `async () => ({ ok: true })` with no `calls` record — every
     // assertion filtering `h.calls` for 'tabTearOff' was vacuously true regardless of
     // whether requestTearOff ever actually dispatched. Track it like every other
     // bridge call above so a guard-removal actually flips a filtered-count assertion.
-    tabTearOff(payload) { calls.push(['tabTearOff', payload]); return Promise.resolve({ ok: true }); },
-    tabNavigate(payload) { calls.push(['tabNavigate', payload]); },
-    findOverlayOpen() {}, isDevtoolsOpen: async () => false,
-    onAdoptTab(fn) { callbacks.adopt = fn; },
-    onTabMovedAway(fn) { callbacks.movedAway = fn; },
-    onTriggerSendBounds(fn) { callbacks.bounds = fn; }
+    tabTearOff(payload) {
+      calls.push(['tabTearOff', payload]);
+      return Promise.resolve({ ok: true });
+    },
+    tabNavigate(payload) {
+      calls.push(['tabNavigate', payload]);
+    },
+    findOverlayOpen() {},
+    isDevtoolsOpen: async () => false,
+    onAdoptTab(fn) {
+      callbacks.adopt = fn;
+    },
+    onTabMovedAway(fn) {
+      callbacks.movedAway = fn;
+    },
+    onTriggerSendBounds(fn) {
+      callbacks.bounds = fn;
+    }
   };
   const window = { goldfinch: bridge };
-  class FakeResizeObserver { constructor(fn) { this.fn = fn; } observe() {} }
+  class FakeResizeObserver {
+    constructor(fn) {
+      this.fn = fn;
+    }
+    observe() {}
+  }
   const jar = { id: 'persist', name: 'Default', color: '#123456', partition: 'persist:default' };
-  const jarsClient = { containers: [jar], defaultId: jar.id, makeBurner: () => ({ id: 'burner', name: 'Burner', color: '#222222', partition: 'temp', burner: true }) };
+  const jarsClient = {
+    containers: [jar],
+    defaultId: jar.id,
+    makeBurner: () => ({ id: 'burner', name: 'Burner', color: '#222222', partition: 'temp', burner: true })
+  };
   const noOp = () => {};
   // M16 F2 Leg 1/2: mutable boxes so tests can flip the resolved home page /
   // search engine mid-test without reconstructing the controller
@@ -109,19 +180,38 @@ function createHarness() {
   let homePageValue = 'https://home.example/';
   let searchEngineValue = 'google';
   const deps = {
-    window, document, requestAnimationFrame: (fn) => { fn(); return 1; }, ResizeObserver: FakeResizeObserver,
-    ctx, els, tabs, jarsClient,
+    window,
+    document,
+    requestAnimationFrame: (fn) => {
+      fn();
+      return 1;
+    },
+    ResizeObserver: FakeResizeObserver,
+    ctx,
+    els,
+    tabs,
+    jarsClient,
     blankPrivacy: () => ({ net: null, fp: {}, permissions: [], cookies: null }),
-    escapeHtml: String, isSafeColor: (color) => typeof color === 'string' && color.startsWith('#'),
-    openTabContextMenu: noOp, currentHomePage: () => homePageValue,
+    escapeHtml: String,
+    isSafeColor: (color) => typeof color === 'string' && color.startsWith('#'),
+    openTabContextMenu: noOp,
+    currentHomePage: () => homePageValue,
     currentSearchEngine: () => searchEngineValue, // M16 F2 Leg 2 (DD7): openNewTab's reasons rule
     isInternalPageUrl: (url) => /^goldfinch:\/\/(settings|downloads|jars|vault)$/.test(url),
     isSafeTabUrl: (url) => /^https?:/.test(url) || url === 'about:blank',
     resolveNewTabContainer: (containers, defaultId) => containers.find((item) => item.id === defaultId) || null,
     classifyDragPoint: () => ({ zone: 'reorder', index: 0 }),
-    announceTabStatus: noOp, updateNavButtons: noOp, refreshZoomControl: noOp, refreshStar: noOp, fetchCookies: noOp,
-    closeSuggestions: noOp, resetSuggestionsForActivation: noOp, updateAddressChip: noOp,
-    renderMedia: noOp, renderPrivacy: noOp, setDevtoolsPressed: noOp,
+    announceTabStatus: noOp,
+    updateNavButtons: noOp,
+    refreshZoomControl: noOp,
+    refreshStar: noOp,
+    fetchCookies: noOp,
+    closeSuggestions: noOp,
+    resetSuggestionsForActivation: noOp,
+    updateAddressChip: noOp,
+    renderMedia: noOp,
+    renderPrivacy: noOp,
+    setDevtoolsPressed: noOp,
     // M15 F2 Leg 3 (DD7 table 3/5, 4/5): the two activation-class bar-render
     // trigger sites — tracked (not a no-op) so the tests below can pin that
     // both actually call it.
@@ -132,9 +222,19 @@ function createHarness() {
     hideWelcomePanel: () => calls.push(['hideWelcomePanel'])
   };
   return {
-    deps, tabs, ctx, els, callbacks, calls, jar,
-    setHomePage: (v) => { homePageValue = v; },
-    setSearchEngine: (v) => { searchEngineValue = v; }
+    deps,
+    tabs,
+    ctx,
+    els,
+    callbacks,
+    calls,
+    jar,
+    setHomePage: (v) => {
+      homePageValue = v;
+    },
+    setSearchEngine: (v) => {
+      searchEngineValue = v;
+    }
   };
 }
 
@@ -187,7 +287,10 @@ test('safe and trusted create paths preserve URL gates, jar routing, strip ARIA,
   assert.equal(web.btn.getAttribute('role'), 'tab');
   assert.equal(internal.btn.getAttribute('aria-selected'), 'true');
   assert.equal(controller.activeTab(), internal);
-  assert.deepEqual(h.calls.filter(([name]) => name === 'tabCreate').map(([, payload]) => payload.trusted), [false, true]);
+  assert.deepEqual(
+    h.calls.filter(([name]) => name === 'tabCreate').map(([, payload]) => payload.trusted),
+    [false, true]
+  );
   // M15 F2 Leg 3 (DD7 table 3/5, 4/5): activateTab's synchronous body (both
   // createTab calls above self-activate) AND the wcId-arrival path both call
   // refreshBookmarksSurfaces for the tab they concern.
@@ -299,7 +402,7 @@ test('openWelcomeTab resolves a burner jar when the resolver yields none', async
   assert.equal(tab.container.burner, true);
 });
 
-test('attachView sends exactly one tabCreate with the record\'s partition, clears welcome, and runs onViewCreated', async () => {
+test("attachView sends exactly one tabCreate with the record's partition, clears welcome, and runs onViewCreated", async () => {
   const h = createHarness();
   const controller = await loadController(h);
   const tab = controller.openWelcomeTab({ reasons: ['home'] });
@@ -424,13 +527,24 @@ test('a welcome record refuses to start a drag: dragstart preventDefaults on a v
   const tab = controller.openWelcomeTab({ reasons: ['home'] });
   const dragStartFn = tab.btn.listeners.get('dragstart');
   let prevented = false;
-  dragStartFn({ dataTransfer: { setData() {}, effectAllowed: null }, preventDefault: () => { prevented = true; }, clientX: 0, clientY: 0 });
+  dragStartFn({
+    dataTransfer: { setData() {}, effectAllowed: null },
+    preventDefault: () => {
+      prevented = true;
+    },
+    clientX: 0,
+    clientY: 0
+  });
   assert.equal(prevented, true, 'dragstart on a viewless record must preventDefault (refused)');
   // dragstart's own gate means no drag session (`dnd`) is ever created for this tab, so
   // requestTearOff — dragend's only call site — never runs. Squawk 0011: this assertion
   // alone previously stood in for coverage of requestTearOff's OWN guard, which it does
   // not exercise. See the two tests below for that guard.
-  assert.equal(h.calls.filter(([name]) => name === 'tabTearOff').length, 0, 'a refused dragstart never creates a drag session');
+  assert.equal(
+    h.calls.filter(([name]) => name === 'tabTearOff').length,
+    0,
+    'a refused dragstart never creates a drag session'
+  );
 });
 
 // Squawk 0011: `requestTearOff`'s own guard — `if (!tab || tab.wcId == null) return;`
@@ -454,13 +568,19 @@ test('requestTearOff refuses a tab that lost its view mid-drag: no tabTearOff IP
   const dragStartFn = tab.btn.listeners.get('dragstart');
   dragStartFn({
     dataTransfer: { setData() {}, effectAllowed: null, setDragImage() {} },
-    preventDefault: () => {}, clientX: 0, clientY: 0
+    preventDefault: () => {},
+    clientX: 0,
+    clientY: 0
   });
   tab.wcId = null; // the view goes away mid-drag — the exact condition requestTearOff's guard exists for
   h.calls.length = 0;
   const dragEndFn = tab.btn.listeners.get('dragend');
   dragEndFn({ clientX: -50, clientY: -50 });
-  assert.equal(h.calls.filter(([name]) => name === 'tabTearOff').length, 0, 'requestTearOff must refuse a tab with no view, even mid-drag');
+  assert.equal(
+    h.calls.filter(([name]) => name === 'tabTearOff').length,
+    0,
+    'requestTearOff must refuse a tab with no view, even mid-drag'
+  );
 });
 
 test('requestTearOff dispatches tabTearOff for a tab with a live view (positive control)', async () => {
@@ -472,7 +592,9 @@ test('requestTearOff dispatches tabTearOff for a tab with a live view (positive 
   const dragStartFn = tab.btn.listeners.get('dragstart');
   dragStartFn({
     dataTransfer: { setData() {}, effectAllowed: null, setDragImage() {} },
-    preventDefault: () => {}, clientX: 0, clientY: 0
+    preventDefault: () => {},
+    clientX: 0,
+    clientY: 0
   });
   h.calls.length = 0;
   const dragEndFn = tab.btn.listeners.get('dragend');
@@ -511,7 +633,9 @@ test('onViewCreated closes the orphaned view via tabClose with skipCapture when 
   const pendingResolvers = [];
   h.deps.window.goldfinch.tabCreate = (payload) => {
     h.calls.push(['tabCreate', payload]);
-    return new Promise((resolve) => { pendingResolvers.push(resolve); });
+    return new Promise((resolve) => {
+      pendingResolvers.push(resolve);
+    });
   };
   const controller = await loadController(h);
   const tab = controller.createTab('https://example.test/');
@@ -537,5 +661,8 @@ test('onViewCreated closes the orphaned view via tabClose with skipCapture when 
   assert.deepEqual(closeCalls[0], ['tabClose', 999, -1, { skipCapture: true }]);
   // No tab record was resurrected for the orphan.
   assert.equal(controller.findTabByWcId(999), null);
-  assert.equal([...h.tabs.values()].some((t) => t.wcId === 999), false);
+  assert.equal(
+    [...h.tabs.values()].some((t) => t.wcId === 999),
+    false
+  );
 });

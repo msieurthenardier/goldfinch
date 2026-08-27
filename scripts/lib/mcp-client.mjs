@@ -41,9 +41,7 @@ export function defaultKey(env = process.env) {
  * @returns {URL}
  */
 export function resolveEndpoint(env = process.env) {
-  return new URL(
-    env.GOLDFINCH_MCP_URL || 'http://127.0.0.1:' + (env.GOLDFINCH_MCP_PORT || 49707) + '/mcp'
-  );
+  return new URL(env.GOLDFINCH_MCP_URL || 'http://127.0.0.1:' + (env.GOLDFINCH_MCP_PORT || 49707) + '/mcp');
 }
 
 /**
@@ -74,10 +72,10 @@ export async function connectAutomation(opts = {}) {
 
   const client = new Client({
     name: opts.clientName || 'goldfinch-automation-client',
-    version: opts.clientVersion || '1.0.0',
+    version: opts.clientVersion || '1.0.0'
   });
   const transport = new StreamableHTTPClientTransport(endpoint, {
-    requestInit: { headers: { Authorization: 'Bearer ' + key } },
+    requestInit: { headers: { Authorization: 'Bearer ' + key } }
   });
   await client.connect(transport); // MCP initialize handshake
   return client;

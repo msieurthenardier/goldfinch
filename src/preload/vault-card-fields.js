@@ -44,7 +44,7 @@ const AUTOCOMPLETE_ROLES = new Map([
   ['cc-exp', 'expiry'],
   ['cc-exp-month', 'expMonth'],
   ['cc-exp-year', 'expYear'],
-  ['cc-csc', 'csc'],
+  ['cc-csc', 'csc']
 ]);
 
 // Narrow name/id/placeholder fallbacks, used ONLY on forms that carry no `cc-*`
@@ -56,7 +56,7 @@ const FALLBACK_PATTERNS = [
   ['expMonth', /\b(exp|expiry|expiration)[-_ ]?(month|mm)\b|^ccmonth$|^expmonth$/i],
   ['expYear', /\b(exp|expiry|expiration)[-_ ]?(year|yy|yyyy)\b|^ccyear$|^expyear$/i],
   ['expiry', /\b(exp|expiry|expiration)([-_ ]?date)?\b|^ccexp$/i],
-  ['cardholder', /\b(card[-_ ]?holder|name[-_ ]?on[-_ ]?card|cc[-_ ]?name)\b/i],
+  ['cardholder', /\b(card[-_ ]?holder|name[-_ ]?on[-_ ]?card|cc[-_ ]?name)\b/i]
 ];
 
 /**
@@ -168,7 +168,7 @@ function entryFromRoles(roles, scope) {
     expMonth: roles.get('expMonth') || null,
     expYear: roles.get('expYear') || null,
     csc: roles.get('csc') || null,
-    form: scope && scope.tagName ? scope : null,
+    form: scope && scope.tagName ? scope : null
   };
 }
 
@@ -374,5 +374,5 @@ module.exports = {
   findAllCardFields,
   isLiveCardNumberField,
   parseExpiry,
-  fillCardForm,
+  fillCardForm
 };

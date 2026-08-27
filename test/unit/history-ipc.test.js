@@ -134,23 +134,20 @@ function makeHarness({ storeThrows = {} } = {}) {
 // ---------------------------------------------------------------------------
 test('registers exactly the six chrome + six internal history channels, no others', () => {
   const h = makeHarness();
-  assert.deepEqual(
-    [...h.handlers.keys()].sort(),
-    [
-      'history-clear',
-      'history-count',
-      'history-delete',
-      'history-page',
-      'history-search',
-      'history-suggest',
-      'internal-history-clear',
-      'internal-history-count',
-      'internal-history-delete',
-      'internal-history-page',
-      'internal-history-search',
-      'internal-history-suggest'
-    ]
-  );
+  assert.deepEqual([...h.handlers.keys()].sort(), [
+    'history-clear',
+    'history-count',
+    'history-delete',
+    'history-page',
+    'history-search',
+    'history-suggest',
+    'internal-history-clear',
+    'internal-history-count',
+    'internal-history-delete',
+    'internal-history-page',
+    'internal-history-search',
+    'internal-history-suggest'
+  ]);
 });
 
 // ---------------------------------------------------------------------------
@@ -234,8 +231,14 @@ test('history-page: malformed payload returns the static error, no store call', 
 
 test('history-page: unknown jarId returns the static error', () => {
   const h = makeHarness();
-  assert.deepEqual(h.invoke('history-page', { jarId: 'nope', page: 1 }), { ok: false, error: 'history: page — unknown-jar' });
-  assert.deepEqual(h.invoke('history-page', { jarId: 'burner', page: 1 }), { ok: false, error: 'history: page — unknown-jar' });
+  assert.deepEqual(h.invoke('history-page', { jarId: 'nope', page: 1 }), {
+    ok: false,
+    error: 'history: page — unknown-jar'
+  });
+  assert.deepEqual(h.invoke('history-page', { jarId: 'burner', page: 1 }), {
+    ok: false,
+    error: 'history: page — unknown-jar'
+  });
 });
 
 test('history-page: page must be a positive integer — 0/negative/fractional/non-finite is bad-args (isFiniteNumber alone would not catch these)', () => {
@@ -278,7 +281,7 @@ test('history-page: success shape returns { ok: true, visits, total }', () => {
   assert.equal(result.total, 2, 'total reflects countByJar, not the page size');
 });
 
-test('history-page: page 2 returns the second slice, using the shared store\'s real pagination', () => {
+test("history-page: page 2 returns the second slice, using the shared store's real pagination", () => {
   const h = makeHarness();
   h.store.seed('personal', { url: 'https://example.com/a' });
   h.store.seed('personal', { url: 'https://example.com/b' });
@@ -412,7 +415,7 @@ test('history-delete: success returns { ok: true } and broadcasts history-change
   assert.deepEqual(h.events[0], { channel: 'history-changed', payload: { jarId: 'personal' } });
 });
 
-test('history-delete: cross-jar visitId is scoped — deleting jar B\'s id via jar A returns not-found', () => {
+test("history-delete: cross-jar visitId is scoped — deleting jar B's id via jar A returns not-found", () => {
   const h = makeHarness();
   const workId = h.store.seed('work', { url: 'https://work.example.com' });
   assert.deepEqual(h.invoke('history-delete', { jarId: 'personal', visitId: workId }), {
@@ -464,7 +467,7 @@ test('history-clear: a non-empty jar clears and broadcasts history-changed', () 
   assert.deepEqual(h.events[0], { channel: 'history-changed', payload: { jarId: 'personal' } });
 });
 
-test('history-clear: clearing jar A never touches jar B\'s rows', () => {
+test("history-clear: clearing jar A never touches jar B's rows", () => {
   const h = makeHarness();
   h.store.seed('personal', { url: 'https://example.com/a' });
   h.store.seed('work', { url: 'https://work.example.com' });
@@ -524,7 +527,7 @@ test('history-count: a throwing store returns the static store-failure string, n
   assert.equal(h.events.length, 0);
 });
 
-test('a count via internal-history-count sees rows recorded via the chrome twin (extract-don\'t-fork parity)', () => {
+test("a count via internal-history-count sees rows recorded via the chrome twin (extract-don't-fork parity)", () => {
   const h = makeHarness();
   h.store.seed('personal', { url: 'https://example.com/a' });
   const chromeResult = h.invoke('history-count', { jarId: 'personal' });
@@ -611,7 +614,7 @@ test('history-suggest: a throwing store returns the static store-failure string,
   assert.deepEqual(result, { ok: false, error: 'history: suggest — store-failure' });
 });
 
-test('a suggest via internal-history-suggest sees rows recorded before either twin was called (extract-don\'t-fork parity)', () => {
+test("a suggest via internal-history-suggest sees rows recorded before either twin was called (extract-don't-fork parity)", () => {
   const h = makeHarness();
   h.store.seed('personal', { url: 'https://example.com/report', title: 'Quarterly report' });
   const chromeResult = h.invoke('history-suggest', { jarId: 'personal', query: 'report' });

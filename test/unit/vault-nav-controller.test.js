@@ -28,17 +28,30 @@ class El {
     this._className = '';
     this._classes = new Set();
     this._textContent = '';
-    this.classList = { add: (c) => { this._classes.add(c); } };
+    this.classList = {
+      add: (c) => {
+        this._classes.add(c);
+      }
+    };
   }
-  get className() { return this._className; }
-  set className(value) { this._className = String(value); this._classes = new Set(String(value).split(/\s+/).filter(Boolean)); }
-  get firstChild() { return this.children[0] || null; }
+  get className() {
+    return this._className;
+  }
+  set className(value) {
+    this._className = String(value);
+    this._classes = new Set(String(value).split(/\s+/).filter(Boolean));
+  }
+  get firstChild() {
+    return this.children[0] || null;
+  }
   get nextSibling() {
     if (!this.parentNode) return null;
     const index = this.parentNode.children.indexOf(this);
     return this.parentNode.children[index + 1] || null;
   }
-  get textContent() { return this._textContent; }
+  get textContent() {
+    return this._textContent;
+  }
   set textContent(value) {
     this._textContent = String(value);
     if (value === '') {
@@ -46,7 +59,9 @@ class El {
       this.children = [];
     }
   }
-  appendChild(child) { return this.insertBefore(child, null); }
+  appendChild(child) {
+    return this.insertBefore(child, null);
+  }
   insertBefore(child, before) {
     if (child.parentNode) child.parentNode.children.splice(child.parentNode.children.indexOf(child), 1);
     const index = before == null ? this.children.length : this.children.indexOf(before);
@@ -63,8 +78,12 @@ class El {
     this.parentNode.children.splice(this.parentNode.children.indexOf(this), 1);
     this.parentNode = null;
   }
-  setAttribute(name, value) { this.attributes.set(name, String(value)); }
-  removeAttribute(name) { this.attributes.delete(name); }
+  setAttribute(name, value) {
+    this.attributes.set(name, String(value));
+  }
+  removeAttribute(name) {
+    this.attributes.delete(name);
+  }
 }
 
 class Observer {
@@ -76,8 +95,12 @@ class Observer {
     this.disconnected = false;
     Observer.instances.push(this);
   }
-  observe(target) { this.observed.push(target); }
-  disconnect() { this.disconnected = true; }
+  observe(target) {
+    this.observed.push(target);
+  }
+  disconnect() {
+    this.disconnected = true;
+  }
 }
 
 function harness() {
@@ -110,7 +133,10 @@ async function create(h) {
 const ENTRIES = [
   { id: 'settings', kind: 'settings', label: 'Settings' },
   {
-    id: 'vaults', kind: 'group', label: 'Vaults', children: [
+    id: 'vaults',
+    kind: 'group',
+    label: 'Vaults',
+    children: [
       { id: 'global', kind: 'global', label: 'Global' },
       { id: 'personal', kind: 'jar', label: 'Personal', color: '#4caf50' }
     ]
@@ -121,7 +147,10 @@ const ENTRIES = [
 const anchorOf = (li) => li.children[0];
 const markerOf = (li) => anchorOf(li).children[0];
 // nameSpan is always the anchor's LAST child (present with or without a leading marker).
-const nameOf = (li) => { const a = anchorOf(li); return a.children[a.children.length - 1]; };
+const nameOf = (li) => {
+  const a = anchorOf(li);
+  return a.children[a.children.length - 1];
+};
 const sublistOf = (groupLi) => groupLi.children[1];
 
 test('renders a Settings gear at top, then a Vaults group with indented globe/dot children', async () => {
@@ -159,7 +188,10 @@ test('an unsafe jar color falls back; a null color falls back', async () => {
   nav.render([
     { id: 'settings', kind: 'settings', label: 'Settings' },
     {
-      id: 'vaults', kind: 'group', label: 'Vaults', children: [
+      id: 'vaults',
+      kind: 'group',
+      label: 'Vaults',
+      children: [
         { id: 'bad', kind: 'jar', label: 'Bad', color: 'url(x)' },
         { id: 'none', kind: 'jar', label: 'None', color: null }
       ]
@@ -179,7 +211,10 @@ test('a focused indented child is patched in place (label rewritten), never repl
   nav.render([
     ENTRIES[0],
     {
-      id: 'vaults', kind: 'group', label: 'Vaults', children: [
+      id: 'vaults',
+      kind: 'group',
+      label: 'Vaults',
+      children: [
         { id: 'global', kind: 'global', label: 'Global' },
         { id: 'personal', kind: 'jar', label: 'Renamed', color: '#123456' }
       ]

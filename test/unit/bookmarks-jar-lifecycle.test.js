@@ -20,7 +20,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { makeFakeBookmarksStore, makeHarness } = require('./helpers/jar-ipc-harness');
 
-test('jars-remove drops the deleted jar\'s bookmarks (DD9) and broadcasts bookmarks-changed (n>0 gate)', async (t) => {
+test("jars-remove drops the deleted jar's bookmarks (DD9) and broadcasts bookmarks-changed (n>0 gate)", async (t) => {
   const bookmarksStore = makeFakeBookmarksStore();
   bookmarksStore.seed('personal', 3);
   bookmarksStore.seed('work', 1); // a DIFFERENT jar — must survive
@@ -28,8 +28,8 @@ test('jars-remove drops the deleted jar\'s bookmarks (DD9) and broadcasts bookma
 
   const result = await h.invoke('jars-remove', { id: 'personal' });
   assert.equal(result.ok, true);
-  assert.equal(bookmarksStore.count('personal'), 0, 'the removed jar\'s bookmarks are gone');
-  assert.equal(bookmarksStore.count('work'), 1, 'a DIFFERENT jar\'s bookmarks are untouched');
+  assert.equal(bookmarksStore.count('personal'), 0, "the removed jar's bookmarks are gone");
+  assert.equal(bookmarksStore.count('work'), 1, "a DIFFERENT jar's bookmarks are untouched");
 
   const bookmarksBroadcast = h.broadcasts().find((b) => b.channel === 'bookmarks-changed');
   assert.ok(bookmarksBroadcast, 'handleRemove must broadcast bookmarks-changed when rows were deleted');
@@ -44,13 +44,23 @@ test('jars-remove on a jar with zero bookmarks does not broadcast bookmarks-chan
   assert.ok(h.broadcasts().every((b) => b.channel !== 'bookmarks-changed'));
 });
 
-test('jars-remove\'s bookmark teardown is fail-soft: a throwing bookmarksStore.clearJar never flips ok, and the rest of the composition still runs', async (t) => {
+test("jars-remove's bookmark teardown is fail-soft: a throwing bookmarksStore.clearJar never flips ok, and the rest of the composition still runs", async (t) => {
   const bookmarksStore = makeFakeBookmarksStore({ throws: true });
   const h = makeHarness(t, { bookmarksStore });
   const result = await h.invoke('jars-remove', { id: 'personal' });
-  assert.equal(result.ok, true, 'a bookmark-teardown failure must not fail the whole delete (own try/catch, fail-soft)');
-  assert.ok(h.broadcasts().some((b) => b.channel === 'jars-changed'), 'the rest of the composition (revoke/broadcasts) still ran');
-  assert.ok(h.broadcasts().every((b) => b.channel !== 'bookmarks-changed'), 'no bookmarks-changed on a failed teardown');
+  assert.equal(
+    result.ok,
+    true,
+    'a bookmark-teardown failure must not fail the whole delete (own try/catch, fail-soft)'
+  );
+  assert.ok(
+    h.broadcasts().some((b) => b.channel === 'jars-changed'),
+    'the rest of the composition (revoke/broadcasts) still ran'
+  );
+  assert.ok(
+    h.broadcasts().every((b) => b.channel !== 'bookmarks-changed'),
+    'no bookmarks-changed on a failed teardown'
+  );
 });
 
 test('jars-remove without a bookmarksStore injection skips the step entirely (offline-test gating) — no throw, no broadcast', async (t) => {
@@ -60,15 +70,22 @@ test('jars-remove without a bookmarksStore injection skips the step entirely (of
   assert.ok(h.broadcasts().every((b) => b.channel !== 'bookmarks-changed'));
 });
 
-test('jars-wipe (the full identity wipe) PRESERVES the jar\'s bookmarks — DD9\'s central distinction from jars-remove', async (t) => {
+test("jars-wipe (the full identity wipe) PRESERVES the jar's bookmarks — DD9's central distinction from jars-remove", async (t) => {
   const bookmarksStore = makeFakeBookmarksStore();
   bookmarksStore.seed('personal', 3);
   const h = makeHarness(t, { bookmarksStore });
 
   const result = await h.invoke('jars-wipe', { id: 'personal' });
   assert.equal(result.ok, true);
-  assert.equal(bookmarksStore.count('personal'), 3, 'wipeJarData never calls bookmarksStore.clearJar — the jar persists, bookmarks stay');
-  assert.ok(h.broadcasts().every((b) => b.channel !== 'bookmarks-changed'), 'a wipe never touches bookmarks, so it never broadcasts about them');
+  assert.equal(
+    bookmarksStore.count('personal'),
+    3,
+    'wipeJarData never calls bookmarksStore.clearJar — the jar persists, bookmarks stay'
+  );
+  assert.ok(
+    h.broadcasts().every((b) => b.channel !== 'bookmarks-changed'),
+    'a wipe never touches bookmarks, so it never broadcasts about them'
+  );
 });
 
 test('the SAME injected bookmarksStore reference is shared by both registrars (facade forwarding, jar-ipc.js)', async (t) => {

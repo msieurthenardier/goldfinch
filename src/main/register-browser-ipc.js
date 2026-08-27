@@ -42,8 +42,8 @@ function registerBrowserIpc({
   // a password, a username, or an origin. Injected so a test can capture the calls.
   vaultTrace = process.env.GOLDFINCH_VAULT_TRACE === '1'
     ? (/** @type {string} */ step, /** @type {any} */ fields) =>
-      logger.info('[vault-capture]', step, JSON.stringify(fields))
-    : () => {},
+        logger.info('[vault-capture]', step, JSON.stringify(fields))
+    : () => {}
 }) {
   // Leg 2 (F3 DD2) sender-identity gate. Resolves the SENDER's own window record
   // via identity-compare against every record's chromeView — a non-chrome sender
@@ -180,7 +180,11 @@ function registerBrowserIpc({
     const wcId = event.sender.id;
     const { number, cvv, cardholder, expiry } = /** @type {any} */ (payload || {});
     const offer = getVaultHuman().captureCard({
-      wcId, numberBytes: number, cvvBytes: cvv, cardholder, expiry,
+      wcId,
+      numberBytes: number,
+      cvvBytes: cvv,
+      cardholder,
+      expiry
     });
     if (offer) {
       chromeForTab(wcId)?.send('vault-capture-offer', { captureId: offer.captureId, model: offer.model });
@@ -379,12 +383,16 @@ function registerBrowserIpc({
     const wc = externalContents(payload);
     if (wc) applyZoom(wc, payload.action);
   });
-  ipcMain.handle('get-zoom', (event, payload) => requireChrome(event) ? (externalContents(payload)?.getZoomFactor() ?? null) : null);
+  ipcMain.handle('get-zoom', (event, payload) =>
+    requireChrome(event) ? (externalContents(payload)?.getZoomFactor() ?? null) : null
+  );
   ipcMain.on('print', (event, payload) => {
     if (!requireChrome(event)) return;
     const wc = externalContents(payload);
     if (!wc) return;
-    wc.print({}, (ok, reason) => { if (!ok) logger.warn('print failed:', reason); });
+    wc.print({}, (ok, reason) => {
+      if (!ok) logger.warn('print failed:', reason);
+    });
   });
   ipcMain.handle('toggle-devtools', (event, payload) => {
     if (!requireChrome(event)) return false;
@@ -455,18 +463,21 @@ function registerBrowserIpc({
     const all = await wc.session.cookies.get({});
     let first = 0;
     let third = 0;
-    const list = all.map((cookie) => {
-      const domain = registrableDomain(cookie.domain.replace(/^\./, ''));
-      const isThird = !!firstParty && domain !== firstParty;
-      if (isThird) third++; else first++;
-      return {
-        name: cookie.name,
-        domain: cookie.domain,
-        third: isThird,
-        secure: cookie.secure,
-        session: !cookie.expirationDate
-      };
-    }).sort((a, b) => a.third === b.third ? 0 : a.third ? 1 : -1);
+    const list = all
+      .map((cookie) => {
+        const domain = registrableDomain(cookie.domain.replace(/^\./, ''));
+        const isThird = !!firstParty && domain !== firstParty;
+        if (isThird) third++;
+        else first++;
+        return {
+          name: cookie.name,
+          domain: cookie.domain,
+          third: isThird,
+          secure: cookie.secure,
+          session: !cookie.expirationDate
+        };
+      })
+      .sort((a, b) => (a.third === b.third ? 0 : a.third ? 1 : -1));
     return { firstParty, first, third, total: all.length, list: list.slice(0, 300) };
   });
 
@@ -484,7 +495,10 @@ function registerBrowserIpc({
       if (scope !== 'all' && !(scope === 'third' && isThird)) continue;
       const host = cookie.domain.replace(/^\./, '');
       try {
-        await wc.session.cookies.remove(`${cookie.secure ? 'https' : 'http'}://${host}${cookie.path || '/'}`, cookie.name);
+        await wc.session.cookies.remove(
+          `${cookie.secure ? 'https' : 'http'}://${host}${cookie.path || '/'}`,
+          cookie.name
+        );
         removed++;
       } catch {
         // Individual cookie removal failures do not abort the bounded sweep.

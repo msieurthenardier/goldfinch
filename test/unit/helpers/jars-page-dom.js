@@ -21,20 +21,29 @@ class Element {
       remove: (...names) => names.forEach((name) => values.delete(name)),
       toggle: (name, force) => {
         const enabled = force === undefined ? !values.has(name) : !!force;
-        if (enabled) values.add(name); else values.delete(name);
+        if (enabled) values.add(name);
+        else values.delete(name);
         return enabled;
       },
       contains: (name) => values.has(name)
     };
   }
-  get firstChild() { return this.children[0] || null; }
-  get lastChild() { return this.children[this.children.length - 1] || null; }
+  get firstChild() {
+    return this.children[0] || null;
+  }
+  get lastChild() {
+    return this.children[this.children.length - 1] || null;
+  }
   get nextSibling() {
     if (!this.parentNode) return null;
     return this.parentNode.children[this.parentNode.children.indexOf(this) + 1] || null;
   }
-  get options() { return this.children; }
-  get textContent() { return this._textContent; }
+  get options() {
+    return this.children;
+  }
+  get textContent() {
+    return this._textContent;
+  }
   set textContent(value) {
     this._textContent = String(value);
     if (value === '') {
@@ -42,7 +51,9 @@ class Element {
       this.children = [];
     }
   }
-  appendChild(child) { return this.insertBefore(child, null); }
+  appendChild(child) {
+    return this.insertBefore(child, null);
+  }
   insertBefore(child, before) {
     if (child.parentNode) child.parentNode.children.splice(child.parentNode.children.indexOf(child), 1);
     const index = before == null ? this.children.length : this.children.indexOf(before);
@@ -63,12 +74,18 @@ class Element {
     if (!this.listeners.has(name)) this.listeners.set(name, new Set());
     this.listeners.get(name).add(fn);
   }
-  removeEventListener(name, fn) { this.listeners.get(name)?.delete(fn); }
+  removeEventListener(name, fn) {
+    this.listeners.get(name)?.delete(fn);
+  }
   dispatch(name, event = {}) {
     for (const fn of this.listeners.get(name) || []) fn(event);
   }
-  setAttribute(name, value) { this.attributes.set(name, String(value)); }
-  removeAttribute(name) { this.attributes.delete(name); }
+  setAttribute(name, value) {
+    this.attributes.set(name, String(value));
+  }
+  removeAttribute(name) {
+    this.attributes.delete(name);
+  }
   querySelectorAll(selector) {
     const found = [];
     const visit = (node) => {
@@ -78,18 +95,37 @@ class Element {
     visit(this);
     return found;
   }
-  focus() { if (this.ownerDocument) this.ownerDocument.activeElement = this; this.focused = true; }
-  blur() { if (this.ownerDocument?.activeElement === this) this.ownerDocument.activeElement = null; }
-  scrollIntoView(options) { this.scrolledWith = options; }
+  focus() {
+    if (this.ownerDocument) this.ownerDocument.activeElement = this;
+    this.focused = true;
+  }
+  blur() {
+    if (this.ownerDocument?.activeElement === this) this.ownerDocument.activeElement = null;
+  }
+  scrollIntoView(options) {
+    this.scrolledWith = options;
+  }
 }
 
 function createDocument() {
   const document = {
     activeElement: null,
-    createElement(tag) { const el = new Element(tag); el.ownerDocument = document; return el; },
-    createElementNS(_namespace, tag) { return document.createElement(tag); },
-    createTextNode(text) { const node = document.createElement('#text'); node.textContent = text; return node; },
-    getElementById() { return null; }
+    createElement(tag) {
+      const el = new Element(tag);
+      el.ownerDocument = document;
+      return el;
+    },
+    createElementNS(_namespace, tag) {
+      return document.createElement(tag);
+    },
+    createTextNode(text) {
+      const node = document.createElement('#text');
+      node.textContent = text;
+      return node;
+    },
+    getElementById() {
+      return null;
+    }
   };
   return document;
 }

@@ -20,10 +20,24 @@ const { buildToolRegistry } = require('../../src/main/automation/mcp-tools');
 // ---------------------------------------------------------------------------
 
 const DRIVE_NAMES = [
-  'enumerateTabs', 'openTab', 'closeTab', 'activateTab', 'navigate',
-  'goBack', 'goForward', 'reload', 'getZoom', 'setZoom', 'printToPDF',
-  'findInPage', 'stopFindInPage',
-  'click', 'typeText', 'scroll', 'pressKey', 'dragPointer',
+  'enumerateTabs',
+  'openTab',
+  'closeTab',
+  'activateTab',
+  'navigate',
+  'goBack',
+  'goForward',
+  'reload',
+  'getZoom',
+  'setZoom',
+  'printToPDF',
+  'findInPage',
+  'stopFindInPage',
+  'click',
+  'typeText',
+  'scroll',
+  'pressKey',
+  'dragPointer'
 ];
 
 const OBSERVE_NAMES = ['captureScreenshot', 'captureWindow', 'readDom', 'readAxTree'];
@@ -203,11 +217,26 @@ test('getZoom/setZoom schemas are flat — no top-level oneOf/allOf/anyOf', () =
     assert.equal(schema.allOf, undefined, name + ' must not declare a top-level allOf');
   }
   // No tool carries a top-level anyOf — pressKey's was flattened to a runtime guard (#56/SC9).
-  const withAnyOf = reg.listTools().filter((t) => t.inputSchema.anyOf !== undefined).map((t) => t.name);
+  const withAnyOf = reg
+    .listTools()
+    .filter((t) => t.inputSchema.anyOf !== undefined)
+    .map((t) => t.name);
   assert.deepEqual(withAnyOf, []);
   // No tool declares a top-level oneOf or allOf.
-  assert.deepEqual(reg.listTools().filter((t) => t.inputSchema.oneOf !== undefined).map((t) => t.name), []);
-  assert.deepEqual(reg.listTools().filter((t) => t.inputSchema.allOf !== undefined).map((t) => t.name), []);
+  assert.deepEqual(
+    reg
+      .listTools()
+      .filter((t) => t.inputSchema.oneOf !== undefined)
+      .map((t) => t.name),
+    []
+  );
+  assert.deepEqual(
+    reg
+      .listTools()
+      .filter((t) => t.inputSchema.allOf !== undefined)
+      .map((t) => t.name),
+    []
+  );
 });
 
 test('no tool inputSchema carries a top-level anyOf/oneOf/allOf/not (SC9 hygiene — count-agnostic)', () => {
@@ -268,7 +297,13 @@ test('findInPage maps full named args → positional engine.findInPage(wcId, tex
   const match = { activeMatchOrdinal: 2, matches: 5 };
   const { engine, calls } = makeFakeEngine({ returns: { findInPage: match } });
   const reg = buildToolRegistry(() => engine);
-  const result = await reg.callTool('findInPage', { wcId: 7, text: 'hello', forward: false, findNext: true, matchCase: true });
+  const result = await reg.callTool('findInPage', {
+    wcId: 7,
+    text: 'hello',
+    forward: false,
+    findNext: true,
+    matchCase: true
+  });
   assert.deepEqual(calls.findInPage[0], [7, 'hello', { forward: false, findNext: true, matchCase: true }]);
   assert.equal(result.isError, undefined);
   assert.deepEqual(JSON.parse(textOf(result)), match);
@@ -300,7 +335,13 @@ test('scroll maps to engine.scroll(wcId, x, y, dx, dy)', async () => {
 test('dragPointer maps to engine.dragPointer(wcId, from, to, { steps, stepDelayMs })', async () => {
   const { engine, calls } = makeFakeEngine();
   const reg = buildToolRegistry(() => engine);
-  await reg.callTool('dragPointer', { wcId: 7, from: { x: 10, y: 20 }, to: { x: 100, y: 20 }, steps: 5, stepDelayMs: 2 });
+  await reg.callTool('dragPointer', {
+    wcId: 7,
+    from: { x: 10, y: 20 },
+    to: { x: 100, y: 20 },
+    steps: 5,
+    stepDelayMs: 2
+  });
   assert.deepEqual(calls.dragPointer[0], [7, { x: 10, y: 20 }, { x: 100, y: 20 }, { steps: 5, stepDelayMs: 2 }]);
 });
 
@@ -308,7 +349,12 @@ test('dragPointer without steps/stepDelayMs passes an opts object with both unde
   const { engine, calls } = makeFakeEngine();
   const reg = buildToolRegistry(() => engine);
   await reg.callTool('dragPointer', { wcId: 7, from: { x: 0, y: 0 }, to: { x: 1, y: 1 } });
-  assert.deepEqual(calls.dragPointer[0], [7, { x: 0, y: 0 }, { x: 1, y: 1 }, { steps: undefined, stepDelayMs: undefined }]);
+  assert.deepEqual(calls.dragPointer[0], [
+    7,
+    { x: 0, y: 0 },
+    { x: 1, y: 1 },
+    { steps: undefined, stepDelayMs: undefined }
+  ]);
 });
 
 test('enumerateTabs invokes engine.enumerateTabs() with no args', async () => {
@@ -399,7 +445,7 @@ test('callTool with undefined arguments defaults to {} (no destructuring throw)'
 test('enumerateTabs success → the tab array as JSON, no isError', async () => {
   const tabs = [
     { wcId: 1, url: 'https://a.test', title: 'A', jarId: null, active: true },
-    { wcId: 2, url: 'https://b.test', title: 'B', jarId: 'work', active: false },
+    { wcId: 2, url: 'https://b.test', title: 'B', jarId: 'work', active: false }
   ];
   const { engine } = makeFakeEngine({ returns: { enumerateTabs: tabs } });
   const reg = buildToolRegistry(() => engine);
@@ -465,14 +511,22 @@ test('each resolveContents throw class (bad-handle / no-such-contents / internal
   const cases = [
     'automation: bad-handle — wcId must be a number, got string',
     'automation: no-such-contents — wcId 99 is not a live webContents',
-    'automation: internal-session — wcId 5 belongs to the internal goldfinch://settings session and cannot be driven',
+    'automation: internal-session — wcId 5 belongs to the internal goldfinch://settings session and cannot be driven'
   ];
   for (const msg of cases) {
     // exercise across a wcId-taking op AND across close/activate (which also resolve)
     for (const name of ['navigate', 'closeTab', 'activateTab', 'click', 'pressKey', 'dragPointer']) {
       const { engine } = makeFakeEngine({ throws: { [name]: new Error(msg) } });
       const reg = buildToolRegistry(() => engine);
-      const args = { wcId: 1, url: 'https://a.test', x: 0, y: 0, name: 'Enter', from: { x: 0, y: 0 }, to: { x: 1, y: 1 } };
+      const args = {
+        wcId: 1,
+        url: 'https://a.test',
+        x: 0,
+        y: 0,
+        name: 'Enter',
+        from: { x: 0, y: 0 },
+        to: { x: 1, y: 1 }
+      };
       const result = await reg.callTool(name, args);
       assert.equal(result.isError, true, name + ' / ' + msg);
       assert.equal(textOf(result), msg);
@@ -521,7 +575,9 @@ test('null engine (window closed) degrades to isError, never a null-deref', asyn
 });
 
 test('engine-unavailable accessor (throwing getEngine) degrades to isError', async () => {
-  const reg = buildToolRegistry(() => { throw new Error('automation: engine unavailable'); });
+  const reg = buildToolRegistry(() => {
+    throw new Error('automation: engine unavailable');
+  });
   const result = await reg.callTool('reload', { wcId: 1 });
   assert.equal(result.isError, true);
   assert.equal(textOf(result), 'automation: engine unavailable');
@@ -734,7 +790,7 @@ test('readAxTree post-attach sendCommand throw → isError (genuine exception pr
 test('observe resolveContents throws (bad-handle / internal-session) → isError, message preserved', async () => {
   const cases = [
     'automation: bad-handle — wcId must be a number, got string',
-    'automation: internal-session — wcId 5 belongs to the internal goldfinch://settings session and cannot be driven',
+    'automation: internal-session — wcId 5 belongs to the internal goldfinch://settings session and cannot be driven'
   ];
   for (const msg of cases) {
     for (const name of ['captureScreenshot', 'readDom', 'readAxTree']) {
@@ -812,7 +868,7 @@ test('injectScript maps named args → positional engine.injectScript(wcId, scri
 test('evaluate non-serializable / internal-session engine throw → isError with message preserved', async () => {
   const cases = [
     'automation: evaluate — return value is not JSON-serializable',
-    'automation: evaluate — internal-session excluded',
+    'automation: evaluate — internal-session excluded'
   ];
   for (const msg of cases) {
     const { engine } = makeFakeEngine({ throws: { evaluate: new Error(msg) } });
@@ -885,7 +941,7 @@ test('closeDevTools maps named args → positional engine.closeDevTools(wcId), v
 test('devtools internal-session engine throw → isError with message preserved (both ops)', async () => {
   for (const [name, msg] of [
     ['openDevTools', 'automation: openDevTools — internal-session excluded'],
-    ['closeDevTools', 'automation: closeDevTools — internal-session excluded'],
+    ['closeDevTools', 'automation: closeDevTools — internal-session excluded']
   ]) {
     const { engine } = makeFakeEngine({ throws: { [name]: new Error(msg) } });
     const reg = buildToolRegistry(() => engine);
@@ -919,7 +975,12 @@ test('getChromeTarget is listed with an OPTIONAL windowId inputSchema and no int
 
 test('callTool getChromeTarget passes windowId through to the engine, and omits it as undefined', async () => {
   const calls = [];
-  const engine = { getChromeTarget: (...args) => { calls.push(args); return { wcId: 5, kind: 'chrome', url: 'about:blank', windowId: 3 }; } };
+  const engine = {
+    getChromeTarget: (...args) => {
+      calls.push(args);
+      return { wcId: 5, kind: 'chrome', url: 'about:blank', windowId: 3 };
+    }
+  };
   const reg = buildToolRegistry(() => engine);
 
   await reg.callTool('getChromeTarget', { windowId: 3 });
@@ -948,8 +1009,25 @@ test('enumerateWindows is listed with a no-input inputSchema and no internal cal
 
 test('callTool enumerateWindows over a fake admin engine returns the serialized census (normal result)', async () => {
   const census = [
-    { windowId: 1, chromeWcId: 11, booted: true, activeTabWcId: 5, lastFocused: true, sheetWcId: 77, sheetVisible: true, findVisible: false },
-    { windowId: 2, chromeWcId: 21, booted: false, activeTabWcId: null, lastFocused: false, sheetVisible: false, findVisible: false },
+    {
+      windowId: 1,
+      chromeWcId: 11,
+      booted: true,
+      activeTabWcId: 5,
+      lastFocused: true,
+      sheetWcId: 77,
+      sheetVisible: true,
+      findVisible: false
+    },
+    {
+      windowId: 2,
+      chromeWcId: 21,
+      booted: false,
+      activeTabWcId: null,
+      lastFocused: false,
+      sheetVisible: false,
+      findVisible: false
+    }
   ];
   const reg = buildToolRegistry(() => ({ enumerateWindows: () => census }));
   const result = await reg.callTool('enumerateWindows', {});
@@ -958,8 +1036,13 @@ test('callTool enumerateWindows over a fake admin engine returns the serialized 
 });
 
 test('callTool enumerateWindows over a jar-scoped engine (throws admin-only) → isError with the message', async () => {
-  const msg = 'automation: admin-only — enumerateWindows (window topology discovery) is restricted to the admin identity';
-  const reg = buildToolRegistry(() => ({ enumerateWindows: () => { throw new Error(msg); } }));
+  const msg =
+    'automation: admin-only — enumerateWindows (window topology discovery) is restricted to the admin identity';
+  const reg = buildToolRegistry(() => ({
+    enumerateWindows: () => {
+      throw new Error(msg);
+    }
+  }));
   const result = await reg.callTool('enumerateWindows', {});
   assert.equal(result.isError, true);
   assert.match(textOf(result), /admin-only/);
@@ -967,7 +1050,11 @@ test('callTool enumerateWindows over a jar-scoped engine (throws admin-only) →
 
 test('callTool enumerateWindows windows-unavailable throw → isError', async () => {
   const msg = 'automation: windows-unavailable — window registry not wired';
-  const reg = buildToolRegistry(() => ({ enumerateWindows: () => { throw new Error(msg); } }));
+  const reg = buildToolRegistry(() => ({
+    enumerateWindows: () => {
+      throw new Error(msg);
+    }
+  }));
   const result = await reg.callTool('enumerateWindows', {});
   assert.equal(result.isError, true);
   assert.match(textOf(result), /windows-unavailable/);
@@ -1006,9 +1093,25 @@ test('DD9: the windowId param is pinned FIELD BY FIELD on captureWindow and getC
   // windowId, one declaring it with the wrong type, and one marking it required.
   // Without this the pin is an absence confirmed by an instrument never shown able
   // to report presence (the leg-1 false-PASS class).
-  assert.equal(declaresOptional({ type: 'object', properties: {} }, 'windowId', 'integer'), false, 'a schema MISSING windowId must be rejected');
-  assert.equal(declaresOptional({ type: 'object', properties: { windowId: { type: 'string' } } }, 'windowId', 'integer'), false, 'the WRONG type must be rejected');
-  assert.equal(declaresOptional({ type: 'object', properties: { windowId: { type: 'integer' } }, required: ['windowId'] }, 'windowId', 'integer'), false, 'a REQUIRED windowId must be rejected — it would break every existing caller');
+  assert.equal(
+    declaresOptional({ type: 'object', properties: {} }, 'windowId', 'integer'),
+    false,
+    'a schema MISSING windowId must be rejected'
+  );
+  assert.equal(
+    declaresOptional({ type: 'object', properties: { windowId: { type: 'string' } } }, 'windowId', 'integer'),
+    false,
+    'the WRONG type must be rejected'
+  );
+  assert.equal(
+    declaresOptional(
+      { type: 'object', properties: { windowId: { type: 'integer' } }, required: ['windowId'] },
+      'windowId',
+      'integer'
+    ),
+    false,
+    'a REQUIRED windowId must be rejected — it would break every existing caller'
+  );
 });
 
 test('DD9: the tools DD3 does NOT touch keep their wcId-required schemas unchanged', () => {
@@ -1102,7 +1205,7 @@ test('M09 F7: the four topology-bearing tools pin their DESCRIPTION contract —
     getChromeTarget: [/admin only/i, /windowId/, /no-such-window/],
     // DD2: admin tier, the completeness signal, the two-menus observable, and that
     // lastFocused is NOT an OS-focus claim (a promise this codebase deliberately refuses).
-    enumerateWindows: [/admin only/i, /booted/, /sheetVisible/, /lastFocused/, /not an OS-focus claim/i],
+    enumerateWindows: [/admin only/i, /booted/, /sheetVisible/, /lastFocused/, /not an OS-focus claim/i]
   };
 
   for (const [name, tokens] of Object.entries(required)) {
@@ -1122,7 +1225,9 @@ test('M09 F7: the four topology-bearing tools pin their DESCRIPTION contract —
   // And it must report a PARTIAL miss, not just an all-or-nothing one: a description
   // that drifted back to the pre-DD1 single-window contract keeps windowId but loses
   // the all-windows claim — the exact silent regression this pin exists to catch.
-  const syntheticDrifted = { description: 'List the tabs in the current window as { wcId, url, windowId }. booted is unrelated.' };
+  const syntheticDrifted = {
+    description: 'List the tabs in the current window as { wcId, url, windowId }. booted is unrelated.'
+  };
   assert.deepEqual(
     missingDescriptionTokens(syntheticDrifted.description, required.enumerateTabs),
     ['/across ALL windows/i'],
@@ -1135,7 +1240,8 @@ test('M09 F7: the four topology-bearing tools pin their DESCRIPTION contract —
   // jar-key aside ("a jar key sees all windows' tabs for its own jar"). A pin written
   // as /all windows/i therefore PASSES even when the contract claim is gone — proven
   // by mutation. Assert the loose token's defeat explicitly, so nobody loosens it back.
-  const contractClaimDeleted = "List all drivable (dom-ready) tabs as an array of { wcId, url, title, jarId, active, windowId }. windowId is stamped from the window registry. A window whose chrome has not finished booting contributes ZERO rows — poll booted. Admin listings include the internal goldfinch:// tabs; jar-key listings never do (session filter) — a jar key sees all windows' tabs for its own jar, never the window topology.";
+  const contractClaimDeleted =
+    "List all drivable (dom-ready) tabs as an array of { wcId, url, title, jarId, active, windowId }. windowId is stamped from the window registry. A window whose chrome has not finished booting contributes ZERO rows — poll booted. Admin listings include the internal goldfinch:// tabs; jar-key listings never do (session filter) — a jar key sees all windows' tabs for its own jar, never the window topology.";
   assert.deepEqual(
     missingDescriptionTokens(contractClaimDeleted, [/all windows/i]),
     [],
@@ -1149,7 +1255,10 @@ test('M09 F7: the four topology-bearing tools pin their DESCRIPTION contract —
   // And the helper must PASS a description that carries every token — otherwise the
   // controls above would be satisfied by a helper that rejects everything.
   assert.deepEqual(
-    missingDescriptionTokens('Lists tabs across ALL windows, stamping windowId; booted signals completeness.', required.enumerateTabs),
+    missingDescriptionTokens(
+      'Lists tabs across ALL windows, stamping windowId; booted signals completeness.',
+      required.enumerateTabs
+    ),
     [],
     'a description carrying every token must PASS — the helper is not simply rejecting everything'
   );
@@ -1227,32 +1336,35 @@ test('M09 F7 DD6: readDom/evaluate descriptions must NOT claim foreground-first 
   const readDomReal = byName.get('readDom').description;
   const readDomClaimDeleted = readDomReal.replace(/Does NOT foreground its target[^.]*\.\s*/i, '');
   assert.notEqual(
-    readDomClaimDeleted, readDomReal,
+    readDomClaimDeleted,
+    readDomReal,
     'the mutation must actually alter the REAL description — a no-op mutation proves nothing'
   );
   assert.deepEqual(
     missingDescriptionTokens(readDomClaimDeleted, [/Does NOT foreground/i]),
     ['/Does NOT foreground/i'],
-    'MUTATION: deleting readDom\'s real no-raise claim MUST break the pin'
+    "MUTATION: deleting readDom's real no-raise claim MUST break the pin"
   );
 
   // (2) Delete evaluate's REAL no-raise claim ⇒ the (b) pin must go red.
   const evaluateReal = byName.get('evaluate').description;
   const evaluateClaimDeleted = evaluateReal.replace(/Does NOT foreground its target[^.]*\.\s*/i, '');
   assert.notEqual(
-    evaluateClaimDeleted, evaluateReal,
+    evaluateClaimDeleted,
+    evaluateReal,
     'the mutation must actually alter the REAL description — a no-op mutation proves nothing'
   );
   assert.deepEqual(
     missingDescriptionTokens(evaluateClaimDeleted, [/Does NOT foreground/i]),
     ['/Does NOT foreground/i'],
-    'MUTATION: deleting evaluate\'s real no-raise claim MUST break the pin'
+    "MUTATION: deleting evaluate's real no-raise claim MUST break the pin"
   );
 
   // (3) REGRESSION-SHAPED MUTATION — reintroduce the exact defect that shipped.
   // This is the highest-value control here: it replays the real bug rather than
   // an invented one. The pre-fold text is pasted verbatim from the tree.
-  const readDomPreFold = 'Read the live DOM of the tab identified by wcId (foreground-first). Returns { url, title, html } as JSON text — the full live document.documentElement outerHTML (no trimming).';
+  const readDomPreFold =
+    'Read the live DOM of the tab identified by wcId (foreground-first). Returns { url, title, html } as JSON text — the full live document.documentElement outerHTML (no trimming).';
   assert.deepEqual(
     missingDescriptionTokens(readDomPreFold, [/foreground-first/i]),
     [],
@@ -1274,7 +1386,7 @@ test('M09 F7 DD6: readDom/evaluate descriptions must NOT claim foreground-first 
   assert.deepEqual(
     missingDescriptionTokens(captureClaimDeleted, [/foreground-first/i]),
     ['/foreground-first/i'],
-    'MUTATION: stripping foreground-first from captureScreenshot\'s real description MUST break the raise-half control'
+    "MUTATION: stripping foreground-first from captureScreenshot's real description MUST break the raise-half control"
   );
 });
 
@@ -1288,8 +1400,13 @@ test('callTool getChromeTarget over a fake admin engine returns the serialized t
 });
 
 test('callTool getChromeTarget over a jar-scoped engine (throws admin-only) → isError with the message', async () => {
-  const msg = 'automation: admin-only — getChromeTarget (chrome renderer discovery) is restricted to the admin identity';
-  const engine = { getChromeTarget: () => { throw new Error(msg); } };
+  const msg =
+    'automation: admin-only — getChromeTarget (chrome renderer discovery) is restricted to the admin identity';
+  const engine = {
+    getChromeTarget: () => {
+      throw new Error(msg);
+    }
+  };
   const reg = buildToolRegistry(() => engine);
   const result = await reg.callTool('getChromeTarget', {});
   assert.equal(result.isError, true);
@@ -1298,7 +1415,11 @@ test('callTool getChromeTarget over a jar-scoped engine (throws admin-only) → 
 
 test('callTool getChromeTarget chrome-window-unavailable throw → isError', async () => {
   const msg = 'automation: chrome-window-unavailable — mainWindow is null (closed or starting up)';
-  const engine = { getChromeTarget: () => { throw new Error(msg); } };
+  const engine = {
+    getChromeTarget: () => {
+      throw new Error(msg);
+    }
+  };
   const reg = buildToolRegistry(() => engine);
   const result = await reg.callTool('getChromeTarget', {});
   assert.equal(result.isError, true);
@@ -1324,8 +1445,24 @@ test('downloadsList is listed with a no-input inputSchema and no internal call/s
 
 test('callTool downloadsList over a fake admin engine returns the serialized records (normal result)', async () => {
   const records = [
-    { id: 1, url: 'https://example.com/a.zip', filename: 'a.zip', savePath: '/d/a.zip', state: 'completed', received: 10, total: 10 },
-    { id: 2, url: 'https://example.com/b.pdf', filename: 'b.pdf', savePath: '/d/b.pdf', state: 'progressing', received: 3, total: 9 },
+    {
+      id: 1,
+      url: 'https://example.com/a.zip',
+      filename: 'a.zip',
+      savePath: '/d/a.zip',
+      state: 'completed',
+      received: 10,
+      total: 10
+    },
+    {
+      id: 2,
+      url: 'https://example.com/b.pdf',
+      filename: 'b.pdf',
+      savePath: '/d/b.pdf',
+      state: 'progressing',
+      received: 3,
+      total: 9
+    }
   ];
   const engine = { getDownloadsList: () => records };
   const reg = buildToolRegistry(() => engine);
@@ -1336,7 +1473,11 @@ test('callTool downloadsList over a fake admin engine returns the serialized rec
 
 test('callTool downloadsList over a jar-scoped engine (throws admin-only) → isError with the message', async () => {
   const msg = 'automation: admin-only — downloadsList (app-level downloads view) is restricted to the admin identity';
-  const engine = { getDownloadsList: () => { throw new Error(msg); } };
+  const engine = {
+    getDownloadsList: () => {
+      throw new Error(msg);
+    }
+  };
   const reg = buildToolRegistry(() => engine);
   const result = await reg.callTool('downloadsList', {});
   assert.equal(result.isError, true);
@@ -1372,9 +1513,14 @@ test('getHistory is listed with jarId/query/limit/before all OPTIONAL at the sch
   assert.match(t.description, /unknown-jar/);
 });
 
-test('callTool getHistory maps named args to the engine\'s (jarId, opts) positional signature', async () => {
+test("callTool getHistory maps named args to the engine's (jarId, opts) positional signature", async () => {
   const calls = [];
-  const engine = { getHistory: (jarId, opts) => { calls.push([jarId, opts]); return { jarId, visits: [] }; } };
+  const engine = {
+    getHistory: (jarId, opts) => {
+      calls.push([jarId, opts]);
+      return { jarId, visits: [] };
+    }
+  };
   const reg = buildToolRegistry(() => engine);
   await reg.callTool('getHistory', { jarId: 'work', query: 'example', limit: 10 });
   assert.deepEqual(calls, [['work', { query: 'example', limit: 10, before: undefined }]]);
@@ -1382,7 +1528,12 @@ test('callTool getHistory maps named args to the engine\'s (jarId, opts) positio
 
 test('callTool getHistory with no args at all still calls engine.getHistory(undefined, opts)', async () => {
   const calls = [];
-  const engine = { getHistory: (jarId, opts) => { calls.push([jarId, opts]); return { jarId: 'own', visits: [] }; } };
+  const engine = {
+    getHistory: (jarId, opts) => {
+      calls.push([jarId, opts]);
+      return { jarId: 'own', visits: [] };
+    }
+  };
   const reg = buildToolRegistry(() => engine);
   const result = await reg.callTool('getHistory', {});
   assert.equal(result.isError, undefined);
@@ -1400,7 +1551,11 @@ test('callTool getHistory over a fake jar engine returns the serialized { jarId,
 
 test('callTool getHistory foreign-jarId out-of-jar throw → isError with the message', async () => {
   const msg = 'automation: out-of-jar — a jar key may only read history for its own jar (personal)';
-  const engine = { getHistory: () => { throw new Error(msg); } };
+  const engine = {
+    getHistory: () => {
+      throw new Error(msg);
+    }
+  };
   const reg = buildToolRegistry(() => engine);
   const result = await reg.callTool('getHistory', { jarId: 'work' });
   assert.equal(result.isError, true);
@@ -1409,7 +1564,11 @@ test('callTool getHistory foreign-jarId out-of-jar throw → isError with the me
 
 test('callTool getHistory admin missing-jarId bad-args throw → isError with the message', async () => {
   const msg = 'automation: bad-args — jarId required';
-  const engine = { getHistory: () => { throw new Error(msg); } };
+  const engine = {
+    getHistory: () => {
+      throw new Error(msg);
+    }
+  };
   const reg = buildToolRegistry(() => engine);
   const result = await reg.callTool('getHistory', {});
   assert.equal(result.isError, true);
@@ -1418,7 +1577,11 @@ test('callTool getHistory admin missing-jarId bad-args throw → isError with th
 
 test('callTool getHistory admin unknown-jarId throw → isError with the message', async () => {
   const msg = 'automation: unknown-jar';
-  const engine = { getHistory: () => { throw new Error(msg); } };
+  const engine = {
+    getHistory: () => {
+      throw new Error(msg);
+    }
+  };
   const reg = buildToolRegistry(() => engine);
   const result = await reg.callTool('getHistory', { jarId: 'ghost' });
   assert.equal(result.isError, true);
@@ -1427,7 +1590,11 @@ test('callTool getHistory admin unknown-jarId throw → isError with the message
 
 test('callTool getHistory query+before bad-args throw → isError with the message', async () => {
   const msg = 'automation: bad-args — query does not page';
-  const engine = { getHistory: () => { throw new Error(msg); } };
+  const engine = {
+    getHistory: () => {
+      throw new Error(msg);
+    }
+  };
   const reg = buildToolRegistry(() => engine);
   const result = await reg.callTool('getHistory', { query: 'x', before: 5 });
   assert.equal(result.isError, true);

@@ -18,7 +18,7 @@ const {
   click,
   typeText,
   pressKey,
-  dragPointer,
+  dragPointer
 } = require('../../src/main/automation/input');
 
 // ---------------------------------------------------------------------------
@@ -29,11 +29,15 @@ function makeGuestWc(id) {
   return {
     id,
     session: { __goldfinchInternal: false },
-    isDestroyed() { return false; },
+    isDestroyed() {
+      return false;
+    },
     /** @type {object[]} */
     _received: [],
     /** @param {object} ev */
-    sendInputEvent(ev) { this._received.push(ev); },
+    sendInputEvent(ev) {
+      this._received.push(ev);
+    }
   };
 }
 
@@ -41,9 +45,13 @@ function makeInternalWc(id) {
   return {
     id,
     session: { __goldfinchInternal: true },
-    isDestroyed() { return false; },
+    isDestroyed() {
+      return false;
+    },
     _received: [],
-    sendInputEvent(ev) { this._received.push(ev); },
+    sendInputEvent(ev) {
+      this._received.push(ev);
+    }
   };
 }
 
@@ -51,9 +59,13 @@ function makeDestroyedWc(id) {
   return {
     id,
     session: { __goldfinchInternal: false },
-    isDestroyed() { return true; },
+    isDestroyed() {
+      return true;
+    },
     _received: [],
-    sendInputEvent(ev) { this._received.push(ev); },
+    sendInputEvent(ev) {
+      this._received.push(ev);
+    }
   };
 }
 
@@ -141,17 +153,22 @@ test('keyEvents: unknown key → throws with "automation: unknown key" and lists
   assert.throws(
     () => keyEvents('Nope'),
     (err) => {
-      return err instanceof Error &&
+      return (
+        err instanceof Error &&
         err.message.includes('automation: unknown key') &&
         err.message.includes('Nope') &&
-        err.message.includes('Tab') &&       // sanity-check some known names are listed
-        err.message.includes('ShiftTab');
+        err.message.includes('Tab') && // sanity-check some known names are listed
+        err.message.includes('ShiftTab')
+      );
     }
   );
 });
 
 test('keyEvents: unknown key (empty string) → throws', () => {
-  assert.throws(() => keyEvents(''), (err) => err instanceof Error && err.message.includes('automation: unknown key'));
+  assert.throws(
+    () => keyEvents(''),
+    (err) => err instanceof Error && err.message.includes('automation: unknown key')
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -241,9 +258,8 @@ test('keyEvents: alias normalization is case-insensitive (AC2)', () => {
 test('keyEvents: unknown modifier → throws with "automation: unknown modifier" (AC2)', () => {
   assert.throws(
     () => keyEvents('M', ['hyper']),
-    (err) => err instanceof Error &&
-      err.message.includes('automation: unknown modifier') &&
-      err.message.includes('hyper')
+    (err) =>
+      err instanceof Error && err.message.includes('automation: unknown modifier') && err.message.includes('hyper')
   );
 });
 
@@ -271,14 +287,14 @@ test('keyEvents: no-modifier call has modifiers:[] (byte-identical to pre-chord,
   // Full structural equality with the historical shape.
   assert.deepEqual(evs, [
     { type: 'keyDown', keyCode: 'Enter', modifiers: [] },
-    { type: 'keyUp', keyCode: 'Enter', modifiers: [] },
+    { type: 'keyUp', keyCode: 'Enter', modifiers: [] }
   ]);
 });
 
 test('keyEvents: ShiftTab no-modifier call still yields modifiers:["shift"] (byte-identical, AC4)', () => {
   assert.deepEqual(keyEvents('ShiftTab'), [
     { type: 'keyDown', keyCode: 'Tab', modifiers: ['shift'] },
-    { type: 'keyUp', keyCode: 'Tab', modifiers: ['shift'] },
+    { type: 'keyUp', keyCode: 'Tab', modifiers: ['shift'] }
   ]);
 });
 
@@ -296,9 +312,12 @@ test('mouseClickEvents: returns 3 events in order mouseMove → mouseDown → mo
 
 test('mouseClickEvents: coordinates propagate to all three events', () => {
   const evs = mouseClickEvents(42, 99);
-  assert.equal(evs[0].x, 42); assert.equal(evs[0].y, 99);
-  assert.equal(evs[1].x, 42); assert.equal(evs[1].y, 99);
-  assert.equal(evs[2].x, 42); assert.equal(evs[2].y, 99);
+  assert.equal(evs[0].x, 42);
+  assert.equal(evs[0].y, 99);
+  assert.equal(evs[1].x, 42);
+  assert.equal(evs[1].y, 99);
+  assert.equal(evs[2].x, 42);
+  assert.equal(evs[2].y, 99);
 });
 
 test('mouseClickEvents: buttons bitmask — mouseDown carries buttons:1 (press)', () => {
@@ -343,7 +362,8 @@ test('dragEvents: returns mouseMove → mouseDown → N interpolated mouseMove �
   assert.equal(evs.length, 2 + 12 + 1); // move-to-start + down + 12 interpolated moves + up
   assert.equal(evs[0].type, 'mouseMove');
   assert.equal(evs[1].type, 'mouseDown');
-  for (let i = 2; i < 14; i++) assert.equal(evs[i].type, 'mouseMove', 'event ' + i + ' should be an interpolated mouseMove');
+  for (let i = 2; i < 14; i++)
+    assert.equal(evs[i].type, 'mouseMove', 'event ' + i + ' should be an interpolated mouseMove');
   assert.equal(evs[14].type, 'mouseUp');
 });
 
@@ -355,7 +375,8 @@ test('dragEvents: custom steps controls the interpolated-move count', () => {
 test('dragEvents: mouseDown carries buttons:1 at `from`; every interpolated move also carries buttons:1', () => {
   const evs = dragEvents({ x: 0, y: 0 }, { x: 100, y: 50 }, 4);
   assert.equal(evs[1].type, 'mouseDown');
-  assert.equal(evs[1].x, 0); assert.equal(evs[1].y, 0);
+  assert.equal(evs[1].x, 0);
+  assert.equal(evs[1].y, 0);
   assert.equal(evs[1].buttons, 1);
   for (let i = 2; i < 2 + 4; i++) assert.equal(evs[i].buttons, 1, 'interpolated move ' + i + ' must hold buttons:1');
 });
@@ -364,14 +385,18 @@ test('dragEvents: mouseUp carries buttons:0 at `to`', () => {
   const evs = dragEvents({ x: 0, y: 0 }, { x: 100, y: 50 }, 4);
   const up = evs[evs.length - 1];
   assert.equal(up.type, 'mouseUp');
-  assert.equal(up.x, 100); assert.equal(up.y, 50);
+  assert.equal(up.x, 100);
+  assert.equal(up.y, 50);
   assert.equal(up.buttons, 0);
 });
 
 test('dragEvents: interpolated moves progress linearly from `from` to `to` (final move lands exactly on `to`)', () => {
   const evs = dragEvents({ x: 0, y: 0 }, { x: 100, y: 0 }, 4);
   const moves = evs.slice(2, 2 + 4); // the 4 interpolated moves
-  assert.deepEqual(moves.map((m) => m.x), [25, 50, 75, 100]);
+  assert.deepEqual(
+    moves.map((m) => m.x),
+    [25, 50, 75, 100]
+  );
   const lastMove = moves[moves.length - 1];
   assert.equal(lastMove.x, 100, 'the final interpolated move must land exactly on `to`');
 });
@@ -474,15 +499,20 @@ test('click: guest target — activate called once with wcId BEFORE sendInputEve
   const guestWc = makeGuestWc(20);
   const callLog = [];
 
-  const activate = async (/** @type {number} */ id) => { callLog.push({ what: 'activate', id }); };
+  const activate = async (/** @type {number} */ id) => {
+    callLog.push({ what: 'activate', id });
+  };
   // Wrap sendInputEvent to track ordering
   const originalSend = guestWc.sendInputEvent.bind(guestWc);
-  guestWc.sendInputEvent = (ev) => { callLog.push({ what: 'sendInputEvent', type: ev.type }); originalSend(ev); };
+  guestWc.sendInputEvent = (ev) => {
+    callLog.push({ what: 'sendInputEvent', type: ev.type });
+    originalSend(ev);
+  };
 
   const deps = {
     fromId: makeFakeFromId({ 20: guestWc }),
-    chromeContents: null,  // guestWc is not === chromeContents, so classified as guest
-    activate,
+    chromeContents: null, // guestWc is not === chromeContents, so classified as guest
+    activate
   };
 
   await click(20, 10, 10, deps);
@@ -507,14 +537,16 @@ test('click: guest target — activate called once with wcId BEFORE sendInputEve
 });
 
 test('click: chrome target — activate NOT called (chrome is always live)', async () => {
-  const chromeWc = makeGuestWc(1);  // same object will be chromeContents
+  const chromeWc = makeGuestWc(1); // same object will be chromeContents
   const activateCalls = [];
-  const activate = async (id) => { activateCalls.push(id); };
+  const activate = async (id) => {
+    activateCalls.push(id);
+  };
 
   const deps = {
     fromId: makeFakeFromId({ 1: chromeWc }),
-    chromeContents: chromeWc,  // classify as 'chrome'
-    activate,
+    chromeContents: chromeWc, // classify as 'chrome'
+    activate
   };
 
   await click(1, 5, 5, deps);
@@ -526,7 +558,9 @@ test('click: chrome target — activate NOT called (chrome is always live)', asy
 test('click: internal-session wcId → throws, activate not called, no events sent', async () => {
   const internalWc = makeInternalWc(77);
   const activateCalls = [];
-  const activate = async (id) => { activateCalls.push(id); };
+  const activate = async (id) => {
+    activateCalls.push(id);
+  };
 
   const deps = { fromId: makeFakeFromId({ 77: internalWc }), chromeContents: null, activate };
 
@@ -545,9 +579,14 @@ test('click: internal-session wcId → throws, activate not called, no events se
 test('dragPointer: guest target — activate called once with wcId BEFORE sendInputEvent calls', async () => {
   const guestWc = makeGuestWc(21);
   const callLog = [];
-  const activate = async (/** @type {number} */ id) => { callLog.push({ what: 'activate', id }); };
+  const activate = async (/** @type {number} */ id) => {
+    callLog.push({ what: 'activate', id });
+  };
   const originalSend = guestWc.sendInputEvent.bind(guestWc);
-  guestWc.sendInputEvent = (ev) => { callLog.push({ what: 'sendInputEvent', type: ev.type }); originalSend(ev); };
+  guestWc.sendInputEvent = (ev) => {
+    callLog.push({ what: 'sendInputEvent', type: ev.type });
+    originalSend(ev);
+  };
 
   const deps = { fromId: makeFakeFromId({ 21: guestWc }), chromeContents: null, activate };
 
@@ -573,7 +612,9 @@ test('dragPointer: guest target — activate called once with wcId BEFORE sendIn
 test('dragPointer: chrome target — activate NOT called (chrome is always live)', async () => {
   const chromeWc = makeGuestWc(2);
   const activateCalls = [];
-  const activate = async (id) => { activateCalls.push(id); };
+  const activate = async (id) => {
+    activateCalls.push(id);
+  };
 
   const deps = { fromId: makeFakeFromId({ 2: chromeWc }), chromeContents: chromeWc, activate };
 
@@ -586,7 +627,9 @@ test('dragPointer: chrome target — activate NOT called (chrome is always live)
 test('dragPointer: internal-session wcId → throws, activate not called, no events sent', async () => {
   const internalWc = makeInternalWc(78);
   const activateCalls = [];
-  const activate = async (id) => { activateCalls.push(id); };
+  const activate = async (id) => {
+    activateCalls.push(id);
+  };
 
   const deps = { fromId: makeFakeFromId({ 78: internalWc }), chromeContents: null, activate };
 
@@ -614,7 +657,9 @@ test('dragPointer: default steps (12) used when opts is omitted', async () => {
 test('typeText: sends one char event per character to guest after activation', async () => {
   const guestWc = makeGuestWc(30);
   const activateCalls = [];
-  const activate = async (id) => { activateCalls.push(id); };
+  const activate = async (id) => {
+    activateCalls.push(id);
+  };
   const deps = { fromId: makeFakeFromId({ 30: guestWc }), chromeContents: null, activate };
 
   await typeText(30, 'ab', deps);
@@ -629,7 +674,9 @@ test('typeText: sends one char event per character to guest after activation', a
 test('typeText: empty string — activates but sends no events', async () => {
   const guestWc = makeGuestWc(31);
   const activateCalls = [];
-  const activate = async (id) => { activateCalls.push(id); };
+  const activate = async (id) => {
+    activateCalls.push(id);
+  };
   const deps = { fromId: makeFakeFromId({ 31: guestWc }), chromeContents: null, activate };
 
   await typeText(31, '', deps);

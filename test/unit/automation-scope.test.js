@@ -17,7 +17,7 @@ const { buildToolRegistry } = require('../../src/main/automation/mcp-tools');
 
 const JARS = [
   { id: 'personal', partition: 'persist:container:personal' },
-  { id: 'work', partition: 'persist:container:work' },
+  { id: 'work', partition: 'persist:container:work' }
 ];
 
 function makeWorld() {
@@ -31,18 +31,31 @@ function makeWorld() {
 
   // tabs: wcId → partition + reported jarId (which MAY lie).
   const tabs = [
-    { wcId: 1, partition: 'persist:container:personal', jarId: 'personal', url: 'https://p1', title: 'P1', active: true },
+    {
+      wcId: 1,
+      partition: 'persist:container:personal',
+      jarId: 'personal',
+      url: 'https://p1',
+      title: 'P1',
+      active: true
+    },
     { wcId: 2, partition: 'persist:container:work', jarId: 'work', url: 'https://w1', title: 'W1', active: false },
     { wcId: 3, partition: 'burner:1', jarId: 'personal', url: 'https://b', title: 'B', active: false }, // burner; jarId LIES
     { wcId: 4, partition: 'persist:container:personal', jarId: 'work', url: 'https://p2', title: 'P2', active: false }, // personal session; jarId LIES 'work'
-    { wcId: 5, partition: 'goldfinch-internal', jarId: null, url: 'goldfinch://settings', title: 'S', active: false },
+    { wcId: 5, partition: 'goldfinch-internal', jarId: null, url: 'goldfinch://settings', title: 'S', active: false }
   ];
   const byWcId = new Map(tabs.map((t) => [t.wcId, t]));
 
   const fromId = (wcId) => {
     const t = byWcId.get(wcId);
     if (!t) return null;
-    return { id: wcId, session: sessionFor(t.partition), isDestroyed() { return false; } };
+    return {
+      id: wcId,
+      session: sessionFor(t.partition),
+      isDestroyed() {
+        return false;
+      }
+    };
   };
 
   return { sessionFor, fromPartition: (p) => sessionFor(p), tabs, fromId };
@@ -58,10 +71,19 @@ function makeFakeEngine(world, { includeInternal = false } = {}) {
     .map((t) => ({ wcId: t.wcId, url: t.url, title: t.title, jarId: t.jarId, active: t.active }));
   const engine = { __calls: calls, enumerateTabs: () => tabsView };
   for (const op of WCID_FIRST_OPS) {
-    engine[op] = (wcId, ...rest) => { calls.push([op, wcId, ...rest]); return { op, wcId }; };
+    engine[op] = (wcId, ...rest) => {
+      calls.push([op, wcId, ...rest]);
+      return { op, wcId };
+    };
   }
-  engine.openTab = (url, jarId) => { calls.push(['openTab', url, jarId]); return { openedFor: url }; };
-  engine.captureWindow = () => { calls.push(['captureWindow']); return 'WINDOW'; };
+  engine.openTab = (url, jarId) => {
+    calls.push(['openTab', url, jarId]);
+    return { openedFor: url };
+  };
+  engine.captureWindow = () => {
+    calls.push(['captureWindow']);
+    return 'WINDOW';
+  };
   return engine;
 }
 
@@ -70,7 +92,7 @@ function makeCtx(world) {
     jars: { list: () => JARS },
     fromId: world.fromId,
     fromPartition: world.fromPartition,
-    getChromeContents: () => ({ id: 0 }),
+    getChromeContents: () => ({ id: 0 })
   };
 }
 
@@ -135,7 +157,7 @@ test('scopeEngine: jar getZoom/setZoom/printToPDF on an IN-JAR tab reach the eng
   assert.deepEqual(engine.__calls, [
     ['getZoom', 1],
     ['setZoom', 1, 1.5],
-    ['printToPDF', 1],
+    ['printToPDF', 1]
   ]);
 });
 
@@ -215,7 +237,8 @@ test('scopeEngine: every wcId-first MCP tool is registered in WCID_FIRST_OPS (th
   // A tool is "wcId-first" when its inputSchema has a required `wcId` property.
   // Tool names map 1:1 to engine op names (asserted by the mcp-tools discovery
   // test), and WCID_FIRST_OPS holds engine op names, so name-matching is valid.
-  const wcIdFirst = reg.listTools()
+  const wcIdFirst = reg
+    .listTools()
     .filter((t) => {
       const s = t.inputSchema || {};
       const req = s.required || [];
@@ -275,14 +298,13 @@ test('scopeEngine: jar captureWindow throws admin-only (NOT out-of-jar)', () => 
   const scoped = scopeEngine(engine, 'personal', makeCtx(world));
   assert.throws(
     () => scoped.captureWindow(),
-    (err) => err instanceof Error
-      && err.message.includes('automation: admin-only')
-      && !err.message.includes('out-of-jar')
+    (err) =>
+      err instanceof Error && err.message.includes('automation: admin-only') && !err.message.includes('out-of-jar')
   );
   assert.equal(engine.__calls.length, 0, 'captureWindow never reaches the engine for a jar key');
 });
 
-test('scopeEngine: jar openTab (no jarId) forces the caller\'s own jar.id to the engine', () => {
+test("scopeEngine: jar openTab (no jarId) forces the caller's own jar.id to the engine", () => {
   const world = makeWorld();
   const engine = makeFakeEngine(world);
   const scoped = scopeEngine(engine, 'personal', makeCtx(world));
@@ -354,17 +376,22 @@ test('scopeEngine: an UNKNOWN jar identity makes every op error (no-such-jar)', 
 test('scopeEngine: jar getChromeTarget throws admin-only (NOT out-of-jar), engine NOT reached', () => {
   const world = makeWorld();
   const engine = makeFakeEngine(world);
-  engine.getChromeTarget = () => { engine.__calls.push(['getChromeTarget']); return { wcId: 0, kind: 'chrome', url: '' }; };
+  engine.getChromeTarget = () => {
+    engine.__calls.push(['getChromeTarget']);
+    return { wcId: 0, kind: 'chrome', url: '' };
+  };
   const scoped = scopeEngine(engine, 'personal', makeCtx(world));
   assert.throws(
     () => scoped.getChromeTarget(),
-    (err) => err instanceof Error
-      && err.message.includes('automation: admin-only')
-      && !err.message.includes('out-of-jar')
+    (err) =>
+      err instanceof Error && err.message.includes('automation: admin-only') && !err.message.includes('out-of-jar')
   );
   // engine.__calls should NOT include getChromeTarget — the façade refused before reaching engine
-  assert.equal(engine.__calls.filter((c) => c[0] === 'getChromeTarget').length, 0,
-    'getChromeTarget must never reach the engine for a jar key');
+  assert.equal(
+    engine.__calls.filter((c) => c[0] === 'getChromeTarget').length,
+    0,
+    'getChromeTarget must never reach the engine for a jar key'
+  );
 });
 
 test('scopeEngine: admin getChromeTarget reaches the engine and returns its value', () => {
@@ -381,7 +408,9 @@ test('scopeEngine: admin getChromeTarget reaches the engine and returns its valu
 test('scopeEngine: unknown jar calling getChromeTarget throws no-such-jar (requireJar fires first)', () => {
   const world = makeWorld();
   const engine = makeFakeEngine(world);
-  engine.getChromeTarget = () => { throw new Error('should not reach engine'); };
+  engine.getChromeTarget = () => {
+    throw new Error('should not reach engine');
+  };
   const scoped = scopeEngine(engine, 'ghost', makeCtx(world));
   assert.throws(
     () => scoped.getChromeTarget(),
@@ -401,22 +430,37 @@ test('scopeEngine: unknown jar calling getChromeTarget throws no-such-jar (requi
 test('scopeEngine: jar enumerateWindows throws admin-only (NOT out-of-jar), engine NOT reached', () => {
   const world = makeWorld();
   const engine = makeFakeEngine(world);
-  engine.enumerateWindows = () => { engine.__calls.push(['enumerateWindows']); return []; };
+  engine.enumerateWindows = () => {
+    engine.__calls.push(['enumerateWindows']);
+    return [];
+  };
   const scoped = scopeEngine(engine, 'personal', makeCtx(world));
   assert.throws(
     () => scoped.enumerateWindows(),
-    (err) => err instanceof Error
-      && err.message.includes('automation: admin-only')
-      && !err.message.includes('out-of-jar')
+    (err) =>
+      err instanceof Error && err.message.includes('automation: admin-only') && !err.message.includes('out-of-jar')
   );
-  assert.equal(engine.__calls.filter((c) => c[0] === 'enumerateWindows').length, 0,
-    'enumerateWindows must never reach the engine for a jar key — zero accessor invocations on refusal');
+  assert.equal(
+    engine.__calls.filter((c) => c[0] === 'enumerateWindows').length,
+    0,
+    'enumerateWindows must never reach the engine for a jar key — zero accessor invocations on refusal'
+  );
 });
 
 test('scopeEngine: admin enumerateWindows reaches the engine and returns its value', () => {
   const world = makeWorld();
   const engine = makeFakeEngine(world, { includeInternal: true });
-  const census = [{ windowId: 1, chromeWcId: 11, booted: true, activeTabWcId: null, lastFocused: true, sheetVisible: false, findVisible: false }];
+  const census = [
+    {
+      windowId: 1,
+      chromeWcId: 11,
+      booted: true,
+      activeTabWcId: null,
+      lastFocused: true,
+      sheetVisible: false,
+      findVisible: false
+    }
+  ];
   engine.enumerateWindows = () => census;
   const scoped = scopeEngine(engine, 'admin', makeCtx(world));
   assert.equal(scoped, engine, 'admin must return the engine unchanged');
@@ -428,7 +472,9 @@ test('scopeEngine: unknown jar calling enumerateWindows throws no-such-jar (requ
   // an unknown jar must still learn no-such-jar rather than admin-only.
   const world = makeWorld();
   const engine = makeFakeEngine(world);
-  engine.enumerateWindows = () => { throw new Error('should not reach engine'); };
+  engine.enumerateWindows = () => {
+    throw new Error('should not reach engine');
+  };
   const scoped = scopeEngine(engine, 'ghost', makeCtx(world));
   assert.throws(
     () => scoped.enumerateWindows(),
@@ -444,16 +490,21 @@ test('scopeEngine: unknown jar calling enumerateWindows throws no-such-jar (requ
 test('scopeEngine: jar getDownloadsList throws admin-only — downloadsList (NOT out-of-jar), engine NOT reached', () => {
   const world = makeWorld();
   const engine = makeFakeEngine(world);
-  engine.getDownloadsList = () => { engine.__calls.push(['getDownloadsList']); return []; };
+  engine.getDownloadsList = () => {
+    engine.__calls.push(['getDownloadsList']);
+    return [];
+  };
   const scoped = scopeEngine(engine, 'personal', makeCtx(world));
   assert.throws(
     () => scoped.getDownloadsList(),
-    (err) => err instanceof Error
-      && /admin-only — downloadsList/.test(err.message)
-      && !err.message.includes('out-of-jar')
+    (err) =>
+      err instanceof Error && /admin-only — downloadsList/.test(err.message) && !err.message.includes('out-of-jar')
   );
-  assert.equal(engine.__calls.filter((c) => c[0] === 'getDownloadsList').length, 0,
-    'getDownloadsList must never reach the engine for a jar key');
+  assert.equal(
+    engine.__calls.filter((c) => c[0] === 'getDownloadsList').length,
+    0,
+    'getDownloadsList must never reach the engine for a jar key'
+  );
 });
 
 test('scopeEngine: admin getDownloadsList reaches the engine and returns its value (pass-through)', () => {
@@ -470,7 +521,9 @@ test('scopeEngine: admin getDownloadsList reaches the engine and returns its val
 test('scopeEngine: unknown jar calling getDownloadsList throws no-such-jar (requireJar fires first)', () => {
   const world = makeWorld();
   const engine = makeFakeEngine(world);
-  engine.getDownloadsList = () => { throw new Error('should not reach engine'); };
+  engine.getDownloadsList = () => {
+    throw new Error('should not reach engine');
+  };
   const scoped = scopeEngine(engine, 'ghost', makeCtx(world));
   assert.throws(
     () => scoped.getDownloadsList(),
@@ -485,10 +538,13 @@ test('scopeEngine: unknown jar calling getDownloadsList throws no-such-jar (requ
 // call (pin zero accessor/engine invocations); admin → engine unchanged.
 // ---------------------------------------------------------------------------
 
-test('scopeEngine: jar getHistory with NO jarId forces the caller\'s own jar.id to the engine', () => {
+test("scopeEngine: jar getHistory with NO jarId forces the caller's own jar.id to the engine", () => {
   const world = makeWorld();
   const engine = makeFakeEngine(world);
-  engine.getHistory = (jarId, opts) => { engine.__calls.push(['getHistory', jarId, opts]); return { jarId, visits: [] }; };
+  engine.getHistory = (jarId, opts) => {
+    engine.__calls.push(['getHistory', jarId, opts]);
+    return { jarId, visits: [] };
+  };
   const scoped = scopeEngine(engine, 'personal', makeCtx(world));
   const res = scoped.getHistory(undefined, { limit: 10 });
   assert.deepEqual(res, { jarId: 'personal', visits: [] });
@@ -498,7 +554,10 @@ test('scopeEngine: jar getHistory with NO jarId forces the caller\'s own jar.id 
 test('scopeEngine: jar getHistory(ownId) is allowed — engine gets own jar.id', () => {
   const world = makeWorld();
   const engine = makeFakeEngine(world);
-  engine.getHistory = (jarId, opts) => { engine.__calls.push(['getHistory', jarId, opts]); return { jarId, visits: [] }; };
+  engine.getHistory = (jarId, opts) => {
+    engine.__calls.push(['getHistory', jarId, opts]);
+    return { jarId, visits: [] };
+  };
   const scoped = scopeEngine(engine, 'personal', makeCtx(world));
   const res = scoped.getHistory('personal', { query: 'x' });
   assert.deepEqual(res, { jarId: 'personal', visits: [] });
@@ -508,20 +567,29 @@ test('scopeEngine: jar getHistory(ownId) is allowed — engine gets own jar.id',
 test('scopeEngine: jar getHistory(foreignId) throws out-of-jar, engine/accessor NOT reached', () => {
   const world = makeWorld();
   const engine = makeFakeEngine(world);
-  engine.getHistory = () => { throw new Error('should not reach engine'); };
+  engine.getHistory = () => {
+    throw new Error('should not reach engine');
+  };
   const scoped = scopeEngine(engine, 'personal', makeCtx(world));
   assert.throws(
     () => scoped.getHistory('work', { limit: 5 }),
     (err) => err instanceof Error && err.message.includes('automation: out-of-jar')
   );
-  assert.equal(engine.__calls.length, 0, 'getHistory must never reach the engine on a foreign jarId (zero accessor invocations)');
+  assert.equal(
+    engine.__calls.length,
+    0,
+    'getHistory must never reach the engine on a foreign jarId (zero accessor invocations)'
+  );
 });
 
 test('scopeEngine: admin getHistory passes any jarId straight through to the engine unchanged', () => {
   const world = makeWorld();
   const engine = makeFakeEngine(world, { includeInternal: true });
   const payload = { jarId: 'work', visits: [{ id: 1 }] };
-  engine.getHistory = (jarId, opts) => { engine.__calls.push(['getHistory', jarId, opts]); return payload; };
+  engine.getHistory = (jarId, opts) => {
+    engine.__calls.push(['getHistory', jarId, opts]);
+    return payload;
+  };
   // admin → engine unchanged
   const scoped = scopeEngine(engine, 'admin', makeCtx(world));
   assert.equal(scoped, engine, 'admin must return the engine unchanged');
@@ -533,7 +601,9 @@ test('scopeEngine: admin getHistory passes any jarId straight through to the eng
 test('scopeEngine: unknown jar calling getHistory throws no-such-jar (requireJar fires first, before out-of-jar or engine)', () => {
   const world = makeWorld();
   const engine = makeFakeEngine(world);
-  engine.getHistory = () => { throw new Error('should not reach engine'); };
+  engine.getHistory = () => {
+    throw new Error('should not reach engine');
+  };
   const scoped = scopeEngine(engine, 'ghost', makeCtx(world));
   assert.throws(
     () => scoped.getHistory('anything'),
@@ -551,7 +621,7 @@ test('scopeEngine: a jar DELETED mid-session degrades to all-ops-error', () => {
     jars: { list: () => live },
     fromId: world.fromId,
     fromPartition: world.fromPartition,
-    getChromeContents: () => ({ id: 0 }),
+    getChromeContents: () => ({ id: 0 })
   };
   const scoped = scopeEngine(engine, 'personal', ctx);
   // Works while present:

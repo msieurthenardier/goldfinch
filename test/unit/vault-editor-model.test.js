@@ -34,8 +34,8 @@ test('assembleSave: masked-untouched secrets go to unchangedSecrets (placeholder
     secretStates: {
       password: m.newSecretState(),
       totp: m.newSecretState(),
-      notes: m.newSecretState(),
-    },
+      notes: m.newSecretState()
+    }
   });
   assert.equal(item.id, 'x1');
   assert.equal(item.title, 'New');
@@ -50,10 +50,13 @@ test('assembleSave: an EDITED secret is sent verbatim and is NOT in unchangedSec
   const states = {
     password: m.edit(m.newSecretState(), 'brandNewPW'),
     totp: m.newSecretState(),
-    notes: m.newSecretState(),
+    notes: m.newSecretState()
   };
   const { item, unchangedSecrets } = m.assembleSave({
-    type: 'login', id: 'x', nonSecretValues: { title: 'T' }, secretStates: states,
+    type: 'login',
+    id: 'x',
+    nonSecretValues: { title: 'T' },
+    secretStates: states
   });
   assert.equal(item.password, 'brandNewPW');
   assert.deepEqual(unchangedSecrets.sort(), ['notes', 'totp']);
@@ -63,9 +66,14 @@ test('assembleSave: an EXPLICIT clear (edited to "") sends "" and is NOT preserv
   const states = {
     password: m.newSecretState(),
     totp: m.edit(m.reveal(m.newSecretState(), 'SEED'), ''), // revealed then cleared
-    notes: m.newSecretState(),
+    notes: m.newSecretState()
   };
-  const { item, unchangedSecrets } = m.assembleSave({ type: 'login', id: 'x', nonSecretValues: {}, secretStates: states });
+  const { item, unchangedSecrets } = m.assembleSave({
+    type: 'login',
+    id: 'x',
+    nonSecretValues: {},
+    secretStates: states
+  });
   assert.equal(item.totp, '', 'explicitly cleared');
   assert.equal(unchangedSecrets.includes('totp'), false, 'a cleared field is not unchanged');
   assert.ok(unchangedSecrets.includes('password') && unchangedSecrets.includes('notes'));
@@ -74,7 +82,9 @@ test('assembleSave: an EXPLICIT clear (edited to "") sends "" and is NOT preserv
 test('assembleSave: a NEW item (no id) via initialSecretStates preserves NOTHING (create-defense safe)', () => {
   const secretStates = m.initialSecretStates('note', true);
   const { item, unchangedSecrets } = m.assembleSave({
-    type: 'note', nonSecretValues: { title: 'Fresh' }, secretStates,
+    type: 'note',
+    nonSecretValues: { title: 'Fresh' },
+    secretStates
   });
   assert.equal('id' in item, false, 'no id on a create');
   assert.deepEqual(unchangedSecrets, [], 'a new item names no unchanged secrets');
@@ -100,8 +110,10 @@ test('reveal shows plaintext WITHOUT marking touched (unchanged on save)', () =>
   assert.deepEqual(st, { value: 'theSecret', revealed: true, touched: false });
   // A revealed-but-untouched field still preserves (unchangedSecrets), never re-sends the plaintext.
   const { item, unchangedSecrets } = m.assembleSave({
-    type: 'note', id: 'x', nonSecretValues: { title: 'T' },
-    secretStates: { body: st, notes: m.newSecretState() },
+    type: 'note',
+    id: 'x',
+    nonSecretValues: { title: 'T' },
+    secretStates: { body: st, notes: m.newSecretState() }
   });
   assert.ok(unchangedSecrets.includes('body'));
   assert.equal(item.body, '', 'revealed-untouched plaintext is NOT put into the save payload');
@@ -120,12 +132,22 @@ test('partitionItemsByType buckets known types (login/card/note) in input order'
     { id: 'a', type: 'login', title: 'A' },
     { id: 'b', type: 'note', title: 'B' },
     { id: 'c', type: 'login', title: 'C' },
-    { id: 'd', type: 'card', title: 'D' },
+    { id: 'd', type: 'card', title: 'D' }
   ];
   const p = m.partitionItemsByType(items);
-  assert.deepEqual(p.login.map((i) => i.id), ['a', 'c'], 'login order preserved');
-  assert.deepEqual(p.card.map((i) => i.id), ['d']);
-  assert.deepEqual(p.note.map((i) => i.id), ['b']);
+  assert.deepEqual(
+    p.login.map((i) => i.id),
+    ['a', 'c'],
+    'login order preserved'
+  );
+  assert.deepEqual(
+    p.card.map((i) => i.id),
+    ['d']
+  );
+  assert.deepEqual(
+    p.note.map((i) => i.id),
+    ['b']
+  );
   assert.deepEqual(p.unknown, [], 'no unknowns');
 });
 
@@ -133,15 +155,16 @@ test('partitionItemsByType SURFACES unknown/missing types in the unknown bucket 
   const weird = { id: 'w', type: 'wormhole', title: 'W' };
   const missing = { id: 'n', title: 'N' }; // no type
   const nullType = { id: 'z', type: null };
-  const p = m.partitionItemsByType([
-    { id: 'a', type: 'login' },
-    weird,
-    missing,
-    nullType,
-  ]);
-  assert.deepEqual(p.login.map((i) => i.id), ['a']);
+  const p = m.partitionItemsByType([{ id: 'a', type: 'login' }, weird, missing, nullType]);
+  assert.deepEqual(
+    p.login.map((i) => i.id),
+    ['a']
+  );
   // Every non-known item is preserved in `unknown` — nothing is silently dropped.
-  assert.deepEqual(p.unknown.map((i) => i.id), ['w', 'n', 'z']);
+  assert.deepEqual(
+    p.unknown.map((i) => i.id),
+    ['w', 'n', 'z']
+  );
 });
 
 test('partitionItemsByType degrades safely on a non-array / empty input', () => {

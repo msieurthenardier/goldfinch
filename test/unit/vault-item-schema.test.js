@@ -44,9 +44,29 @@ test('taxonomy matches the flight Context: notes is a secret annotations field o
 
 test('metadataOf emits NO secret key for any type, even when the item carries secrets', () => {
   const items = {
-    login: { id: 'l1', type: 'login', title: 'T', username: 'u', origin: 'https://x', password: 'PW', totp: 'SEED', notes: 'N' },
-    card: { id: 'c1', type: 'card', title: 'T', cardholder: 'CH', brand: 'visa', last4: '4242', number: '4111111111111111', cvv: '123', expiry: '12/30', notes: 'N' },
-    note: { id: 'n1', type: 'note', title: 'T', body: 'BODY', notes: 'N' },
+    login: {
+      id: 'l1',
+      type: 'login',
+      title: 'T',
+      username: 'u',
+      origin: 'https://x',
+      password: 'PW',
+      totp: 'SEED',
+      notes: 'N'
+    },
+    card: {
+      id: 'c1',
+      type: 'card',
+      title: 'T',
+      cardholder: 'CH',
+      brand: 'visa',
+      last4: '4242',
+      number: '4111111111111111',
+      cvv: '123',
+      expiry: '12/30',
+      notes: 'N'
+    },
+    note: { id: 'n1', type: 'note', title: 'T', body: 'BODY', notes: 'N' }
   };
   for (const type of ITEM_TYPES) {
     const meta = metadataOf(items[type]);

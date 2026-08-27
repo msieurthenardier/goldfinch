@@ -75,7 +75,7 @@ jobs:
   - name: build-linux
     plan:
       - get: repo
-        passed: [ci]   # build only a commit that passed ci; manual trigger
+        passed: [ci] # build only a commit that passed ci; manual trigger
       - task: build
         file: repo/ci/tasks/build-linux.yml
       - put: linux-installers

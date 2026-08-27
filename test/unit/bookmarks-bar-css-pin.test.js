@@ -85,9 +85,10 @@ test('#bookmarks-bar gap is pinned to bookmarks-bar.js BAR_GAP', () => {
   const block = ruleBlock(cssSource(), '#bookmarks-bar');
   const gap = declaration(block, 'gap', '#bookmarks-bar');
   assert.equal(
-    px(gap, '#bookmarks-bar gap'), BAR_GAP,
+    px(gap, '#bookmarks-bar gap'),
+    BAR_GAP,
     `styles.css #bookmarks-bar { gap: ${gap} } and bookmarks-bar.js BAR_GAP = ${BAR_GAP} have DRIFTED — ` +
-    'the overflow partition budgets the gap in JS and cannot read the CSS. Change both or neither.',
+      'the overflow partition budgets the gap in JS and cannot read the CSS. Change both or neither.'
   );
 });
 
@@ -97,9 +98,10 @@ test('#bookmarks-bar horizontal padding is pinned to bookmarks-bar.js BAR_PADDIN
   const { vertical, horizontal } = paddingParts(padding);
   assert.equal(vertical, '0', `#bookmarks-bar vertical padding is "${vertical}" — the fixed 30px height assumes 0`);
   assert.equal(
-    px(horizontal, '#bookmarks-bar horizontal padding'), BAR_PADDING_X,
+    px(horizontal, '#bookmarks-bar horizontal padding'),
+    BAR_PADDING_X,
     `styles.css #bookmarks-bar { padding: ${padding} } and bookmarks-bar.js BAR_PADDING_X = ${BAR_PADDING_X} ` +
-    'have DRIFTED — the partition budgets both sides in JS. Change both or neither.',
+      'have DRIFTED — the partition budgets both sides in JS. Change both or neither.'
   );
 });
 
@@ -107,10 +109,11 @@ test('#bookmarks-overflow width is pinned to bookmarks-bar.js CHEVRON_WIDTH', ()
   const block = ruleBlock(cssSource(), '#bookmarks-overflow');
   const width = declaration(block, 'width', '#bookmarks-overflow');
   assert.equal(
-    px(width, '#bookmarks-overflow width'), CHEVRON_WIDTH,
+    px(width, '#bookmarks-overflow width'),
+    CHEVRON_WIDTH,
     `styles.css #bookmarks-overflow { width: ${width} } and bookmarks-bar.js CHEVRON_WIDTH = ${CHEVRON_WIDTH} ` +
-    'have DRIFTED — the partition reserves the chevron footprint rather than measuring a possibly-hidden ' +
-    'element. Change both or neither.',
+      'have DRIFTED — the partition reserves the chevron footprint rather than measuring a possibly-hidden ' +
+      'element. Change both or neither.'
   );
 });
 
@@ -122,9 +125,10 @@ test('bookmarks-bar.js exports exactly the three pinned numeric constants', () =
   const src = fs.readFileSync(BOOKMARKS_BAR_JS, 'utf8');
   const found = [...src.matchAll(/^export const ([A-Z][A-Z0-9_]*)\s*=\s*-?\d/gm)].map((m) => m[1]).sort();
   assert.deepEqual(
-    found, ['BAR_GAP', 'BAR_PADDING_X', 'CHEVRON_WIDTH'],
+    found,
+    ['BAR_GAP', 'BAR_PADDING_X', 'CHEVRON_WIDTH'],
     'bookmarks-bar.js exports a numeric constant this CSS pin does not cover (or lost one it did) — ' +
-    'add it to this test or drop it from the export list, so the pin can never silently under-cover.',
+      'add it to this test or drop it from the export list, so the pin can never silently under-cover.'
   );
 });
 

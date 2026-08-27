@@ -109,18 +109,22 @@ function originOf(url) {
  */
 function createVaultContext(deps = /** @type {any} */ ({})) {
   const vaultStore = deps.vaultStore;
-  const fillDelegate = typeof deps.fillDelegate === 'function'
-    ? deps.fillDelegate
-    : () => { throw new Error('automation: vault-fill-unavailable — no fill delegate injected'); };
+  const fillDelegate =
+    typeof deps.fillDelegate === 'function'
+      ? deps.fillDelegate
+      : () => {
+          throw new Error('automation: vault-fill-unavailable — no fill delegate injected');
+        };
   // M14 F1 L2 (DD3): the auth-answer twins of fillDelegate — an injected effect
   // plus the pending-challenge read seam. Absent (older tests / engine-only
   // rigs) → answerAuth degrades to the throwing stub / a clean no-challenge.
-  const answerAuthDelegate = typeof deps.answerAuthDelegate === 'function'
-    ? deps.answerAuthDelegate
-    : () => { throw new Error('automation: vault-answer-auth-unavailable — no answer delegate injected'); };
-  const getPendingChallenge = typeof deps.getPendingChallenge === 'function'
-    ? deps.getPendingChallenge
-    : () => null;
+  const answerAuthDelegate =
+    typeof deps.answerAuthDelegate === 'function'
+      ? deps.answerAuthDelegate
+      : () => {
+          throw new Error('automation: vault-answer-auth-unavailable — no answer delegate injected');
+        };
+  const getPendingChallenge = typeof deps.getPendingChallenge === 'function' ? deps.getPendingChallenge : () => null;
   const getAutoLockMinutes = typeof deps.getAutoLockMinutes === 'function' ? deps.getAutoLockMinutes : () => 10;
   const now = typeof deps.now === 'function' ? deps.now : Date.now;
   const setT = typeof deps.setTimeout === 'function' ? deps.setTimeout : setTimeout;
@@ -155,7 +159,11 @@ function createVaultContext(deps = /** @type {any} */ ({})) {
   function zeroize() {
     clearTimer();
     for (const buf of keys.values()) {
-      try { buf.fill(0); } catch { /* not a Buffer / already gone */ }
+      try {
+        buf.fill(0);
+      } catch {
+        /* not a Buffer / already gone */
+      }
     }
     keys.clear();
     unlockedIds.clear();
@@ -169,7 +177,13 @@ function createVaultContext(deps = /** @type {any} */ ({})) {
    */
   function dropVault(vaultId) {
     const buf = keys.get(vaultId);
-    if (buf) { try { buf.fill(0); } catch { /* ignore */ } }
+    if (buf) {
+      try {
+        buf.fill(0);
+      } catch {
+        /* ignore */
+      }
+    }
     keys.delete(vaultId);
     unlockedIds.delete(vaultId);
     grants.delete(vaultId);
@@ -193,13 +207,13 @@ function createVaultContext(deps = /** @type {any} */ ({})) {
       try {
         if (grant && grant.mode === 'access') {
           // A store without the probe (a minimal test fake) cannot be revalidated → keep.
-          stillValid = typeof vaultStore.accessEnvelopeExists === 'function'
-            ? vaultStore.accessEnvelopeExists(vaultId, grant.keyId)
-            : true;
+          stillValid =
+            typeof vaultStore.accessEnvelopeExists === 'function'
+              ? vaultStore.accessEnvelopeExists(vaultId, grant.keyId)
+              : true;
         } else if (grant && grant.mode === 'admin') {
-          stillValid = typeof vaultStore.adminPublicKey === 'function'
-            ? vaultStore.adminPublicKey() === grant.adminPub
-            : true;
+          stillValid =
+            typeof vaultStore.adminPublicKey === 'function' ? vaultStore.adminPublicKey() === grant.adminPub : true;
         } else {
           stillValid = true; // no grant recorded (older path) → nothing to revalidate against.
         }
@@ -220,7 +234,12 @@ function createVaultContext(deps = /** @type {any} */ ({})) {
     if (keys.size === 0) return;
     const mins = getAutoLockMinutes();
     const safeMins = typeof mins === 'number' && mins >= 1 ? mins : 10;
-    timer = setT(() => { zeroize(); }, safeMins * 60 * 1000);
+    timer = setT(
+      () => {
+        zeroize();
+      },
+      safeMins * 60 * 1000
+    );
     if (timer && typeof timer.unref === 'function') timer.unref();
   }
 
@@ -236,7 +255,11 @@ function createVaultContext(deps = /** @type {any} */ ({})) {
   function setKey(vaultId, key, grant) {
     const prev = keys.get(vaultId);
     if (prev && prev !== key) {
-      try { prev.fill(0); } catch { /* ignore */ }
+      try {
+        prev.fill(0);
+      } catch {
+        /* ignore */
+      }
     }
     keys.set(vaultId, key);
     unlockedIds.add(vaultId);
@@ -325,7 +348,7 @@ function createVaultContext(deps = /** @type {any} */ ({})) {
         title: item.title ?? null,
         origin: item.origin ?? null,
         username: item.username ?? null,
-        hasTotp: !!item.totp,
+        hasTotp: !!item.totp
       });
     }
     return rows;
@@ -389,18 +412,16 @@ function createVaultContext(deps = /** @type {any} */ ({})) {
    */
   function resolveTarget(identity, wcId, engineDeps) {
     const fromId = engineDeps.fromId;
-    const chromeContents = typeof engineDeps.getChromeContents === 'function'
-      ? engineDeps.getChromeContents()
-      : undefined;
-    const chromeDep = typeof engineDeps.isChromeContents === 'function'
-      ? { isChromeContents: engineDeps.isChromeContents }
-      : {};
+    const chromeContents =
+      typeof engineDeps.getChromeContents === 'function' ? engineDeps.getChromeContents() : undefined;
+    const chromeDep =
+      typeof engineDeps.isChromeContents === 'function' ? { isChromeContents: engineDeps.isChromeContents } : {};
     if (identity === 'admin') {
       return resolveContents(wcId, { fromId, allowInternal: true, chromeContents, ...chromeDep });
     }
-    const jar = (engineDeps.jars && typeof engineDeps.jars.list === 'function'
-      ? engineDeps.jars.list()
-      : []).find((j) => j.id === identity);
+    const jar = (engineDeps.jars && typeof engineDeps.jars.list === 'function' ? engineDeps.jars.list() : []).find(
+      (j) => j.id === identity
+    );
     if (!jar) {
       throw new Error('automation: no-such-jar — jar ' + identity + ' is not present (revoked or deleted)');
     }
@@ -408,7 +429,7 @@ function createVaultContext(deps = /** @type {any} */ ({})) {
       fromId,
       fromPartition: engineDeps.fromPartition,
       chromeContents,
-      ...chromeDep,
+      ...chromeDep
     });
   }
 

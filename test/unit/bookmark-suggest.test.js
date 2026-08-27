@@ -18,12 +18,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { DatabaseSync } = require('node:sqlite');
 
-const {
-  tokenize,
-  queryWordTokens,
-  phraseMatches,
-  matchBookmarks
-} = require('../../src/shared/bookmark-suggest.js');
+const { tokenize, queryWordTokens, phraseMatches, matchBookmarks } = require('../../src/shared/bookmark-suggest.js');
 
 // ---------------------------------------------------------------------------
 // Unit-level coverage of the pure helpers
@@ -87,17 +82,14 @@ test('matchBookmarks: stored order preserved, limit default 3', () => {
     { title: 'Example Three', url: 'https://c.example.com/' },
     { title: 'Example Four', url: 'https://d.example.com/' }
   ];
-  assert.deepEqual(matchBookmarks(entries, 'example').map((e) => e.title), [
-    'Example One',
-    'Example Two',
-    'Example Three'
-  ]);
-  assert.deepEqual(matchBookmarks(entries, 'example', { limit: 4 }).map((e) => e.title), [
-    'Example One',
-    'Example Two',
-    'Example Three',
-    'Example Four'
-  ]);
+  assert.deepEqual(
+    matchBookmarks(entries, 'example').map((e) => e.title),
+    ['Example One', 'Example Two', 'Example Three']
+  );
+  assert.deepEqual(
+    matchBookmarks(entries, 'example', { limit: 4 }).map((e) => e.title),
+    ['Example One', 'Example Two', 'Example Three', 'Example Four']
+  );
 });
 
 test('matchBookmarks: URL-only match still surfaces (matcher covers both fields)', () => {
@@ -234,7 +226,10 @@ test('FTS5 parity: JS matcher agrees with live unicode61 FTS5 over the pinned ed
 // in isolation, redundant with the corpus sweep above by design — a future
 // corpus edit that accidentally weakens coverage still trips these).
 test('FTS5 parity pin: adjacency is REQUIRED, not AND-of-independent-prefixes', () => {
-  assert.deepEqual(matchBookmarks(CORPUS, 'exa-mple', { limit: CORPUS.length }).map((e) => e.id), [1]);
+  assert.deepEqual(
+    matchBookmarks(CORPUS, 'exa-mple', { limit: CORPUS.length }).map((e) => e.id),
+    [1]
+  );
 });
 
 test('FTS5 parity pin: ligature/stroke letters are never cross-matched', () => {

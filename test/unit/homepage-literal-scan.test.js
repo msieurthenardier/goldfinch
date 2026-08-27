@@ -23,15 +23,19 @@ const FILES = [
   path.join(__dirname, '../../src/renderer/renderer.js'),
   path.join(__dirname, '../../src/renderer/chrome/navigation-controller.js'),
   path.join(__dirname, '../../src/renderer/chrome/tab-controller.js'),
-  path.join(__dirname, '../../src/renderer/chrome/welcome-controller.js'),
+  path.join(__dirname, '../../src/renderer/chrome/welcome-controller.js')
 ];
 
-test('no HOMEPAGE / google.com / \'google\' literal remains in renderer.js, navigation-controller.js, tab-controller.js, or welcome-controller.js', () => {
+test("no HOMEPAGE / google.com / 'google' literal remains in renderer.js, navigation-controller.js, tab-controller.js, or welcome-controller.js", () => {
   for (const file of FILES) {
     const source = fs.readFileSync(file, 'utf8');
     assert.equal(/HOMEPAGE/.test(source), false, `${path.basename(file)} still mentions HOMEPAGE`);
     assert.equal(/google\.com/.test(source), false, `${path.basename(file)} still mentions google.com`);
-    assert.equal(/['"]google['"]/.test(source), false, `${path.basename(file)} still mentions the quoted 'google' engine id`);
+    assert.equal(
+      /['"]google['"]/.test(source),
+      false,
+      `${path.basename(file)} still mentions the quoted 'google' engine id`
+    );
   }
 });
 

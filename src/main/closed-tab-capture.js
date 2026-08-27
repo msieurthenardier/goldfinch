@@ -70,7 +70,7 @@ function captureClosedTabEntry({ tabEntry, jarsList, stripIndex, windowId }) {
     navEntries: wc.navigationHistory.getAllEntries(),
     navIndex: wc.navigationHistory.getActiveIndex(),
     closedAt: Date.now(),
-    windowId,
+    windowId
   };
 }
 
@@ -109,14 +109,12 @@ function captureWindowCloseEntries({ tabViews, jarsList, windowId }) {
  * @returns {number}
  */
 function reopenStripIndex(entry, invokingWindowId) {
-  return invokingWindowId != null && entry.windowId === invokingWindowId
-    ? entry.stripIndex
-    : APPEND_SENTINEL;
+  return invokingWindowId != null && entry.windowId === invokingWindowId ? entry.stripIndex : APPEND_SENTINEL;
 }
 
 module.exports = {
   APPEND_SENTINEL,
   captureClosedTabEntry,
   captureWindowCloseEntries,
-  reopenStripIndex,
+  reopenStripIndex
 };

@@ -9,7 +9,10 @@ const assert = require('node:assert');
 const { decideOzonePlatform } = require('../../src/main/ozone-platform');
 
 const existsNone = () => false;
-const existsOnly = (...paths) => (p) => paths.includes(p);
+const existsOnly =
+  (...paths) =>
+  (p) =>
+    paths.includes(p);
 
 test('non-linux platforms never choose wayland', () => {
   for (const platform of ['win32', 'darwin']) {

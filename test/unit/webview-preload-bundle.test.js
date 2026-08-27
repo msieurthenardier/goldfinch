@@ -51,8 +51,8 @@ test('bundle has no surviving relative require — sandbox-loadability property 
   assert.equal(
     relativeRequire.test(src),
     false,
-    'bundle contains a surviving relative require() — a sandboxed preload\'s restricted loader ' +
-      'cannot resolve this at runtime (the exact property leg 2\'s sandbox flip depends on)'
+    "bundle contains a surviving relative require() — a sandboxed preload's restricted loader " +
+      "cannot resolve this at runtime (the exact property leg 2's sandbox flip depends on)"
   );
 });
 

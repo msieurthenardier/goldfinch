@@ -1,6 +1,6 @@
 # Flight: Prettier Adoption
 
-**Status**: ready
+**Status**: in-flight
 **Mission**: [Codebase Health — 2026-08-27 Maintenance](../../mission.md)
 
 ## Contributing to Criteria
@@ -184,10 +184,10 @@ lint`/typecheck/test green.
 
 ### Checkpoints
 
-- [ ] CP1: `npx prettier --check .` clean; formatted-file count and the
-      two post-format line counts recorded in the flight log
-- [ ] CP2: suite green at the pre-flight test count; every re-targeted pin
-      neuter-verified (log lists each with its neuter result)
+- [x] CP1: `npx prettier --check .` clean; 319 files formatted; 1650 → 1827
+      and 1040 → 1077 (pin metric) recorded in the flight log
+- [x] CP2: suite green at 3839/3839 (corrected baseline); all twelve pins
+      neuter-verified, four independently by the Reviewer
 - [ ] CP3 (after Leg 1's PR merges): `format:check` wired in both CI
       definitions and passing in a Concourse task run; `ci/tasks/lint.yml`
       header, `ci/README.md` row, CLAUDE.md Commands + Patterns updated;
@@ -205,8 +205,9 @@ the pin's metric); a pin outside the Recon list needing the same treatment.
 
 ### Legs
 
-- [ ] `format-and-repin` - the reformat, the thirteen matcher fixes, the two
-      budget re-bases; all gates green
+- [x] `format-and-repin` - the reformat, the twelve matcher fixes, the
+      renderer.js budget re-base (1650 → 1827); all gates green — landed
+      2026-08-27
 - [ ] `ci-format-gate` - `format:check` script, both CI definitions,
       `.git-blame-ignore-revs` scaffold, CLAUDE.md / docs
 

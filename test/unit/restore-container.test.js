@@ -18,7 +18,7 @@ const { resolveRestoreContainer } = require('../../src/shared/restore-container'
 // A live jars snapshot, the shape the renderer's `containers` array carries.
 const CONTAINERS = [
   { id: 'jar-work', name: 'Work', partition: 'persist:jar-work' },
-  { id: 'jar-personal', name: 'Personal', partition: 'persist:jar-personal' },
+  { id: 'jar-personal', name: 'Personal', partition: 'persist:jar-personal' }
 ];
 
 // ---------------------------------------------------------------------------

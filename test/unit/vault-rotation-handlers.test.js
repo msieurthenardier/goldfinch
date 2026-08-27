@@ -22,8 +22,12 @@ function makeIpc() {
   return {
     handlers,
     listeners,
-    on(channel, fn) { listeners.set(channel, fn); },
-    handle(channel, fn) { handlers.set(channel, fn); },
+    on(channel, fn) {
+      listeners.set(channel, fn);
+    },
+    handle(channel, fn) {
+      handlers.set(channel, fn);
+    }
   };
 }
 
@@ -36,18 +40,19 @@ function baseHarness(extraInjections, menuType) {
   const sheet = {
     getView: () => ({ webContents: sheetSender }),
     getCurrentMenu: () => ({ token: 7, menuType }),
-    closeMenuOverlay: (reason, token) => closeCalls.push([reason, token]),
+    closeMenuOverlay: (reason, token) => closeCalls.push([reason, token])
   };
   const rec = { sheet, win };
   const registry = { records: () => [rec], getWindowForChrome: () => null };
   const chrome = { send: (channel, payload) => chromeSends.push([channel, payload]) };
 
   registerOverlayIpc({
-    ipcMain, registry,
+    ipcMain,
+    registry,
     chromeForAttachment: (w) => (w === win ? chrome : null),
     chromeForTab: () => null,
     sanitizeActivatedValue: (v) => (typeof v === 'string' && v.length <= 24 ? v : undefined),
-    ...extraInjections,
+    ...extraInjections
   });
   return { ipcMain, sheetSender, closeCalls, chromeSends };
 }
@@ -78,13 +83,19 @@ test('rotate-recovery: valid step-up → { ok:true }; Buffer hand-off; array zer
   assert.deepEqual(res, { ok: true }, 'the invoke reply carries { ok } only — never the new key');
   assert.equal(captured.isBuffer, true);
   assert.equal(captured.bytes, 'correct-master');
-  assert.ok(captured.buffer.every((b) => b === 0), 'copied Buffer zeroized in finally');
-  assert.ok(secret.every((b) => b === 0), 'incoming Uint8Array zeroized in finally');
+  assert.ok(
+    captured.buffer.every((b) => b === 0),
+    'copied Buffer zeroized in finally'
+  );
+  assert.ok(
+    secret.every((b) => b === 0),
+    'incoming Uint8Array zeroized in finally'
+  );
   assert.deepEqual(closeCalls, [['activated', 7]]);
   // The rotate send carries `replacing: true` (HAT I9) — the new key kills the previous one,
   // so the recovery-show sheet reveals the "this replaces your previous recovery key" line.
   assert.deepEqual(chromeSends, [
-    ['vault-recovery-show', { recoveryKey: 'NEW-RECOVERY-KEY-DISPLAY', replacing: true }],
+    ['vault-recovery-show', { recoveryKey: 'NEW-RECOVERY-KEY-DISPLAY', replacing: true }]
   ]);
 });
 
@@ -99,16 +110,24 @@ test('rotate-recovery: WRONG master → { ok:false }: no recovery-show, sheet no
   assert.deepEqual(res, { ok: false });
   assert.deepEqual(chromeSends, [], 'no recovery-show on a refused rotation');
   assert.deepEqual(closeCalls, [], 'sheet stays open to re-prompt');
-  assert.ok(secret.every((b) => b === 0), 'incoming Uint8Array zeroized on refusal');
+  assert.ok(
+    secret.every((b) => b === 0),
+    'incoming Uint8Array zeroized on refusal'
+  );
 });
 
 test('rotate-recovery: wrong sender / stale token / non-Uint8Array → { ok:false }, delegate never called', async () => {
   let called = 0;
-  const vaultRotateRecovery = async () => { called += 1; return { ok: true, recoveryKeyDisplay: 'x' }; };
+  const vaultRotateRecovery = async () => {
+    called += 1;
+    return { ok: true, recoveryKeyDisplay: 'x' };
+  };
   const { ipcMain, sheetSender } = baseHarness({ vaultRotateRecovery }, 'vault-stepup');
   const handler = ipcMain.handlers.get('menu-overlay:vault-rotate-recovery');
 
-  assert.deepEqual(await handler({ sender: { isDestroyed: () => false } }, { token: 7, secret: new Uint8Array([1]) }), { ok: false });
+  assert.deepEqual(await handler({ sender: { isDestroyed: () => false } }, { token: 7, secret: new Uint8Array([1]) }), {
+    ok: false
+  });
   assert.deepEqual(await handler({ sender: sheetSender }, { token: 6, secret: new Uint8Array([1]) }), { ok: false });
   assert.deepEqual(await handler({ sender: sheetSender }, { token: 7, secret: 'string' }), { ok: false });
   assert.equal(called, 0);
@@ -147,10 +166,22 @@ test('change-master: valid → { ok:true }; BOTH Buffers passed; ALL FOUR arrays
   assert.equal(captured.old, 'old-master');
   assert.equal(captured.neu, 'new-master');
   // DUAL-zeroize: both copied Buffers AND both incoming Uint8Arrays.
-  assert.ok(captured.oldBuf.every((b) => b === 0), 'copied old Buffer zeroized');
-  assert.ok(captured.newBuf.every((b) => b === 0), 'copied new Buffer zeroized');
-  assert.ok(oldSecret.every((b) => b === 0), 'incoming old Uint8Array zeroized');
-  assert.ok(newSecret.every((b) => b === 0), 'incoming new Uint8Array zeroized');
+  assert.ok(
+    captured.oldBuf.every((b) => b === 0),
+    'copied old Buffer zeroized'
+  );
+  assert.ok(
+    captured.newBuf.every((b) => b === 0),
+    'copied new Buffer zeroized'
+  );
+  assert.ok(
+    oldSecret.every((b) => b === 0),
+    'incoming old Uint8Array zeroized'
+  );
+  assert.ok(
+    newSecret.every((b) => b === 0),
+    'incoming new Uint8Array zeroized'
+  );
   assert.deepEqual(closeCalls, [['activated', 7]]);
   assert.deepEqual(chromeSends, [], 'change-master shows no one-time display');
 });
@@ -172,11 +203,20 @@ test('change-master: WRONG old password → { ok:false }: sheet not closed; both
 
 test('change-master: a missing/non-Uint8Array secret → { ok:false }, delegate never called', async () => {
   let called = 0;
-  const vaultChangeMaster = async () => { called += 1; return { ok: true }; };
+  const vaultChangeMaster = async () => {
+    called += 1;
+    return { ok: true };
+  };
   const { ipcMain, sheetSender } = baseHarness({ vaultChangeMaster }, 'vault-change-master');
   const handler = ipcMain.handlers.get('menu-overlay:vault-change-master');
-  assert.deepEqual(await handler({ sender: sheetSender }, { token: 7, oldSecret: new Uint8Array([1]) /* no newSecret */ }), { ok: false });
-  assert.deepEqual(await handler({ sender: sheetSender }, { token: 7, oldSecret: 'str', newSecret: new Uint8Array([1]) }), { ok: false });
+  assert.deepEqual(
+    await handler({ sender: sheetSender }, { token: 7, oldSecret: new Uint8Array([1]) /* no newSecret */ }),
+    { ok: false }
+  );
+  assert.deepEqual(
+    await handler({ sender: sheetSender }, { token: 7, oldSecret: 'str', newSecret: new Uint8Array([1]) }),
+    { ok: false }
+  );
   assert.equal(called, 0);
 });
 
@@ -208,10 +248,22 @@ test('recover: valid → { ok:true }; BOTH Buffers passed; ALL FOUR arrays zeroe
   assert.deepEqual(res, { ok: true });
   assert.equal(captured.recovery, 'ABCD-EFGH-IJKL-MNOP');
   assert.equal(captured.neu, 'new-master');
-  assert.ok(captured.recoveryBuf.every((b) => b === 0), 'copied recovery Buffer zeroized');
-  assert.ok(captured.newBuf.every((b) => b === 0), 'copied new Buffer zeroized');
-  assert.ok(recoverySecret.every((b) => b === 0), 'incoming recovery Uint8Array zeroized');
-  assert.ok(newSecret.every((b) => b === 0), 'incoming new Uint8Array zeroized');
+  assert.ok(
+    captured.recoveryBuf.every((b) => b === 0),
+    'copied recovery Buffer zeroized'
+  );
+  assert.ok(
+    captured.newBuf.every((b) => b === 0),
+    'copied new Buffer zeroized'
+  );
+  assert.ok(
+    recoverySecret.every((b) => b === 0),
+    'incoming recovery Uint8Array zeroized'
+  );
+  assert.ok(
+    newSecret.every((b) => b === 0),
+    'incoming new Uint8Array zeroized'
+  );
   assert.deepEqual(closeCalls, [['activated', 7]]);
 });
 

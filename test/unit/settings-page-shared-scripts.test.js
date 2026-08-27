@@ -61,10 +61,13 @@ function isSharedSrc(src) {
 
 test('settings.html loads its own controller script and the search-engines table', () => {
   const tags = settingsScriptTags();
-  assert.ok(tags.some((t) => t.src === 'settings.js'), 'settings.html must load settings.js');
+  assert.ok(
+    tags.some((t) => t.src === 'settings.js'),
+    'settings.html must load settings.js'
+  );
   assert.ok(
     tags.some((t) => t.src === 'search-engines.js'),
-    'settings.html must load search-engines.js (M16 F1 Leg 2 / DD7 — the radio group\'s single source table)'
+    "settings.html must load search-engines.js (M16 F1 Leg 2 / DD7 — the radio group's single source table)"
   );
 });
 
@@ -84,7 +87,10 @@ test('settings.html: once any script is a module, every classic script tag carri
 
 test('every script settings.html loads resolves to a real file on disk', () => {
   for (const { src } of settingsScriptTags()) {
-    assert.doesNotThrow(() => resolveScriptFile(src), `"${src}" should resolve under src/shared/ or src/renderer/pages/`);
+    assert.doesNotThrow(
+      () => resolveScriptFile(src),
+      `"${src}" should resolve under src/shared/ or src/renderer/pages/`
+    );
   }
 });
 
@@ -127,7 +133,7 @@ test('settings.js defines a persistent home-page unset hint and reflects it from
 
   assert.ok(
     /const HOME_UNSET_HINT\s*=\s*'No home page chosen/.test(block),
-    'settings.js\'s home-page controller must define HOME_UNSET_HINT, symmetric with the search-engine block\'s UNSET_HINT'
+    "settings.js's home-page controller must define HOME_UNSET_HINT, symmetric with the search-engine block's UNSET_HINT"
   );
   // Grep-AC hygiene rule: no literal search-engine name anywhere in this block.
   assert.equal(
@@ -149,7 +155,7 @@ test('settings.js defines a persistent home-page unset hint and reflects it from
   );
 });
 
-test('no engine id/label/description is duplicated in settings.html\'s search-engine fieldset or in settings.js (DD7: single source is search-engines.js)', () => {
+test("no engine id/label/description is duplicated in settings.html's search-engine fieldset or in settings.js (DD7: single source is search-engines.js)", () => {
   // Scoped to the search-engine fieldset specifically (not the whole document)
   // — settings.html legitimately mentions "Google" elsewhere (the spellcheck
   // note's dictionary-download copy), which is unrelated product prose, not a
@@ -162,7 +168,9 @@ test('no engine id/label/description is duplicated in settings.html\'s search-en
   assert.ok(SEARCH_ENGINES.length > 0, 'sanity: the curated table must be non-empty for this check to mean anything');
   for (const engine of SEARCH_ENGINES) {
     assert.ok(
-      !fieldsetHtml.includes(engine.id) && !fieldsetHtml.includes(engine.label) && !fieldsetHtml.includes(engine.description),
+      !fieldsetHtml.includes(engine.id) &&
+        !fieldsetHtml.includes(engine.label) &&
+        !fieldsetHtml.includes(engine.description),
       `settings.html's search-engine fieldset contains engine data for "${engine.id}" — engine data must come only ` +
         'from search-engines.js, rendered at runtime by settings.js'
     );
@@ -187,15 +195,14 @@ test('both Clear buttons carry settings-btn settings-btn--secondary, and setting
   for (const id of ['home-page-clear', 'search-engine-clear']) {
     const tagMatch = new RegExp(`<button[^>]*id="${id}"[^>]*>`).exec(html);
     assert.ok(tagMatch, `settings.html must have a button with id="${id}"`);
-    assert.ok(/class="[^"]*\bsettings-btn\b[^"]*\bsettings-btn--secondary\b[^"]*"/.test(tagMatch[0]) ||
-      /class="[^"]*\bsettings-btn--secondary\b[^"]*\bsettings-btn\b[^"]*"/.test(tagMatch[0]),
-      `#${id} must carry both "settings-btn" and "settings-btn--secondary"`);
+    assert.ok(
+      /class="[^"]*\bsettings-btn\b[^"]*\bsettings-btn--secondary\b[^"]*"/.test(tagMatch[0]) ||
+        /class="[^"]*\bsettings-btn--secondary\b[^"]*\bsettings-btn\b[^"]*"/.test(tagMatch[0]),
+      `#${id} must carry both "settings-btn" and "settings-btn--secondary"`
+    );
   }
 
-  assert.ok(
-    /\.settings-btn--secondary\s*{/.test(settingsCss),
-    'settings.css must define .settings-btn--secondary'
-  );
+  assert.ok(/\.settings-btn--secondary\s*{/.test(settingsCss), 'settings.css must define .settings-btn--secondary');
   assert.ok(
     /#home-page-clear\s*{[^}]*margin-left:\s*8px/.test(settingsCss),
     "settings.css must give #home-page-clear an explicit margin-left (Save's gap is Save's own rule, not .settings-btn's)"

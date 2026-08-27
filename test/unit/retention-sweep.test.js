@@ -211,7 +211,13 @@ test('sweepJar cookies: removes cookies whose bookkeeping age exceeds the window
       ]
     }
   });
-  const engine = createRetentionSweep({ cookieSeen, historyOrigins: () => [], sessionFor, cookieUrl, now: () => nowMs });
+  const engine = createRetentionSweep({
+    cookieSeen,
+    historyOrigins: () => [],
+    sessionFor,
+    cookieUrl,
+    now: () => nowMs
+  });
 
   const result = await engine.sweepJar(jar, []);
   assert.equal(result.cookiesRemoved, 1);
@@ -220,7 +226,11 @@ test('sweepJar cookies: removes cookies whose bookkeeping age exceeds the window
   const removeCall = events.find((e) => e.fn === 'cookies.remove');
   assert.ok(removeCall, 'cookies.remove was called');
   assert.equal(removeCall.args.name, 'sid');
-  assert.equal(removeCall.args.url, cookieUrl({ domain: 'x.test', path: '/', secure: true }), 'secure recovered from the live cookie, not defaulted');
+  assert.equal(
+    removeCall.args.url,
+    cookieUrl({ domain: 'x.test', path: '/', secure: true }),
+    'secure recovered from the live cookie, not defaulted'
+  );
 });
 
 test('sweepJar cookies: a removal failure leaves the bookkeeping row in place (retry-next-sweep), never aborts the pass', async () => {
@@ -232,7 +242,13 @@ test('sweepJar cookies: a removal failure leaves the bookkeeping row in place (r
     cookiesByPartition: { 'persist:container:a': [{ name: 'sid', domain: 'x.test', path: '/', secure: true }] },
     throwsByPartition: { 'persist:container:a': { cookiesRemove: true } }
   });
-  const engine = createRetentionSweep({ cookieSeen, historyOrigins: () => [], sessionFor, cookieUrl, now: () => nowMs });
+  const engine = createRetentionSweep({
+    cookieSeen,
+    historyOrigins: () => [],
+    sessionFor,
+    cookieUrl,
+    now: () => nowMs
+  });
 
   const result = await engine.sweepJar(jar, []);
   assert.equal(result.cookiesRemoved, 0);
@@ -245,7 +261,13 @@ test('sweepJar cookies: a bookkeeping row with no matching live cookie removes w
   cookieSeen.insertIfAbsent('jarA', 'gone', 'x.test', '/', nowMs - 40 * DAY_MS);
   const jar = { id: 'jarA', partition: 'persist:container:a', retentionDays: 30 };
   const { sessionFor, events } = makeFakeSessionFactory({ cookiesByPartition: { 'persist:container:a': [] } });
-  const engine = createRetentionSweep({ cookieSeen, historyOrigins: () => [], sessionFor, cookieUrl, now: () => nowMs });
+  const engine = createRetentionSweep({
+    cookieSeen,
+    historyOrigins: () => [],
+    sessionFor,
+    cookieUrl,
+    now: () => nowMs
+  });
 
   const result = await engine.sweepJar(jar, []);
   assert.equal(result.cookiesRemoved, 1);
@@ -268,10 +290,7 @@ test('sweepJar storage: clears exactly the origins in the supplied snapshot, sto
   assert.deepEqual(result.classes, ['storage']);
   const clears = events.filter((e) => e.fn === 'clearStorageData');
   assert.equal(clears.length, 2);
-  assert.deepEqual(
-    clears.map((c) => c.args.origin).sort(),
-    ['https://ancient.example', 'https://old.example']
-  );
+  assert.deepEqual(clears.map((c) => c.args.origin).sort(), ['https://ancient.example', 'https://old.example']);
   for (const c of clears) {
     assert.ok(!c.args.storages.includes('cookies'), 'the storage class must exclude cookies');
   }
@@ -354,7 +373,7 @@ test('sweepJar: classes reports only classes with a nonzero effect', async () =>
 // sweepAll — per-jar isolation (DD6)
 // ---------------------------------------------------------------------------
 
-test('sweepAll: one jar throwing (sessionFor itself throws) never blocks a sibling jar\'s sweep', async () => {
+test("sweepAll: one jar throwing (sessionFor itself throws) never blocks a sibling jar's sweep", async () => {
   const cookieSeen = makeFakeCookieSeen();
   const jars = [
     { id: 'jarBad', partition: 'persist:container:bad', retentionDays: 30 },

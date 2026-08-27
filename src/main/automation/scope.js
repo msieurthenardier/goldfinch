@@ -47,26 +47,40 @@ const { resolveContentsForJar } = require('./resolve');
 // (the leg-05 SC8 gap). The automation-scope.test.js three-place-registration guard
 // enforces the WCID_FIRST_OPS half by cross-checking against the MCP tool registry.
 const WCID_FIRST_OPS = [
-  'closeTab', 'activateTab',
-  'navigate', 'goBack', 'goForward', 'reload',
-  'click', 'typeText', 'scroll', 'pressKey',
-  'captureScreenshot', 'readDom', 'readAxTree',
-  'evaluate', 'injectScript',
+  'closeTab',
+  'activateTab',
+  'navigate',
+  'goBack',
+  'goForward',
+  'reload',
+  'click',
+  'typeText',
+  'scroll',
+  'pressKey',
+  'captureScreenshot',
+  'readDom',
+  'readAxTree',
+  'evaluate',
+  'injectScript',
   // DevTools ops (Flight 9): wcId-first, jar-membership-checked. DevTools on a jar's own
   // guest is within the jar key's authority — NOT admin-only (unlike captureWindow /
   // getChromeTarget). The internal-session exclusion is enforced op-locally even for admin.
-  'openDevTools', 'closeDevTools',
+  'openDevTools',
+  'closeDevTools',
   // Zoom & print (Flight 1): wcId-first, jar-membership-checked. A jar key may
   // zoom/print its OWN guests; resolveContentsForJar refuses out-of-jar/internal/chrome.
   // The op-local internal guard in zoom.js/print.js additionally covers the admin path.
-  'getZoom', 'setZoom', 'printToPDF',
+  'getZoom',
+  'setZoom',
+  'printToPDF',
   // Find in page (Flight 2 / Mission 4): wcId-first, jar-membership-checked. A jar key
   // may find in its OWN guests. The op-local internal guard in find.js covers admin.
-  'findInPage', 'stopFindInPage',
+  'findInPage',
+  'stopFindInPage',
   // Pointer drag (M09 F2 Leg 2, DD4): wcId-first, jar-membership-checked like click. A
   // jar key may drag within its OWN guest's viewport; admin may drag the chrome (tab
   // reorder). No new trust surface — same tier as click.
-  'dragPointer',
+  'dragPointer'
 ];
 
 // REGISTRATION-ONLY marker (Mission 12, Flight 1, Leg 3). `vaultFill` is a
@@ -141,7 +155,7 @@ function scopeEngine(engine, identity, ctx) {
     fromPartition,
     // M09 F6 (DD8 / review L5): the chrome-exclusion compare widens to "is any
     // registered chrome" — window 2's chrome is equally out of a jar key's reach.
-    ...(typeof isChromeContents === 'function' ? { isChromeContents } : {}),
+    ...(typeof isChromeContents === 'function' ? { isChromeContents } : {})
   });
 
   /** @type {{ [op: string]: (...args: any[]) => any }} */
@@ -168,7 +182,11 @@ function scopeEngine(engine, identity, ctx) {
     const jarSession = fromPartition(jar.partition);
     return tabs.filter((t) => {
       let wc;
-      try { wc = fromId(t.wcId); } catch { return false; }
+      try {
+        wc = fromId(t.wcId);
+      } catch {
+        return false;
+      }
       return !!wc && wc.session === jarSession;
     });
   };
@@ -178,7 +196,9 @@ function scopeEngine(engine, identity, ctx) {
   // jar's tab" apart from "this op is admin-only".
   facade.captureWindow = () => {
     requireJar(); // an unknown jar still errors here (no-such-jar) before admin-only
-    throw new Error('automation: admin-only — captureWindow (whole-window capture) is restricted to the admin identity');
+    throw new Error(
+      'automation: admin-only — captureWindow (whole-window capture) is restricted to the admin identity'
+    );
   };
 
   // openTab → jar-targeted (DD3, Flight 6). A jar key may only open in ITS OWN jar:
@@ -189,7 +209,7 @@ function scopeEngine(engine, identity, ctx) {
     if (jarId != null && jarId !== jar.id) {
       throw new Error('automation: out-of-jar — a jar key may only open tabs in its own jar (' + jar.id + ')');
     }
-    return engine.openTab(url, jar.id);   // force the caller's own jar
+    return engine.openTab(url, jar.id); // force the caller's own jar
   };
 
   // getChromeTarget → REFUSED for jar keys with a DISTINCT admin-only message (mirrors
@@ -197,7 +217,9 @@ function scopeEngine(engine, identity, ctx) {
   // is the resolveContentsForJar chrome-exclusion for any wcId-first op (DD1, Flight 6).
   facade.getChromeTarget = () => {
     requireJar(); // unknown jar errors no-such-jar first, mirroring captureWindow
-    throw new Error('automation: admin-only — getChromeTarget (chrome renderer discovery) is restricted to the admin identity');
+    throw new Error(
+      'automation: admin-only — getChromeTarget (chrome renderer discovery) is restricted to the admin identity'
+    );
   };
 
   // enumerateWindows → REFUSED for jar keys (admin-only, app-level — mirrors
@@ -209,7 +231,9 @@ function scopeEngine(engine, identity, ctx) {
   // all WINDOWS' tabs for ITS OWN jar (DD1's intent), but never the window list.
   facade.enumerateWindows = () => {
     requireJar(); // unknown jar errors no-such-jar first, mirroring captureWindow/getChromeTarget
-    throw new Error('automation: admin-only — enumerateWindows (window topology discovery) is restricted to the admin identity');
+    throw new Error(
+      'automation: admin-only — enumerateWindows (window topology discovery) is restricted to the admin identity'
+    );
   };
 
   // downloadsList → REFUSED for jar keys (admin-only, app-level — mirrors getChromeTarget/captureWindow).
@@ -218,7 +242,9 @@ function scopeEngine(engine, identity, ctx) {
   // omission — the latter throws the opaque "engine.getDownloadsList is not a function" (the scope.js:38 gap).
   facade.getDownloadsList = () => {
     requireJar(); // unknown jar errors no-such-jar first, mirroring captureWindow/getChromeTarget
-    throw new Error('automation: admin-only — downloadsList (app-level downloads view) is restricted to the admin identity');
+    throw new Error(
+      'automation: admin-only — downloadsList (app-level downloads view) is restricted to the admin identity'
+    );
   };
 
   // getHistory → jar-CONFINED custom op (Mission 08 Flight 5, DD1/DD4) — the FIRST

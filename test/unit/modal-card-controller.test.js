@@ -13,7 +13,9 @@ const assert = require('node:assert/strict');
 
 const { createDocument } = require('./helpers/jars-page-dom');
 const {
-  createSheetReport, attachModalCard, attachBackdropPressGate
+  createSheetReport,
+  attachModalCard,
+  attachBackdropPressGate
 } = require('../../src/shared/modal-card-controller.js');
 
 // ---------------------------------------------------------------------------
@@ -27,7 +29,7 @@ function makeBridge() {
     activated,
     dismissed,
     sendActivated: (p) => activated.push(p),
-    sendDismissed: (p) => dismissed.push(p),
+    sendDismissed: (p) => dismissed.push(p)
   };
 }
 
@@ -121,7 +123,7 @@ function makeCard(document, { dismissible } = {}) {
     getCycle: () => [a, b, c],
     dismissible,
     close: (s) => closes.push(s),
-    activeElement: () => document.activeElement,
+    activeElement: () => document.activeElement
   });
   return { node, a, b, c, closes };
 }

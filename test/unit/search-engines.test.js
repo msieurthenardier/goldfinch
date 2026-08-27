@@ -32,8 +32,11 @@ test('SEARCH_ENGINES is frozen and every descriptor is frozen', () => {
   for (const e of SEARCH_ENGINES) assert.ok(Object.isFrozen(e), `descriptor "${e.id}" should be frozen`);
 });
 
-test('exactly the mission\'s eight engines, in the mission\'s order', () => {
-  assert.deepEqual(SEARCH_ENGINES.map((e) => e.id), EXPECTED_IDS);
+test("exactly the mission's eight engines, in the mission's order", () => {
+  assert.deepEqual(
+    SEARCH_ENGINES.map((e) => e.id),
+    EXPECTED_IDS
+  );
   assert.equal(new Set(SEARCH_ENGINES.map((e) => e.id)).size, EXPECTED_IDS.length, 'ids are unique');
 });
 
@@ -108,7 +111,7 @@ test('getSearchEngine returns null for an unknown id', () => {
 // ---------------------------------------------------------------------------
 // buildSearchUrl — substitution, per engine (including Startpage's query=)
 // ---------------------------------------------------------------------------
-test('buildSearchUrl substitutes a plain query into every engine\'s template', () => {
+test("buildSearchUrl substitutes a plain query into every engine's template", () => {
   const expected = {
     duckduckgo: 'https://duckduckgo.com/?q=hello',
     brave: 'https://search.brave.com/search?q=hello',
@@ -138,10 +141,7 @@ test('buildSearchUrl escapes spaces as %20 (encodeURIComponent, not +)', () => {
 });
 
 test('buildSearchUrl escapes & so it cannot inject a second query parameter', () => {
-  assert.equal(
-    buildSearchUrl('google', 'a&b=evil'),
-    'https://www.google.com/search?q=a%26b%3Devil'
-  );
+  assert.equal(buildSearchUrl('google', 'a&b=evil'), 'https://www.google.com/search?q=a%26b%3Devil');
 });
 
 test('buildSearchUrl escapes # so it cannot inject a URL fragment', () => {
@@ -153,15 +153,15 @@ test('buildSearchUrl escapes literal + (encodeURIComponent does not treat + as s
 });
 
 test('buildSearchUrl escapes non-ASCII query text', () => {
-  assert.equal(buildSearchUrl('google', 'héllo wörld'), `https://www.google.com/search?q=${encodeURIComponent('héllo wörld')}`);
+  assert.equal(
+    buildSearchUrl('google', 'héllo wörld'),
+    `https://www.google.com/search?q=${encodeURIComponent('héllo wörld')}`
+  );
   assert.equal(buildSearchUrl('google', '日本語'), `https://www.google.com/search?q=${encodeURIComponent('日本語')}`);
 });
 
 test('buildSearchUrl on Startpage still substitutes into query= (not q=) with an escaped query', () => {
-  assert.equal(
-    buildSearchUrl('startpage', 'a b&c'),
-    'https://www.startpage.com/sp/search?query=a%20b%26c'
-  );
+  assert.equal(buildSearchUrl('startpage', 'a b&c'), 'https://www.startpage.com/sp/search?query=a%20b%26c');
 });
 
 test('buildSearchUrl treats a literal %s in the query as ordinary text, not a second substitution point', () => {
@@ -203,7 +203,11 @@ test('capPendingQuery on an exactly-cap-length query returns it unchanged', () =
 
 test('a <script>-shaped query is capPendingQuery-safe as plain text (no markup interpretation at this layer)', () => {
   const hostile = '<script>alert(1)</script>';
-  assert.equal(capPendingQuery(hostile), hostile, 'capPendingQuery is a plain trim+truncate — never sanitizes markup, because it is only ever rendered via textContent and encoded via buildSearchUrl, never assigned to innerHTML');
+  assert.equal(
+    capPendingQuery(hostile),
+    hostile,
+    'capPendingQuery is a plain trim+truncate — never sanitizes markup, because it is only ever rendered via textContent and encoded via buildSearchUrl, never assigned to innerHTML'
+  );
 });
 
 test('buildSearchUrl truncates an over-length query to PENDING_QUERY_MAX before encoding (second enforcement point)', () => {
@@ -341,7 +345,7 @@ test('welcome-controller.js: show(tab) delegates to settle(tab) rather than rend
 // state-derived confirmation line. Grep-shape, same convention as the DD2
 // contract test above (no DOM harness for the chrome).
 // ---------------------------------------------------------------------------
-test('welcome-controller.js: render(tab) gates the engine block on reasons.has(\'search\'), not the live unset state (M16 F3 Leg 2, HAT item 3)', () => {
+test("welcome-controller.js: render(tab) gates the engine block on reasons.has('search'), not the live unset state (M16 F3 Leg 2, HAT item 3)", () => {
   const fs = require('fs');
   const path = require('path');
   const src = fs.readFileSync(path.join(__dirname, '../../src/renderer/chrome/welcome-controller.js'), 'utf8');
@@ -352,16 +356,16 @@ test('welcome-controller.js: render(tab) gates the engine block on reasons.has(\
   const engineToggleLine = (renderMatch[1].match(/engineBlock\.classList\.toggle\('hidden'[^\n]*/) || [''])[0];
   assert.ok(
     /reasons\.has\('search'\)/.test(renderMatch[1]),
-    'render(tab) must gate the engine block\'s visibility on tab.welcome.reasons.has(\'search\') ' +
-      '(why the tab was opened), not on unsetReasons(...).has(\'search\')'
+    "render(tab) must gate the engine block's visibility on tab.welcome.reasons.has('search') " +
+      "(why the tab was opened), not on unsetReasons(...).has('search')"
   );
   assert.ok(
     !/unset\.has\('search'\)/.test(engineToggleLine),
-    'the engine block\'s hidden toggle must not read the unset-state Set — choosing an engine must not hide it'
+    "the engine block's hidden toggle must not read the unset-state Set — choosing an engine must not hide it"
   );
 });
 
-test('welcome-controller.js: submitEngine no longer deletes \'search\' from reasons and settles with a search: override (M16 F3 Leg 2, HAT item 3)', () => {
+test("welcome-controller.js: submitEngine no longer deletes 'search' from reasons and settles with a search: override (M16 F3 Leg 2, HAT item 3)", () => {
   const fs = require('fs');
   const path = require('path');
   const src = fs.readFileSync(path.join(__dirname, '../../src/renderer/chrome/welcome-controller.js'), 'utf8');
@@ -370,8 +374,8 @@ test('welcome-controller.js: submitEngine no longer deletes \'search\' from reas
   assert.ok(submitEngineMatch, 'welcome-controller.js must export an async function submitEngine(id) { ... }');
   assert.ok(
     !/reasons\.delete\('search'\)/.test(submitEngineMatch[1]),
-    'submitEngine must no longer mutate reasons — deleting \'search\' would (once render keys off ' +
-      'reasons.has(\'search\')) hide the block instead of keeping it visible with the selection'
+    "submitEngine must no longer mutate reasons — deleting 'search' would (once render keys off " +
+      "reasons.has('search')) hide the block instead of keeping it visible with the selection"
   );
   assert.ok(
     /settle\(tab,\s*{\s*search:\s*id\s*}\)/.test(submitEngineMatch[1]),
@@ -386,8 +390,8 @@ test('welcome-controller.js: the engine radio sync assigns .checked directly and
   const src = fs.readFileSync(path.join(__dirname, '../../src/renderer/chrome/welcome-controller.js'), 'utf8');
 
   assert.ok(
-    /radio\.checked = \(radio\.value === engine\)/.test(src),
-    'render(tab) must sync each radio\'s .checked by direct assignment against the resolved engine'
+    /radio\.checked = \(?radio\.value === engine\)?/.test(src),
+    "render(tab) must sync each radio's .checked by direct assignment against the resolved engine"
   );
 
   // Strip comment-only lines first — the fix comment above the sync
@@ -467,7 +471,7 @@ test('welcome-controller.js: all three tagline copy strings are present in the c
 // applies to the next new tab, not this one. Grep-shape, same convention as
 // the other structural tests in this file (no DOM harness for the chrome).
 // ---------------------------------------------------------------------------
-test('welcome-controller.js: render(tab) gates the home block on reasons.has(\'home\'), symmetric with the engine block (M16 F3 Leg 2, HAT item 6)', () => {
+test("welcome-controller.js: render(tab) gates the home block on reasons.has('home'), symmetric with the engine block (M16 F3 Leg 2, HAT item 6)", () => {
   const fs = require('fs');
   const path = require('path');
   const src = fs.readFileSync(path.join(__dirname, '../../src/renderer/chrome/welcome-controller.js'), 'utf8');
@@ -476,8 +480,8 @@ test('welcome-controller.js: render(tab) gates the home block on reasons.has(\'h
   assert.ok(renderMatch, 'welcome-controller.js must export a function render(tab, ...) { ... }');
   assert.ok(
     /reasons\.has\('home'\)/.test(renderMatch[1]),
-    'render(tab) must gate the home block\'s visibility on tab.welcome.reasons.has(\'home\') ' +
-      '(why the tab was opened), symmetric with the engine block\'s reasons.has(\'search\') check'
+    "render(tab) must gate the home block's visibility on tab.welcome.reasons.has('home') " +
+      "(why the tab was opened), symmetric with the engine block's reasons.has('search') check"
   );
 });
 
@@ -528,7 +532,8 @@ test('welcome-controller.js: settle(tab) never attaches to the resolved home pag
   );
   const attachCalls = settleMatch[1].match(/attachView\(/g) || [];
   assert.equal(
-    attachCalls.length, 1,
+    attachCalls.length,
+    1,
     'settle(tab) must call attachView exactly once — the pending-search branch — with no ' +
       'other auto-navigation left'
   );
@@ -578,7 +583,7 @@ test('normalizeHomePageInput leaves a non-https scheme unchanged', () => {
   assert.equal(normalizeHomePageInput('http://x'), 'http://x');
 });
 
-test('normalizeHomePageInput leaves about:blank unchanged (the scheme/about: shape is not the domain rule\'s concern)', () => {
+test("normalizeHomePageInput leaves about:blank unchanged (the scheme/about: shape is not the domain rule's concern)", () => {
   assert.equal(normalizeHomePageInput('about:blank'), 'about:blank');
 });
 
@@ -627,7 +632,7 @@ test('settings.js: the home-page Save handler normalizes the input through norma
   assert.ok(
     /normalizeHomePageInput\(/.test(saveMatch[1]),
     'the home-page Save handler must normalize input.value through normalizeHomePageInput before ' +
-      'settingsSet(\'homePage\', ...)'
+      "settingsSet('homePage', ...)"
   );
 });
 

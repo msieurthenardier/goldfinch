@@ -15,7 +15,7 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 /** @type {ReadonlyArray<{ tag: string, attrs: Record<string, string> }>} */
 const COPY_SHAPES = [
   { tag: 'rect', attrs: { width: '14', height: '14', x: '8', y: '8', rx: '2', ry: '2' } },
-  { tag: 'path', attrs: { d: 'M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2' } },
+  { tag: 'path', attrs: { d: 'M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2' } }
 ];
 
 /**

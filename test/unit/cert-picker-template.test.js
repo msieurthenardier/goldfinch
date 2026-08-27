@@ -23,12 +23,12 @@ const {
   certPickId,
   parseCertPickIndex,
   CERT_PICK_PREFIX,
-  CERT_CANCEL_ID,
+  CERT_CANCEL_ID
 } = require('../../src/shared/cert-picker-template.js');
 
 const MODEL = [
   { subject: 'CN=Goldfinch Fixture Client', issuer: 'CN=Goldfinch Fixture Throwaway CA' },
-  { subject: 'CN=Second Cert', issuer: 'CN=Another CA' },
+  { subject: 'CN=Second Cert', issuer: 'CN=Another CA' }
 ];
 
 test('cert-picker card: hidden backdrop + header (title + accessible close) + role="menu" roving list host', () => {
@@ -117,9 +117,7 @@ test('id↔index mapping: certPickId/parseCertPickIndex round-trip; malformed id
 });
 
 test("cross-pin: register-overlay-ipc.js's local prefix mirror matches the template's CERT_PICK_PREFIX (the ESM/CJS split cannot drift)", () => {
-  const registrarSource = fs.readFileSync(
-    path.join(__dirname, '../../src/main/register-overlay-ipc.js'), 'utf8'
-  );
+  const registrarSource = fs.readFileSync(path.join(__dirname, '../../src/main/register-overlay-ipc.js'), 'utf8');
   assert.equal(CERT_PICK_PREFIX, 'cert:');
   assert.match(
     registrarSource,
@@ -139,17 +137,13 @@ test('REGRESSION (M14 F3 HAT): the LIVE cert-picker model shape ({certs, popup?}
   // the a11y hook still sends the pre-popup bare-array shape, which masked it.
   // Source-contract pin (downloads-popup-contract idiom): BOTH ends of the
   // shape contract, so neither side can drift without failing here.
-  const rendererSource = fs.readFileSync(
-    path.join(__dirname, '../../src/renderer/renderer.js'), 'utf8'
-  );
-  const sheetSource = fs.readFileSync(
-    path.join(__dirname, '../../src/renderer/menu-overlay.js'), 'utf8'
-  );
+  const rendererSource = fs.readFileSync(path.join(__dirname, '../../src/renderer/renderer.js'), 'utf8');
+  const sheetSource = fs.readFileSync(path.join(__dirname, '../../src/renderer/menu-overlay.js'), 'utf8');
   // 1. The live chrome sender uses the object form (never the bare array —
   //    the popup marker must be able to ride every presentation).
   assert.match(
     rendererSource,
-    /openOverlayMenu\('cert-picker', \{ certs: Array\.isArray\(certs\) \? certs : \[\]/,
+    /openOverlayMenu\(\s*'cert-picker',\s*\{\s*certs:\s*Array\.isArray\(certs\)\s*\?\s*certs\s*:\s*\[\]/,
     "renderer.js's cert-challenge-present handler must send the { certs, popup? } object model"
   );
   // 2. The sheet's init gate accepts an OBJECT for cert-picker (array-or-object
@@ -206,9 +200,11 @@ test('site-attribution subtitle (M14 F3 HAT fix): host renders the attribution c
   // Sited under the header, above the list (with the popup marker line — the
   // two copy lines coexist; a popup challenge shows both).
   const kids = card.card.children;
-  assert.ok(kids.indexOf(card.subtitle) === kids.indexOf(card.popupNote) - 1
-    && kids.indexOf(card.subtitle) < kids.indexOf(card.list),
-  'subtitle sits between the header and the popup marker / list');
+  assert.ok(
+    kids.indexOf(card.subtitle) === kids.indexOf(card.popupNote) - 1 &&
+      kids.indexOf(card.subtitle) < kids.indexOf(card.list),
+    'subtitle sits between the header and the popup marker / list'
+  );
 
   // Back to no host (and non-string hosts): the line hides and empties —
   // never copy with a blank in it.
@@ -226,10 +222,15 @@ test('popup marker line (M14 F2 L2, DD5): fixed copy, hidden by default, sited b
   assert.ok(card.popupNote, 'the template returns the popupNote ref (menu-overlay toggles it per model.popup)');
   assert.equal(card.popupNote.classList.contains('hidden'), true, 'hidden by default — tab challenges never show it');
   assert.equal(card.popupNote.className, 'auth-basic-origin auth-popup-note');
-  assert.equal(card.popupNote.textContent, 'This request comes from a pop-up window opened by this page.',
-    'FIXED template copy — no server/certificate string ever rides the marker');
+  assert.equal(
+    card.popupNote.textContent,
+    'This request comes from a pop-up window opened by this page.',
+    'FIXED template copy — no server/certificate string ever rides the marker'
+  );
 
   const kids = card.card.children;
-  assert.ok(kids.indexOf(card.popupNote) > -1 && kids.indexOf(card.popupNote) < kids.indexOf(card.list),
-    'marker sits above the certificate list');
+  assert.ok(
+    kids.indexOf(card.popupNote) > -1 && kids.indexOf(card.popupNote) < kids.indexOf(card.list),
+    'marker sits above the certificate list'
+  );
 });

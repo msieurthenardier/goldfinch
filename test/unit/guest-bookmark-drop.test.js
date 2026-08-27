@@ -22,7 +22,7 @@ const {
   createBookmarkDropListeners,
   hasBookmarkType,
   GUEST_BOOKMARK_DROP_CHANNEL,
-  BOOKMARK_DND_MIME,
+  BOOKMARK_DND_MIME
 } = require('../../src/preload/guest-bookmark-drop.js');
 
 // ---------------------------------------------------------------------------
@@ -35,12 +35,14 @@ function fakeDragEvent(types, { onPreventDefault } = {}) {
     defaultPrevented: false,
     dataTransfer: {
       types,
-      getData() { throw new Error('the guest never calls getData (DD2) — protected mode forbids it here'); },
+      getData() {
+        throw new Error('the guest never calls getData (DD2) — protected mode forbids it here');
+      }
     },
     preventDefault() {
       evt.defaultPrevented = true;
       if (onPreventDefault) onPreventDefault();
-    },
+    }
   };
   return evt;
 }
@@ -54,8 +56,17 @@ function fakeIpc() {
 /** Deferred callbacks, run explicitly — the macrotask queue, made observable. */
 function fakeDefer() {
   const queue = [];
-  const defer = (fn, ms) => { queue.push({ fn, ms }); };
-  return { queue, defer, run: () => { const q = queue.splice(0); for (const t of q) t.fn(); } };
+  const defer = (fn, ms) => {
+    queue.push({ fn, ms });
+  };
+  return {
+    queue,
+    defer,
+    run: () => {
+      const q = queue.splice(0);
+      for (const t of q) t.fn();
+    }
+  };
 }
 
 function build() {
@@ -95,7 +106,14 @@ test('AC3: the gate answers false for unreadable / hostile dataTransfer shapes',
   // A DOMStringList-shaped (array-LIKE, no .includes) types collection still works.
   assert.equal(hasBookmarkType({ dataTransfer: { types: { length: 1, 0: BOOKMARK_DND_MIME } } }), true);
   // A throwing getter — the page's world, so this is reachable — resolves false.
-  assert.equal(hasBookmarkType({ get dataTransfer() { throw new Error('nope'); } }), false);
+  assert.equal(
+    hasBookmarkType({
+      get dataTransfer() {
+        throw new Error('nope');
+      }
+    }),
+    false
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -105,12 +123,19 @@ test('AC3: the gate answers false for unreadable / hostile dataTransfer shapes',
 test('AC4: the drop handler never calls preventDefault — it would pollute the discriminator', () => {
   const { listeners, timers } = build();
   let prevents = 0;
-  const evt = fakeDragEvent([BOOKMARK_DND_MIME], { onPreventDefault: () => { prevents++; } });
+  const evt = fakeDragEvent([BOOKMARK_DND_MIME], {
+    onPreventDefault: () => {
+      prevents++;
+    }
+  });
   listeners.handleDrop(evt);
   timers.run();
   assert.equal(prevents, 0);
-  assert.equal(evt.defaultPrevented, false,
-    'DD5b: there is no default left to suppress, and setting the flag would make the page-wins read always say "consumed"');
+  assert.equal(
+    evt.defaultPrevented,
+    false,
+    'DD5b: there is no default left to suppress, and setting the flag would make the page-wins read always say "consumed"'
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -185,18 +210,26 @@ test('AC2: a SYNCHRONOUS read and a queueMicrotask read are BOTH insufficient �
   let syncRead = null;
   let microtaskRead = null;
   const syncProbe = (e) => {
-    syncRead = e.defaultPrevented;                                  // read inline
-    queueMicrotask(() => { microtaskRead = e.defaultPrevented; });  // read at the next checkpoint
+    syncRead = e.defaultPrevented; // read inline
+    queueMicrotask(() => {
+      microtaskRead = e.defaultPrevented;
+    }); // read at the next checkpoint
   };
   const pageHandler = (e) => e.preventDefault();
   await dispatchLikeABrowser([syncProbe, pageHandler], evt);
   await null; // let any straggler microtask land
 
   assert.equal(evt.defaultPrevented, true, 'the page really did consume this drop');
-  assert.equal(syncRead, false,
-    'a synchronous read runs BEFORE the page handler (document-start registration order) and would navigate over it');
-  assert.equal(microtaskRead, false,
-    'a microtask checkpoint runs between listeners while the stack is empty, so it too runs before the page handler');
+  assert.equal(
+    syncRead,
+    false,
+    'a synchronous read runs BEFORE the page handler (document-start registration order) and would navigate over it'
+  );
+  assert.equal(
+    microtaskRead,
+    false,
+    'a microtask checkpoint runs between listeners while the stack is empty, so it too runs before the page handler'
+  );
 });
 
 test('AC2: an ordinary page — nothing consumes the drop — produces exactly one signal', async () => {
@@ -213,7 +246,9 @@ test('AC2: an unreadable defaultPrevented fails CLOSED — no navigation', () =>
   const listeners = createBookmarkDropListeners({ ipcRenderer: ipc, setTimeout: timers.defer });
   const hostile = {
     dataTransfer: { types: [BOOKMARK_DND_MIME] },
-    get defaultPrevented() { throw new Error('page-installed getter'); },
+    get defaultPrevented() {
+      throw new Error('page-installed getter');
+    }
   };
   listeners.handleDrop(hostile);
   timers.run();
@@ -239,8 +274,12 @@ test('the types gate is read SYNCHRONOUSLY — a dataTransfer emptied when dispa
 test('a send that throws (tab tearing down) is swallowed rather than escaping into page script', () => {
   const timers = fakeDefer();
   const listeners = createBookmarkDropListeners({
-    ipcRenderer: { send() { throw new Error('main gone'); } },
-    setTimeout: timers.defer,
+    ipcRenderer: {
+      send() {
+        throw new Error('main gone');
+      }
+    },
+    setTimeout: timers.defer
   });
   listeners.handleDrop(fakeDragEvent([BOOKMARK_DND_MIME]));
   assert.doesNotThrow(() => timers.run());
@@ -253,15 +292,21 @@ test('a send that throws (tab tearing down) is swallowed rather than escaping in
 
 test('webview-preload.js captures setTimeout at document-start and injects it (page-monkeypatch defense)', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'preload', 'webview-preload.js'), 'utf8');
-  assert.match(src, /const nativeSetTimeout = /,
+  assert.match(
+    src,
+    /const nativeSetTimeout = /,
     'the deferral must not resolve window.setTimeout at DROP time — contextIsolation is off and a page can ' +
-    'replace it to run our read synchronously (defeating page-wins) or never (suppressing the navigation)');
+      'replace it to run our read synchronously (defeating page-wins) or never (suppressing the navigation)'
+  );
   assert.match(src, /createBookmarkDropListeners\(\{\s*ipcRenderer,\s*setTimeout: nativeSetTimeout\s*\}\)/);
   // Registered on `window`, bubble phase (no `true` third argument), in EVERY
   // frame — the frame-scope decision, deliberately not IS_TOP_FRAME-gated.
   assert.match(src, /window\.addEventListener\('dragover', bookmarkDrop\.handleDragOver\);/);
   assert.match(src, /window\.addEventListener\('drop', bookmarkDrop\.handleDrop\);/);
   const registration = src.slice(src.indexOf('const nativeSetTimeout'));
-  assert.equal(/IS_TOP_FRAME[\s\S]{0,200}handleDragOver/.test(registration), false,
-    'all-frames registration is a stated decision: main navigates the TAB, not a frame');
+  assert.equal(
+    /IS_TOP_FRAME[\s\S]{0,200}handleDragOver/.test(registration),
+    false,
+    'all-frames registration is a stated decision: main navigates the TAB, not a frame'
+  );
 });

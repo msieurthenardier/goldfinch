@@ -60,8 +60,7 @@ export function buildVaultRecoveryCard(document) {
   // textContent-only, like every other label on this DD5 sheet.
   const replacingLede = document.createElement('p');
   replacingLede.className = 'vault-recovery-lede vault-recovery-replacing';
-  replacingLede.textContent =
-    'This replaces your previous recovery key — the old one no longer works.';
+  replacingLede.textContent = 'This replaces your previous recovery key — the old one no longer works.';
   replacingLede.hidden = true;
   card.appendChild(replacingLede);
 

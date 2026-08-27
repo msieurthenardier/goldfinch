@@ -33,7 +33,7 @@ function makeStore(dir, overrides = {}) {
     scryptParams: FAST_SCRYPT,
     getAutoLockMinutes: () => 10,
     listJars: () => JARS,
-    ...overrides,
+    ...overrides
   });
 }
 function vaultPath(dir, id) {
@@ -43,7 +43,14 @@ function managerPath(dir) {
   return path.join(dir, 'vaults', 'manager.json');
 }
 function loginItem(overrides = {}) {
-  return { type: 'login', title: 'Example', username: 'user@example.com', password: 'hunter2', origin: 'https://example.com', ...overrides };
+  return {
+    type: 'login',
+    title: 'Example',
+    username: 'user@example.com',
+    password: 'hunter2',
+    origin: 'https://example.com',
+    ...overrides
+  };
 }
 // Simulate the on-disk file round-trip (the real export path JSON-serializes the bundle to a
 // file and the import path JSON.parses it back) — proves the bundle is pure serializable data.
@@ -66,14 +73,29 @@ async function makeSource() {
 
 test('validateImportedKdf: rejects absent fields (the silent Node-scrypt-default downgrade) and exhausting values', () => {
   // The exact scenario the reviewer demonstrated: only { algo:'scrypt' } → Node defaults.
-  assert.throws(() => vs.validateImportedKdf({ algo: 'scrypt' }), (e) => e instanceof vs.VaultFormatError);
+  assert.throws(
+    () => vs.validateImportedKdf({ algo: 'scrypt' }),
+    (e) => e instanceof vs.VaultFormatError
+  );
   assert.throws(() => vs.validateImportedKdf({ algo: 'scrypt', N: 2 ** 12, r: 8, p: 1 }), /maxmem/); // maxmem absent
-  assert.throws(() => vs.validateImportedKdf(null), (e) => e instanceof vs.VaultFormatError);
-  assert.throws(() => vs.validateImportedKdf({ algo: 'pbkdf2', N: 2 ** 12, r: 8, p: 1, maxmem: 64 * 1024 * 1024 }), /algo/);
+  assert.throws(
+    () => vs.validateImportedKdf(null),
+    (e) => e instanceof vs.VaultFormatError
+  );
+  assert.throws(
+    () => vs.validateImportedKdf({ algo: 'pbkdf2', N: 2 ** 12, r: 8, p: 1, maxmem: 64 * 1024 * 1024 }),
+    /algo/
+  );
   // Resource exhaustion: N far above the cap, or a non-power-of-two N.
-  assert.throws(() => vs.validateImportedKdf({ algo: 'scrypt', N: 2 ** 30, r: 8, p: 1, maxmem: 64 * 1024 * 1024 }), /N/);
+  assert.throws(
+    () => vs.validateImportedKdf({ algo: 'scrypt', N: 2 ** 30, r: 8, p: 1, maxmem: 64 * 1024 * 1024 }),
+    /N/
+  );
   assert.throws(() => vs.validateImportedKdf({ algo: 'scrypt', N: 100000, r: 8, p: 1, maxmem: 64 * 1024 * 1024 }), /N/);
-  assert.throws(() => vs.validateImportedKdf({ algo: 'scrypt', N: 2 ** 12, r: 8, p: 999, maxmem: 64 * 1024 * 1024 }), /p/);
+  assert.throws(
+    () => vs.validateImportedKdf({ algo: 'scrypt', N: 2 ** 12, r: 8, p: 999, maxmem: 64 * 1024 * 1024 }),
+    /p/
+  );
   // maxmem below scrypt's 128*N*r floor is refused up front (would otherwise throw deep in derive).
   assert.throws(() => vs.validateImportedKdf({ algo: 'scrypt', N: 2 ** 17, r: 8, p: 1, maxmem: 1024 }), /maxmem/);
   // The production params AND the fast test params both pass.
@@ -86,9 +108,19 @@ test('validateImportedItems: rejects a non-array, a bad type, an absent id, and 
   assert.throws(() => vs.validateImportedItems('nope'), /item array/);
   assert.throws(() => vs.validateImportedItems([{ type: 'bogus', id: 'a' }]), /invalid type/);
   assert.throws(() => vs.validateImportedItems([{ type: 'login' }]), /string id/);
-  assert.throws(() => vs.validateImportedItems([{ type: 'login', id: 'x' }, { type: 'login', id: 'x' }]), /duplicate item id/);
+  assert.throws(
+    () =>
+      vs.validateImportedItems([
+        { type: 'login', id: 'x' },
+        { type: 'login', id: 'x' }
+      ]),
+    /duplicate item id/
+  );
   // A well-formed array passes and is returned unchanged.
-  const ok = [{ type: 'login', id: 'a' }, { type: 'note', id: 'b' }];
+  const ok = [
+    { type: 'login', id: 'a' },
+    { type: 'note', id: 'b' }
+  ];
   assert.equal(vs.validateImportedItems(ok), ok);
 });
 
@@ -102,7 +134,12 @@ test('importVault rejects a bundle with downgraded/absent KDF params before pers
   try {
     const store = vs.load(freshDir, { scryptParams: FAST_SCRYPT, listJars: () => [] });
     await assert.rejects(
-      () => store.importVault(bundle, { destinationTarget: 'global', secret: Buffer.from(MASTER, 'utf8'), secretKind: 'master' }),
+      () =>
+        store.importVault(bundle, {
+          destinationTarget: 'global',
+          secret: Buffer.from(MASTER, 'utf8'),
+          secretKind: 'master'
+        }),
       (e) => e instanceof vs.VaultFormatError
     );
     // Nothing was written — the profile is still unset (fail-closed before persistence).
@@ -139,7 +176,10 @@ test('exportVault(global) builds a ciphertext-only bundle with all three mrk env
     }
     // The embedded .gfvault doc: its mrk envelope + item ciphertext.
     assert.equal(bundle.vault.format, 'gfvault');
-    assert.ok(bundle.vault.envelopes.some((e) => e.keyId === 'mrk'), 'vault has an mrk envelope');
+    assert.ok(
+      bundle.vault.envelopes.some((e) => e.keyId === 'mrk'),
+      'vault has an mrk envelope'
+    );
     assert.equal(typeof bundle.vault.items.ct, 'string');
 
     // No plaintext secret anywhere in the serialized bundle (the grep AC, in-process).
@@ -156,7 +196,10 @@ test('exportVault on a LOCKED manager throws VaultLockedError (policy — export
   const { dir, store } = await makeSource();
   try {
     store.lockNow();
-    assert.throws(() => store.exportVault('global'), (e) => e instanceof vs.VaultLockedError);
+    assert.throws(
+      () => store.exportVault('global'),
+      (e) => e instanceof vs.VaultLockedError
+    );
   } finally {
     rm(dir);
   }
@@ -176,7 +219,11 @@ test('FRESH profile import (adopt-manager): sets up + leaves unlocked; the item 
     const store = vs.load(freshDir, { scryptParams: FAST_SCRYPT, listJars: () => [] });
     assert.equal(store.isSetUp(), false);
 
-    const res = await store.importVault(bundle, { destinationTarget: 'global', secret: Buffer.from(MASTER, 'utf8'), secretKind: 'master' });
+    const res = await store.importVault(bundle, {
+      destinationTarget: 'global',
+      secret: Buffer.from(MASTER, 'utf8'),
+      secretKind: 'master'
+    });
     assert.deepEqual(res, { imported: true, fresh: true, vaultId: 'global' });
 
     // Vault file written; manager adopted; left UNLOCKED (analogous to setup).
@@ -210,7 +257,11 @@ test('FRESH profile import → unlock by the SOURCE MASTER password on restart (
   const freshDir = tmpDir();
   try {
     const store = vs.load(freshDir, { scryptParams: FAST_SCRYPT, listJars: () => [] });
-    await store.importVault(bundle, { destinationTarget: 'global', secret: Buffer.from(MASTER, 'utf8'), secretKind: 'master' });
+    await store.importVault(bundle, {
+      destinationTarget: 'global',
+      secret: Buffer.from(MASTER, 'utf8'),
+      secretKind: 'master'
+    });
 
     // Simulate a restart: lock, then unlock with the SOURCE master password.
     store.lockNow();
@@ -236,7 +287,11 @@ test('FRESH profile import → unlock by the SOURCE RECOVERY key on restart (ind
   try {
     const store = vs.load(freshDir, { scryptParams: FAST_SCRYPT, listJars: () => [] });
     // Import by the RECOVERY key (a base32 display STRING carried as Buffer bytes).
-    await store.importVault(bundle, { destinationTarget: 'global', secret: Buffer.from(src.recovery, 'utf8'), secretKind: 'recovery' });
+    await store.importVault(bundle, {
+      destinationTarget: 'global',
+      secret: Buffer.from(src.recovery, 'utf8'),
+      secretKind: 'recovery'
+    });
     assert.equal(store.isUnlocked(), true);
 
     // Restart: lock, then unlock with the SOURCE recovery key.
@@ -258,7 +313,11 @@ test('FRESH profile import: a WRONG secret → VaultAuthError, NOTHING installed
   try {
     const store = vs.load(freshDir, { scryptParams: FAST_SCRYPT, listJars: () => [] });
     await assert.rejects(
-      store.importVault(bundle, { destinationTarget: 'global', secret: Buffer.from('wrong master', 'utf8'), secretKind: 'master' }),
+      store.importVault(bundle, {
+        destinationTarget: 'global',
+        secret: Buffer.from('wrong master', 'utf8'),
+        secretKind: 'master'
+      }),
       (e) => e instanceof vc.VaultAuthError
     );
     assert.equal(store.isSetUp(), false, 'no manager written on a wrong secret');
@@ -283,7 +342,11 @@ test('EXISTING profile import: re-keys the source vault under the DESTINATION MR
     const store = makeStore(destDir); // has JARS work/personal
     await store.setup({ masterPassword: DEST_MASTER });
 
-    const res = await store.importVault(bundle, { destinationTarget: 'work', secret: Buffer.from(MASTER, 'utf8'), secretKind: 'master' });
+    const res = await store.importVault(bundle, {
+      destinationTarget: 'work',
+      secret: Buffer.from(MASTER, 'utf8'),
+      secretKind: 'master'
+    });
     assert.deepEqual(res, { imported: true, fresh: false, vaultId: 'work' });
     assert.ok(fs.existsSync(vaultPath(destDir, 'work')), 'the destination vault file was written');
 
@@ -313,33 +376,52 @@ test('EXISTING profile import: refuse-on-collision unless overwrite; unknown tar
     await store.setup({ masterPassword: DEST_MASTER });
 
     // First import lands the vault at 'work'.
-    await store.importVault(bundle, { destinationTarget: 'work', secret: Buffer.from(MASTER, 'utf8'), secretKind: 'master' });
+    await store.importVault(bundle, {
+      destinationTarget: 'work',
+      secret: Buffer.from(MASTER, 'utf8'),
+      secretKind: 'master'
+    });
 
     // Collision: a second import to 'work' refuses unless overwrite:true. The refusal is a CODED
     // VaultCollisionError (M12 F5 HAT tail) — distinguishable from the other VaultStateError causes
     // and from a wrong-secret VaultAuthError — while STILL an instanceof VaultStateError (so the
     // pre-existing catchers are unaffected).
     await assert.rejects(
-      store.importVault(bundle, { destinationTarget: 'work', secret: Buffer.from(MASTER, 'utf8'), secretKind: 'master' }),
-      (e) => e instanceof vs.VaultCollisionError
-        && e instanceof vs.VaultStateError
-        && e.code === 'vault-collision'
+      store.importVault(bundle, {
+        destinationTarget: 'work',
+        secret: Buffer.from(MASTER, 'utf8'),
+        secretKind: 'master'
+      }),
+      (e) => e instanceof vs.VaultCollisionError && e instanceof vs.VaultStateError && e.code === 'vault-collision'
     );
     // overwrite:true succeeds (REPLACES the destination vault).
-    const ok = await store.importVault(bundle, { destinationTarget: 'work', secret: Buffer.from(MASTER, 'utf8'), secretKind: 'master', overwrite: true });
+    const ok = await store.importVault(bundle, {
+      destinationTarget: 'work',
+      secret: Buffer.from(MASTER, 'utf8'),
+      secretKind: 'master',
+      overwrite: true
+    });
     assert.equal(ok.vaultId, 'work');
 
     // Unknown / non-persistent destination target is refused by the allowlist — a VaultStateError
     // that is NOT the coded collision (only the :846 destination-collision carries the code).
     await assert.rejects(
-      store.importVault(bundle, { destinationTarget: 'no-such-jar', secret: Buffer.from(MASTER, 'utf8'), secretKind: 'master' }),
+      store.importVault(bundle, {
+        destinationTarget: 'no-such-jar',
+        secret: Buffer.from(MASTER, 'utf8'),
+        secretKind: 'master'
+      }),
       (e) => e instanceof vs.VaultStateError && !(e instanceof vs.VaultCollisionError)
     );
 
     // Wrong secret to a fresh target → VaultAuthError, and no file is written for it.
     assert.equal(fs.existsSync(vaultPath(destDir, 'personal')), false);
     await assert.rejects(
-      store.importVault(bundle, { destinationTarget: 'personal', secret: Buffer.from('wrong', 'utf8'), secretKind: 'master' }),
+      store.importVault(bundle, {
+        destinationTarget: 'personal',
+        secret: Buffer.from('wrong', 'utf8'),
+        secretKind: 'master'
+      }),
       (e) => e instanceof vc.VaultAuthError
     );
     assert.equal(fs.existsSync(vaultPath(destDir, 'personal')), false, 'nothing written on a wrong secret');
@@ -357,7 +439,11 @@ test('EXISTING profile import by the RECOVERY key also re-keys under the destina
   try {
     const store = makeStore(destDir);
     await store.setup({ masterPassword: DEST_MASTER });
-    await store.importVault(bundle, { destinationTarget: 'personal', secret: Buffer.from(src.recovery, 'utf8'), secretKind: 'recovery' });
+    await store.importVault(bundle, {
+      destinationTarget: 'personal',
+      secret: Buffer.from(src.recovery, 'utf8'),
+      secretKind: 'recovery'
+    });
     assert.equal(store.listItems('personal')[0].password, 'hunter2');
   } finally {
     rm(src.dir);

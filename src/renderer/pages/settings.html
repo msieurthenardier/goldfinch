@@ -61,9 +61,14 @@
         </fieldset>
         <fieldset class="shields-group startup-toggle-group">
           <legend class="sr-only">Session restore</legend>
-          <label class="shield-row startup-toggle-row"><span>Restore session on startup</span><input type="checkbox" id="restore-session-enabled" /></label>
+          <label class="shield-row startup-toggle-row"
+            ><span>Restore session on startup</span><input type="checkbox" id="restore-session-enabled"
+          /></label>
         </fieldset>
-        <p class="muted">Reopens the previous session's windows and tabs (addresses and cookie jars) on launch. Burner tabs are never restored. Takes effect on the next launch.</p>
+        <p class="muted">
+          Reopens the previous session's windows and tabs (addresses and cookie jars) on launch. Burner tabs are never
+          restored. Takes effect on the next launch.
+        </p>
         <!-- Bookmarks bar toggle (M15 F1 Leg 3, DD7): the restore-session checkbox's
              sibling — settingsSet('bookmarksBarEnabled', …) keeps every window's bar
              in sync via the settings-changed broadcast (window-controller.js's
@@ -71,9 +76,13 @@
              no divergent state). -->
         <fieldset class="shields-group startup-toggle-group">
           <legend class="sr-only">Bookmarks bar</legend>
-          <label class="shield-row startup-toggle-row"><span>Show bookmarks bar</span><input type="checkbox" id="bookmarks-bar-enabled" /></label>
+          <label class="shield-row startup-toggle-row"
+            ><span>Show bookmarks bar</span><input type="checkbox" id="bookmarks-bar-enabled"
+          /></label>
         </fieldset>
-        <p class="muted">Shows a bar of your bookmarks below the toolbar in every window. Toggle anytime with Ctrl+Shift+B.</p>
+        <p class="muted">
+          Shows a bar of your bookmarks below the toolbar in every window. Toggle anytime with Ctrl+Shift+B.
+        </p>
         <!-- Pinned-icons subheading (HAT fix, Leg 5): a divider + h3 sets the pin rows
              apart as their own named group, matching the Automation section's h2>h3
              subheading idiom ("Keys", "Activity") — the divider itself mirrors the
@@ -84,21 +93,81 @@
           <span>Media</span>
           <button type="button" class="pin-toggle" id="pin-media" aria-pressed="true" aria-label="Pin Media to toolbar">
             <!-- Lucide "pin" (ISC license) — inline SVG, CSP-safe -->
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>
+            <svg
+              viewBox="0 0 24 24"
+              width="16"
+              height="16"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+              focusable="false"
+            >
+              <path d="M12 17v5" />
+              <path
+                d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"
+              />
+            </svg>
           </button>
         </div>
         <div class="appearance-row">
           <span>Shields</span>
-          <button type="button" class="pin-toggle" id="pin-shields" aria-pressed="true" aria-label="Pin Shields to toolbar">
+          <button
+            type="button"
+            class="pin-toggle"
+            id="pin-shields"
+            aria-pressed="true"
+            aria-label="Pin Shields to toolbar"
+          >
             <!-- Lucide "pin" (ISC license) — inline SVG, CSP-safe -->
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>
+            <svg
+              viewBox="0 0 24 24"
+              width="16"
+              height="16"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+              focusable="false"
+            >
+              <path d="M12 17v5" />
+              <path
+                d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"
+              />
+            </svg>
           </button>
         </div>
         <div class="appearance-row">
           <span>DevTools</span>
-          <button type="button" class="pin-toggle" id="pin-devtools" aria-pressed="false" aria-label="Pin DevTools to toolbar">
+          <button
+            type="button"
+            class="pin-toggle"
+            id="pin-devtools"
+            aria-pressed="false"
+            aria-label="Pin DevTools to toolbar"
+          >
             <!-- Lucide "pin" (ISC license) — inline SVG, CSP-safe -->
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>
+            <svg
+              viewBox="0 0 24 24"
+              width="16"
+              height="16"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+              focusable="false"
+            >
+              <path d="M12 17v5" />
+              <path
+                d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"
+              />
+            </svg>
           </button>
         </div>
       </section>
@@ -106,24 +175,36 @@
         <h2>Privacy &amp; Shields</h2>
         <fieldset class="shields-group">
           <legend class="sr-only">Shields</legend>
-          <label class="shield-row shield-parent"><span>Shields</span><input type="checkbox" id="shield-enabled" /></label>
+          <label class="shield-row shield-parent"
+            ><span>Shields</span><input type="checkbox" id="shield-enabled"
+          /></label>
           <label class="shield-row"><span>Block trackers</span><input type="checkbox" id="shield-block" /></label>
-          <label class="shield-row"><span>Strip tracking params</span><input type="checkbox" id="shield-strip" /></label>
-          <label class="shield-row"><span>Isolate 3rd-party cookies</span><input type="checkbox" id="shield-isolate" /></label>
+          <label class="shield-row"
+            ><span>Strip tracking params</span><input type="checkbox" id="shield-strip"
+          /></label>
+          <label class="shield-row"
+            ><span>Isolate 3rd-party cookies</span><input type="checkbox" id="shield-isolate"
+          /></label>
           <label class="shield-row"><span>Farble fingerprint</span><input type="checkbox" id="shield-farble" /></label>
         </fieldset>
         <p>These are global Shields defaults, applied to every site.</p>
         <fieldset class="shields-group spellcheck-group">
           <legend class="sr-only">Spellcheck</legend>
-          <label class="shield-row spellcheck-row"><span>Spellcheck</span><input type="checkbox" id="spellcheck-enabled" /></label>
+          <label class="shield-row spellcheck-row"
+            ><span>Spellcheck</span><input type="checkbox" id="spellcheck-enabled"
+          /></label>
         </fieldset>
-        <p id="spellcheck-note" class="muted">Enabling spellcheck downloads a one-time dictionary from Google. Reload open tabs to enable.</p>
+        <p id="spellcheck-note" class="muted">
+          Enabling spellcheck downloads a one-time dictionary from Google. Reload open tabs to enable.
+        </p>
       </section>
       <section id="automation">
         <h2>Automation</h2>
         <fieldset class="shields-group">
           <legend class="sr-only">Automation</legend>
-          <label class="shield-row shield-parent"><span>Enable automation surface</span><input type="checkbox" id="automation-enabled" /></label>
+          <label class="shield-row shield-parent"
+            ><span>Enable automation surface</span><input type="checkbox" id="automation-enabled"
+          /></label>
         </fieldset>
         <p id="automation-enabled-note" class="muted"></p>
         <p id="automation-status">—</p>
@@ -134,18 +215,31 @@
         </div>
         <div class="settings-row">
           <label for="automation-port">Port</label>
-          <input id="automation-port" class="settings-text-input" type="number" min="1024" max="65535" autocomplete="off" />
+          <input
+            id="automation-port"
+            class="settings-text-input"
+            type="number"
+            min="1024"
+            max="65535"
+            autocomplete="off"
+          />
           <button id="automation-port-save" class="settings-btn" type="button">Save</button>
           <button id="automation-find-port" class="settings-btn" type="button">Find free port</button>
           <span id="automation-port-note" class="muted"></span>
         </div>
         <p id="automation-message" role="status"></p>
-        <p class="connect-hint">MCP client config (e.g. <code>.mcp.json</code>) — replace <code>&lt;your-key&gt;</code> with a generated key:</p>
+        <p class="connect-hint">
+          MCP client config (e.g. <code>.mcp.json</code>) — replace <code>&lt;your-key&gt;</code> with a generated key:
+        </p>
         <pre class="mcp-config-block"><code id="automation-mcp-config"></code></pre>
         <button id="automation-copy-config" class="settings-btn" type="button">Copy config</button>
-        <p class="connect-hint">Loopback-only — see <code>docs/mcp-automation.md</code> for WSL2 / Docker connection details.</p>
+        <p class="connect-hint">
+          Loopback-only — see <code>docs/mcp-automation.md</code> for WSL2 / Docker connection details.
+        </p>
         <h3>Keys</h3>
-        <p class="muted">Generate a per-jar key for the automation surface. The key is shown once — copy it immediately.</p>
+        <p class="muted">
+          Generate a per-jar key for the automation surface. The key is shown once — copy it immediately.
+        </p>
         <div id="automation-jars"></div>
         <div id="automation-key-reveal" hidden>
           <label for="automation-key-value">New key (shown once)</label>
@@ -167,7 +261,10 @@
           </div>
         </div>
         <h3>Activity</h3>
-        <p class="muted">Sessions currently connected to the automation surface, and a log of recent actions. "Connected" reflects the transport — a revoked session lingers here until its connection closes.</p>
+        <p class="muted">
+          Sessions currently connected to the automation surface, and a log of recent actions. "Connected" reflects the
+          transport — a revoked session lingers here until its connection closes.
+        </p>
         <div id="automation-active-sessions"></div>
         <h4>Recent actions</h4>
         <div id="automation-activity-log"></div>

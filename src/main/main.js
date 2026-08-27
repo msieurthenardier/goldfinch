@@ -1,6 +1,20 @@
 'use strict';
 
-const { app, BaseWindow, WebContentsView, ipcMain, session, webContents, desktopCapturer, dialog, shell, protocol, net, clipboard, Menu } = require('electron');
+const {
+  app,
+  BaseWindow,
+  WebContentsView,
+  ipcMain,
+  session,
+  webContents,
+  desktopCapturer,
+  dialog,
+  shell,
+  protocol,
+  net,
+  clipboard,
+  Menu
+} = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto'); // node:crypto — randomUUID for the per-window import handle (PR#112 finding 5).
@@ -93,14 +107,18 @@ const { withCaptureTimeout } = require('./capture-timeout');
 // deliberately NOT part of the manager (the manager never touches channel 4).
 const { sanitizeActivatedValue } = require('./menu-overlay-value');
 const { validateBookmarkEditFields } = require('./bookmark-edit-validate');
-const {
-  isMcpAutomationEnabled,
-  shouldAutoMint,
-  shouldBindAutomation,
-} = require('../shared/automation-dev');
+const { isMcpAutomationEnabled, shouldAutoMint, shouldBindAutomation } = require('../shared/automation-dev');
 const { resolveAutoMintTarget } = require('./auto-mint');
 const { createEngine } = require('./automation/engine');
-const { createMcpServer, mintJarKey, mintAdminKey, revokeJarKey, revokeAdminKey, resolvePort, freePortInRange } = require('./automation/mcp-server');
+const {
+  createMcpServer,
+  mintJarKey,
+  mintAdminKey,
+  revokeJarKey,
+  revokeAdminKey,
+  resolvePort,
+  freePortInRange
+} = require('./automation/mcp-server');
 const { makeAutomationToggle } = require('./automation/toggle');
 // DevTools human-path: import the SHARED open/close helper (Flight-3 DD1, one code path with the
 // M03 ops) and the SHARED internal-session predicate. The sibling chrome handlers (zoom/print)
@@ -132,7 +150,7 @@ const {
   APPEND_SENTINEL,
   captureClosedTabEntry,
   captureWindowCloseEntries,
-  reopenStripIndex,
+  reopenStripIndex
 } = require('./closed-tab-capture');
 // M09 F6 Leg 2 (DD2/DD3/DD8): the window registry — per-window records replace the
 // former mainWindow/chromeView/tabViews/activeTabWcId singletons. Pure module;
@@ -367,7 +385,7 @@ function popupTabRows() {
         jarId: entry.partition != null ? (jarIdByPartition.get(entry.partition) ?? null) : null,
         active: false,
         windowId: rec.win.id,
-        popup: true,
+        popup: true
       });
     }
   }
@@ -380,12 +398,13 @@ function popupTabRows() {
 //
 // tabs.js stays ELECTRON-FREE: the only Electron handle that crosses is `chrome`,
 // and tabs.js passes it to executeInChrome and NOTHING else (leg 2's rule).
-const listWindows = () => registry.records().map((rec) => ({
-  windowId: rec.win.id,
-  chrome: rec.chromeView.webContents,
-  booted: rec.bootConfigServed,
-  ownsTab: (/** @type {number} */ wcId) => rec.tabViews.has(wcId),
-}));
+const listWindows = () =>
+  registry.records().map((rec) => ({
+    windowId: rec.win.id,
+    chrome: rec.chromeView.webContents,
+    booted: rec.bootConfigServed,
+    ownsTab: (/** @type {number} */ wcId) => rec.tabViews.has(wcId)
+  }));
 
 // Class-3 owner routing (DD2): the chrome webContents of the window OWNING a tab,
 // resolved AT EVENT TIME (never captured at wiring time — that event-time resolution
@@ -418,17 +437,14 @@ const closedTabStack = createClosedTabStack();
 // Push helpers read the live registry on every call. Closed-tab updates are
 // chrome-only; move targets are per-record; shared state fans out to every
 // chrome plus each trusted internal page, never ordinary web guests.
-const {
-  broadcastClosedTabStackChanged,
-  broadcastMoveTargetsChanged,
-  broadcastToChromeAndInternal
-} = createBroadcasters({
-  registry,
-  webContents,
-  isInternalContents,
-  closedTabStack,
-  buildMoveTargets
-});
+const { broadcastClosedTabStackChanged, broadcastMoveTargetsChanged, broadcastToChromeAndInternal } =
+  createBroadcasters({
+    registry,
+    webContents,
+    isInternalContents,
+    closedTabStack,
+    buildMoveTargets
+  });
 
 // Resolve a chrome webContents for the sheet's DD7 attachment window (leg 4):
 // a live registered window → ITS chrome; a provided-but-gone window → null
@@ -450,7 +466,7 @@ function getTabContents(wcId) {
   const entry = owner ? owner.tabViews.get(wcId) : null;
   if (!entry) return null;
   const wc = entry.view.webContents;
-  return (wc && !wc.isDestroyed()) ? wc : null;
+  return wc && !wc.isDestroyed() ? wc : null;
 }
 
 // (getActiveTabContents — the last-focused active-tab accessor — was deleted in
@@ -512,28 +528,28 @@ async function grabWindow(windowId) {
   const onWayland = app.commandLine.getSwitchValue('ozone-platform') === 'wayland';
   if (!onWayland) {
     try {
-    // FIX 2(a): request thumbnail at the actual window content size so we get a
-    // full-resolution capture, not the 150px-wide default thumbnail.
-    const { width: cw, height: ch } = grabWin.getContentBounds();
-    const sources = await desktopCapturer.getSources({
-      types: ['window'],
-      fetchWindowIcons: false,
-      thumbnailSize: { width: cw, height: ch },
-    });
-    // F7 DD4: bind by window IDENTITY, never by size. The pre-F7 best-size-match
-    // scored every source against this window's bounds and took the largest overlap
-    // — with two similar-sized windows open it could grab an UNRELATED window and
-    // report success. "Capture *a* window that happens to be the same size" is not a
-    // contract, and the exact identity is on the record (getMediaSourceId, an X11
-    // Window id on Linux — electron.d.ts:2805-2809).
-    //
-    // NO fallback branch, by design: a miss falls through to the composite path
-    // below, which is already correctly bound to grabRec. Do NOT restore "the
-    // closest source" — that is the bug, not a safety net.
-    const best = pickSourceByMediaSourceId(sources, grabWin.getMediaSourceId());
-    if (best && best.thumbnail) {
-      return best.thumbnail.toPNG().toString('base64');
-    }
+      // FIX 2(a): request thumbnail at the actual window content size so we get a
+      // full-resolution capture, not the 150px-wide default thumbnail.
+      const { width: cw, height: ch } = grabWin.getContentBounds();
+      const sources = await desktopCapturer.getSources({
+        types: ['window'],
+        fetchWindowIcons: false,
+        thumbnailSize: { width: cw, height: ch }
+      });
+      // F7 DD4: bind by window IDENTITY, never by size. The pre-F7 best-size-match
+      // scored every source against this window's bounds and took the largest overlap
+      // — with two similar-sized windows open it could grab an UNRELATED window and
+      // report success. "Capture *a* window that happens to be the same size" is not a
+      // contract, and the exact identity is on the record (getMediaSourceId, an X11
+      // Window id on Linux — electron.d.ts:2805-2809).
+      //
+      // NO fallback branch, by design: a miss falls through to the composite path
+      // below, which is already correctly bound to grabRec. Do NOT restore "the
+      // closest source" — that is the bug, not a safety net.
+      const best = pickSourceByMediaSourceId(sources, grabWin.getMediaSourceId());
+      if (best && best.thumbnail) {
+        return best.thumbnail.toPNG().toString('base64');
+      }
     } catch {
       /* desktopCapturer unavailable */
     }
@@ -574,9 +590,7 @@ async function grabWindow(windowId) {
     // tell the two captures apart.
     const [chromeImg, tabImg] = await Promise.all([
       withCaptureTimeout(cc.capturePage(), 'chrome'),
-      atc && !atc.isDestroyed()
-        ? withCaptureTimeout(atc.capturePage(), 'active guest')
-        : Promise.resolve(null),
+      atc && !atc.isDestroyed() ? withCaptureTimeout(atc.capturePage(), 'active guest') : Promise.resolve(null)
     ]);
     if (!chromeImg) return null;
 
@@ -617,7 +631,9 @@ async function grabWindow(windowId) {
     if (findView && !findView.webContents.isDestroyed()) {
       try {
         const img = await withCaptureTimeout(
-          /** @type {Electron.WebContents} */ (findView.webContents).capturePage(), 'find overlay layer');
+          /** @type {Electron.WebContents} */ (findView.webContents).capturePage(),
+          'find overlay layer'
+        );
         // F7 DD7 post-await re-check (TOCTOU): the gate above is SYNCHRONOUS and the await
         // is not — a hideFindOverlay() landing in the gap detaches the view mid-capture.
         // Written against THIS window's instance (leg 1 deleted the `=== grabWin` compares),
@@ -627,7 +643,8 @@ async function grabWindow(windowId) {
           /* detached mid-capture — drop the layer (same disposition as a layer timeout) */
         } else {
           const b = /** @type {Electron.WebContentsView} */ (/** @type {unknown} */ (findView)).getBounds();
-          if (img && b.width && b.height) layers.push({ b64: img.toPNG().toString('base64'), x: b.x, y: b.y, w: b.width, h: b.height });
+          if (img && b.width && b.height)
+            layers.push({ b64: img.toPNG().toString('base64'), x: b.x, y: b.y, w: b.width, h: b.height });
         }
       } catch (err) {
         // F7 DD7 layer degradation: a slow menu must not fail an otherwise-good window
@@ -648,12 +665,14 @@ async function grabWindow(windowId) {
     // the imported AUTOMATABLE_MENU_TYPES allowlist. A non-allowlisted or absent menu drops the
     // layer entirely — the capture still returns chrome + guests, exactly as it does when the
     // sheet is hidden.
-    const sheetMenuAdmitted = (view) => !!view && !!view.webContents
-      && AUTOMATABLE_MENU_TYPES.has(registry.sheetMenuFor(view.webContents)?.menuType);
+    const sheetMenuAdmitted = (view) =>
+      !!view && !!view.webContents && AUTOMATABLE_MENU_TYPES.has(registry.sheetMenuFor(view.webContents)?.menuType);
     if (sheetView && sheetMenuAdmitted(sheetView) && !sheetView.webContents.isDestroyed()) {
       try {
         const img = await withCaptureTimeout(
-          /** @type {Electron.WebContents} */ (sheetView.webContents).capturePage(), 'sheet overlay layer');
+          /** @type {Electron.WebContents} */ (sheetView.webContents).capturePage(),
+          'sheet overlay layer'
+        );
         // DD7 post-await re-check (TOCTOU) — see the find layer above. Null-tolerant for
         // the same reason (leg 1 nulls rec.sheet in the window's `close` handler).
         // M15 F3 L1 (DD1c): the re-check ALSO re-evaluates the menuType, not only isVisible() —
@@ -664,7 +683,8 @@ async function grabWindow(windowId) {
           /* detached mid-capture — drop the layer (same disposition as a layer timeout) */
         } else {
           const b = /** @type {Electron.WebContentsView} */ (/** @type {unknown} */ (sheetView)).getBounds();
-          if (img && b.width && b.height) layers.push({ b64: img.toPNG().toString('base64'), x: b.x, y: b.y, w: b.width, h: b.height });
+          if (img && b.width && b.height)
+            layers.push({ b64: img.toPNG().toString('base64'), x: b.x, y: b.y, w: b.width, h: b.height });
         }
       } catch (err) {
         // DD7 layer degradation — see the find layer above.
@@ -678,7 +698,9 @@ async function grabWindow(windowId) {
     }
 
     // Composite in the chrome renderer: draw chrome, then each layer in order.
-    const layerArgs = JSON.stringify(layers.map((l) => ({ u: 'data:image/png;base64,' + l.b64, x: l.x, y: l.y, w: l.w, h: l.h })));
+    const layerArgs = JSON.stringify(
+      layers.map((l) => ({ u: 'data:image/png;base64,' + l.b64, x: l.x, y: l.y, w: l.w, h: l.h }))
+    );
     const compositeB64 = await cc.executeJavaScript(`(function(chromeDataUrl, layers) {
       function load(src) {
         return new Promise(function(resolve, reject) {
@@ -745,7 +767,7 @@ function getVaultStore() {
       // paths); onLock fires from lockNow + the idle timer. Both are guarded
       // inside the store, so a broadcast throw can never reject unlock()/lockNow().
       onLock: () => broadcastVaultLockState(),
-      onUnlock: () => broadcastVaultLockState(),
+      onUnlock: () => broadcastVaultLockState()
     });
   }
   return _vaultStore;
@@ -769,7 +791,11 @@ function broadcastVaultLockState() {
     for (const entry of record.tabViews.values()) {
       const wc = entry.view && entry.view.webContents;
       if (wc && !wc.isDestroyed()) {
-        try { wc.send('vault-lock-changed', { unlocked: state.unlocked }); } catch { /* view torn down mid-send */ }
+        try {
+          wc.send('vault-lock-changed', { unlocked: state.unlocked });
+        } catch {
+          /* view torn down mid-send */
+        }
       }
     }
   }
@@ -807,8 +833,8 @@ async function vaultPickSavePath(target) {
     defaultPath: `vault-${typeof target === 'string' && target ? target : 'export'}.gfvaultbundle`,
     filters: [
       { name: 'Goldfinch vault bundle', extensions: ['gfvaultbundle', 'json'] },
-      { name: 'All files', extensions: ['*'] },
-    ],
+      { name: 'All files', extensions: ['*'] }
+    ]
   });
   if (canceled || !filePath) return { canceled: true };
   return { path: filePath };
@@ -842,8 +868,8 @@ async function vaultSaveBundleToFile(bundle, savePath) {
       defaultPath: `vault-${bundle && bundle.sourceVaultId ? bundle.sourceVaultId : 'export'}.gfvaultbundle`,
       filters: [
         { name: 'Goldfinch vault bundle', extensions: ['gfvaultbundle', 'json'] },
-        { name: 'All files', extensions: ['*'] },
-      ],
+        { name: 'All files', extensions: ['*'] }
+      ]
     });
     if (canceled || !picked) return { canceled: true };
     filePath = picked;
@@ -878,8 +904,8 @@ async function vaultImportBeginFromFile(destinationTarget, chromeId) {
     properties: ['openFile'],
     filters: [
       { name: 'Goldfinch vault bundle', extensions: ['gfvaultbundle', 'json'] },
-      { name: 'All files', extensions: ['*'] },
-    ],
+      { name: 'All files', extensions: ['*'] }
+    ]
   });
   if (canceled || !filePaths || !filePaths[0]) return { canceled: true };
   let bundle;
@@ -940,7 +966,7 @@ async function vaultImportFromSheet(chromeId, buf, secretKind) {
       // Bound at Continue from the "Replace existing vault" checkbox (review MEDIUM-3). overwrite
       // gates ONLY the :846 destination-collision, downstream of ALL crypto — a wrong secret still
       // throws VaultAuthError before any write, so overwrite can never bypass secret entry (DD5).
-      overwrite: pending.overwrite === true,
+      overwrite: pending.overwrite === true
     });
     _pendingVaultImports.clear(chromeId); // consume on success only.
     broadcastVaultLockState();
@@ -984,7 +1010,7 @@ function getVaultHuman() {
       // ~2-min timeout is unit-testable (mirrors the vault-store idle timer).
       setTimeout: (fn, ms) => setTimeout(fn, ms),
       clearTimeout: (handle) => clearTimeout(handle),
-      now: () => Date.now(),
+      now: () => Date.now()
     });
   }
   return _vaultHuman;
@@ -996,49 +1022,53 @@ async function startMcpServerInstance() {
     // can build an allowInternal engine (DD6 / Leg 2). createEngine forwards it.
     // isTabViewWcId (F8 DD8 defense-in-depth): non-tab, non-chrome wcIds (e.g. the
     // menu-overlay sheet, the find overlay) resolve only at the admin tier.
-    getEngine: (engineOpts) => createEngine(getChromeContents, {
-      ...engineOpts,
-      getDownloads: () => downloadsManager.listAll(),
-      grabWindow,
-      // F7 DD1/DD2: the all-windows census seam + the discovery primitive. Kept in
-      // parity with the dev-seam engine below — a forgotten injection SILENTLY
-      // restores single-window enumerateTabs with no test failure anywhere (the
-      // house "Absent → no behavior change" idiom), which is why AC12 greps for 2.
-      listWindows,
-      enumerateWindows,
-      // M14 F2 L2 (DD1a): popup census rows + the popup addressability
-      // predicate. BOTH fallbacks are silent (no rows / non-tab refusal), so
-      // this injection site and app-lifecycle's dev-seam twin are grep-pinned
-      // (the listWindows precedent).
-      listPopups: popupTabRows,
-      isPopupWcId: (id) => popupRegistry.isPopupWcId(id),
-      // DD8 widening (F6 Leg 2): ALL-WINDOWS tab membership + the any-registered-
-      // chrome predicate (classify/jar-guard widening — a second window's chrome
-      // must classify 'chrome', not 'guest').
-      isTabViewWcId: (id) => registry.isTabViewWcId(id),
-      isChromeContents: (wc) => registry.isChromeContents(wc),
-      // PR#112 finding 1: the vault SECRET SHEET's webContents is refused by resolveContents at
-      // EVERY tier (admin included), so no automation op can keylog / read the master password or
-      // the one-time recovery/access/admin keys rendered on it.
-      // M15 F3 L1 (DD1/DD1b): the refusal is now (menuType × op) rather than absolute —
-      // sheetMenuFor is the menuType half and MUST be injected wherever isSheetContents is.
-      // Injecting isSheetContents alone leaves the sheet absolutely refused (fail-closed, but
-      // silently divergent from the other engine site); the FAIL-OPEN edit is widening a
-      // relaxation (`allowInternal`, or dropping isTabViewWcId) without this pair present.
-      // Grep-pinned as a PAIR across both engine sites — see app-lifecycle.js's dev seam.
-      isSheetContents: (wc) => registry.isSheetContents(wc),
-      sheetMenuFor: (wc) => registry.sheetMenuFor(wc),
-      // F7 DD6 (recon S1): owner routing + the window raise for activateTab. Without
-      // BOTH, activateTab silently falls back to the pre-F7 last-focused dispatch —
-      // a forgotten injection restores S1 with NO test failure anywhere, which is why
-      // the leg grep-pins both live sites.
-      chromeForTab,
-      raiseWindowForTab,
-      // History read accessors (Mission 08 Flight 5): threaded the same way as
-      // getDownloads above, backing the getHistory op (jar-confined via scope.js).
-      getHistoryReads: { listRecent: (id, o) => historyStore.listRecent(id, o), search: (id, q, o) => historyStore.search(id, q, o) },
-      isKnownJar: (id) => jars.list().some((j) => j.id === id),
-    }),
+    getEngine: (engineOpts) =>
+      createEngine(getChromeContents, {
+        ...engineOpts,
+        getDownloads: () => downloadsManager.listAll(),
+        grabWindow,
+        // F7 DD1/DD2: the all-windows census seam + the discovery primitive. Kept in
+        // parity with the dev-seam engine below — a forgotten injection SILENTLY
+        // restores single-window enumerateTabs with no test failure anywhere (the
+        // house "Absent → no behavior change" idiom), which is why AC12 greps for 2.
+        listWindows,
+        enumerateWindows,
+        // M14 F2 L2 (DD1a): popup census rows + the popup addressability
+        // predicate. BOTH fallbacks are silent (no rows / non-tab refusal), so
+        // this injection site and app-lifecycle's dev-seam twin are grep-pinned
+        // (the listWindows precedent).
+        listPopups: popupTabRows,
+        isPopupWcId: (id) => popupRegistry.isPopupWcId(id),
+        // DD8 widening (F6 Leg 2): ALL-WINDOWS tab membership + the any-registered-
+        // chrome predicate (classify/jar-guard widening — a second window's chrome
+        // must classify 'chrome', not 'guest').
+        isTabViewWcId: (id) => registry.isTabViewWcId(id),
+        isChromeContents: (wc) => registry.isChromeContents(wc),
+        // PR#112 finding 1: the vault SECRET SHEET's webContents is refused by resolveContents at
+        // EVERY tier (admin included), so no automation op can keylog / read the master password or
+        // the one-time recovery/access/admin keys rendered on it.
+        // M15 F3 L1 (DD1/DD1b): the refusal is now (menuType × op) rather than absolute —
+        // sheetMenuFor is the menuType half and MUST be injected wherever isSheetContents is.
+        // Injecting isSheetContents alone leaves the sheet absolutely refused (fail-closed, but
+        // silently divergent from the other engine site); the FAIL-OPEN edit is widening a
+        // relaxation (`allowInternal`, or dropping isTabViewWcId) without this pair present.
+        // Grep-pinned as a PAIR across both engine sites — see app-lifecycle.js's dev seam.
+        isSheetContents: (wc) => registry.isSheetContents(wc),
+        sheetMenuFor: (wc) => registry.sheetMenuFor(wc),
+        // F7 DD6 (recon S1): owner routing + the window raise for activateTab. Without
+        // BOTH, activateTab silently falls back to the pre-F7 last-focused dispatch —
+        // a forgotten injection restores S1 with NO test failure anywhere, which is why
+        // the leg grep-pins both live sites.
+        chromeForTab,
+        raiseWindowForTab,
+        // History read accessors (Mission 08 Flight 5): threaded the same way as
+        // getDownloads above, backing the getHistory op (jar-confined via scope.js).
+        getHistoryReads: {
+          listRecent: (id, o) => historyStore.listRecent(id, o),
+          search: (id, q, o) => historyStore.search(id, q, o)
+        },
+        isKnownJar: (id) => jars.list().some((j) => j.id === id)
+      }),
     // Jar-scoping context (Leg 2). fromId / fromPartition are the SAME handles
     // the engine uses (webContents.fromId / session.fromPartition) so the
     // façade's membership compare and the engine's op resolve cannot diverge.
@@ -1049,7 +1079,7 @@ async function startMcpServerInstance() {
       getChromeContents,
       // Jar-tier chrome-exclusion widening (DD8 / review L5): any registered
       // chrome is refused for jar identities, not just the accessor's chrome.
-      isChromeContents: (wc) => registry.isChromeContents(wc),
+      isChromeContents: (wc) => registry.isChromeContents(wc)
     },
     // Audit fan-out (Flight 4, Leg 3, DD8): every recorded tool call and every
     // session open/close broadcasts the new audit snapshot over the M02 channel.
@@ -1084,7 +1114,7 @@ async function startMcpServerInstance() {
     // GOLDFINCH_MCP_PORT is DEV-ONLY (DD6, Leg 5): honored only in an unpackaged
     // build. In a packaged build the env is ignored everywhere; the port comes
     // from the persisted automationPort + free-port fallback.
-    honorEnv: !app.isPackaged,
+    honorEnv: !app.isPackaged
   });
   // Capture the resolved (attempted) port up front; this is what the failure UI
   // shows if start() rejects. bound flips true once start() resolves.
@@ -1117,9 +1147,13 @@ const automationToggle = makeAutomationToggle({
   start: startMcpServerInstance,
   stop: () => mcpServer.stop(),
   getServer: () => mcpServer,
-  setServer: (server) => { mcpServer = server; },
+  setServer: (server) => {
+    mcpServer = server;
+  },
   isDevOverride: () => devEnableOverride,
-  setStatus: (status) => { mcpStatus = status; },
+  setStatus: (status) => {
+    mcpStatus = status;
+  }
 });
 
 // Live-rebind the running MCP server to the current resolved port (Flight 5, Leg 7).
@@ -1152,7 +1186,7 @@ function currentAutomationStatus() {
     host: '127.0.0.1',
     port: mcpStatus.port != null ? mcpStatus.port : resolvePort(() => settings, { honorEnv: !app.isPackaged }),
     bound: mcpStatus.bound,
-    error: mcpStatus.error,
+    error: mcpStatus.error
   };
 }
 
@@ -1164,9 +1198,7 @@ function currentAutomationStatus() {
 // ---------------------------------------------------------------------------
 const ZOOM_MIN = 0.25;
 const ZOOM_MAX = 5.0;
-const ZOOM_LADDER = [
-  0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 4.0, 5.0
-];
+const ZOOM_LADDER = [0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 4.0, 5.0];
 
 // Resolve the next factor for an action ('in'|'out'|'reset') from the current one.
 function nextZoomFactor(current, action) {
@@ -1176,7 +1208,10 @@ function nextZoomFactor(current, action) {
   let best = Infinity;
   for (let i = 0; i < ZOOM_LADDER.length; i++) {
     const d = Math.abs(ZOOM_LADDER[i] - current);
-    if (d < best) { best = d; idx = i; }
+    if (d < best) {
+      best = d;
+      idx = i;
+    }
   }
   if (action === 'in') idx = Math.min(idx + 1, ZOOM_LADDER.length - 1);
   else if (action === 'out') idx = Math.max(idx - 1, 0);
@@ -1649,7 +1684,7 @@ registerOverlayIpc({
     try {
       await getVaultStore().recoverMasterPassword({
         recoveryDisplay: recoveryBuf.toString('utf8'),
-        newMasterPassword: newBuf,
+        newMasterPassword: newBuf
       });
       broadcastVaultLockState();
       return { ok: true };
@@ -1715,9 +1750,19 @@ ipcMain.handle('vault-lock', () => vaultLockNow());
 function popupVaultIconMenu({ wcId, win }) {
   if (!win || (typeof win.isDestroyed === 'function' && win.isDestroyed())) return;
   const menu = Menu.buildFromTemplate([
-    { label: 'Lock now', click: () => { vaultLockNow(); } },
+    {
+      label: 'Lock now',
+      click: () => {
+        vaultLockNow();
+      }
+    },
     { type: 'separator' },
-    { label: 'Fill login…', click: () => { chromeForTab(wcId)?.send('vault-gesture', { wcId }); } },
+    {
+      label: 'Fill login…',
+      click: () => {
+        chromeForTab(wcId)?.send('vault-gesture', { wcId });
+      }
+    }
   ]);
   menu.popup({ window: win });
 }
@@ -1965,14 +2010,18 @@ registerAppLifecycle({
   sessionStore,
   getUserDataPath: () => app.getPath('userData'),
   createHistoryRecorder,
-  setHistoryRecorder: (recorder) => { historyRecorder = recorder; },
+  setHistoryRecorder: (recorder) => {
+    historyRecorder = recorder;
+  },
   listJars: () => jars.list(),
   broadcast: broadcastToChromeAndInternal,
   pruneAllJars,
   scheduleInterval: setInterval,
   createDownloadsManager: createManager,
   downloadsStore: downloads,
-  setDownloadsManager: (manager) => { downloadsManager = manager; },
+  setDownloadsManager: (manager) => {
+    downloadsManager = manager;
+  },
   getDownloadsManager: () => downloadsManager,
   wireDownloadHandler,
   applyShields,
@@ -1981,7 +2030,9 @@ registerAppLifecycle({
   getDefaultSession: () => session.defaultSession,
   fromPartition: (partition) => session.fromPartition(partition),
   internalPartition: INTERNAL_PARTITION,
-  setCreatingInternalSession: (value) => { creatingInternalSession = value; },
+  setCreatingInternalSession: (value) => {
+    creatingInternalSession = value;
+  },
   handleInternal,
   // Media proxy wiring (Mission 13 Flight 1 / Leg 2 — DD2/AC2): threaded so
   // app-lifecycle.js can build the handler and register it on the default
@@ -2003,7 +2054,9 @@ registerAppLifecycle({
   isMcpAutomationEnabled,
   shouldBindAutomation,
   shouldAutoMint,
-  setDevEnableOverride: (value) => { devEnableOverride = value; },
+  setDevEnableOverride: (value) => {
+    devEnableOverride = value;
+  },
   startMcpServerInstance,
   createEngine,
   getChromeContents,
@@ -2021,7 +2074,9 @@ registerAppLifecycle({
   mintJarKey,
   mintAdminKey,
   getMcpServer: () => mcpServer,
-  setSessionQuitting: (value) => { sessionQuitting = value; },
+  setSessionQuitting: (value) => {
+    sessionQuitting = value;
+  },
   buildSessionSnapshot,
   appDb,
   // M14 F1 L2 (DD2): the pending-challenge store behind app.on('login').
