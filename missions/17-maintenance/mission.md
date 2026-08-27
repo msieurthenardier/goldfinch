@@ -92,7 +92,7 @@ and the next mission's crew. N/A beyond that.
 
 ## Known Issues
 
-*(none yet)*
+- [ ] **Prettier enforcement needs a flight, not a squawk** — escalated from [squawk 0039](../../squawks/0039-prettier-drift-not-enforced.md) on 2026-08-27. `npm run format` reformats 318 files cleanly but pushes `renderer.js` from 1650 to 1827 lines (repealing the line budget by accident) and breaks 13 mutation-testing pins in 9 test files. Decision owed: tune `.prettierrc` toward house style (likely a larger `printWidth`; measure first) vs. accept defaults and re-base the budgets + re-pin the matchers. The CI `format:check` wiring rides along either way. Operator ruling to enforce stands; plan with `/flight` under this mission (optional flight, no dependency on Flights 1–4).
 
 ## Flights
 
