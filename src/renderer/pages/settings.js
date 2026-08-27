@@ -925,8 +925,8 @@ function automationKeysOnce() {
    * @param {unknown} e
    */
   function showErr(e) {
-    keyMessageEl.textContent =
-      'Error: ' + (e && /** @type {any} */ (e).message ? /** @type {any} */ (e).message : 'failed');
+    const anyE = /** @type {any} */ (e);
+    keyMessageEl.textContent = 'Error: ' + (e && anyE.message ? anyE.message : 'failed');
   }
 
   /**
