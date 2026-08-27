@@ -20,7 +20,6 @@ import { createSiteDataPanel } from './jars-sitedata-panel.js';
 import { createJarTabs } from './jars-tabs.js';
 // @ts-ignore — serving-path vs disk-path mismatch
 import { createConfirmModal } from './jars-confirm-modal.js';
-// @ts-ignore — serving-path vs disk-path mismatch
 import {
   createPanelModeKey,
   exactHashTarget,
@@ -28,6 +27,7 @@ import {
   reconcileTransient,
   sectionSetKey,
   stateFromPayload
+  // @ts-ignore — serving-path vs disk-path mismatch
 } from './jars-page-state.js';
 // @ts-ignore — serving-path vs disk-path mismatch
 import { createJarsNav } from './jars-nav-controller.js';
