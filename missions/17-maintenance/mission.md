@@ -34,10 +34,19 @@ and are not part of this mission.
       across the view boundary (a chrome-owned announcement or equivalent
       ruled in design), with the mechanism shared with criterion 1's focus
       handoff rather than a second cross-view scheme (F49)
-- [ ] Under an admin automation key, `click`/`typeText`/`scroll`/`pressKey`
-      and `readDom`/`readAxTree`/`captureScreenshot` refuse internal
-      `goldfinch://` targets exactly as `evaluate` and `nav` already do, and
-      `docs/mcp-automation.md` states only what the code enforces (F1, F10k)
+- [ ] The internal-session boundary is tier-based: **non-admin** keys are
+      refused internal `goldfinch://` targets on every op (already enforced at
+      the resolver), the **admin** key (a high-bar, deliberately-enabled,
+      loopback-bound, key-gated tier — env `GOLDFINCH_AUTOMATION_ADMIN` + a
+      minted key + the Settings toggle; enablable on a packaged build too) may
+      reach internal guests on every op, and the **master-password secret
+      sheet** is refused for all tiers; `docs/mcp-automation.md` states only
+      what the code enforces (F1, F10k) — *reframed by the Flight 2 pivot
+      2026-08-28: the original "refuse even for admin" criterion was inverted
+      for end-to-end automation reach; the wall that matters (non-admin →
+      internal) already holds, and the secret sheet stays walled for all. (An
+      earlier draft mis-justified this as "admin is dev-only" — false; corrected
+      under the flight's DD2, operator re-decided keep-as-is.)*
 - [ ] `vaultFill`/`vaultAnswerAuth` resolve targets through the same
       sheet/popup/tab-view predicate set as every other tool (F9), and
       `download-media` validates a renderer-supplied `webContentsId`

@@ -39,7 +39,7 @@ that documents it in full; the summary below is the authority phrasing from the 
 | **Per-jar key-gated** | Every request must present `Authorization: Bearer <key>`. Keys are per-jar (a key authorises only its own jar's tabs) and shown once at mint. A separate **admin tier** is available when `GOLDFINCH_AUTOMATION_ADMIN` is set in the environment and an admin key has been minted. See *Authentication*. |
 | **Loopback-only bind** | The server binds `127.0.0.1` only — never `0.0.0.0` or `::`. See *Endpoint*. |
 | **Inject-then-run / no-persistence pairing** | `injectScript` makes no persistence guarantee across subsequent `evaluate` calls; pair them immediately in sequence. See *Eval tools*. |
-| **Internal-session (`goldfinch://settings`) always excluded** | Both eval tools and both DevTools tools refuse the internal session — even for admin. See the security-invariant blocks under *Eval tools* and *DevTools tools*. |
+| **Internal-session (`goldfinch://settings`) gated by tier** | Non-admin (jar) keys are refused the internal session on every op, at the resolver. The admin tier — a high-bar, deliberately-enabled, loopback-bound, key-gated tier (`GOLDFINCH_AUTOMATION_ADMIN` + a minted admin key + the Settings toggle) that CAN be enabled on a packaged build — reaches internal guests on every op, including both eval tools and both DevTools tools. The master-password secret sheet is refused for all tiers, admin included. See the security-invariant blocks under *Eval tools* and *DevTools tools*. |
 | **Result / refusal error contract** | `openTab null` and `readAxTree debugger-unavailable` are normal results, not errors. Only a genuine engine throw sets `isError: true`. See *Result and refusal semantics*. |
 
 **Reach boundary.** Goldfinch binds `127.0.0.1` only. Reaching that loopback from the consumer's
@@ -371,6 +371,12 @@ A request's key resolves to an **identity** — a `jarId` or the literal `admin`
   - **Jar keys are unaffected by any of this.** They are refused by `automation: out-of-jar`
     on session identity before the sheet guard is consulted at all (see the note at the top of
     this section); the change widens the **admin tier only**.
+  - **The 5 vault tools resolve through this same gate.** `vaultFill` and `vaultAnswerAuth`
+    (see *Vault tools*) call the same `resolveTarget`, which threads `isSheetContents` from the
+    engine deps (`vault-context.js`) — so the master-password sheet is refused to the vault
+    tools by the identical `automation: secret-sheet` throw, at every tier including admin. The
+    vault tools are otherwise **non-engine-op** (they dispatch to a per-session vault context,
+    not the drive/observe engine), but this one gate is shared.
 
 - **Overlay views are non-enumerable but probe-addressable (design choice, M05 F7/F8).** The find
   overlay and the menu-overlay sheet are deliberately **not registered in `tabViews`**, so they
@@ -576,12 +582,16 @@ natively awaited.
 | `evaluate` | `{ wcId: integer, expression: string }` *(required)* | JSON text: the evaluated value. A returned Promise is awaited; the resolved value **must be JSON-serializable** — a non-serializable return (function, DOM node, circular object) is refused with `automation: evaluate — return value is not JSON-serializable` (isError). An in-page throw surfaces as an error result (isError). **Does NOT foreground its target** (M09 F7 DD6): the tab is evaluated where it sits — a background tab is not brought to front and its window is not raised. |
 | `injectScript` | `{ wcId: integer, script: string }` *(required)* | JSON text `{"ok":true}` (void). Defines globals / patches prototypes (e.g. the axe-core source, a farbling hook). **Skips foreground-to-act** (defining a global needs no paint). Makes **no persistence guarantee** — globals it defines are not promised to survive across a later `evaluate` gap (a navigation clears them); pair `injectScript` immediately with one `evaluate`. An in-page throw surfaces as an error result (isError). |
 
-> **Security invariant — internal session always excluded, even for admin.** Both eval tools refuse the
-> internal `goldfinch://settings` session with `automation: evaluate — internal-session excluded` (and the
-> analogous `injectScript` message) **before** any `executeJavaScript`, regardless of identity. Admin builds
-> its engine with `allowInternal:true` (so it can run read-only ops on the internal tab), but arbitrary JS in
-> `goldfinch://settings` would reach the privileged `goldfinchInternal` bridge — so the eval ops carry their
-> own op-local refusal that fires even for admin. This is the single most important security item in the eval surface.
+> **Security invariant — internal session gated by tier.** Non-admin (jar) keys are refused the internal
+> `goldfinch://settings` session with `automation: internal-session` at the resolver (`resolve.js`'s
+> `!allowInternal && isInternalContents` throw), before either eval tool runs. The **admin tier** — a
+> high-bar, deliberately-enabled, loopback-bound, key-gated tier (`GOLDFINCH_AUTOMATION_ADMIN` env var +
+> a separately-minted admin key + the Settings automation toggle), which CAN be enabled on a packaged
+> build — builds its engine with `allowInternal:true` and **reaches** the internal session with both
+> `evaluate` and `injectScript`, by design (end-to-end testing needs to reach internal pages). The
+> **master-password secret sheet is refused for all tiers, admin included** — resolve.js's separate,
+> ungated `isSheetContents` gate (DD3) is untouched by the admin relaxation above; neither eval tool ever
+> opts into it.
 
 ### DevTools tools (2)
 
@@ -603,13 +613,15 @@ the tab to the foreground.
 > `webContents.executeJavaScript`, not the debugger). Call `closeDevTools` to release the client so a
 > subsequent `readAxTree`/`scroll` can attach again.
 
-> **Security invariant — internal session always excluded, even for admin.** Both DevTools tools refuse the
-> internal `goldfinch://settings` session with `automation: openDevTools — internal-session excluded` (and the
-> analogous `closeDevTools` message) **before** opening/closing DevTools, regardless of identity. Opening
-> DevTools establishes a full CDP client on the page (functionally a debugger attach), and the mission rule
-> forbids a debugger client on the internal session — a privilege-escalation surface onto the privileged
-> `goldfinchInternal` bridge. (Jar-scoped guests / admin chrome are allowed; DevTools on a jar's own guest is
-> within the jar key's authority.)
+> **Security invariant — internal session gated by tier.** Non-admin (jar) keys are refused the internal
+> `goldfinch://settings` session at the resolver, before either DevTools tool runs — same
+> `!allowInternal && isInternalContents` throw as the eval tools above. The **admin tier** — the same
+> high-bar, key-gated, loopback-bound tier, enableable on a packaged build — reaches the internal session
+> with both `openDevTools` and `closeDevTools`, by design; opening DevTools establishes a full CDP client
+> on the page, and reaching the internal session with a debugger client is a deliberate admin-only
+> capability, not an accident. The **master-password secret sheet is refused for all tiers, admin
+> included** — the sheet gate (DD3) is untouched by the admin relaxation. (Jar-scoped guests / admin
+> chrome are allowed; DevTools on a jar's own guest is within the jar key's authority.)
 
 ### Admin chrome / app-level (3)
 
@@ -683,7 +695,7 @@ not the automation engine, and hold no cross-session state.
 | `vaultUnlock` | `{ accessKey: string }` *(required)* | JSON text: `{ unlocked: [vaultId, …] }` — the vaults this session opened. A **wrong/foreign key opens nothing** (`{ unlocked: [] }`, a **normal** result, not an error). |
 | `vaultList` | *(none)* | JSON text: array of `{ vaultId, id, title, origin, username, hasTotp }` — **metadata only** for the login items in this session's unlocked vaults. **Never** a password, TOTP secret, or card data. Only unlocked vaults contribute. |
 | `vaultTotp` | `{ itemId: string }` *(required)* | JSON text: `{ id, code }` — the **current** TOTP code for a named unlocked item. `code` is `null` when the item is absent, not in an unlocked vault, or has no TOTP. The TOTP **secret** is never returned. |
-| `vaultFill` | `{ wcId: integer, itemId: string }` *(required)* | JSON text: `{ filled: true, id }` on success, or a **normal** `{ filled: false, reason }` (`"locked"` / `"no-match"` / `"origin-mismatch"`) when nothing was filled. The credential is handed to Goldfinch's internal fill effect and **never returned**. |
+| `vaultFill` | `{ wcId: integer, itemId: string }` *(required)* | JSON text: `{ filled: true, id, origin }` on success, or a **normal** `{ filled: false, reason }` (`"locked"` / `"no-match"` / `"origin-mismatch"` / `"ambiguous"`) when nothing was filled. `origin` is the resolved top-frame origin the fill targeted — non-secret (the client already knows the tab's URL via `enumerateTabs`), never a credential. `"ambiguous"` means the bare `itemId` matched more than one unlocked vault's item; pass `vaultId` (from `vaultList`) to disambiguate. The credential is handed to Goldfinch's internal fill effect and **never returned**. |
 | `vaultAnswerAuth` | `{ wcId: integer, itemId: string, vaultId?: string }` *(`wcId`, `itemId` required)* | JSON text: `{ answered: true, id, origin }` on success, or a **normal** `{ answered: false, reason }` (`"locked"` / `"no-challenge"` / `"no-match"` / `"origin-mismatch"` / `"ambiguous"`) when nothing was answered. Answers the tab's **pending HTTP basic-auth challenge** (Goldfinch's browser-owned prompt) with the named item's credential; the credential is **never returned**. `"no-challenge"` means the tab has no pending auth prompt. |
 
 **Cryptographic scope by session identity (DD4).** The reachable vault set is decided by the

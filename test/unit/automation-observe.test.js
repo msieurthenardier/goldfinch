@@ -1095,9 +1095,14 @@ test('evaluate: in-page throw propagates (not swallowed)', async () => {
   );
 });
 
-test('[HIGH] evaluate: internal-session REFUSED even with allowInternal:true — no executeJavaScript', async () => {
-  // The op-local guard is the SOLE protection: admin builds deps with allowInternal:true, so
-  // resolveContents is permissive on the internal wcId. The op must STILL refuse before any JS runs.
+test('[HIGH] evaluate: internal-session ALLOWED under admin (allowInternal:true) — executeJavaScript runs (flight-2 DD2 pivot; was "REFUSED even for admin")', async () => {
+  // INVERTED at flight-2 leg 1 (2026-08-28 operator ruling, DD1/DD2). The op-local
+  // "even for admin" refusal is gone (flight-2 DD2): the admin tier — a high-bar,
+  // key-gated, loopback-bound tier, enablable on a packaged build too — may now
+  // reach internal goldfinch:// guests; non-admin stays refused at the resolver;
+  // the secret sheet stays refused for all. resolveContents is permissive on the
+  // internal wcId because allowInternal:true is set (the admin tier), so the op
+  // simply runs.
   const internalWc = makeEvalGuestWc(405, { leaked: 'goldfinchInternal' }, { internal: true });
   const activateCalls = [];
   const deps = {
@@ -1106,26 +1111,36 @@ test('[HIGH] evaluate: internal-session REFUSED even with allowInternal:true —
     activate: async (id) => {
       activateCalls.push(id);
     },
-    allowInternal: true // admin relaxation — resolveContents would NOT throw
+    allowInternal: true // admin tier
+  };
+
+  const result = await evaluate(405, 'document.title', deps);
+
+  assert.deepEqual(result, { leaked: 'goldfinchInternal' }, 'executeJavaScript must run and return its value');
+  assert.equal(internalWc._execCount, 1, 'executeJavaScript must run on the internal-session guest under admin');
+  assert.equal(internalWc._lastExecCode, 'document.title');
+  // F7 DD6 still holds regardless of the DD2 pivot: evaluate never activates any target.
+  assert.equal(activateCalls.length, 0, 'F7 DD6: evaluate must not activate ANY target, internal included');
+});
+
+test('[HIGH] evaluate: internal-session REFUSED for non-admin (no allowInternal) — resolver refusal, no executeJavaScript', async () => {
+  // AC2 negative case: the wall that matters — a non-admin key must never reach an
+  // internal goldfinch:// guest — lives at resolve.js's `!allowInternal &&
+  // isInternalContents` throw, BEFORE this op is reached. No allowInternal in deps
+  // reproduces a non-admin (jar-scoped) call.
+  const internalWc = makeEvalGuestWc(406, { leaked: 'goldfinchInternal' }, { internal: true });
+  const deps = {
+    fromId: makeFakeFromId({ 406: internalWc }),
+    chromeContents: null,
+    activate: async () => {}
+    // no allowInternal — non-admin
   };
 
   await assert.rejects(
-    () => evaluate(405, 'document.title', deps),
-    (err) => err instanceof Error && err.message === 'automation: evaluate — internal-session excluded'
+    () => evaluate(406, 'document.title', deps),
+    (err) => err instanceof Error && err.message.includes('automation: internal-session')
   );
-  assert.equal(
-    internalWc._execCount,
-    0,
-    'executeJavaScript must NOT run on the internal-session path (even for admin)'
-  );
-  // F7 leg 2 / AC5 — THE GUARD DID NOT GO OUT WITH THE ACTIVATE BRANCH. DD6 deleted
-  // evaluate's guest-activate block; this DD2-HIGH refusal was written to run "on the FINAL
-  // wc, AFTER the (optional) activate branch", so a careless deletion could plausibly have
-  // taken it along. It now runs on the ONE resolved wc and still refuses before any JS runs.
-  // (The pre-F7 version of this comment said "activate fires before the FINAL guard" — that
-  // is now false, hence the assertion below, which pins the new truth rather than leaving a
-  // comment that lies.)
-  assert.equal(activateCalls.length, 0, 'F7 DD6: evaluate must not activate ANY target, internal included');
+  assert.equal(internalWc._execCount, 0, 'executeJavaScript must NOT run for a non-admin call on an internal guest');
 });
 
 // --- injectScript ---
@@ -1169,23 +1184,37 @@ test('injectScript: in-page throw propagates (not swallowed)', async () => {
   );
 });
 
-test('[HIGH] injectScript: internal-session REFUSED even with allowInternal:true — no executeJavaScript', async () => {
+test('[HIGH] injectScript: internal-session ALLOWED under admin (allowInternal:true) — executeJavaScript runs (flight-2 DD2 pivot; was "REFUSED even for admin")', async () => {
+  // INVERTED at flight-2 leg 1 (2026-08-28 operator ruling, DD1/DD2). See evaluate's
+  // sibling test for the rationale.
   const internalWc = makeEvalGuestWc(413, undefined, { internal: true });
   const deps = {
     fromId: makeFakeFromId({ 413: internalWc }),
     chromeContents: null,
-    allowInternal: true // admin relaxation — resolveContents would NOT throw
+    allowInternal: true // admin tier
+  };
+
+  const result = await injectScript(413, 'window.x = 1;', deps);
+
+  assert.equal(result, undefined, 'injectScript is void (resolves undefined → {"ok":true} at the adapter)');
+  assert.equal(internalWc._execCount, 1, 'executeJavaScript must run on the internal-session guest under admin');
+  assert.equal(internalWc._lastExecCode, 'window.x = 1;');
+});
+
+test('[HIGH] injectScript: internal-session REFUSED for non-admin (no allowInternal) — resolver refusal, no executeJavaScript', async () => {
+  // AC2 negative case — see evaluate's sibling test.
+  const internalWc = makeEvalGuestWc(414, undefined, { internal: true });
+  const deps = {
+    fromId: makeFakeFromId({ 414: internalWc }),
+    chromeContents: null
+    // no allowInternal — non-admin
   };
 
   await assert.rejects(
-    () => injectScript(413, 'window.x = 1;', deps),
-    (err) => err instanceof Error && err.message === 'automation: injectScript — internal-session excluded'
+    () => injectScript(414, 'window.x = 1;', deps),
+    (err) => err instanceof Error && err.message.includes('automation: internal-session')
   );
-  assert.equal(
-    internalWc._execCount,
-    0,
-    'executeJavaScript must NOT run on the internal-session path (even for admin)'
-  );
+  assert.equal(internalWc._execCount, 0, 'executeJavaScript must NOT run for a non-admin call on an internal guest');
 });
 
 test('injectScript: bad-handle (non-number wcId) → throws bad-handle, no exec', async () => {
@@ -1266,25 +1295,36 @@ test('openDevTools: bad-handle (non-number wcId) → throws bad-handle, no openD
   );
 });
 
-test('[HIGH] openDevTools: internal-session REFUSED even with allowInternal:true — DevTools NOT opened', async () => {
-  // The op-local guard is the SOLE protection: admin builds deps with allowInternal:true, so
-  // resolveContents is permissive on the internal wcId. The op must STILL refuse before opening
-  // DevTools — opening it establishes a full CDP client on goldfinch://settings (privilege escalation).
+test('[HIGH] openDevTools: internal-session ALLOWED under admin (allowInternal:true) — DevTools opens (flight-2 DD2 pivot; was "REFUSED even for admin")', async () => {
+  // INVERTED at flight-2 leg 1 (2026-08-28 operator ruling, DD1/DD2). admin builds deps
+  // with allowInternal:true, so resolveContents is permissive on the internal wcId, and
+  // the op-local "even for admin" refusal is gone — DevTools now opens on the internal
+  // goldfinch://settings guest under the admin tier by design.
   const internalWc = makeDevToolsWc(502, { internal: true });
   const deps = {
     fromId: makeFakeFromId({ 502: internalWc }),
     chromeContents: null,
-    allowInternal: true // admin relaxation — resolveContents would NOT throw
+    allowInternal: true // admin tier
+  };
+  const result = await openDevTools(502, deps);
+  assert.equal(result, undefined, 'void contract (resolves undefined → {"ok":true} at the adapter)');
+  assert.equal(internalWc._openCalls.length, 1, 'openDevTools must run on the internal-session guest under admin');
+  assert.deepEqual(internalWc._openCalls[0], { mode: 'detach' });
+});
+
+test('[HIGH] openDevTools: internal-session REFUSED for non-admin (no allowInternal) — resolver refusal, DevTools NOT opened', async () => {
+  // AC2 negative case: the non-admin wall lives at resolve.js, before this op runs.
+  const internalWc = makeDevToolsWc(503, { internal: true });
+  const deps = {
+    fromId: makeFakeFromId({ 503: internalWc }),
+    chromeContents: null
+    // no allowInternal — non-admin
   };
   await assert.rejects(
-    () => openDevTools(502, deps),
-    (err) => err instanceof Error && err.message === 'automation: openDevTools — internal-session excluded'
+    () => openDevTools(503, deps),
+    (err) => err instanceof Error && err.message.includes('automation: internal-session')
   );
-  assert.equal(
-    internalWc._openCalls.length,
-    0,
-    'openDevTools must NOT run on the internal-session path (even for admin)'
-  );
+  assert.equal(internalWc._openCalls.length, 0, 'openDevTools must NOT run for a non-admin call on an internal guest');
 });
 
 // --- closeDevTools ---
@@ -1321,16 +1361,33 @@ test('closeDevTools: does NOT activate', async () => {
   assert.equal(activateCalls.length, 0, 'closeDevTools must skip foreground-to-act');
 });
 
-test('[HIGH] closeDevTools: internal-session REFUSED even with allowInternal:true — closeDevTools NOT called', async () => {
+test('[HIGH] closeDevTools: internal-session ALLOWED under admin (allowInternal:true) — closeDevTools runs (flight-2 DD2 pivot; was "REFUSED even for admin")', async () => {
+  // INVERTED at flight-2 leg 1 (2026-08-28 operator ruling, DD1/DD2). See openDevTools's
+  // sibling test for the rationale.
   const internalWc = makeDevToolsWc(513, { internal: true });
+  internalWc.devToolsOpen = true; // pretend DevTools was open
   const deps = {
     fromId: makeFakeFromId({ 513: internalWc }),
     chromeContents: null,
-    allowInternal: true
+    allowInternal: true // admin tier
+  };
+  const result = await closeDevTools(513, deps);
+  assert.equal(result, undefined, 'void contract');
+  assert.equal(internalWc._closeCount, 1, 'closeDevTools must run on the internal-session guest under admin');
+  assert.equal(internalWc.devToolsOpen, false);
+});
+
+test('[HIGH] closeDevTools: internal-session REFUSED for non-admin (no allowInternal) — resolver refusal, closeDevTools NOT called', async () => {
+  // AC2 negative case: the non-admin wall lives at resolve.js, before this op runs.
+  const internalWc = makeDevToolsWc(514, { internal: true });
+  const deps = {
+    fromId: makeFakeFromId({ 514: internalWc }),
+    chromeContents: null
+    // no allowInternal — non-admin
   };
   await assert.rejects(
-    () => closeDevTools(513, deps),
-    (err) => err instanceof Error && err.message === 'automation: closeDevTools — internal-session excluded'
+    () => closeDevTools(514, deps),
+    (err) => err instanceof Error && err.message.includes('automation: internal-session')
   );
-  assert.equal(internalWc._closeCount, 0, 'closeDevTools must NOT run on the internal-session path (even for admin)');
+  assert.equal(internalWc._closeCount, 0, 'closeDevTools must NOT run for a non-admin call on an internal guest');
 });

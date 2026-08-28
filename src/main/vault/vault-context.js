@@ -88,6 +88,19 @@ function originOf(url) {
  * @property {(partition: string) => any} [fromPartition]
  * @property {() => any} [getChromeContents]
  * @property {(wc: any) => boolean} [isChromeContents]
+ * @property {(wc: any) => boolean} [isSheetContents]  F9 fix (M17 F2 L2): the
+ *   secret-sheet predicate — MUST be threaded alongside sheetMenuFor (a pair;
+ *   see resolve.js guard 3) so resolveTarget's resolveContents/resolveContentsForJar
+ *   calls refuse the vault master-password sheet at resolve time, admin included.
+ * @property {(wc: any) => ({ menuType: string, token: number } | null)} [sheetMenuFor]
+ *   the menuType half of the sheet gate's (menuType × op) admission — the vault
+ *   path never opts in with allowSheet, so this predicate's mere presence keeps
+ *   the sheet absolutely refused for every vault op.
+ * @property {(id: number) => boolean} [isTabViewWcId]  chrome-class overlay
+ *   membership (the find overlay included) — `!allowInternal`-gated, so it only
+ *   bites the jar branch; admin's allowInternal is exempt.
+ * @property {(id: number) => boolean} [isPopupWcId]  popup-registry membership,
+ *   exempted from the isTabViewWcId non-tab-contents guard the same way.
  */
 
 /**
@@ -416,8 +429,20 @@ function createVaultContext(deps = /** @type {any} */ ({})) {
       typeof engineDeps.getChromeContents === 'function' ? engineDeps.getChromeContents() : undefined;
     const chromeDep =
       typeof engineDeps.isChromeContents === 'function' ? { isChromeContents: engineDeps.isChromeContents } : {};
+    // F9 fix (M17 F2 L2): thread the sheet/membership predicates through — WITHOUT
+    // this, resolve.js's guard 3 (secret-sheet) and guard 5 (non-tab-contents) are
+    // both typeof-gated no-ops for every vault tool, and the vault master-password
+    // sheet is refused only by the later origin match (or not at all). Never pass
+    // allowSheet — the vault path has no opt-in, so isSheetContents alone keeps
+    // the sheet absolutely refused at every tier (admin included).
+    const sheetDeps = {
+      isSheetContents: engineDeps.isSheetContents,
+      sheetMenuFor: engineDeps.sheetMenuFor,
+      isTabViewWcId: engineDeps.isTabViewWcId,
+      isPopupWcId: engineDeps.isPopupWcId
+    };
     if (identity === 'admin') {
-      return resolveContents(wcId, { fromId, allowInternal: true, chromeContents, ...chromeDep });
+      return resolveContents(wcId, { fromId, allowInternal: true, chromeContents, ...chromeDep, ...sheetDeps });
     }
     const jar = (engineDeps.jars && typeof engineDeps.jars.list === 'function' ? engineDeps.jars.list() : []).find(
       (j) => j.id === identity
@@ -429,7 +454,8 @@ function createVaultContext(deps = /** @type {any} */ ({})) {
       fromId,
       fromPartition: engineDeps.fromPartition,
       chromeContents,
-      ...chromeDep
+      ...chromeDep,
+      ...sheetDeps
     });
   }
 

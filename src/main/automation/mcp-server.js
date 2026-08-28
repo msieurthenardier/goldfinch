@@ -342,12 +342,20 @@ async function freePortInRange(lo = 49152, hi = 65535) {
  *   fromPartition: (partition: string) => any,
  *   getChromeContents: () => any,
  *   isChromeContents?: (wc: any) => boolean,
+ *   isSheetContents?: (wc: any) => boolean,
+ *   sheetMenuFor?: (wc: any) => ({ menuType: string, token: number } | null),
+ *   isTabViewWcId?: (id: number) => boolean,
+ *   isPopupWcId?: (id: number) => boolean,
  * }} [opts.scopeCtx]  the jar-scoping context (Leg 2). Injected from main.js
  *   (which has electron + jars + the window registry), keeping scope.js
  *   electron-free and the façade unit-testable. fromId / fromPartition MUST be
  *   the SAME handles the engine uses so a membership check cannot pass while the
  *   engine resolves a different contents. isChromeContents (M09 F6) widens the
- *   jar-tier chrome exclusion to every registered window's chrome.
+ *   jar-tier chrome exclusion to every registered window's chrome. isSheetContents
+ *   / sheetMenuFor / isTabViewWcId / isPopupWcId (F9 fix, M17 F2 L2) are forwarded
+ *   verbatim to vaultCtx.fill/.answerAuth as engineDeps, and from there into
+ *   resolveTarget — WITHOUT them the vault master-password secret sheet is
+ *   reachable by a vault tool (resolve.js's guard 3 is typeof-gated).
  * @param {() => { get: (k: string) => any, getAll?: () => any }} [opts.getSettings]
  *   lazy accessor for the settings store (the singleton exposing get/getAll).
  *   Read PER REQUEST by the auth gate so toggles are live, and stubbable in the

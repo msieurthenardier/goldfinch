@@ -428,8 +428,10 @@ const DRIVE_TOOLS = [
 // image ops set `shape: imageResult` (base64 PNG → MCP image content, DD6);
 // readDom + readAxTree + the two Flight-9 eval ops (evaluate / injectScript) ride
 // the default JSON-text serialize. evaluate / injectScript are debugger-free
-// executeJavaScript ops (ZERO CDP), main-world, with the internal session excluded
-// even for admin.
+// executeJavaScript ops (ZERO CDP), main-world; internal-session admission is a TIER
+// decision (flight-2 DD1/DD2 pivot) — non-admin refused, the admin tier (high-bar,
+// key-gated, loopback-bound; can be enabled on a packaged build) reaches the internal
+// session by design, the secret sheet refused for all tiers.
 // ---------------------------------------------------------------------------
 
 /** @type {ToolDef[]} */
@@ -504,7 +506,7 @@ const OBSERVE_TOOLS = [
       'A returned Promise is natively awaited, so an async expression like axe.run(document) resolves before its value crosses back. ' +
       'The RETURN VALUE must be JSON-serializable — it is returned as JSON text. A non-JSON-serializable return (function, DOM node, circular object) ' +
       'is refused with "automation: evaluate — return value is not JSON-serializable". An in-page throw surfaces as an error result (isError). ' +
-      'The internal goldfinch://settings session is ALWAYS excluded (even for admin).',
+      'Jar-scoped guests and admin targets, including the internal goldfinch:// session under the admin tier; the master-password secret sheet is refused for all tiers.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -528,7 +530,7 @@ const OBSERVE_TOOLS = [
       'Unlike evaluate it SKIPS foreground-to-act activation (defining a global needs no paint). ' +
       'It makes NO persistence guarantee — globals it defines are not promised to survive across a later evaluate gap (a navigation clears them); ' +
       'pair injectScript immediately with one evaluate. An in-page throw surfaces as an error result (isError). ' +
-      'The internal goldfinch://settings session is ALWAYS excluded (even for admin).',
+      'Jar-scoped guests and admin targets, including the internal goldfinch:// session under the admin tier; the master-password secret sheet is refused for all tiers.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -550,8 +552,11 @@ const OBSERVE_TOOLS = [
 // validate input, call engine[op](...), ride the default JSON-text serialize
 // (both are void → {"ok":true}). Built on webContents.openDevTools({mode:'detach'})
 // / webContents.closeDevTools() — NO CDP from these ops (the CDP client is
-// Chromium's own DevTools front-end). The internal goldfinch://settings session is
-// excluded even for admin. {mode:'detach'} opens a separate OS window (WSLg-friendly).
+// Chromium's own DevTools front-end). internal-session admission is a TIER decision
+// (flight-2 DD1/DD2 pivot) — non-admin refused, the admin tier (high-bar, key-gated,
+// loopback-bound; can be enabled on a packaged build) reaches the internal
+// goldfinch://settings session by design, the secret sheet refused for all
+// tiers. {mode:'detach'} opens a separate OS window (WSLg-friendly).
 // ---------------------------------------------------------------------------
 
 /** @type {ToolDef[]} */
@@ -560,7 +565,7 @@ const DEVTOOLS_TOOLS = [
     name: 'openDevTools',
     description:
       'Open the DevTools front-end (detached OS window — {mode:"detach"}, WSLg-friendly) on the tab identified by wcId. ' +
-      'Returns {"ok":true} (void). Jar-scoped guests / admin chrome; the internal goldfinch://settings session is ALWAYS excluded (even for admin). ' +
+      'Returns {"ok":true} (void). Jar-scoped guests and admin targets, including the internal goldfinch:// session under the admin tier; the master-password secret sheet is refused for all tiers. ' +
       'Opening DevTools establishes a CDP client on the tab, so a CONCURRENT readAxTree/scroll (which attach the in-process debugger) will surface a ' +
       '"debugger-unavailable" / attach-failed result — that is EXPECTED, not a regression. By contrast evaluate/injectScript keep working under DevTools ' +
       '(they use webContents.executeJavaScript, not the debugger). Does NOT bring the tab to the foreground.',
@@ -577,7 +582,7 @@ const DEVTOOLS_TOOLS = [
     description:
       'Close the DevTools front-end on the tab identified by wcId, releasing the CDP client (so a subsequent readAxTree/scroll can attach again). ' +
       'Returns {"ok":true} (void). IDEMPOTENT — closing when DevTools is not open is a no-op. ' +
-      'The internal goldfinch://settings session is ALWAYS excluded (even for admin).',
+      'Jar-scoped guests and admin targets, including the internal goldfinch:// session under the admin tier; the master-password secret sheet is refused for all tiers.',
     inputSchema: {
       type: 'object',
       properties: { wcId: { type: 'integer', description: 'webContents id of the target tab' } },
