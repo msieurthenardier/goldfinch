@@ -1,12 +1,12 @@
 # Flight: Keyboard Reachability and Omnibox Semantics
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Codebase Health — 2026-08-27 Maintenance](../../mission.md)
 
 ## Contributing to Criteria
 
-- [ ] Keyboard-only user can enter, traverse, and leave page content (criterion 1)
-- [ ] Omnibox suggestion highlighting exposed to AT across the view boundary (criterion 2)
+- [x] Keyboard-only user can enter, traverse, and leave page content (criterion 1)
+- [x] Omnibox suggestion highlighting exposed to AT across the view boundary (criterion 2)
 
 ---
 
@@ -233,7 +233,7 @@ deferring Shift+Tab symmetry to a follow-on leg with a recorded reason.
 - [x] `focus-entry-spike` - prove the tab-exhaustion signal and the entry gesture on fixtures — landed 2026-08-28 (behavior test 12/12 on the fixed build)
 - [x] `chrome-to-guest-handoff` - entry gesture + `wc.focus()` path + `cross-view-nav` change + reversed pins
 - [x] `omnibox-suggestion-announcement` - live-region mirror of the highlighted suggestion
-- [ ] `hat-and-alignment` - operator keyboard walk incl. one multi-window state
+- [x] `hat-and-alignment` - operator keyboard walk incl. one multi-window state
 
 ---
 
@@ -241,10 +241,10 @@ deferring Shift+Tab symmetry to a follow-on leg with a recorded reason.
 
 ### Completion Checklist
 
-- [ ] All legs completed
-- [ ] Code merged
-- [ ] Tests passing
-- [ ] Documentation updated (CLAUDE.md focus-handoff note; BACKLOG focus seed retired via squawk 0029)
+- [x] All legs completed
+- [ ] Code merged (PR #188, ready for review)
+- [x] Tests passing (3941; behavior 15/15 + 8/8; a11y exit 0)
+- [x] Documentation updated (CLAUDE.md focus-handoff note; BACKLOG focus seed retired via squawk 0029)
 
 ### Verification
 

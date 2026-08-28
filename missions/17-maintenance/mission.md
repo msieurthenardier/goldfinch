@@ -98,14 +98,20 @@ and the next mission's crew. N/A beyond that.
 - [ ] **Trailing-iframe forward-Tab wrap (found by Flight 1 Leg 1's behavior-test runs 2026-08-27/28).** With the tab-boundary listener running only in the top frame, a page whose last tabbable is an `<iframe>` cycles forward Tab `#top → #inner → #top` and never reaches the chrome by Tab. **Ruled (C) at Flight 1 Leg 2 design (DD8):** not a keyboard trap under WCAG 2.1.2 once Leg 2 ships F6 / Shift+F6 from the guest as the documented standard exit; the wrap itself is a residual. The only real fix — the boundary listener in subframes — needs `nodeIntegrationInSubFrames`, which loads the *same* page-world farbling preload in every cross-origin iframe; that is a Flight 2 / #147 (fingerprinting mission) decision, not this flight's. Run logs: `tests/behavior/chrome-guest-keyboard-nav/runs/2026-08-28-01-01-15.md` checkpoint 12.
 - [ ] **Prettier enforcement needs a flight, not a squawk** — escalated from [squawk 0039](../../squawks/0039-prettier-drift-not-enforced.md) on 2026-08-27. `npm run format` reformats 318 files cleanly but pushes `renderer.js` from 1650 to 1829 lines (by the budget pin's metric) (repealing the line budget by accident) and breaks 13 mutation-testing pins in 9 test files. Decision owed: tune `.prettierrc` toward house style (likely a larger `printWidth`; measure first) vs. accept defaults and re-base the budgets + re-pin the matchers. The CI `format:check` wiring rides along either way. Operator ruling to enforce stands. **Planned 2026-08-27 as [Flight 5: Prettier Adoption](flights/05-prettier-adoption/flight.md)** — the spike showed option (a) is not achievable (Prettier has no setting that preserves one-line function bodies), so the operator chose (b): accept defaults, re-base the budgets.
 
+- **Cross-view stale focus ring at the tab boundary (M17 F1 HAT, 2026-08-28).** When keyboard focus hands off from a guest page to the chrome (forward Tab → `#address`, or Shift+Tab/Shift+F6 → the chrome's last control), the guest's last-focused control keeps its visible focus ring because Chromium does not blur a sibling `WebContentsView`. The operator briefly sees two focus indicators; the real focus is in the chrome (proven by the address-bar selection / typed text landing). The handoff itself is correct. A proper fix (clear the guest ring on handoff while preserving DD1's F6-re-entry-restores-place behavior — behavior-tested) is a store/blur/restore change to the every-page guest preload + main, deferred to **Flight 2 / #147**; it is cousin to **squawk 0044** (toolbar controls draw no focus ring at all). Both are "where did my focus go at the boundary" and should be considered together.
+
 ## Flights
 
 > **Note:** Ordered by the maintenance report's ruling: Critical first; the
 > automation invariant before the sheet work it shares a gate with.
 
-- [ ] Flight 1: **Keyboard reachability and omnibox semantics** — chrome↔guest
+- [x] Flight 1: **Keyboard reachability and omnibox semantics** — chrome↔guest
       focus handoff (F48 / #174; absorbs BACKLOG "Internal-page keyboard
-      focus" + M08 H8) and cross-view omnibox suggestion semantics (F49)
+      focus" + M08 H8) and cross-view omnibox suggestion semantics (F49) —
+      landed 2026-08-28 (Legs 1–4; behavior 15/15 + 8/8; a11y exit 0; PR #188).
+      Advances criteria 1 (keyboard reach) and 2 (omnibox AT). Findings:
+      cross-view stale focus ring (Known Issue → Flight 2/#147), squawk 0046
+      (omnibox bare-IP→https). Debrief pending.
 - [ ] Flight 2: **Automation-surface internal-session invariant** — op-local
       internal refusals on `input.js` / three `observe.js` ops (F1), the
       vault-tool resolver predicates (F9), `download-media` `webContentsId`

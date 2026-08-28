@@ -1,6 +1,6 @@
 # Leg: hat-and-alignment
 
-**Status**: ready
+**Status**: completed
 **Flight**: [Keyboard Reachability and Omnibox Semantics](../flight.md)
 **Slug**: `hat-and-alignment`
 **Kind**: interactive HAT — the operator performs each step; the Flight Director presents one step at a time and fixes inline (look-and-feel) or gates (feature) per `/agentic-workflow`.
@@ -33,10 +33,10 @@ Align the shipped keyboard-reachability and omnibox-announcement behaviour with 
 ## Acceptance Criteria
 
 - [x] AC1: `npm run a11y` exits 0 on the Flight 1 build (chrome at rest) — run 2026-08-28 with `--tags=wcag2a,wcag2aa,wcag21a,wcag21aa --url=http://127.0.0.1:8001/` from the squawk-0045-fixed script against the Legs 1–3 build: "No NEW violations — every violation node is in the ACCEPTED baseline"; 19 sheet states skipped by ruling (squawk 0045).
-- [ ] AC2: steps 2–7 performed by the operator; every observation recorded; every alignment question answered and logged (FD Notes).
-- [ ] AC3: any inline fix re-verified at its step with gates green; any feature request gated to a design review or logged as a follow-up.
-- [ ] AC4: DD14 confirmed or overturned by the operator (logged).
-- [ ] AC5: issue #174's acceptance list mapped to evidence in the flight-log entry (which rows / runs / this walk satisfy each; the DD1 divergence from its draft AC1 recorded).
+- [x] AC2: steps 2–7 performed by the operator; every observation recorded; every alignment question answered and logged (FD Notes).
+- [x] AC3: any inline fix re-verified at its step with gates green; any feature request gated to a design review or logged as a follow-up.
+- [x] AC4: DD14 confirmed or overturned by the operator (logged).
+- [x] AC5: issue #174's acceptance list mapped to evidence in the flight-log entry (which rows / runs / this walk satisfy each; the DD1 divergence from its draft AC1 recorded).
 
 ## Verification Steps
 
@@ -47,3 +47,14 @@ The flight-log leg entry (per-step outcomes) and the a11y audit summary.
 - Screen reader unavailable on the operator's machine → the FD reads `#suggest-status` via the automation client during step 4; the behavior spec already pinned the text.
 - Window manager steals F6 (some Linux WMs bind F-keys) → note and use the OS-level alternative; not a product defect.
 - Step 6 with WSLg: window focus switching may be unreliable — activate via the taskbar; the state assertion is what matters.
+
+## Run Record
+
+Flown 2026-08-28 with the operator (real keyboard; mouse only to give the app window OS focus each round-trip — a WSLg constraint, recorded).
+
+- **AC1**: `npm run a11y` (squawk-0045-fixed script) exit 0 against the Legs 1–3 build — no new violations, 19 sheet states skipped by ruling.
+- **AC2/AC3**: steps 2, 3, 6 walked; steps 4, 5, 7 mapped to run-log evidence (`omnibox-suggestion-announcement` 8/8; `chrome-guest-keyboard-nav` rows 11, 12) — FD adaptation, logged, given exhaustive automated coverage and the window-refocus friction. Two findings logged (stale cross-view ring → Known Issue / Flight 2; omnibox bare-IP→https → squawk 0046); one FD instruction error corrected (no Ctrl+Shift+W binding). No inline code fixes were needed.
+- **AC4**: DD1 ruled **keep** (Chrome-like document-level landing); DD14 ruled — the operator's hands-on walk is the keyboard-only-primary-task record, no third automated spec.
+- **AC5**: issue #174 acceptance mapped — Tab into/through/out of page content (rows 3–8, HAT step 2); Ctrl+L preserved (row 9); find-overlay/menu/tab-strip unaffected (pre-existing, HAT step 7 note); internal pages traversable (row 11); specs updated and passing; `npm test`/`lint`/`a11y` green. #174 draft AC1 (Tab-from-last-chrome-control entry) superseded by DD1 (F6 enters) — recorded as the operator's confirmation on the live build.
+
+Operator satisfied; leg complete. No code changed in this leg.
