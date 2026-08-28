@@ -1,6 +1,6 @@
 # Flight: Keyboard Reachability and Omnibox Semantics
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Codebase Health — 2026-08-27 Maintenance](../../mission.md)
 
 ## Contributing to Criteria

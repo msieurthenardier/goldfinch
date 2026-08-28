@@ -21,7 +21,7 @@ Cause: during squawk 0045, a scratch git worktree symlinked its `node_modules` t
 
 Remove the tracked symlink from `main` (`git rm node_modules`) and change `.gitignore:1` from `node_modules/` to `node_modules` so a file/symlink of that name can never be staged again. No source or dependency change; the real `node_modules` directory stays gitignored as before. Fixed on branch `squawk/0047-node-modules-symlink-leak` off `origin/main`.
 
-**Residual (operator decision):** the leaking blob remains reachable in history at `46b5be6`. This forward fix removes it from every tree going forward but does not purge history; a full purge needs a `main` history rewrite (force-push), which the operator has previously declined for similar cases. Flagged for an explicit call.
+**Residual (operator decision):** the leaking blob remains reachable in history at `46b5be6`. This forward fix removes it from every tree going forward but does not purge history; a full purge needs a `main` history rewrite (force-push), which the operator has previously declined for similar cases. Flagged for an explicit call. **Operator decision 2026-08-28: leave as is — no `main` history rewrite; the forward fix stands.**
 
 ## Verification
 

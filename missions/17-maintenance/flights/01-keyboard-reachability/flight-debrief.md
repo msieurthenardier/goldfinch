@@ -75,9 +75,9 @@ Verification: `chrome-guest-keyboard-nav` 15/15 (run 2026-08-28-01-56-28), `omni
 
 ## Follow-Up Actions
 
-1. **Servicing squawk** — two stale comments naming the retired `lastVisibleChromeTabbable` (`test/unit/shortcut-controller.test.js:22,47`; also the stale mentions in `a11y-audit-exit-codes.test.js:28` and `vault-accesskey-template.test.js:8` noted during squawk 0045). Comment-only; next turnaround.
-2. **Squawk candidate** — extend `tabSequence`/`FOCUSABLE_SELECTOR` to pierce open shadow roots (Architect finding). Verify it's wanted before logging.
+1. **Servicing squawk** — two stale comments naming the retired `lastVisibleChromeTabbable` (`test/unit/shortcut-controller.test.js:22,47`; also the stale mentions in `a11y-audit-exit-codes.test.js:28` and `vault-accesskey-template.test.js:8` noted during squawk 0045). Comment-only; next turnaround. **Logged as squawk 0048.**
+2. **Squawk candidate** — extend `tabSequence`/`FOCUSABLE_SELECTOR` to pierce open shadow roots (Architect finding). **Logged as squawk 0049** (latent — no current page uses shadow DOM; revisit trigger recorded on the squawk).
 3. **Crew-file apparatus notes** — fold the accumulated behavior-run facts (collector patterns, `readAxTree` iframe-omission, stale losing-view reads, persisted-`activeElement` HAT signal, `json.dumps` arg quoting, JSON-escaped `readDom`, chevron ring not reliably invisible) into `.flightops/agent-crews/behavior-tests-execution.md`.
 4. **Mission-control methodology** — line-budget-metric checklist item; HAT-under-WSLg live-signal note; worktree-`node_modules` tooling note; the AUTHORING.md negative-assertion rule. These join the Flight 5 debrief's four unreviewed items for a batched methodology pass.
-5. **Operator decision** — whether to rewrite `main` history to purge the leaked-path blob at `46b5be6` (squawk 0047 residual).
+5. **Operator decision** — whether to rewrite `main` history to purge the leaked-path blob at `46b5be6` (squawk 0047 residual). **Operator decision 2026-08-28: leave as is — no history rewrite.**
 6. **Already logged**: squawk 0044 (focus-visible on toolbar buttons), squawk 0046 (omnibox https/no-fallback), squawk 0047 (node_modules symlink, completed). Flight 2 / #147 owns the stale-ring + subframe-preload design.
