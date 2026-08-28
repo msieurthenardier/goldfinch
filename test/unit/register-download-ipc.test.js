@@ -11,6 +11,7 @@ function makeHarness() {
   const events = [];
   const chromeSender = {};
   const downloader = { downloadURL: (url) => events.push(['download', url]) };
+  let activeTabWcId = null;
   const record = {
     id: 1,
     url: 'https://retry.example/file',
@@ -46,15 +47,16 @@ function makeHarness() {
   };
   const { wireDownloadHandler } = registerDownloadIpc({
     ipcMain: { handle: (channel, fn) => handlers.set(channel, fn) },
-    webContents: { fromId: (id) => (id === 9 ? downloader : null) },
     registry: {
       getWindowForChrome: (sender) =>
-        sender === chromeSender
-          ? { activeTabWcId: null, win: { id: 1 }, chromeView: { webContents: downloader } }
-          : null,
+        sender === chromeSender ? { activeTabWcId, win: { id: 1 }, chromeView: { webContents: downloader } } : null,
       getLastFocused: () => null
     },
-    getTabContents: () => null,
+    // getTabContents mirrors main.js's registry.getWindowForGuest contract
+    // (design-review CONFIRMED): a real tab id (9) resolves to a live
+    // contents; any non-tab id (the chrome id 42, a sheet/popup id, an
+    // unknown id) resolves to null, never throws.
+    getTabContents: (id) => (id === 9 ? downloader : null),
     path,
     fs: { existsSync: () => false },
     sanitizeFilename: (name) => name,
@@ -78,7 +80,17 @@ function makeHarness() {
     now: () => 10,
     logger: { warn: (...args) => events.push(['warn', ...args]) }
   });
-  return { handlers, internal, events, chromeSender, wireDownloadHandler, manager };
+  return {
+    handlers,
+    internal,
+    events,
+    chromeSender,
+    wireDownloadHandler,
+    manager,
+    setActiveTab: (id) => {
+      activeTabWcId = id;
+    }
+  };
 }
 
 test('download directory authority is minted by the chooser and enforced by download-media', async () => {
@@ -119,6 +131,30 @@ test('download-media fails loudly with no resolvable jar-guest context — the c
     error: 'No web contents available to download with.'
   });
   assert.deepEqual(h.events, []);
+});
+
+test('download-media ignores a non-tab webContentsId (e.g. the chrome id) and falls back to the sender active tab — F10c', async () => {
+  const h = makeHarness();
+  h.setActiveTab(9); // the sender's genuine tab
+  // 42 is a stand-in for the chrome's own webContents id (or any id
+  // getTabContents rejects) — getTabContents(42) === null per contract, so
+  // this must NOT resolve as the explicit downloader.
+  const payload = { webContentsId: 42, url: 'https://example/chrome-id', suggestedName: 'file' };
+  assert.deepEqual(await h.handlers.get('download-media')({ sender: h.chromeSender }, payload), { ok: true });
+  // Only the active-tab downloader fired — proves the fallback path was
+  // used, not some resolution of the rejected id. Neuter: reverting to
+  // `webContents.fromId(webContentsId)` (removed) throws, since `webContents`
+  // is no longer in scope — this assertion would never be reached → red.
+  assert.deepEqual(h.events, [['download', 'https://example/chrome-id']]);
+});
+
+test('download-media uses a real tab webContentsId directly, with no active-tab fallback needed', async () => {
+  const h = makeHarness();
+  // activeTabWcId stays null — if the code used the fallback instead of the
+  // resolved tab contents, downloader would be null and this would fail loudly.
+  const payload = { webContentsId: 9, url: 'https://example/tab-id', suggestedName: 'file' };
+  assert.deepEqual(await h.handlers.get('download-media')({ sender: h.chromeSender }, payload), { ok: true });
+  assert.deepEqual(h.events, [['download', 'https://example/tab-id']]);
 });
 
 test('downloads-snapshot is chrome-authorized and omits paths and URLs', async () => {
@@ -215,6 +251,39 @@ test('downloads-page action allowlist resolves open/show paths only from the man
     { ok: true }
   );
   assert.deepEqual(h.events, [['show', '/trusted/file']]);
+});
+
+test('show-item-in-folder shows an approved download directory (mirrors media-controller.js:494) — F10c', async () => {
+  const h = makeHarness();
+  const chosen = await h.handlers.get('choose-download-dir')({ sender: h.chromeSender });
+  assert.equal(chosen, '/approved');
+  assert.deepEqual(await h.handlers.get('show-item-in-folder')({}, '/approved'), undefined);
+  assert.deepEqual(h.events, [['show', '/approved']]);
+});
+
+test('show-item-in-folder shows a known download record savePath (mirrors media-controller.js:715) — F10c', async () => {
+  const h = makeHarness();
+  assert.deepEqual(await h.handlers.get('show-item-in-folder')({}, '/trusted/file'), undefined);
+  assert.deepEqual(h.events, [['show', '/trusted/file']]);
+});
+
+test('show-item-in-folder no-ops for an arbitrary/unknown renderer-supplied path — F10c', async () => {
+  const h = makeHarness();
+  // Path-traversal-y: resolves to a directory outside both the approved-dirs
+  // set and any known record savePath. The cancelled fixture record's
+  // savePath is null, exercising that a null savePath in the manager's list
+  // does not crash or falsely match.
+  assert.deepEqual(await h.handlers.get('show-item-in-folder')({}, '/trusted/../attacker/evil'), undefined);
+  // Neuter: removing the validation would call shell.showItemInFolder with
+  // the raw path here → this assertion would go red.
+  assert.deepEqual(h.events, []);
+});
+
+test('show-item-in-folder is a no-op for an empty or non-string savePath', async () => {
+  const h = makeHarness();
+  assert.deepEqual(await h.handlers.get('show-item-in-folder')({}, ''), undefined);
+  assert.deepEqual(await h.handlers.get('show-item-in-folder')({}, null), undefined);
+  assert.deepEqual(h.events, []);
 });
 
 test('open-downloaded-file resolves savePath by id from the manager, never a path arg', async () => {

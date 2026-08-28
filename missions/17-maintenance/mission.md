@@ -34,10 +34,19 @@ and are not part of this mission.
       across the view boundary (a chrome-owned announcement or equivalent
       ruled in design), with the mechanism shared with criterion 1's focus
       handoff rather than a second cross-view scheme (F49)
-- [ ] Under an admin automation key, `click`/`typeText`/`scroll`/`pressKey`
-      and `readDom`/`readAxTree`/`captureScreenshot` refuse internal
-      `goldfinch://` targets exactly as `evaluate` and `nav` already do, and
-      `docs/mcp-automation.md` states only what the code enforces (F1, F10k)
+- [ ] The internal-session boundary is tier-based: **non-admin** keys are
+      refused internal `goldfinch://` targets on every op (already enforced at
+      the resolver), the **admin** key (a high-bar, deliberately-enabled,
+      loopback-bound, key-gated tier — env `GOLDFINCH_AUTOMATION_ADMIN` + a
+      minted key + the Settings toggle; enablable on a packaged build too) may
+      reach internal guests on every op, and the **master-password secret
+      sheet** is refused for all tiers; `docs/mcp-automation.md` states only
+      what the code enforces (F1, F10k) — *reframed by the Flight 2 pivot
+      2026-08-28: the original "refuse even for admin" criterion was inverted
+      for end-to-end automation reach; the wall that matters (non-admin →
+      internal) already holds, and the secret sheet stays walled for all. (An
+      earlier draft mis-justified this as "admin is dev-only" — false; corrected
+      under the flight's DD2, operator re-decided keep-as-is.)*
 - [ ] `vaultFill`/`vaultAnswerAuth` resolve targets through the same
       sheet/popup/tab-view predicate set as every other tool (F9), and
       `download-media` validates a renderer-supplied `webContentsId`
@@ -112,10 +121,14 @@ and the next mission's crew. N/A beyond that.
       Advances criteria 1 (keyboard reach) and 2 (omnibox AT). Findings:
       cross-view stale focus ring (Known Issue → Flight 2/#147), squawk 0046
       (omnibox bare-IP→https). Debrief pending.
-- [ ] Flight 2: **Automation-surface internal-session invariant** — op-local
-      internal refusals on `input.js` / three `observe.js` ops (F1), the
-      vault-tool resolver predicates (F9), `download-media` `webContentsId`
-      validation (F10c), and truing `docs/mcp-automation.md` (F10k)
+- [x] Flight 2: **Automation-surface internal-session invariant** — landed
+      2026-08-28 (Legs 1–4; PR #191). Reframed by the tier-based pivot
+      (operator-ruled): admin reaches internal guests (F1 inverted), the vault
+      tools can't target the secret sheet (F9), `download-media`/`show-item-in-folder`
+      trust hardened (F10c), docs trued (F10k). Advances criteria 3 (internal-session
+      boundary) and 4 (vault predicates + download validation). Tests 3843 → 3966;
+      resolve.js untouched. A false "admin is dev-only" justification was caught
+      and corrected mid-flight; operator kept the pivot on corrected facts. Debrief pending.
 - [ ] Flight 3: **Sheet lifecycle verification** — make the 17 unverified
       sheets in `menu-overlay.js` verifiable (F14) via a test-scoped
       `AUTOMATABLE_MENU_TYPES` widening and/or a `createSheetEntry`

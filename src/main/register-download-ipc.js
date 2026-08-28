@@ -5,7 +5,6 @@ const INDICATOR_RECENT_CAP = 25;
 
 function registerDownloadIpc({
   ipcMain,
-  webContents,
   registry,
   getTabContents,
   path,
@@ -48,13 +47,18 @@ function registerDownloadIpc({
 
   ipcMain.handle('download-media', async (event, payload) => {
     const { webContentsId, url, suggestedName, saveDir } = /** @type {any} */ (payload || {});
-    const wc = typeof webContentsId === 'number' ? webContents.fromId(webContentsId) : null;
+    const wc = typeof webContentsId === 'number' ? getTabContents(webContentsId) : null;
     const rec = registry.getWindowForChrome(event.sender) || registry.getLastFocused();
     const senderActiveTab = rec && rec.activeTabWcId != null ? getTabContents(rec.activeTabWcId) : null;
     // DD6 (Mission 13 Flight 1 / Leg 2): the chrome-view terminal fallback is
     // removed — a download with no resolvable jar-guest context fails loudly
     // instead of riding the default session (the one path a download could
-    // have carried default-session cookies).
+    // have carried default-session cookies). F10c (Flight 02 Leg 3): the
+    // renderer-supplied webContentsId is resolved via getTabContents, which
+    // returns a live contents only for a genuine tab and null for the
+    // chrome's own id, a sheet, a popup, or an unknown/dead id — so naming a
+    // non-tab id can no longer resolve as the explicit downloader; it falls
+    // through to senderActiveTab like an absent id would.
     const downloader = wc || senderActiveTab;
     if (!downloader) return { ok: false, error: 'No web contents available to download with.' };
     if (saveDir != null && !approvedDownloadDirs.has(path.resolve(saveDir))) {
@@ -84,12 +88,24 @@ function registerDownloadIpc({
   });
 
   ipcMain.handle('show-item-in-folder', (_event, savePath) => {
-    if (savePath) shell.showItemInFolder(savePath);
+    if (typeof savePath !== 'string' || !savePath) return;
+    const resolved = path.resolve(savePath);
+    const isApprovedDir = approvedDownloadDirs.has(resolved);
+    const isKnownSavePath = getDownloadsManager()
+      ?.listAll()
+      .some((entry) => entry.savePath && path.resolve(entry.savePath) === resolved);
+    if (isApprovedDir || isKnownSavePath) shell.showItemInFolder(savePath);
   });
 
   // Chrome-trust file actions (M11 F1 Leg 1, DD4): resolve savePath MAIN-SIDE by
   // numeric id — never trust a renderer-supplied path. Shared with the internal
   // downloads-action open/show bodies via resolveDownloadRecord below.
+  // show-item-in-folder (F10c, Flight 02 Leg 3) is the path-holding-caller
+  // equivalent: its two renderer callers hold a main-originated path (an
+  // approved download directory or a completed record's savePath) rather than
+  // a record id, so instead of resolving by id it validates the renderer's
+  // path against the same main-known sets before acting — anything else is a
+  // silent no-op.
   function resolveDownloadRecord(id) {
     if (typeof id !== 'number') return null;
     const manager = getDownloadsManager();

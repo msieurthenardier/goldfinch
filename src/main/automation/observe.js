@@ -1,6 +1,6 @@
 // @ts-check
 'use strict';
-const { resolveContents, classifyContents, isInternalContents } = require('./resolve');
+const { resolveContents, classifyContents } = require('./resolve');
 const { withDebuggerSession } = require('./cdp');
 const { setDevTools } = require('../devtools');
 // F7 DD7: bounded capturePage race. Reaching up to src/main/ is the established shape
@@ -40,23 +40,34 @@ const { withCaptureTimeout } = require('../capture-timeout');
 // steal the operator's foreground is a worse bug than the one DD6 fixes. Both halves are
 // pinned in automation-observe.test.js; do not "harmonize" them.
 //
-// evaluate / injectScript run the FINAL isInternalContents(wc) refusal — the load-bearing
-// DD2-HIGH guard: admin's allowInternal:true makes resolveContents permissive, so without
-// this op-local check admin could run arbitrary JS in goldfinch://settings and reach the
-// privileged goldfinchInternal bridge. It now runs on the ONE resolved wc (there is no
-// activate branch left in those two ops for it to sit after).
+// internal-session is a TIER boundary, not a per-op check (flight-2 DD1/DD2 pivot,
+// 2026-08-28 operator ruling — reverses the prior "even for admin" invariant this module
+// used to enforce locally). The non-admin wall lives at resolve.js's
+// `!allowInternal && isInternalContents` throw, which fires BEFORE any op in this module
+// runs — a jar-scoped key never reaches evaluate / injectScript / openDevTools /
+// closeDevTools with an internal wcId. The admin tier sets `allowInternal: true`
+// (engine.js) and is DELIBERATELY let through to internal goldfinch:// guests on every op,
+// including these four — admin is a high-bar, deliberately-enabled, loopback-bound,
+// key-gated tier (requires the GOLDFINCH_AUTOMATION_ADMIN env var at launch, a
+// separately-minted admin key, and the Settings automation toggle) that CAN be enabled
+// on a packaged build, and end-to-end testing needs to reach internal pages. This module
+// therefore carries NO op-local isInternalContents refusal any more.
+//
+// The separate menu-overlay SHEET gate (DD3) is untouched by this pivot: resolve.js's
+// isSheetContents check is ungated by allowInternal and refuses a sheet wcId for every
+// tier, admin included. None of these four ops ever bypasses it — they never pass
+// `allowSheet: true` — so a sheet target is still refused at resolve time, before this
+// module is reached.
 //
 // Flight-9 devtools ops (openDevTools / closeDevTools): webContents.openDevTools({mode:'detach'})
 // / webContents.closeDevTools() — synchronous/void → {"ok":true}. They are co-located here (NOT a
-// new devtools.js) because they share the same resolve → FINAL isInternalContents refusal → act
-// skeleton as the eval ops. They touch NO CDP / cdp.js: openDevTools is a webContents method; the
-// CDP *client* it spawns is Chromium's own DevTools front-end (the source of leg-5's intended
-// readAxTree/scroll attach-failed conflict — NOT a regression). NO foreground-to-act activation
-// (DevTools attaches to the contents regardless of paint). The FINAL isInternalContents(wc) refusal
-// fires EVEN for admin (allowInternal:true): opening DevTools establishes a full CDP client on the
-// page, so DevTools on goldfinch://settings is a privilege-escalation surface onto the privileged
-// goldfinchInternal bridge — the mission's debugger-attach-skip-internal hard rule. evaluate /
-// injectScript keep working under DevTools (executeJavaScript, not the debugger).
+// new devtools.js) because they share the same resolve → act skeleton as the eval ops. They touch
+// NO CDP / cdp.js: openDevTools is a webContents method; the CDP *client* it spawns is Chromium's
+// own DevTools front-end (the source of leg-5's intended readAxTree/scroll attach-failed conflict —
+// NOT a regression). NO foreground-to-act activation (DevTools attaches to the contents regardless
+// of paint). Under the tier model above, admin reaching internal goldfinch://settings via DevTools
+// is accepted (the admin tier, end-to-end testing); evaluate / injectScript keep working under
+// DevTools too (executeJavaScript, not the debugger).
 
 // Default paint-settle delay (ms) after foregrounding a guest before capturePage().
 // DD1's blank-capture is a compositor/visibility effect on an already-loaded guest, so the
@@ -433,8 +444,9 @@ async function readAxTree(wcId, deps, { depth, properties } = {}) {
 
 /**
  * Evaluate an arbitrary expression in the target tab's MAIN WORLD via
- * wc.executeJavaScript (DD1/DD2 — ZERO CDP). Mirrors readDom: resolve → FINAL
- * isInternalContents refusal → wc.executeJavaScript(expression).
+ * wc.executeJavaScript (DD1/DD2 — ZERO CDP). Mirrors readDom: resolve →
+ * wc.executeJavaScript(expression). internal-session admission is a TIER decision made
+ * at resolve.js (flight-2 DD1/DD2 pivot) — no op-local check here.
  *
  * [M09 F7 DD6] THIS OP NO LONGER ACTIVATES ITS TARGET — see readDom's note for the
  * predicate and the rationale. This is the op every probe walk and every cross-window
@@ -457,13 +469,12 @@ async function readAxTree(wcId, deps, { depth, properties } = {}) {
  *     rather than relying on the adapter's bare JSON.stringify (mcp-tools.js
  *     serialize), whose throw would surface as a raw message via errResult.
  *
- * [HIGH] DD2 internal-session exclusion EVEN FOR ADMIN: the isInternalContents
- * refusal is LOAD-BEARING and survives F7 DD6's removal of the activate branch — it
- * now simply runs on the ONE resolved wc. Admin builds the engine with
- * allowInternal:true, so resolveContents will NOT throw on an internal wcId — this
- * op-local check is the sole guard against arbitrary JS in goldfinch://settings
- * reaching the privileged goldfinchInternal bridge. Refuses regardless of
- * allowInternal. (Pinned by test: it did NOT go out with the activate branch.)
+ * Tier model (flight-2 DD1/DD2 pivot, 2026-08-28 operator ruling): internal-session
+ * admission is decided at resolve.js, not here. Non-admin is refused at resolve.js's
+ * `!allowInternal && isInternalContents` throw, which fires before this op runs. The
+ * admin tier reaches internal goldfinch://settings guests here by design.
+ * The menu-overlay SHEET stays refused for all tiers via resolve.js's separate,
+ * ungated `isSheetContents` gate (DD3) — this op never opts into it (no `allowSheet`).
  *
  * @param {number} wcId
  * @param {{
@@ -477,12 +488,11 @@ async function readAxTree(wcId, deps, { depth, properties } = {}) {
  */
 async function evaluate(wcId, expression, deps) {
   // ONE resolve, no async hop (F7 DD6 deleted the activate branch — see readDom).
+  // Flight-2 DD1/DD2 pivot: internal-session is a tier boundary enforced at
+  // resolve.js's !allowInternal && isInternalContents throw (which fires BEFORE this
+  // op is reached for a non-admin key); the admin tier reaches internal
+  // guests here by design, so there is no op-local internal-session check any more.
   const wc = resolveContents(wcId, deps);
-  // [HIGH] DD2: internal-session exclusion EVEN FOR ADMIN. With the activate branch
-  // gone this runs on the sole resolved wc — the guard itself is unchanged.
-  if (isInternalContents(wc)) {
-    throw new Error('automation: evaluate — internal-session excluded');
-  }
   // executeJavaScript natively awaits a returned Promise; `await` here means the
   // RESOLVED value (never a Promise) reaches the serialization pre-flight.
   const value = await wc.executeJavaScript(expression);
@@ -505,8 +515,9 @@ async function evaluate(wcId, expression, deps) {
  *
  * No foreground-to-act activation (DD2 — intentional, pinned by a unit test):
  * injectScript SKIPS it. Defining a global / patching a prototype does not need a
- * paint, so there is NO activate call here — resolve → FINAL isInternalContents
- * refusal → executeJavaScript.
+ * paint, so there is NO activate call here — resolve → executeJavaScript. Tier model
+ * (flight-2 DD1/DD2 pivot): internal-session admission is decided at resolve.js, not
+ * here (see below).
  *
  * [M09 F7 DD6] This is NO LONGER an asymmetry vs evaluate. The old text here read
  * "evaluate keeps foreground-to-act for parity with reads" — DD6 deleted evaluate's
@@ -519,9 +530,12 @@ async function evaluate(wcId, expression, deps) {
  * pairs injectScript immediately with one evaluate — the tool makes no implicit
  * persistence assumption.
  *
- * [HIGH] DD2 internal-session exclusion EVEN FOR ADMIN: same load-bearing guard as
- * evaluate — isInternalContents(wc) refuses BEFORE any executeJavaScript, regardless
- * of allowInternal. In-page throws propagate as errors (surface as isError).
+ * Tier model (flight-2 DD1/DD2 pivot, 2026-08-28 operator ruling), same as evaluate:
+ * non-admin is refused at resolve.js's `!allowInternal && isInternalContents` throw
+ * before this op runs; the admin tier reaches internal guests here by
+ * design; the menu-overlay SHEET stays refused for all tiers at resolve.js's separate
+ * ungated `isSheetContents` gate (DD3), which this op never bypasses. In-page throws
+ * propagate as errors (surface as isError).
  *
  * @param {number} wcId
  * @param {{
@@ -535,11 +549,9 @@ async function evaluate(wcId, expression, deps) {
 async function injectScript(wcId, script, deps) {
   const wc = resolveContents(wcId, deps);
   // NO activate (DD2): injectScript skips foreground-to-act — it defines globals /
-  // patches prototypes and needs no paint. The internal-session refusal still runs
-  // on this resolved wc (no activate branch to re-resolve through).
-  if (isInternalContents(wc)) {
-    throw new Error('automation: injectScript — internal-session excluded');
-  }
+  // patches prototypes and needs no paint. Flight-2 DD1/DD2 pivot: internal-session is
+  // a tier boundary enforced at resolve.js (non-admin refused there before this op
+  // runs; admin reaches internal guests here by design) — no op-local check remains.
   await wc.executeJavaScript(script); // void contract → returns undefined
 }
 
@@ -550,20 +562,22 @@ async function injectScript(wcId, script, deps) {
  * leg-5 conflict). VOID contract: returns `undefined` → the MCP adapter serializes
  * that to the one success shape `{"ok":true}`.
  *
- * Sequence: resolve → FINAL isInternalContents refusal → wc.openDevTools({mode:'detach'}).
- * NO foreground-to-act activation: DevTools attaches to the contents regardless of paint,
- * so there is no activate branch (and thus no re-resolve) — the refusal runs on the
- * resolved wc.
+ * Sequence: resolve → wc.openDevTools({mode:'detach'}). NO foreground-to-act activation:
+ * DevTools attaches to the contents regardless of paint, so there is no activate branch
+ * (and thus no re-resolve). Tier model (flight-2 pivot): internal-session admission is
+ * decided at resolve.js, not here (see below).
  *
  * `{ mode: 'detach' }` opens a separate OS window (preferred under WSLg over the default
  * docked mode — less compositor interference, more predictable).
  *
- * [HIGH] internal-session exclusion EVEN FOR ADMIN: admin builds deps with
- * allowInternal:true, so resolveContents will NOT throw on an internal wcId — this
- * op-local isInternalContents check is the SOLE guard. Opening DevTools establishes a
- * full CDP client on the page (functionally a debugger attach); the mission rule forbids
- * a debugger client on the internal goldfinch://settings session (privilege escalation
- * onto the goldfinchInternal bridge). Refuses regardless of allowInternal.
+ * Tier model (flight-2 DD1/DD2 pivot, 2026-08-28 operator ruling): non-admin is refused
+ * at resolve.js's `!allowInternal && isInternalContents` throw before this op runs; the
+ * admin tier reaches internal goldfinch://settings guests here by design — admin is a
+ * high-bar, deliberately-enabled, loopback-bound, key-gated tier (env
+ * GOLDFINCH_AUTOMATION_ADMIN + a minted admin key + the Settings toggle) that CAN be
+ * enabled on a packaged build. The menu-overlay SHEET stays refused for all tiers at
+ * resolve.js's separate, ungated `isSheetContents` gate (DD3), which this op never
+ * bypasses.
  *
  * Capability distinction (leg-5 recorded finding): once DevTools is open, a concurrent
  * readAxTree/scroll (which attach the in-process debugger) surfaces `attach-failed`
@@ -580,11 +594,10 @@ async function injectScript(wcId, script, deps) {
  */
 async function openDevTools(wcId, deps) {
   const wc = resolveContents(wcId, deps);
-  // NO activate (DevTools attaches regardless of paint). The internal-session refusal
-  // runs on this resolved wc — fires even for admin (allowInternal:true).
-  if (isInternalContents(wc)) {
-    throw new Error('automation: openDevTools — internal-session excluded');
-  }
+  // NO activate (DevTools attaches regardless of paint). Flight-2 DD1/DD2 pivot:
+  // internal-session is a tier boundary enforced at resolve.js (non-admin refused
+  // there before this op runs; admin reaches internal guests here by design) — no
+  // op-local check remains.
   setDevTools(wc, true); // shared helper: wc.openDevTools({mode:'detach'}); void contract → undefined
 }
 
@@ -594,11 +607,14 @@ async function openDevTools(wcId, deps) {
  * DevTools is not open is a no-op in Electron (does not throw), so there is no special
  * error path: the op contract is the same whether or not DevTools was open.
  *
- * Sequence mirrors openDevTools: resolve → FINAL isInternalContents refusal → wc.closeDevTools().
- * NO foreground-to-act activation.
+ * Sequence mirrors openDevTools: resolve → wc.closeDevTools(). NO foreground-to-act
+ * activation.
  *
- * [HIGH] internal-session exclusion EVEN FOR ADMIN: same load-bearing guard as openDevTools —
- * isInternalContents(wc) refuses before any closeDevTools, regardless of allowInternal.
+ * Tier model (flight-2 DD1/DD2 pivot, 2026-08-28 operator ruling), same as openDevTools:
+ * non-admin is refused at resolve.js's `!allowInternal && isInternalContents` throw
+ * before this op runs; the admin tier reaches internal guests here by design;
+ * the menu-overlay SHEET stays refused for all tiers at resolve.js's separate, ungated
+ * `isSheetContents` gate (DD3), which this op never bypasses.
  *
  * @param {number} wcId
  * @param {{
@@ -611,9 +627,9 @@ async function openDevTools(wcId, deps) {
  */
 async function closeDevTools(wcId, deps) {
   const wc = resolveContents(wcId, deps);
-  if (isInternalContents(wc)) {
-    throw new Error('automation: closeDevTools — internal-session excluded');
-  }
+  // Flight-2 DD1/DD2 pivot: internal-session is a tier boundary enforced at resolve.js
+  // (non-admin refused there before this op runs; admin reaches internal guests here by
+  // design) — no op-local check remains.
   setDevTools(wc, false); // shared helper: wc.closeDevTools(); idempotent no-op when not open; void contract
 }
 

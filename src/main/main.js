@@ -1079,7 +1079,19 @@ async function startMcpServerInstance() {
       getChromeContents,
       // Jar-tier chrome-exclusion widening (DD8 / review L5): any registered
       // chrome is refused for jar identities, not just the accessor's chrome.
-      isChromeContents: (wc) => registry.isChromeContents(wc)
+      isChromeContents: (wc) => registry.isChromeContents(wc),
+      // F9 fix (M17 F2 L2): the vault path's scopeCtx never carried the sheet/
+      // membership predicates, so resolve.js's secret-sheet gate (typeof-gated)
+      // silently no-opped for vaultFill/vaultAnswerAuth — a vault tool could name
+      // the master-password secret sheet and reach it. Mirrors the general engine
+      // deps block above, EXACT accessors, not re-derived. isSheetContents +
+      // sheetMenuFor are pair-injected (same discipline as the engine site — see
+      // that block's comment): injecting one alone either leaves the sheet
+      // silently divergent or fail-opens a relaxation without the menuType half.
+      isSheetContents: (wc) => registry.isSheetContents(wc),
+      sheetMenuFor: (wc) => registry.sheetMenuFor(wc),
+      isTabViewWcId: (id) => registry.isTabViewWcId(id),
+      isPopupWcId: (id) => popupRegistry.isPopupWcId(id)
     },
     // Audit fan-out (Flight 4, Leg 3, DD8): every recorded tool call and every
     // session open/close broadcasts the new audit snapshot over the M02 channel.
@@ -1374,7 +1386,6 @@ let downloadsManager = null;
 
 const { wireDownloadHandler } = registerDownloadIpc({
   ipcMain,
-  webContents,
   registry,
   getTabContents,
   path,

@@ -23,6 +23,9 @@ const vs = require('../../src/main/vault/vault-store');
 const vc = require('../../src/main/vault/vault-crypto');
 const { createVaultContext } = require('../../src/main/vault/vault-context');
 const { deriveAuditDetail } = require('../../src/main/automation/mcp-server');
+const { maskComments, findMatchingBracket } = require('../helpers/source-scan');
+
+const SRC = path.join(__dirname, '..', '..', 'src');
 
 // Memory-cheap scrypt for fast round-trips (production params live in vault-crypto's suite).
 const FAST_SCRYPT = { algo: 'scrypt', N: 2 ** 12, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
@@ -87,8 +90,16 @@ async function buildFixture() {
   return { dir, adminPrivateKeyB64, workSecret: work.secret, personalSecret: personal.secret, setup };
 }
 
+// F9 fix (M17 F2 L2): the fake secret-sheet wcId — never a member of `tabs`, so
+// isTabViewWcId naturally refuses it too (mirrors the real sheet's shape: a
+// chrome-owned overlay contents, not a tab).
+const SHEET_WCID = 900;
+
 // A fake browser world: sessions interned by partition (REAL object identity), a
-// fromId returning a wc with { session, getURL }, and fromPartition.
+// fromId returning a wc with { session, getURL }, and fromPartition. Also carries
+// a fake secret-sheet wc + the isSheetContents/sheetMenuFor/isTabViewWcId
+// predicates the vault scopeCtx now threads (F9 fix), so this harness exercises
+// the guarded resolveTarget path instead of the old predicate-free one.
 function makeWorld() {
   const sessions = new Map();
   const sessionFor = (p) => {
@@ -101,7 +112,7 @@ function makeWorld() {
     { wcId: 30, partition: 'persist:container:work', url: 'https://evil.example/phish' } // work session, WRONG origin
   ];
   const byWcId = new Map(tabs.map((t) => [t.wcId, t]));
-  const fromId = (wcId) => {
+  const fromTab = (wcId) => {
     const t = byWcId.get(wcId);
     if (!t) return null;
     return {
@@ -113,7 +124,21 @@ function makeWorld() {
       }
     };
   };
-  return { fromId, fromPartition: sessionFor };
+  const sheetWc = {
+    id: SHEET_WCID,
+    session: { __goldfinchInternal: false },
+    getURL: () => 'file://sheet',
+    isDestroyed() {
+      return false;
+    }
+  };
+  const isSheetContents = (wc) => wc === sheetWc;
+  // Menu is currently open on an allowlisted menuType, deliberately — the vault
+  // path never opts in with allowSheet, so this stays refused regardless; the
+  // point is proving the refusal is isSheetContents, not a menuType accident.
+  const sheetMenuFor = (wc) => (wc === sheetWc ? { menuType: 'vault-unlock', token: 1 } : null);
+  const fromId = (wcId) => (wcId === SHEET_WCID ? sheetWc : fromTab(wcId));
+  return { fromId, fromPartition: sessionFor, byWcId, sheetWc, isSheetContents, sheetMenuFor };
 }
 
 function fillDeps(world) {
@@ -121,7 +146,16 @@ function fillDeps(world) {
     jars: { list: () => JARS },
     fromId: world.fromId,
     fromPartition: world.fromPartition,
-    getChromeContents: () => ({ id: 0 })
+    getChromeContents: () => ({ id: 0 }),
+    // F9 fix (M17 F2 L2): the same predicates main.js's vault scopeCtx now
+    // injects. isTabViewWcId is REQUIRED here — threading it into the jar
+    // branch newly activates resolve.js's non-tab-contents guard for jar
+    // identity, and every legitimate in-jar tab test in this file resolves
+    // through fillDeps(); without this fake they would break with
+    // `automation: non-tab-contents` (leg AC3 regression note).
+    isSheetContents: world.isSheetContents,
+    sheetMenuFor: world.sheetMenuFor,
+    isTabViewWcId: (id) => world.byWcId.has(id)
   };
 }
 
@@ -515,6 +549,169 @@ test('list/totp/fill BEFORE unlock are normal empty/locked results (empty ctx)',
   } finally {
     rm(fx.dir);
   }
+});
+
+// ---------------------------------------------------------------------------
+// F9 fix (M17 F2 L2, flight DD3): the vault master-password SECRET SHEET must
+// be refused by vaultFill/vaultAnswerAuth at resolve time, at EVERY tier
+// (admin included) — not merely by the later origin-match residual. Before
+// this leg the vault scopeCtx never threaded isSheetContents/sheetMenuFor,
+// so resolve.js's guard 3 was typeof-gated and silently no-opped for every
+// vault tool.
+// ---------------------------------------------------------------------------
+
+test('vaultFill on the secret sheet is refused with automation: secret-sheet — ADMIN identity', async () => {
+  const fx = await buildFixture();
+  try {
+    const store = makeStore(fx.dir);
+    const fill = makeFill();
+    const world = makeWorld();
+    const ctx = createVaultContext({ vaultStore: store, fillDelegate: fill.fn });
+    ctx.unlock('admin', fx.adminPrivateKeyB64);
+    assert.throws(
+      () => ctx.fill('admin', { wcId: SHEET_WCID, itemId: 'g1' }, fillDeps(world)),
+      /automation: secret-sheet/,
+      'admin allowInternal must not lift the sheet gate — that is the whole point of DD3'
+    );
+    assert.equal(fill.calls.length, 0, 'the fill delegate must never be reached');
+  } finally {
+    rm(fx.dir);
+  }
+});
+
+test('vaultFill on the secret sheet is refused with automation: secret-sheet — JAR identity', async () => {
+  const fx = await buildFixture();
+  try {
+    const store = makeStore(fx.dir);
+    const fill = makeFill();
+    const world = makeWorld();
+    const ctx = createVaultContext({ vaultStore: store, fillDelegate: fill.fn });
+    ctx.unlock('work', fx.workSecret);
+    assert.throws(
+      () => ctx.fill('work', { wcId: SHEET_WCID, itemId: 'w1' }, fillDeps(world)),
+      /automation: secret-sheet/,
+      'a jar key must be refused the same as admin — the sheet is refused at EVERY tier (DD3)'
+    );
+    assert.equal(fill.calls.length, 0, 'the fill delegate must never be reached');
+  } finally {
+    rm(fx.dir);
+  }
+});
+
+test('vaultAnswerAuth on the secret sheet is refused with automation: secret-sheet — ADMIN identity', async () => {
+  const fx = await buildFixture();
+  try {
+    const store = makeStore(fx.dir);
+    const world = makeWorld();
+    const answered = [];
+    const ctx = createVaultContext({
+      vaultStore: store,
+      fillDelegate: makeFill().fn,
+      answerAuthDelegate: (arg) => {
+        answered.push(arg);
+        return { answered: true };
+      },
+      getPendingChallenge: () => ({ wcId: SHEET_WCID, host: 'x', port: null, realm: 'r', url: 'file://sheet' })
+    });
+    ctx.unlock('admin', fx.adminPrivateKeyB64);
+    assert.throws(
+      () => ctx.answerAuth('admin', { wcId: SHEET_WCID, itemId: 'g1' }, fillDeps(world)),
+      /automation: secret-sheet/,
+      'admin allowInternal must not lift the sheet gate'
+    );
+    assert.equal(answered.length, 0, 'the answer delegate must never be reached');
+  } finally {
+    rm(fx.dir);
+  }
+});
+
+test('vaultAnswerAuth on the secret sheet is refused with automation: secret-sheet — JAR identity', async () => {
+  const fx = await buildFixture();
+  try {
+    const store = makeStore(fx.dir);
+    const world = makeWorld();
+    const answered = [];
+    const ctx = createVaultContext({
+      vaultStore: store,
+      fillDelegate: makeFill().fn,
+      answerAuthDelegate: (arg) => {
+        answered.push(arg);
+        return { answered: true };
+      },
+      getPendingChallenge: () => ({ wcId: SHEET_WCID, host: 'x', port: null, realm: 'r', url: 'file://sheet' })
+    });
+    ctx.unlock('work', fx.workSecret);
+    assert.throws(
+      () => ctx.answerAuth('work', { wcId: SHEET_WCID, itemId: 'w1' }, fillDeps(world)),
+      /automation: secret-sheet/,
+      'the sheet is refused at every tier (DD3)'
+    );
+    assert.equal(answered.length, 0, 'the answer delegate must never be reached');
+  } finally {
+    rm(fx.dir);
+  }
+});
+
+test('vaultFill/vaultAnswerAuth on a normal in-jar tab still succeed — no regression from threading the sheet/tab predicates (AC3)', async () => {
+  const fx = await buildFixture();
+  try {
+    const store = makeStore(fx.dir);
+    const fill = makeFill();
+    const world = makeWorld();
+    const ctx = createVaultContext({
+      vaultStore: store,
+      fillDelegate: fill.fn,
+      answerAuthDelegate: () => ({ answered: true }),
+      getPendingChallenge: (wcId) =>
+        wcId === 10
+          ? { wcId: 10, host: 'work.example', port: 443, realm: 'r', url: 'https://work.example/protected' }
+          : null
+    });
+    ctx.unlock('work', fx.workSecret);
+    const filled = ctx.fill('work', { wcId: 10, itemId: 'w1' }, fillDeps(world));
+    assert.deepEqual(filled, { filled: true, id: 'w1', origin: 'https://work.example' });
+    const answered = ctx.answerAuth('work', { wcId: 10, itemId: 'w1' }, fillDeps(world));
+    assert.deepEqual(answered, { answered: true, id: 'w1', origin: 'https://work.example' });
+  } finally {
+    rm(fx.dir);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// AC4 source-pin — the vault scopeCtx block in main.js must carry
+// isSheetContents + sheetMenuFor as a PAIR. The existing pair-pin in
+// sheet-automation-gate-invariant.test.js:234-249 is keyed to `createEngine(`
+// call sites and does not reach the `scopeCtx:` literal — a scopeCtx that
+// injected isSheetContents alone (fail-closed on the sheet, but silently
+// divergent from the engine sites' pair discipline) would not trip it.
+// ---------------------------------------------------------------------------
+
+test('AC4: the vault scopeCtx block in main.js carries isSheetContents + sheetMenuFor as a PAIR', () => {
+  const masked = maskComments(fs.readFileSync(path.join(SRC, 'main', 'main.js'), 'utf8'));
+
+  const scopeCtxHead = masked.indexOf('scopeCtx:');
+  assert.notEqual(scopeCtxHead, -1, 'main.js must still define a vault scopeCtx block');
+  const braceOpen = masked.indexOf('{', scopeCtxHead);
+  const braceClose = findMatchingBracket(masked, braceOpen, '{', '}');
+  const block = masked.slice(braceOpen, braceClose + 1);
+
+  assert.ok(
+    /isSheetContents:\s*\(\w+\)\s*=>\s*registry\.isSheetContents\(\w+\)/.test(block),
+    'vault scopeCtx must inject isSheetContents — absent, resolve.js guard 3 silently no-ops for every vault tool'
+  );
+  assert.ok(
+    /sheetMenuFor:\s*\(\w+\)\s*=>\s*registry\.sheetMenuFor\(\w+\)/.test(block),
+    'sheetMenuFor MUST ride alongside isSheetContents — injecting one alone is either a silent ' +
+      'divergence from the engine sites or a fail-open relaxation without the menuType half'
+  );
+  assert.ok(
+    /isTabViewWcId:\s*\(\w+\)\s*=>\s*registry\.isTabViewWcId\(\w+\)/.test(block),
+    'vault scopeCtx must also thread isTabViewWcId (find-overlay / overlay membership)'
+  );
+  assert.ok(
+    /isPopupWcId:\s*\(\w+\)\s*=>\s*popupRegistry\.isPopupWcId\(\w+\)/.test(block),
+    'vault scopeCtx must also thread isPopupWcId'
+  );
 });
 
 // ---------------------------------------------------------------------------

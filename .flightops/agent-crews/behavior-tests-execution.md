@@ -344,10 +344,14 @@ instructions beyond run-specific keys/ports.
   (Checkpoint 5 / Raw state) and
   `tests/behavior/welcome-home-routing/runs/2026-08-26-02-29-57.md`
   (Checkpoint 5).
-- **`evaluate` on internal guests**: refused outright on an internal
-  guest's own wcId (e.g. Settings) — "internal-session excluded" —
-  screenshot + a11y are the only readable apparatus there; judge internal-
-  guest DOM state from rendered pixels/a11y, never `evaluate` — see
+- **`evaluate`/`readDom` on internal guests**: work under the **admin**
+  tier (flight-2 DD1/DD2 pivot) — an internal guest's own wcId (e.g.
+  Settings) is reachable by `evaluate`, `injectScript`, `readDom`,
+  `openDevTools`/`closeDevTools` when the session is admin-authenticated.
+  Non-admin (jar) keys are still refused outright — "internal-session
+  excluded" — so screenshot + a11y remain the only readable apparatus
+  under a jar-scoped session. The master-password secret sheet stays
+  unreadable to any tier (never resolves, admin included) — see
   `tests/behavior/welcome-first-launch/runs/2026-08-25-20-20-29.md`
   (Orchestrator Notes).
 - **Re-activating a viewless welcome tab**: has no wcId, so `activateTab`
