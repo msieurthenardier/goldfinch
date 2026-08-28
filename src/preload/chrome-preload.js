@@ -288,6 +288,11 @@ contextBridge.exposeInMainWorld('goldfinch', {
   onTabMovedAway: (cb) => ipcRenderer.on('tab-moved-away', (_e, d) => cb(d)),
   tabHide: (wcId) => ipcRenderer.send('tab-hide', wcId),
   tabNavigate: (payload) => ipcRenderer.send('tab-navigate', payload),
+  // F6 focus-entry gesture (M17 F1 L1, DD2/DD4): no wcId argument — main
+  // resolves the sender window's OWN active tab (tab-focus-guest, register-
+  // tab-ipc.js). Resolves true/false so the caller knows whether OS focus
+  // actually moved (there was an active tab to grant it to).
+  focusActiveGuest: () => ipcRenderer.invoke('tab-focus-guest'),
   tabSetActive: (wcId, bounds) => ipcRenderer.send('tab-set-active', { wcId, bounds }),
   tabSetBounds: (wcId, bounds) => ipcRenderer.send('tab-set-bounds', { wcId, bounds }),
   tabFind: (payload) => ipcRenderer.send('tab-find', payload),
@@ -321,6 +326,12 @@ contextBridge.exposeInMainWorld('goldfinch', {
   // DD13: chrome-class accelerators forwarded from the sheet's before-input-event —
   // {action}; handled by the extracted dispatchChromeAction (same bodies as keydown).
   onChromeShortcutAction: (cb) => ipcRenderer.on('chrome-shortcut-action', (_e, d) => cb(d)),
+  // Guest tab-boundary signal (M17 F1 L1, DD2/DD4) — {direction: 'forward' | 'backward'};
+  // forwarded from register-browser-ipc.js's guest-tab-boundary handler. The
+  // chrome subscriber (shortcut-controller.js) focuses #address (forward) or
+  // its own last visible tabbable (backward). The onXxx bridge pattern, cloned
+  // from onChromeShortcutAction above.
+  onTabBoundary: (cb) => ipcRenderer.on('tab-boundary', (_e, d) => cb(d)),
 
   // --- find overlay (M05 Flight 7) ---
   // The find bar is a main-owned chrome-class WebContentsView floating over the

@@ -1,0 +1,18 @@
+<!--
+  keyboard-nav fixture (M17 Flight 1 Leg 1 — chrome-guest-keyboard-nav behavior
+  spec, row 10). Text only, zero focusable elements — proves tabBoundary's
+  count===0 edge case (F6 still moves OS focus to the guest; the guest's
+  activeElement lands on BODY; an immediate Tab hands off to the chrome). No
+  scripts.
+-->
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>keyboard-nav: empty</title>
+  </head>
+  <body>
+    <h1>keyboard-nav fixture — empty</h1>
+    <p>No focusable elements on this page.</p>
+  </body>
+</html>

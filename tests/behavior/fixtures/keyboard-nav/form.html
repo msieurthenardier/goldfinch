@@ -1,0 +1,21 @@
+<!--
+  keyboard-nav fixture (M17 Flight 1 Leg 1 — chrome-guest-keyboard-nav behavior
+  spec, row 2 onward). Three text inputs (#f1 #f2 #f3) and a button (#b1), in
+  that DOM order — the spec's F6-enters-first-tabbable / Tab-traverses-in-order
+  / Tab-past-the-last-hands-off rows walk exactly this sequence. No scripts.
+-->
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>keyboard-nav: form</title>
+  </head>
+  <body>
+    <h1>keyboard-nav fixture — form</h1>
+    <p>Three text inputs, then a button, in DOM order.</p>
+    <input id="f1" type="text" aria-label="first field" />
+    <input id="f2" type="text" aria-label="second field" />
+    <input id="f3" type="text" aria-label="third field" />
+    <button id="b1" type="button">last</button>
+  </body>
+</html>

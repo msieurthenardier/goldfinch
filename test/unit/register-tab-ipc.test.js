@@ -330,6 +330,8 @@ test('registers the complete tab/move channel set exactly once', () => {
       'move-targets',
       'tab-adopt-by-drop',
       'tab-create',
+      // M17 F1 L1 (DD2/DD4): the F6 chrome→content focus-entry gesture's handle.
+      'tab-focus-guest',
       'tab-history-snapshot',
       'tab-move-to-new-window',
       'tab-move-to-window',
@@ -354,6 +356,77 @@ test('registers the complete tab/move channel set exactly once', () => {
       'tab-set-active',
       'tab-set-bounds'
     ].sort()
+  );
+});
+
+// ---------------------------------------------------------------------------
+// tab-focus-guest (M17 Flight 1 Leg 1, DD2/DD4/AC4): the F6 focus-entry
+// bridge. Sender-validated, no wcId payload — focuses ONLY the sender
+// window's OWN active tab.
+// ---------------------------------------------------------------------------
+
+test("tab-focus-guest: focuses the sender window's active tab guest", async () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  const view = h.addTab(record, 101);
+  record.activeTabWcId = 101;
+  const ok = await h.ipcMain.invoke('tab-focus-guest', record.chromeView.webContents);
+  assert.equal(ok, true);
+  assert.deepEqual(
+    h.log.filter((e) => e[0] === 'focus-wc'),
+    [['focus-wc', 101]]
+  );
+  assert.equal(view.webContents.id, 101);
+});
+
+test('tab-focus-guest: no active tab on the sender window refuses (no focus call)', async () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  h.addTab(record, 101);
+  record.activeTabWcId = null;
+  const ok = await h.ipcMain.invoke('tab-focus-guest', record.chromeView.webContents);
+  assert.equal(ok, false);
+  assert.deepEqual(
+    h.log.filter((e) => e[0] === 'focus-wc'),
+    []
+  );
+});
+
+test('tab-focus-guest: activeTabWcId pointing at an unknown/stale tab refuses', async () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  record.activeTabWcId = 999; // no matching tabViews entry
+  const ok = await h.ipcMain.invoke('tab-focus-guest', record.chromeView.webContents);
+  assert.equal(ok, false);
+});
+
+test('tab-focus-guest: a non-chrome sender is refused', async () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  h.addTab(record, 101);
+  record.activeTabWcId = 101;
+  const ok = await h.ipcMain.invoke('tab-focus-guest', {}); // no chrome record owns this sender
+  assert.equal(ok, false);
+  assert.deepEqual(
+    h.log.filter((e) => e[0] === 'focus-wc'),
+    []
+  );
+});
+
+test("tab-focus-guest: window A's active tab is unaffected by window B — never cross-window", async () => {
+  const h = setup();
+  const a = h.makeRecord(1);
+  const b = h.makeRecord(2);
+  h.addTab(a, 101);
+  h.addTab(b, 201);
+  a.activeTabWcId = 101;
+  b.activeTabWcId = 201;
+  const ok = await h.ipcMain.invoke('tab-focus-guest', b.chromeView.webContents);
+  assert.equal(ok, true);
+  assert.deepEqual(
+    h.log.filter((e) => e[0] === 'focus-wc'),
+    [['focus-wc', 201]],
+    "only window B's own active tab (201) is focused, never window A's (101)"
   );
 });
 

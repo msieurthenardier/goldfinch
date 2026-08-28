@@ -1,0 +1,19 @@
+<!--
+  keyboard-nav fixture (M17 Flight 1 Leg 1 — chrome-guest-keyboard-nav behavior
+  spec, row 12, the iframe documentation row). One input (#top), then an
+  <iframe id="fr"> pointing at iframe-inner.html (one input, #inner) — the
+  fixture that documents how tabBoundary treats an iframe as ONE opaque
+  tabbable in the top document. No scripts.
+-->
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>keyboard-nav: iframe</title>
+  </head>
+  <body>
+    <h1>keyboard-nav fixture — iframe</h1>
+    <input id="top" type="text" aria-label="top field" />
+    <iframe id="fr" src="iframe-inner.html" title="inner frame"></iframe>
+  </body>
+</html>

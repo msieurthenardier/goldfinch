@@ -102,7 +102,12 @@ function setup() {
     authChallenges: { cancelForTab: (wcId, reason) => calls.push(['auth-cancel', wcId, reason]) },
     crossViewNavAction: (input) => {
       calls.push('classify-cross-view');
-      return input.key === 'l' ? 'focus-address' : null;
+      if (input.key === 'l') return 'focus-address';
+      // M17 F1 L2 (DD6): a shape closer to the real crossViewNavAction, so
+      // the handleCrossView tests below can pin the send payload PER ACTION
+      // rather than only ever observing the same hardcoded string.
+      if (input.key === 'F6') return input.shift ? 'focus-chrome-end' : 'focus-address';
+      return null;
     },
     keydownToAction: (input) => {
       calls.push('classify-chrome');
@@ -374,6 +379,40 @@ test('cross-view shortcut classification runs before generalized forwarding for 
   internal.emit('before-input-event', internalEvent, { type: 'keyDown', key: 't', control: true });
   assert.deepEqual(h.calls, ['classify-cross-view', 'classify-chrome']);
   assert.deepEqual(h.sends.at(-1), ['chrome-shortcut-action', { action: 'new-tab' }]);
+});
+
+// ---------------------------------------------------------------------------
+// M17 F1 L2 (DD6): handleCrossView forwards the COMPUTED action — a design-
+// review fix (it used to hardcode 'focus-address', which would have made
+// Shift+F6's 'focus-chrome-end' silently behave like plain F6).
+// ---------------------------------------------------------------------------
+
+test('handleCrossView forwards the computed action — send payload differs for F6 vs Shift+F6 (DD6)', () => {
+  const h = setup();
+  const web = new FakeContents(50, false);
+  h.wiring.wireGuestContents(web);
+
+  const f6 = inputEvent();
+  web.emit('before-input-event', f6, { type: 'keyDown', key: 'F6' });
+  assert.equal(f6.prevented, true);
+  assert.deepEqual(h.sends.at(-1), ['chrome-shortcut-action', { action: 'focus-address' }]);
+
+  const shiftF6 = inputEvent();
+  web.emit('before-input-event', shiftF6, { type: 'keyDown', key: 'F6', shift: true });
+  assert.equal(shiftF6.prevented, true);
+  assert.deepEqual(h.sends.at(-1), ['chrome-shortcut-action', { action: 'focus-chrome-end' }]);
+});
+
+test('handleCrossView suppresses the focus-then-send pair on auto-repeat but still preventDefaults', () => {
+  const h = setup();
+  const web = new FakeContents(51, false);
+  h.wiring.wireGuestContents(web);
+
+  const event = inputEvent();
+  web.emit('before-input-event', event, { type: 'keyDown', key: 'F6', isAutoRepeat: true });
+  assert.equal(event.prevented, true, 'the key is still swallowed on repeat');
+  assert.deepEqual(h.sends, [], 'no repeated send on auto-repeat');
+  assert.equal(h.calls.includes('focus-chrome'), false, 'no repeated chrome.focus() either');
 });
 
 // M14 F1 L1 (DD1): enter/leave-html-full-screen route to the injected module —

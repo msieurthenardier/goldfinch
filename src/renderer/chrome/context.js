@@ -21,6 +21,7 @@ const IDS = {
   mediaEmpty: 'media-empty',
   mediaStatus: 'media-status',
   tabStatus: 'tab-status',
+  suggestStatus: 'suggest-status',
   mediaClose: 'media-close',
   mediaRescan: 'media-rescan',
   mediaDownloadSelected: 'media-download-selected',

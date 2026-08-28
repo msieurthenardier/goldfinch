@@ -9,7 +9,8 @@ export default [
       'build/**',
       'tests/behavior/fixtures/**',
       'eslint.config.mjs',
-      'src/preload/webview-preload.bundle.js'
+      'src/preload/webview-preload.bundle.js',
+      'src/preload/internal-preload.bundle.js'
     ]
   }, // standalone — ONLY the ignores key
   js.configs.recommended,

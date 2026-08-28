@@ -1,15 +1,23 @@
 #!/usr/bin/env node
-// Bundles the web-guest preload into a single sandbox-loadable CJS file
-// (flight/02 leg 1 — preload-bundling-infra). A sandboxed Electron preload's
-// restricted module loader cannot resolve the two relative require()s in
-// webview-preload.js (./vault-fill-fields, ./vault-fill-icon) — this step
-// inlines them ahead of time so leg 2 can flip `sandbox: true` on the web
-// guest without touching the preload's require graph.
+// Bundles the two sandboxed guest preloads into single sandbox-loadable CJS
+// files (flight/02 leg 1 — preload-bundling-infra; extended M17 F1 L1, DD5).
 //
-// The two leaf sources (vault-fill-fields.js, vault-fill-icon.js) stay in
-// place on disk — three unit tests require them directly. This bundle is an
-// ADDITIONAL, generated, gitignored artifact; it is never committed and is
-// regenerated at every launch/test/build entry point (see flight DD2).
+// A sandboxed Electron preload's restricted module loader cannot resolve
+// relative require()s:
+//   - webview-preload.js (web branch): ./vault-fill-fields, ./vault-fill-icon,
+//     ./vault-card-fields, ./guest-bookmark-drop, and (M17 F1 L1) ../shared/
+//     tab-boundary.
+//   - internal-preload.js (trusted/internal branch, sandboxed since its
+//     construction — register-tab-ipc.js's trusted branch): previously had
+//     zero relative requires, so it never needed bundling; M17 F1 L1 gives it
+//     one (../shared/tab-boundary, the guest tab-exhaustion signal shared by
+//     both guest preloads), so it now needs the same treatment.
+//
+// This step inlines each preload's require graph ahead of time. The leaf
+// sources stay in place on disk — unit tests require them directly. Both
+// bundles are ADDITIONAL, generated, gitignored artifacts; neither is ever
+// committed and both are regenerated at every launch/test/build entry point
+// (see flight DD2/DD5).
 
 import { build } from 'esbuild';
 import path from 'node:path';
@@ -18,10 +26,18 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.join(__dirname, '..');
 
-const entryPoint = path.join(repoRoot, 'src', 'preload', 'webview-preload.js');
-const outfile = path.join(repoRoot, 'src', 'preload', 'webview-preload.bundle.js');
+const webEntryPoint = path.join(repoRoot, 'src', 'preload', 'webview-preload.js');
+const webOutfile = path.join(repoRoot, 'src', 'preload', 'webview-preload.bundle.js');
 
-export async function buildPreloadBundle() {
+const internalEntryPoint = path.join(repoRoot, 'src', 'preload', 'internal-preload.js');
+const internalOutfile = path.join(repoRoot, 'src', 'preload', 'internal-preload.bundle.js');
+
+/**
+ * @param {string} entryPoint
+ * @param {string} outfile
+ * @param {string} sourceBasename  for the GENERATED banner comment only
+ */
+async function bundleOne(entryPoint, outfile, sourceBasename) {
   await build({
     entryPoints: [entryPoint],
     outfile,
@@ -32,10 +48,18 @@ export async function buildPreloadBundle() {
     minify: false,
     logLevel: 'silent',
     banner: {
-      js: '/* GENERATED — do not edit; source: webview-preload.js. Regenerate: npm run build:preload */'
+      js: `/* GENERATED — do not edit; source: ${sourceBasename}. Regenerate: npm run build:preload */`
     }
   });
   return outfile;
+}
+
+export async function buildPreloadBundle() {
+  const [web, internal] = await Promise.all([
+    bundleOne(webEntryPoint, webOutfile, 'webview-preload.js'),
+    bundleOne(internalEntryPoint, internalOutfile, 'internal-preload.js')
+  ]);
+  return { web, internal };
 }
 
 // Allow both `node scripts/build-preload.mjs` (npm script / hooks) and

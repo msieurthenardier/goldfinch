@@ -308,6 +308,9 @@ interface GoldfinchBridge {
   onMenuOverlayClosed(cb: (d: { menuType: string; reason: string; token: number }) => void): void;
   /** DD13: chrome-class accelerators forwarded from the sheet's before-input-event. */
   onChromeShortcutAction(cb: (d: { action: string }) => void): void;
+  /** M17 F1 L1 (DD2/DD4): the guest tab-boundary signal — forward Tab on the last
+   * tabbable / Shift+Tab on the first. */
+  onTabBoundary(cb: (d: { direction: 'forward' | 'backward' }) => void): void;
 
   // The internal `goldfinch://` partition string (single source of truth).
   internalPartition: string;
@@ -457,6 +460,9 @@ interface GoldfinchBridge {
   tabHide(wcId: number): void;
   /** Navigate, reload, stop, goBack, goForward on a web tab view (fire-and-forget). */
   tabNavigate(payload: { wcId: number; verb: string; args?: any[] }): void;
+  /** M17 F1 L1 (DD2/DD4): the F6 focus-entry gesture — no wcId argument, main
+   * resolves the sender window's OWN active tab. Resolves whether OS focus moved. */
+  focusActiveGuest(): Promise<boolean>;
   /** Atomic activation: set-bounds + show incoming, hide outgoing (fire-and-forget). */
   tabSetActive(wcId: number, bounds: { x: number; y: number; width: number; height: number }): void;
   /** Update bounds of a web tab view (fire-and-forget). */

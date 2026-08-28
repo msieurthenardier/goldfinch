@@ -1541,7 +1541,11 @@ const { rerollSeed } = registerBrowserIpc({
 registerTabIpc({
   ipcMain,
   WebContentsView,
-  internalPreloadPath: path.join(__dirname, '..', 'preload', 'internal-preload.js'),
+  // M17 F1 L1 (DD5): the trusted/internal branch now loads its BUNDLE too — the
+  // guest tab-boundary signal gives internal-preload.js its first relative
+  // require (../shared/tab-boundary), which a sandboxed preload's restricted
+  // loader cannot resolve unbundled (see scripts/build-preload.mjs).
+  internalPreloadPath: path.join(__dirname, '..', 'preload', 'internal-preload.bundle.js'),
   webPreloadPath: path.join(__dirname, '..', 'preload', 'webview-preload.bundle.js'),
   INTERNAL_PARTITION,
   registry,

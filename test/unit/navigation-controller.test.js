@@ -10,6 +10,12 @@ const { pathToFileURL } = require('node:url');
 // pending-query cap, and (HAT item 5) the shared domain-normalize rule are
 // exercised against the actual functions, not hand-rolled stand-ins.
 const { buildSearchUrl, capPendingQuery, normalizeHomePageInput } = require('../../src/shared/search-engines');
+// M17 F1 L3 (DD12/AC2): the real moveSelection (clamp incl. -1) and
+// suggestionAnnouncement (the #suggest-status text) — same require(esm)
+// precedent as the search-engines import above, so the controller's
+// keyboard-selection and live-region wiring is exercised against actual
+// pure-module behavior, not a hand-rolled stand-in.
+const { moveSelection, suggestionAnnouncement } = require('../../src/shared/omnibox-suggest-model');
 
 const moduleUrl = pathToFileURL(path.join(__dirname, '../../src/renderer/chrome/navigation-controller.js')).href;
 
@@ -69,7 +75,8 @@ function harness() {
     'zoomOut',
     'zoomIn',
     'zoomReset',
-    'lightbox'
+    'lightbox',
+    'suggestStatus'
   ];
   const els = Object.fromEntries(names.map((name) => [name, new El()]));
   els.lightbox.classList.add('hidden');
@@ -121,18 +128,29 @@ function harness() {
       },
       onOpenDownloads: (fn) => {
         callbacks.openDownloads = fn;
-      }
+      },
+      // M17 F1 L2 (DD7): the controller subscribes to onTabDidNavigate ITSELF
+      // and drives the Enter-focus-handoff one-shot through focusActiveGuest.
+      onTabDidNavigate: (fn) => {
+        callbacks.tabDidNavigate = fn;
+      },
+      focusActiveGuest: () => state.calls.push(['focusActiveGuest'])
     }
   };
   const document = { activeElement: els.address };
   const ctx = { activeTabId: null };
   const bookmarks = new Set();
+  // M17 F1 L2 (DD7): wcId -> tab record, for the findTabByWcId dep. Tests
+  // register a tab explicitly (tabController owns this resolution for real —
+  // the fake only needs to mirror the shape the controller consumes).
+  const tabsByWcId = new Map();
   const deps = {
     window,
     document,
     ctx,
     els,
     activeTab: () => state.active,
+    findTabByWcId: (wcId) => tabsByWcId.get(wcId) || null,
     isInternalTab: (tab) => !!tab?.internal,
     isWebTab: (tab) => !!tab && !tab.internal,
     createTab: (url) => state.calls.push(['create', url]),
@@ -161,7 +179,18 @@ function harness() {
     currentSearchEngine: () => state.searchEngine,
     isInternalPageUrl: (url) => url.startsWith('goldfinch://'),
     shouldQuery: ({ focused, isInternal, isBurner, value }) => focused && !isInternal && !isBurner && !!value.trim(),
-    buildSuggestionModel: (items, selectedIndex) => ({ items, selectedIndex }),
+    // Minimal stand-in for items/selectedIndex shape (full mapping —
+    // primary/secondary/kind derivation — is unit-pinned separately in
+    // omnibox-suggest-model.test.js); the announcement itself is composed by
+    // the REAL suggestionAnnouncement (M17 F1 L3 / AC2) so paint/clear
+    // wiring is exercised against actual pure-module text, not a
+    // hand-rolled stand-in that could drift from production composition.
+    buildSuggestionModel: (items, selectedIndex) => {
+      const model = { items, selectedIndex };
+      const mapped = items.map((it) => ({ primary: it.title || it.url, secondary: '', kind: it.kind }));
+      model.announcement = suggestionAnnouncement({ items: mapped, selectedIndex });
+      return model;
+    },
     // Minimal stand-in (bookmark rows first, then history — full dedupe/cap
     // semantics are unit-pinned separately in omnibox-suggest-model.test.js;
     // this harness only needs to observe that the controller calls through
@@ -170,7 +199,7 @@ function harness() {
       ...bookmarkRows.map((r) => ({ ...r, kind: 'bookmark' })),
       ...historyRows.map((r) => ({ ...r, kind: 'history' }))
     ],
-    moveSelection: (index, delta, length) => (length ? Math.max(0, Math.min(length - 1, index + delta)) : -1),
+    moveSelection,
     acceptSuggestResponse: ({ requestSeq, currentSeq, gateNow }) => requestSeq === currentSeq && gateNow,
     suggestionsState: () => state.suggestions,
     closeOverlayMenu: () => {
@@ -189,6 +218,7 @@ function harness() {
     ctx,
     callbacks,
     bookmarks,
+    tabsByWcId,
     resolveSuggest: (value) => suggestResolve(value),
     rejectSuggest: (err) => suggestReject(err),
     resolveBookmarksSuggest: (value) => bookmarksSuggestResolve(value),
@@ -352,6 +382,158 @@ test('a real URL typed on a welcome record still attaches (unaffected by the sea
   assert.deepEqual(h.state.calls.pop(), ['attachView', 'w', 'https://example.com']);
 });
 
+// ---------------------------------------------------------------------------
+// M17 F1 L2 (DD7): Enter in the address bar focuses the page once the
+// navigation commits — a one-shot keyed by the logical tab id, armed by the
+// Enter keydown handler (both branches), resolved by a matching
+// tab-did-navigate (via the new findTabByWcId dep), and cleared on tab
+// switch. The harness's fake `document.activeElement` defaults to
+// `els.address` (the "input bar has focus" baseline the suggestion tests
+// rely on) — each positive case below sets it to a non-address value first,
+// modeling the real blur() actually moving OS focus off the input.
+// ---------------------------------------------------------------------------
+
+function pressEnter(h) {
+  h.els.address.listeners.get('keydown')({ key: 'Enter', preventDefault() {} });
+}
+
+test('DD7: Enter arms a one-shot; a matching tab-did-navigate fires focusActiveGuest exactly once', async () => {
+  const h = harness();
+  await create(h);
+  const tab = { id: 'a', internal: false, wcId: 9, container: { id: 'jar-a' } };
+  h.state.active = tab;
+  h.ctx.activeTabId = 'a';
+  h.tabsByWcId.set(9, tab);
+  h.els.address.value = 'https://example.test/';
+  pressEnter(h);
+  assert.equal(h.els.address.blurred, true);
+  assert.equal(
+    h.state.calls.some(([n]) => n === 'focusActiveGuest'),
+    false,
+    'not fired yet — only armed'
+  );
+
+  h.deps.document.activeElement = null; // the real blur() would have moved focus off #address
+  h.callbacks.tabDidNavigate({ wcId: 9, url: 'https://example.test/' });
+  assert.deepEqual(
+    h.state.calls.filter(([n]) => n === 'focusActiveGuest'),
+    [['focusActiveGuest']]
+  );
+
+  // One-shot: a SECOND tab-did-navigate for the same wcId does not fire again.
+  h.callbacks.tabDidNavigate({ wcId: 9, url: 'https://example.test/again' });
+  assert.equal(h.state.calls.filter(([n]) => n === 'focusActiveGuest').length, 1);
+});
+
+test('DD7: welcome-tab late-wcId — armed by tab id before the wcId exists, resolves once tab-did-navigate reports it', async () => {
+  const h = harness();
+  await create(h);
+  const tab = { id: 'w', wcId: null, welcome: { reasons: new Set(['home']), pendingQuery: null } };
+  h.state.active = tab;
+  h.ctx.activeTabId = 'w';
+  h.els.address.value = 'example.com';
+  pressEnter(h);
+  assert.deepEqual(h.state.calls.pop(), ['attachView', 'w', 'https://example.com']);
+
+  // The wcId arrives later (attachView's async continuation, out of this
+  // controller's scope) — findTabByWcId only needs to resolve it by then.
+  tab.wcId = 42;
+  h.tabsByWcId.set(42, tab);
+  h.deps.document.activeElement = null;
+  h.callbacks.tabDidNavigate({ wcId: 42, url: 'https://example.com' });
+  assert.deepEqual(
+    h.state.calls.filter(([n]) => n === 'focusActiveGuest'),
+    [['focusActiveGuest']]
+  );
+});
+
+test("DD7: a DIFFERENT tab's wcId does not trigger the armed tab's handoff", async () => {
+  const h = harness();
+  await create(h);
+  const armed = { id: 'a', internal: false, wcId: 9, container: { id: 'jar-a' } };
+  const other = { id: 'b', internal: false, wcId: 10, container: { id: 'jar-b' } };
+  h.state.active = armed;
+  h.ctx.activeTabId = 'a';
+  h.tabsByWcId.set(9, armed);
+  h.tabsByWcId.set(10, other);
+  h.els.address.value = 'https://example.test/';
+  pressEnter(h);
+
+  h.deps.document.activeElement = null;
+  h.callbacks.tabDidNavigate({ wcId: 10, url: 'https://other.test/' });
+  assert.equal(
+    h.state.calls.some(([n]) => n === 'focusActiveGuest'),
+    false
+  );
+});
+
+test('DD7: a re-focused address bar at commit time suppresses the handoff', async () => {
+  const h = harness();
+  await create(h);
+  const tab = { id: 'a', internal: false, wcId: 9, container: { id: 'jar-a' } };
+  h.state.active = tab;
+  h.ctx.activeTabId = 'a';
+  h.tabsByWcId.set(9, tab);
+  h.els.address.value = 'https://example.test/';
+  pressEnter(h);
+
+  // The operator clicked/Ctrl+L'd back into the address bar before commit —
+  // document.activeElement is back to els.address (the harness default).
+  h.callbacks.tabDidNavigate({ wcId: 9, url: 'https://example.test/' });
+  assert.equal(
+    h.state.calls.some(([n]) => n === 'focusActiveGuest'),
+    false
+  );
+});
+
+test('DD7: a tab switch clears the pending arm (resetSuggestionsForActivation, the activateTab precedent)', async () => {
+  const h = harness();
+  const controller = await create(h);
+  const tab = { id: 'a', internal: false, wcId: 9, container: { id: 'jar-a' } };
+  h.state.active = tab;
+  h.ctx.activeTabId = 'a';
+  h.tabsByWcId.set(9, tab);
+  h.els.address.value = 'https://example.test/';
+  pressEnter(h);
+
+  // tab-controller.js's activateTab calls resetSuggestionsForActivation on
+  // every activation, unconditionally — including switching straight back to
+  // the SAME tab.
+  controller.resetSuggestionsForActivation();
+  h.deps.document.activeElement = null;
+  h.callbacks.tabDidNavigate({ wcId: 9, url: 'https://example.test/' });
+  assert.equal(
+    h.state.calls.some(([n]) => n === 'focusActiveGuest'),
+    false
+  );
+});
+
+test('DD7: an in-page navigation never resolves the arm — the controller does not subscribe to that channel at all', async () => {
+  const h = harness();
+  await create(h);
+  assert.equal(
+    h.callbacks.tabDidNavigateInPage,
+    undefined,
+    'onTabDidNavigateInPage was never wired by this controller'
+  );
+});
+
+test('DD7: a search-query Enter arms harmlessly — handoffSearch never fires tab-did-navigate, so focusActiveGuest never runs', async () => {
+  const h = harness();
+  await create(h);
+  const tab = { id: 'web', internal: false, wcId: 9, container: { id: 'jar-a' } };
+  h.state.active = tab;
+  h.ctx.activeTabId = 'web';
+  h.state.searchEngine = null;
+  h.els.address.value = 'hello world';
+  pressEnter(h);
+  assert.ok(h.state.calls.some(([n]) => n === 'openWelcomeTab'));
+  assert.equal(
+    h.state.calls.some(([n]) => n === 'focusActiveGuest'),
+    false
+  );
+});
+
 test('suggestion responses are rejected after the tab controller invalidates on switch', async () => {
   const h = harness();
   const controller = await create(h);
@@ -477,6 +659,106 @@ test('DD11: an {ok:false} bookmarksSuggest response also degrades to [] (not jus
     model.items.map((i) => i.url),
     ['https://history.example/']
   );
+});
+
+// ---------------------------------------------------------------------------
+// M17 F1 L3 (DD12/AC2): the #suggest-status live region — announced on every
+// paint (fresh results, ArrowDown/ArrowUp), cleared on every chrome-initiated
+// close and the main-initiated close sink's non-'activated' reasons, kept
+// (items intact) on 'activated' until dispatchSuggestion's own reset.
+// ---------------------------------------------------------------------------
+
+async function paintTwoItems(h) {
+  h.state.active = { id: 'a', container: { id: 'jar-a' } };
+  h.ctx.activeTabId = 'a';
+  h.els.address.value = 'exa';
+  h.els.address.listeners.get('input')();
+  await new Promise((resolve) => setTimeout(resolve, 110));
+  h.resolveSuggest({
+    ok: true,
+    suggestions: [
+      { url: 'https://first.example/', title: 'First' },
+      { url: 'https://second.example/', title: 'Second' }
+    ]
+  });
+  h.resolveBookmarksSuggest({ ok: true, suggestions: [] });
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+test('AC2: the announcement is written to #suggest-status on a fresh result paint', async () => {
+  const h = harness();
+  await create(h);
+  await paintTwoItems(h);
+  assert.equal(h.els.suggestStatus.textContent, '2 suggestions');
+});
+
+test('AC2: ArrowDown/ArrowUp update the announcement, clamping back to the count at the top', async () => {
+  const h = harness();
+  await create(h);
+  await paintTwoItems(h);
+
+  h.els.address.listeners.get('keydown')({ key: 'ArrowDown', preventDefault() {} });
+  assert.equal(h.els.suggestStatus.textContent, 'First, 1 of 2');
+
+  h.els.address.listeners.get('keydown')({ key: 'ArrowDown', preventDefault() {} });
+  assert.equal(h.els.suggestStatus.textContent, 'Second, 2 of 2');
+
+  h.els.address.listeners.get('keydown')({ key: 'ArrowUp', preventDefault() {} });
+  h.els.address.listeners.get('keydown')({ key: 'ArrowUp', preventDefault() {} });
+  assert.equal(h.els.suggestStatus.textContent, '2 suggestions');
+});
+
+test('AC2: Escape clears the announcement', async () => {
+  const h = harness();
+  await create(h);
+  await paintTwoItems(h);
+  assert.notEqual(h.els.suggestStatus.textContent, '');
+  h.els.address.listeners.get('keydown')({ key: 'Escape', preventDefault() {} });
+  assert.equal(h.els.suggestStatus.textContent, '');
+});
+
+test("AC2: handleSuggestionsClosed('tab-switch') clears the announcement (main-initiated close sink)", async () => {
+  const h = harness();
+  const controller = await create(h);
+  await paintTwoItems(h);
+  assert.notEqual(h.els.suggestStatus.textContent, '');
+  controller.handleSuggestionsClosed('tab-switch');
+  assert.equal(h.els.suggestStatus.textContent, '');
+});
+
+test("AC2: handleSuggestionsClosed('blur') clears the announcement (main-initiated close sink)", async () => {
+  const h = harness();
+  const controller = await create(h);
+  await paintTwoItems(h);
+  assert.notEqual(h.els.suggestStatus.textContent, '');
+  controller.handleSuggestionsClosed('blur');
+  assert.equal(h.els.suggestStatus.textContent, '');
+});
+
+test("AC2: handleSuggestionsClosed('activated') keeps the announcement and items until dispatchSuggestion's own reset", async () => {
+  const h = harness();
+  const controller = await create(h);
+  await paintTwoItems(h);
+  const painted = h.els.suggestStatus.textContent;
+  assert.notEqual(painted, '');
+
+  controller.handleSuggestionsClosed('activated');
+  assert.equal(h.els.suggestStatus.textContent, painted, 'unchanged — items are kept for dispatchSuggestion');
+
+  h.state.active = { id: 'a', internal: false, wcId: 9 };
+  controller.dispatchSuggestion('sug:0');
+  assert.deepEqual(h.state.calls.pop(), ['navigate', { wcId: 9, verb: 'loadURL', args: ['https://first.example/'] }]);
+  assert.equal(h.els.suggestStatus.textContent, '', "dispatchSuggestion's own resetSuggestState clears it afterward");
+});
+
+test('AC2: resetSuggestionsForActivation (tab activation) clears the announcement', async () => {
+  const h = harness();
+  const controller = await create(h);
+  await paintTwoItems(h);
+  assert.notEqual(h.els.suggestStatus.textContent, '');
+  controller.resetSuggestionsForActivation();
+  assert.equal(h.els.suggestStatus.textContent, '');
 });
 
 test('zoom readback drops a result after TOCTOU tab switch and find restores saved text', async () => {

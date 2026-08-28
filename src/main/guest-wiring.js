@@ -111,7 +111,11 @@ function createGuestWiring(deps) {
     if (input.isAutoRepeat) return true;
     const chrome = chromeForTab(contents.id);
     chrome?.focus();
-    chrome?.send('chrome-shortcut-action', { action: 'focus-address' });
+    // M17 F1 L2 (DD6, design review): forward the COMPUTED action — this used
+    // to hardcode 'focus-address', which silently made Shift+F6's
+    // 'focus-chrome-end' behave like plain F6 (guest-wiring.test.js pins the
+    // send payload per action).
+    chrome?.send('chrome-shortcut-action', { action });
     return true;
   }
 

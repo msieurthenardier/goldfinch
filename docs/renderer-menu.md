@@ -58,7 +58,12 @@ has no in-document trigger buttons; opens are programmatic on `menu-overlay:init
 - **`suggestions` template** (address-bar suggestions, M08 Flight 4 Leg 2) — **no
   `items`**; a listbox fully model-replaced by the chrome on every keystroke, and
   `onOpen` moves no focus (the sheet's non-focusing regime) so keystrokes keep flowing
-  to the chrome's own `#address` field.
+  to the chrome's own `#address` field. The model carries an `announcement` string
+  (M17 F1 L3, DD12), mirrored into the chrome's own `#suggest-status` polite live
+  region on every paint and cleared on every close; `#address` stays a plain `textbox`
+  with no `aria-expanded` (DD11 — the attribute is invalid on that role, and a
+  `combobox` role can't be made valid either since the listbox lives in a separate
+  document).
 
 ## The `MenuEntry` shape
 

@@ -7,3 +7,4 @@ maintenance/
 tests/
 *.md
 src/preload/webview-preload.bundle.js
+src/preload/internal-preload.bundle.js

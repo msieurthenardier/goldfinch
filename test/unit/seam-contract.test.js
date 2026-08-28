@@ -151,7 +151,8 @@ const SEAM_COUNT = 34;
 // growing the file. The budget is set to the file's measured post-format
 // line count by this test's own metric (source.split(/\r?\n/).length) —
 // zero headroom, same zero-headroom policy the pre-format 1650 carried.
-const RENDERER_LINE_BUDGET = 1827;
+// +1 for the DD7 findTabByWcId dep (M17 F1 L2, 2026-08-28).
+const RENDERER_LINE_BUDGET = 1828;
 
 // Bookmarks-bar line budget (squawk 0025, M15 debrief finding F25): bar/
 // overflow rendering, measurement, and dispatch business logic lives in

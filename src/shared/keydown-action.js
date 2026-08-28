@@ -56,12 +56,28 @@
  *   | 'tab-jump-6' | 'tab-jump-7' | 'tab-jump-8' | 'tab-jump-last'
  *   | 'reopen-closed-tab'
  *   | 'bookmark-page' | 'toggle-bookmarks-bar'
+ *   | 'focus-content' | 'focus-chrome'
  *   | null}
  */
 export function keydownToAction({ key, ctrl, meta, shift, lightboxOpen, alt = false }) {
   // F12 (no modifier) — must be decided BEFORE the modifier gate, else it never
   // fires. Defers while a lightbox is open.
   if (key === 'F12') return lightboxOpen ? null : 'devtools';
+
+  // F6 / Shift+F6 (M17 F1 L1, DD1) — chrome↔content focus-cycling, the browser
+  // convention (Chromium's own binding); decided BEFORE the modifier gate,
+  // beside F12, for the same reason (an unmodified key never reaches the
+  // `mod = ctrl || meta` branch below). Shift disambiguates direction, same as
+  // the Tab-cycle chord further down: F6 → 'focus-content' (chrome → the
+  // active guest's first tabbable), Shift+F6 → 'focus-chrome' (content →
+  // chrome; a no-op in this leg — the chrome is already the target). NOT
+  // lightbox-gated (unlike F12/devtools/Ctrl+Shift+I) — the leg spec does not
+  // scope this to the lightbox, and moving OS focus is orthogonal to whatever
+  // the lightbox itself is doing. Gated on !ctrl/!meta/!alt (M17 F1 L2, DD6
+  // parity ruling) so Ctrl+F6 / Meta+F6 / Alt+F6 falls through as a no-op on
+  // BOTH sides of the boundary, matching the guest-side crossViewNavAction's
+  // identical gate.
+  if (key === 'F6' && !ctrl && !meta && !alt) return shift ? 'focus-chrome' : 'focus-content';
 
   const mod = ctrl || meta;
   if (!mod) return null;

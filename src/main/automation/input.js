@@ -31,7 +31,13 @@ const KEY_MAP = {
   Home: 'Home',
   End: 'End',
   Delete: 'Delete',
-  Backspace: 'Backspace'
+  Backspace: 'Backspace',
+  // M17 F1 L1 (DD1/6b): the chrome↔content focus-cycle key. The fallback
+  // regex below only matches a single printable char, so F6 needs its own
+  // entry (same shape as every other named key above) — without it,
+  // pressKey(C, 'F6') throws "automation: unknown key" and the behavior
+  // spec's F6 apparatus has nothing to drive.
+  F6: 'F6'
 };
 
 // Canonical Electron modifier vocabulary. Electron `^42` sendInputEvent accepts

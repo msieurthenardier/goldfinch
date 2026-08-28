@@ -1081,6 +1081,13 @@ a:focus-visible {
   width: 0;
   overflow: hidden;
   border-left: none;
+  /* M17 F1 L1 (DD4): width:0 + overflow:hidden alone leaves this panel's
+     buttons phantom-focusable — getClientRects() still returns rects for a
+     zero-width-but-not-display:none box, so tabBoundary's visibility filter
+     (and any other Tab-order reader) would still walk into it. visibility:
+     hidden removes it from the tab sequence outright while leaving the
+     width/overflow collapse (still needed for layout) untouched. */
+  visibility: hidden;
 }
 #media-panel-header {
   display: flex;
@@ -1517,6 +1524,9 @@ a:focus-visible {
   width: 0;
   overflow: hidden;
   border-left: none;
+  /* M17 F1 L1 (DD4): see #media-panel.collapsed's comment — same phantom-
+     focusable fix, same reason. */
+  visibility: hidden;
 }
 #privacy-header {
   display: flex;
