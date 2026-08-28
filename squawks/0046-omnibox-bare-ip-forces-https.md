@@ -1,10 +1,10 @@
 # Squawk 0046: Omnibox forces `https://` on a bare `IP:port` host with no http fallback — loopback dev URLs fail to a blank error page
 
-**Status**: open
+**Status**: completed
 **Type**: defect
 **Severity**: routine
 **Reported**: 2026-08-28
-**Completed**: —
+**Completed**: 2026-08-28
 
 ## Report
 
@@ -24,8 +24,26 @@ This borders the squawk gate's "no design decisions" criterion. Prepending `http
 
 ## Corrective Action
 
-*(recorded by the Developer)*
+Scope-gate decision: contained fix qualifies. Added a narrow `LOOPBACK_LITERAL_RE` check in `normalizeHomePageInput` (`src/shared/search-engines.js`), checked before the existing domain regex, that prepends `http://` instead of `https://` to a bare loopback literal:
+
+- `127.0.0.0/8` (e.g. `127.0.0.1`), bare or with `:port` and/or `/path`
+- `::1` bare, or bracketed `[::1]` with `:port` and/or `/path` — an unbracketed `::1:port` is deliberately NOT matched (it is a distinct, non-loopback IPv6 address, not "loopback plus port")
+- `localhost` ONLY when a `:port` or `/path` follows
+
+The pre-existing, intentionally tested gap — a bare `localhost` with nothing following stays unchanged (M16 F3 Leg 2, HAT item 5) — is preserved unchanged: widening it would alter the Settings/welcome home-page write sites' already-agreed contract for that exact input, which is a design decision outside this squawk's scope. Real domains (e.g. `example.com`, `example.com:8001/x`) are unaffected — still forced to `https://`. An explicit scheme on any input (including `http://` on a loopback host) is always respected, unchanged.
+
+`normalizeHomePageInput` is shared by three call sites (`navigation-controller.js`'s `toUrl` for the address bar, `welcome-controller.js`'s `submitHome`, `settings.js`'s home-page Save handler) — all three now agree on the loopback carve-out, same as they already agreed on the domain rule.
+
+Not done (per the qualification note, out of contained scope): non-loopback IP literals, public-host scheme policy, and TLS-failure retry/fallback are untouched.
 
 ## Verification
 
-*(recorded by the Developer)*
+- New unit tests in `test/unit/search-engines.test.js` (9 new test blocks (10 assertions)): `127.0.0.1:8001/links.html` → `http://127.0.0.1:8001/links.html` (the exact HAT repro); bare `127.0.0.1`; `localhost:3000`; `localhost/app`; bare `::1`; bracketed `[::1]:8001/x`; unbracketed `::1:3000` NOT treated as loopback (unchanged); `example.com` and `example.com:8001/x` unchanged (still https); explicit `http://127.0.0.1:8001/x` unchanged (no double-prepend).
+- Full suite: `timeout 300 npm test` — 3950/3950 pass.
+- `npm run lint` — clean.
+- `npm run typecheck` — clean.
+- `npx prettier --check .` — clean.
+
+## Sign-off
+
+Independent Reviewer (batch turnaround 2026-08-28): `[HANDOFF:confirmed]` — the `LOOPBACK_LITERAL_RE` carve-out matches only `127.0.0.0/8` (bare/port/path), `::1`/`[::1]` (port/path), and `localhost` with a trailing `:`/`/`; verified directly that `localhost.example.com`, `127.0.0.1.example.com`, and real domains do NOT false-match and still resolve to https; the bare-`localhost` gap is preserved; `normalizeHomePageInput`'s three call sites (toUrl, welcome-controller, settings) are unaffected (they assert delegation, not values) and http-for-loopback is coherent at each. 9 new test blocks; gates green (3950/3950). Scope-gate call (contained loopback carve-out, no scheme-policy decision) upheld on independent review.

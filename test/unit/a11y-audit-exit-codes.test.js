@@ -25,7 +25,8 @@ test('a11y-audit exit codes: fail() exits 2, violations branch exits 1, clean br
 
   // fail() — the sole apparatus/setup-failure exit point (called from every non-clean,
   // non-violations process.exit site: connect failure, getChromeTarget, enumerateTabs,
-  // guest-target lookup, findSheetWcId, and the top-level main().catch).
+  // guest-target lookup, and the top-level main().catch). Sheet states are skipped
+  // entirely by the audit (squawk 0045), so there is no sheet-wcId lookup call here.
   const failMatch = source.match(
     /function fail\(msg\) \{\s*console\.error\(`a11y-audit: \$\{msg\}`\);\s*process\.exit\((\d+)\);\s*\}/
   );

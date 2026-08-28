@@ -4,8 +4,9 @@
 // Leg 5 access-keys, DD5). Built by the pure, document-injected buildVaultAccessKeyCard so
 // its structure/aria contract is testable against the fake-document helper without a live
 // sheet. Behavior (render the secret + keyId, Copy, acknowledge, drop-on-close, and the
-// dismiss-DISABLED wiring) is in menu-overlay.js; the dismiss-locked invariant is also
-// enforced by the a11y-audit's SHEET_DISMISS_EXPR (acknowledge = actions button:last-child).
+// dismiss-DISABLED wiring) is in menu-overlay.js; the dismiss-locked invariant — the
+// acknowledge button (the actions region's last child) is the only control that
+// dismisses the sheet — is enforced there too, not by this template test.
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
