@@ -52,10 +52,13 @@
 //   (Endpoint override: GOLDFINCH_MCP_URL / GOLDFINCH_MCP_PORT, default :49707 —
 //   same contract as scripts/mcp-example-client.mjs.)
 //
-// The default sweep (5 chrome states + 10 menu-overlay SHEET states) needs the
-// ADMIN key (getChromeTarget is admin-only, and the sheet's wcId resolves only
-// under the admin relaxation — it is deliberately not in tabViews, DD8);
-// `--target` guest mode uses a jar key (or admin). NOTE: `goldfinch://settings`
+// The default sweep audits the chrome states only (getChromeTarget is admin-only, so
+// the ADMIN key is required); `--target` guest mode uses a jar key (or admin). The
+// menu-overlay SHEET states are SKIPPED BY RULING (squawk 0045) — `evaluate`/
+// `injectScript` are refused on any sheet wcId, unconditionally, at every tier
+// (CLAUDE.md § MCP automation, M15 F3), so axe can never be injected into one; the
+// script prints a notice listing the skipped labels instead of treating that refusal
+// as an apparatus failure. NOTE: `goldfinch://settings`
 // is the INTERNAL session and the eval tool refuses it even for admin, so it
 // CANNOT be audited via `evaluate` (the old CDP path could) — see the
 // findGuestTarget note. The default chrome sweep — what this gate gates on —
@@ -258,90 +261,17 @@ async function getGuestWcId(client, substring) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// ---------- discover the menu-overlay sheet's wcId (M05 F8 DD6/DD8; M09 F7 DD2) ----------
-// The sheet is a per-window lazy-singleton chrome-class WebContentsView created on
-// the FIRST menu open in its window. It is deliberately absent from enumerateTabs
-// (never in tabViews — DD8). Called ONCE per run, after the first sheet state opens;
-// the wcId is stable across states unless the sheet crashes (self-teardown +
-// recreate would mint a new one).
-//
-// M09 F7 DD2: the sheet's wcId now comes from `enumerateWindows` — an EXACT, O(1)
-// read. This RETIRES the id-space probe walk (build a skip set from enumerateTabs +
-// the chrome's own id, then evaluate location.href against every id in 1..64 looking
-// for menu-overlay.html). Why the walk existed at all, and why it can go:
-//   - No op could ENUMERATE non-tab contents. The admin relaxation made overlay views
-//     ADDRESSABLE, never LISTABLE — so the only way to find the sheet was to guess an
-//     id and ask. enumerateWindows is the op that LISTS them.
-//   - The walk's enumerateTabs-failure branch fell back to an UNFILTERED walk, and
-//     the skip set it built was window-scoped in a multi-window app.
-//   - Its foreground-first hazard (probing a background TAB would activate it,
-//     switching tabs and closing the just-opened menu) is separately gone since F7
-//     DD6 removed the activate from `evaluate` — an optimization now, not a safety
-//     requirement. The O(64)-guess-vs-O(1)-exact argument is what retires it.
-//
-// NO FALLBACK — if enumerateWindows fails, `npm run a11y` fails LOUDLY. That is the
-// point: a silent fallback to the walk would let DD2 be broken while this checkpoint
-// stayed green.
-async function findSheetWcId(client) {
-  const { value: wins, isError } = await callTool(client, 'enumerateWindows', {});
-  if (!isError && Array.isArray(wins)) {
-    // Prefer the window actually SHOWING a sheet; else any window that has ever
-    // instantiated one (sheetWcId present but hidden). An ABSENT sheetWcId means the
-    // sheet was never created in that window (lazy — DD5), which is not a candidate.
-    const row = wins.find((w) => w.sheetVisible && w.sheetWcId != null) || wins.find((w) => w.sheetWcId != null);
-    if (row) return row.sheetWcId;
-  }
-  fail(
-    'menu-overlay sheet wcId not found via enumerateWindows — the sheet is a per-window ' +
-      'lazy singleton, so a menu state must have OPENED before discovery (and the audit ' +
-      'needs the ADMIN key: enumerateWindows is admin-only).'
-  );
-}
-
-// Sheet-side dismissal (design constraint): a chrome-side menuOverlayClose would
-// leave the sheet DOM rendered (the deliberate persist-after-main-close design),
-// breaking the DOM-closed check between states — so dismissal is a synthesized
-// Escape keydown on the OPEN template node, evaluated IN THE SHEET document.
-// That drives the sheet's own dismissal path (capture-phase 'escape' attribution
-// → controller close → dismissed{escape} → main close → chrome refocus).
-// The dialog-style sheet template node ids (menu / popup / input-dialog + the M12 F3
-// first-run-setup vault-set / vault-recovery-show cards). Kept in sync with the
-// SHEET_STATES below — a state whose node id is absent here would never dismiss/close-check.
-const SHEET_NODE_IDS = [
-  'sheet-menu',
-  'sheet-popup',
-  'sheet-dialog',
-  'sheet-downloads',
-  'sheet-vault-set',
-  'sheet-vault-recovery',
-  'sheet-vault-stepup',
-  'sheet-vault-accesskey',
-  'sheet-vault-import',
-  'sheet-vault-change-master',
-  'sheet-vault-recover',
-  'sheet-vault-adminkey',
-  'sheet-auth-basic',
-  'sheet-cert-picker',
-  'sheet-bookmark-edit'
-];
-const SHEET_DISMISS_EXPR = `(() => {
-  const ids = ${JSON.stringify(SHEET_NODE_IDS)};
-  const open = ids.map((id) => document.getElementById(id)).find((el) => el && !el.classList.contains('hidden'));
-  if (!open) return 'none-open';
-  // vault-recovery-show, vault-accesskey-show and vault-adminkey-show are DISMISS-DISABLED
-  // (Escape / backdrop / blur are inert — the one-time recovery key / minted access secret /
-  // admin private key is unrecoverable); only the explicit acknowledge ("I've saved it", the
-  // last actions button) closes them. Every other sheet dismisses on Escape.
-  if (open.id === 'sheet-vault-recovery' || open.id === 'sheet-vault-accesskey' || open.id === 'sheet-vault-adminkey') {
-    const ack = open.querySelector('.new-container-actions button:last-child');
-    if (ack) { ack.click(); return 'escaped'; }
-    return 'no-ack';
-  }
-  open.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-  return 'escaped';
-})()`;
-const SHEET_CLOSED_EXPR = `${JSON.stringify(SHEET_NODE_IDS)}
-  .every((id) => { const el = document.getElementById(id); return !el || el.classList.contains('hidden'); })`;
+// ---------- sheet discovery/dismissal machinery — REMOVED (squawk 0045) ----------
+// This script used to discover the menu-overlay sheet's wcId (via `enumerateWindows`)
+// and dismiss each sheet state with a synthesized Escape keydown evaluated IN the
+// sheet document (SHEET_NODE_IDS / SHEET_DISMISS_EXPR / SHEET_CLOSED_EXPR). Both are
+// gone: `evaluate`/`injectScript` are refused on ANY sheet wcId, UNCONDITIONALLY, at
+// every tier (`src/main/automation/resolve.js`'s `isSheetContents` guard — CLAUDE.md
+// § MCP automation, "READABLE BUT NOT SCRIPTABLE since M15 F3"), so axe could never be
+// injected into a sheet state and the sheet-side dismiss/close-check expressions could
+// never run either. Driving the discovery/dismiss machinery only to hit that refusal
+// killed the whole run (exit 2) before the chrome states' results were even reported —
+// see the SHEET_STATES skip notice below, which is what replaced this.
 
 // Evaluate an expression in the target tab's main world via the eval tool. The
 // MCP `evaluate` tool runs `webContents.executeJavaScript` (no CDP), natively
@@ -487,17 +417,18 @@ async function main() {
       await sleep(200);
       allViolations.push(...(await runAxe(client, wcId, axeSource, 'downloads-button')));
 
-      // 6-10) Menu-overlay SHEET states (M05 F8 cutover, DD6). Every popup menu
-      // renders in the transparent sheet WebContentsView, so each state opens
-      // from the CHROME (evaluate on the chrome's own top-level open paths —
-      // the same bodies the trigger click/keydown handlers run) and audits the
-      // SHEET's wcId. The old chrome `page-context-menu` state re-targets the
-      // sheet here; chrome base states above are unchanged. `new-container` has
-      // no chrome-side trigger element — `openNewContainerOverlay()` is the
-      // module-scope open path (the same body the container menu's
-      // 'action:new-container' activation runs; sanctioned at leg design).
-      // Between states, dismissal is SHEET-SIDE (see SHEET_DISMISS_EXPR) and the
-      // DOM-closed check runs before the next open.
+      // 6-10) Menu-overlay SHEET states — SKIPPED BY RULING, not run (squawk 0045).
+      // Every popup menu renders in the transparent sheet WebContentsView. This
+      // array is kept as the RECORD of what is not covered (each state's would-be
+      // open path, for reference) — the loop that used to open a state from the
+      // chrome, inject axe into the sheet, and dismiss it sheet-side no longer
+      // runs. `evaluate`/`injectScript` are refused on ANY sheet wcId,
+      // UNCONDITIONALLY, at every tier (`src/main/automation/resolve.js`'s
+      // `isSheetContents` guard — CLAUDE.md § MCP automation, "READABLE BUT NOT
+      // SCRIPTABLE since M15 F3"), so axe can never be injected into a sheet
+      // state. Treating that refusal as an apparatus failure used to kill the
+      // whole run (exit 2) before the chrome states' results were even reported;
+      // see the skip notice below instead.
       const SHEET_STATES = [
         // M15 F1 Leg 3 FD ruling (flight-log-recorded): the two bookmark sheet
         // states are placed FIRST — BEFORE sheet:kebab — so this flight's new
@@ -532,15 +463,15 @@ async function main() {
         { label: 'sheet:tab-context', open: 'openTabContextMenuForAudit()' },
         // M12 F3 Leg 4 (first-run-setup, DD9): the two new setup sheets. vault-set is the
         // master-password entry (dialog-style, Escape-dismissible); vault-recovery-show is
-        // the read-only, DISMISS-DISABLED one-time key display (SHEET_DISMISS_EXPR clicks
-        // its acknowledge). Both raise no chrome-side trigger element — the audit hooks
+        // the read-only, DISMISS-DISABLED one-time key display (only its explicit
+        // acknowledge closes it). Both raise no chrome-side trigger element — the audit hooks
         // open them directly (openVault*OverlayForAudit, the evaluate-seam additions).
         { label: 'sheet:vault-set', open: 'openVaultSetOverlayForAudit()' },
         { label: 'sheet:vault-recovery-show', open: 'openVaultRecoveryShowOverlayForAudit()' },
         // M12 F3 Leg 5 (access-keys, DD9): the two new access-key sheets. vault-stepup is the
         // step-up master-password re-auth (dialog-style, Escape-dismissible); vault-accesskey-
         // show is the read-only, DISMISS-DISABLED one-time minted-secret display
-        // (SHEET_DISMISS_EXPR clicks its acknowledge). Both raise no chrome-side trigger — the
+        // (only its explicit acknowledge closes it). Both raise no chrome-side trigger — the
         // audit hooks open them directly (openVault*OverlayForAudit, the evaluate-seam additions).
         { label: 'sheet:vault-stepup', open: 'openVaultStepupOverlayForAudit()' },
         { label: 'sheet:vault-accesskey-show', open: 'openVaultAccessKeyShowOverlayForAudit()' },
@@ -556,7 +487,7 @@ async function main() {
         { label: 'sheet:vault-change-master', open: 'openVaultChangeMasterOverlayForAudit()' },
         { label: 'sheet:vault-recover', open: 'openVaultRecoverOverlayForAudit()' },
         // M12 F4 Leg 3 (admin-key-provision, DD9): the one-time admin-key display. Read-only,
-        // DISMISS-DISABLED (SHEET_DISMISS_EXPR clicks its acknowledge); the master-password step-up
+        // DISMISS-DISABLED (only its explicit acknowledge closes it); the master-password step-up
         // reuses vault-stepup (already covered above). Raises no chrome-side trigger — the audit hook
         // opens it directly.
         { label: 'sheet:vault-adminkey-show', open: 'openVaultAdminKeyShowOverlayForAudit()' },
@@ -579,28 +510,15 @@ async function main() {
         // precedent), so no ACCEPTED entry is expected.
         { label: 'sheet:downloads', open: 'openDownloadsOverlayForAudit()' }
       ];
-      let sheetWcId = null;
-      for (const state of SHEET_STATES) {
-        await evaluate(client, wcId, state.open);
-        await sleep(400);
-        if (sheetWcId == null) sheetWcId = await findSheetWcId(client); // once — stable across states
-        // Force the capped downloads list into its short-window overflow state.
-        // The product's 900x600 minimum reaches this naturally; the audit rig's
-        // current window is taller and would otherwise leave all 25 rows unscrolled.
-        if (state.label === 'sheet:downloads') {
-          await evaluate(client, sheetWcId, "document.getElementById('sheet-downloads').style.maxHeight = '320px'");
-        }
-        allViolations.push(...(await runAxe(client, sheetWcId, axeSource, state.label)));
-        const dismissed = await evaluate(client, sheetWcId, SHEET_DISMISS_EXPR);
-        if (dismissed !== 'escaped') {
-          throw new Error(`sheet state "${state.label}": no open template node to dismiss (got ${dismissed})`);
-        }
-        await sleep(300);
-        const closed = await evaluate(client, sheetWcId, SHEET_CLOSED_EXPR);
-        if (!closed) {
-          throw new Error(`sheet state "${state.label}" did not close after the sheet-side Escape`);
-        }
-      }
+      // Skip notice (squawk 0045): print once, list every skipped label, and do NOT
+      // call state.open / findSheetWcId / runAxe / evaluate on a sheet wcId — the
+      // sheet loop never runs in the live path. The chrome states above already ran
+      // to completion; their results are reported normally below.
+      console.log(
+        `\na11y-audit: skipping ${SHEET_STATES.length} sheet state(s) — unauditable by axe per ` +
+          'ruling (CLAUDE.md § MCP automation, M15 F3: evaluate/injectScript refused on any ' +
+          `sheet wcId, unconditionally, at every tier): ${SHEET_STATES.map((s) => s.label).join(', ')}`
+      );
     }
   } finally {
     await client.close();

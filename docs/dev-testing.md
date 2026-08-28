@@ -76,8 +76,14 @@ axe-core audit (`scripts/a11y-audit.mjs`) against the RUNNING app over the MCP s
 
 - **Attach**: canonical admin launch (above), then `export GOLDFINCH_MCP_ADMIN_KEY=<adminKey>`
   (chrome mode) or `GOLDFINCH_MCP_KEY=<jarKey>` + `--target=<url-substring>` (guest mode).
-- **Coverage**: five chrome states + eight sheet states; the sheet's wcId is resolved once
-  per run from `enumerateWindows` with **no fallback** — a failed read fails the run loudly.
+- **Coverage**: the chrome states only. The menu-overlay SHEET states are **skipped by
+  ruling** (squawk 0045) — `evaluate`/`injectScript` are refused on any sheet wcId,
+  unconditionally, at every tier (`src/main/automation/resolve.js`'s `isSheetContents`
+  guard; see *MCP automation* → "READABLE BUT NOT SCRIPTABLE since M15 F3"), so axe can
+  never be injected into a sheet state. `scripts/a11y-audit.mjs`'s `SHEET_STATES` array
+  stays as the record of what is not covered; the script prints a notice listing the
+  skipped labels and runs the chrome states to completion instead of treating the
+  refusal as an apparatus failure.
 - **Gate**: violations are diffed against the curated `ACCEPTED` allowlist baked into the
   script — only NEW `(rule id, node-selector)` findings fail. Tag convention:
   `--tags=wcag2a,wcag2aa,wcag21a,wcag21aa` (axe's full default set adds non-conformance
