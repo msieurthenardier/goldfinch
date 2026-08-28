@@ -5,6 +5,8 @@
 **Slug**: `mcp-automation-docs-truing`
 **Risk tier**: low — documentation only; no code. (Closing leg; must reflect the SHIPPED state of Legs 1–3.)
 
+> **Correction banner (2026-08-28).** An earlier draft of THIS spec (and of Leg 1) carried the false "admin is dev-only / `!app.isPackaged` / absent in a packaged build" justification — visible in stale phrasing still present in this document's body (e.g. the pre-pivot doc-rewrite sentence in Implementation Guidance step 2, and the "admin (dev-only)" mentions in Context/AC1). That justification is **RETRACTED** (see the flight DD2 correction). This leg was **re-run** with the corrected framing, and the shipped docs/code are grep-clean of the false claim; the stale phrasing below is historical planning text, NOT what was implemented. The live instruction is the corrected Objective above + Implementation Guidance step 6.
+
 ## Objective
 
 Close finding F10k (flight DD5): true `docs/mcp-automation.md`, the behavior-test crew apparatus note, **and the shipped-code comments/descriptions Leg 1 wrote**, to the tier-based internal-session model this flight shipped — using the CORRECTED justification (the admin tier is a high-bar, key-gated, loopback-bound tier that CAN be enabled on a packaged build; **NOT** "dev-only"). Every claim verified against the landed code, not the pre-pivot text and not the retracted dev-only draft.
