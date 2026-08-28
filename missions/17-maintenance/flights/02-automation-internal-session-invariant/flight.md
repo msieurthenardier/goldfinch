@@ -1,6 +1,6 @@
 # Flight: Automation-Surface Internal-Session Invariant
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Codebase Health — 2026-08-27 Maintenance](../../mission.md)
 
 ## Contributing to Criteria

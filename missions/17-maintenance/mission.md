@@ -121,10 +121,14 @@ and the next mission's crew. N/A beyond that.
       Advances criteria 1 (keyboard reach) and 2 (omnibox AT). Findings:
       cross-view stale focus ring (Known Issue → Flight 2/#147), squawk 0046
       (omnibox bare-IP→https). Debrief pending.
-- [ ] Flight 2: **Automation-surface internal-session invariant** — op-local
-      internal refusals on `input.js` / three `observe.js` ops (F1), the
-      vault-tool resolver predicates (F9), `download-media` `webContentsId`
-      validation (F10c), and truing `docs/mcp-automation.md` (F10k)
+- [x] Flight 2: **Automation-surface internal-session invariant** — landed
+      2026-08-28 (Legs 1–4; PR #191). Reframed by the tier-based pivot
+      (operator-ruled): admin reaches internal guests (F1 inverted), the vault
+      tools can't target the secret sheet (F9), `download-media`/`show-item-in-folder`
+      trust hardened (F10c), docs trued (F10k). Advances criteria 3 (internal-session
+      boundary) and 4 (vault predicates + download validation). Tests 3843 → 3966;
+      resolve.js untouched. A false "admin is dev-only" justification was caught
+      and corrected mid-flight; operator kept the pivot on corrected facts. Debrief pending.
 - [ ] Flight 3: **Sheet lifecycle verification** — make the 17 unverified
       sheets in `menu-overlay.js` verifiable (F14) via a test-scoped
       `AUTOMATABLE_MENU_TYPES` widening and/or a `createSheetEntry`
