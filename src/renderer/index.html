@@ -423,6 +423,10 @@
          a dedicated sibling to #media-status so tab-reorder announcements never
          race media-panel ones. -->
     <div id="tab-status" class="sr-only" role="status" aria-live="polite"></div>
+    <!-- Visually-hidden live region for omnibox suggestion-popup announcements
+         (M17 F1 L3 DD12): a dedicated sibling to #media-status/#tab-status so
+         suggestion updates never race those regions' announcements. -->
+    <div id="suggest-status" class="sr-only" role="status" aria-live="polite"></div>
 
     <!-- Image lightbox with zoom + pan -->
     <div id="lightbox" class="hidden" role="dialog" aria-modal="true" aria-label="Image viewer">

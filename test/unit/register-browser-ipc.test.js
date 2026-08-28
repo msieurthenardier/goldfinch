@@ -9,6 +9,7 @@ function makeHarness(options = {}) {
   const listeners = new Map();
   const internal = new Map();
   const events = [];
+  const chromeForTabCalls = [];
   const chromeSender = {};
   const webSession = {
     cookies: { get: async () => [], remove: async () => {} },
@@ -57,7 +58,10 @@ function makeHarness(options = {}) {
       on: (channel, fn) => listeners.set(channel, fn)
     },
     webContents: { fromId: (id) => (id === 5 ? wc : id === 6 ? { ...wc, session: internalSession } : null) },
-    chromeForTab: () => chrome,
+    chromeForTab: (wcId) => {
+      chromeForTabCalls.push(wcId);
+      return chrome;
+    },
     getTabContents: (id) => (id === 5 ? wc : null),
     applyZoom: (_wc, action) => events.push(['zoom', action]),
     isInternalContents: (target) => target.session.__goldfinchInternal === true,
@@ -104,8 +108,60 @@ function makeHarness(options = {}) {
     random: () => 0.5,
     logger: { warn: (...args) => events.push(['warn', ...args]) }
   });
-  return { handlers, listeners, internal, events, wc, chrome, chromeSender, human, iconMenuCalls, iconMenuWin };
+  return {
+    handlers,
+    listeners,
+    internal,
+    events,
+    wc,
+    chrome,
+    chromeSender,
+    human,
+    iconMenuCalls,
+    iconMenuWin,
+    chromeForTabCalls
+  };
 }
+
+// ---------------------------------------------------------------------------
+// guest-tab-boundary (M17 Flight 1 Leg 1, DD2/AC3): the guest preload's
+// capturing Tab/Shift+Tab handoff. Sender-derived wcId, direction allowlist,
+// forwards only 'tab-boundary' to chromeForTab(wcId) — the guest-vault-gesture
+// shape.
+// ---------------------------------------------------------------------------
+
+test('guest-tab-boundary: forwards a valid direction, wcId derived from event.sender.id only', () => {
+  const h = makeHarness();
+  assert.equal(h.listeners.has('guest-tab-boundary'), true);
+  h.listeners.get('guest-tab-boundary')({ sender: { id: 5 } }, { direction: 'forward' });
+  assert.deepEqual(h.events, [['chrome-send', 'tab-boundary', { direction: 'forward' }]]);
+  assert.deepEqual(h.chromeForTabCalls, [5]);
+});
+
+test('guest-tab-boundary: backward direction forwards too', () => {
+  const h = makeHarness();
+  h.listeners.get('guest-tab-boundary')({ sender: { id: 5 } }, { direction: 'backward' });
+  assert.deepEqual(h.events, [['chrome-send', 'tab-boundary', { direction: 'backward' }]]);
+});
+
+test('guest-tab-boundary: a renderer-supplied wcId in the payload is ignored — only event.sender.id is used', () => {
+  const h = makeHarness();
+  h.listeners.get('guest-tab-boundary')({ sender: { id: 5 } }, { direction: 'forward', wcId: 999 });
+  assert.deepEqual(h.chromeForTabCalls, [5], 'the forged wcId (999) in the payload must never reach chromeForTab');
+});
+
+test('guest-tab-boundary: an unrecognized direction is dropped — no forward, chromeForTab never called', () => {
+  const h = makeHarness();
+  h.listeners.get('guest-tab-boundary')({ sender: { id: 5 } }, { direction: 'sideways' });
+  assert.deepEqual(h.events, []);
+  assert.deepEqual(h.chromeForTabCalls, []);
+});
+
+test('guest-tab-boundary: a missing/malformed payload is dropped, not thrown', () => {
+  const h = makeHarness();
+  assert.doesNotThrow(() => h.listeners.get('guest-tab-boundary')({ sender: { id: 5 } }, undefined));
+  assert.deepEqual(h.events, []);
+});
 
 test('browser registrar preserves channel inventory and owner-routed media forwarding', () => {
   const h = makeHarness();

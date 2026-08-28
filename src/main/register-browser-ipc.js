@@ -133,6 +133,21 @@ function registerBrowserIpc({
     chromeForTab(wcId)?.send('vault-gesture', { wcId });
   });
 
+  // Guest tab-boundary signal (M17 Flight 1 Leg 1, DD2): the guest preload's
+  // capturing Tab/Shift+Tab handler sends this when tabBoundary(document, dir)
+  // says the press would leave the page's tabbable sequence. Same shape as
+  // guest-vault-gesture above: wcId comes ONLY from event.sender.id (never a
+  // renderer-supplied one — a hostile page cannot forge a boundary event for a
+  // wcId that isn't its own), and `direction` is validated against the two
+  // literals before forwarding — an unrecognized value is silently dropped,
+  // never forwarded as-is.
+  ipcMain.on('guest-tab-boundary', (event, payload) => {
+    const direction = payload && payload.direction;
+    if (direction !== 'forward' && direction !== 'backward') return;
+    const wcId = event.sender.id;
+    chromeForTab(wcId)?.send('tab-boundary', { direction });
+  });
+
   // Vault fill-icon CONTEXT menu (M12 F5 HAT batch 1, I8): a TRUSTED right-click on the
   // injected lock icon arrives here carrying NO payload (bare — no secret). Derive the trusted
   // wcId from event.sender.id (never renderer-supplied) and resolve the owning window from the

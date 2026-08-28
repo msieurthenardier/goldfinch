@@ -6,6 +6,7 @@ const assert = require('node:assert/strict');
 const {
   shouldQuery,
   buildSuggestionModel,
+  suggestionAnnouncement,
   mergeSuggestionSources,
   moveSelection,
   acceptSuggestResponse
@@ -303,4 +304,77 @@ test('acceptSuggestResponse: response-after-tab-switch — activateTab bumped se
 
 test('acceptSuggestResponse: stale seq AND gate false → reject', () => {
   assert.equal(acceptSuggestResponse({ requestSeq: 1, currentSeq: 2, gateNow: false }), false);
+});
+
+// ---------------------------------------------------------------------------
+// suggestionAnnouncement — DD12 truth table (the #suggest-status live
+// region's composed text)
+// ---------------------------------------------------------------------------
+
+test('suggestionAnnouncement: no items → "No matches"', () => {
+  assert.equal(suggestionAnnouncement({ items: [], selectedIndex: -1 }), 'No matches');
+});
+
+test('suggestionAnnouncement: no selection, one item → singular "1 suggestion"', () => {
+  const items = [{ primary: 'A', secondary: 'a.example', kind: 'history' }];
+  assert.equal(suggestionAnnouncement({ items, selectedIndex: -1 }), '1 suggestion');
+});
+
+test('suggestionAnnouncement: no selection, multiple items → plural "{n} suggestions"', () => {
+  const items = [
+    { primary: 'A', secondary: '', kind: 'history' },
+    { primary: 'B', secondary: '', kind: 'history' },
+    { primary: 'C', secondary: '', kind: 'history' }
+  ];
+  assert.equal(suggestionAnnouncement({ items, selectedIndex: -1 }), '3 suggestions');
+});
+
+test('suggestionAnnouncement: a selection composes primary, secondary, position', () => {
+  const items = [
+    { primary: 'Example Site', secondary: 'example.com', kind: 'history' },
+    { primary: 'Other', secondary: 'other.example', kind: 'history' }
+  ];
+  assert.equal(suggestionAnnouncement({ items, selectedIndex: 0 }), 'Example Site, example.com, 1 of 2');
+  assert.equal(suggestionAnnouncement({ items, selectedIndex: 1 }), 'Other, other.example, 2 of 2');
+});
+
+test('suggestionAnnouncement: an empty secondary is omitted, not rendered as a stray comma', () => {
+  const items = [{ primary: 'No Host', secondary: '', kind: 'history' }];
+  assert.equal(suggestionAnnouncement({ items, selectedIndex: 0 }), 'No Host, 1 of 1');
+});
+
+test('suggestionAnnouncement: a bookmark row appends ", bookmark"', () => {
+  const items = [{ primary: 'Bookmarked', secondary: 'bm.example', kind: 'bookmark' }];
+  assert.equal(suggestionAnnouncement({ items, selectedIndex: 0 }), 'Bookmarked, bm.example, 1 of 1, bookmark');
+});
+
+test('suggestionAnnouncement: a bookmark row with no secondary omits the comma but keeps the bookmark suffix', () => {
+  const items = [{ primary: 'Bookmarked', secondary: '', kind: 'bookmark' }];
+  assert.equal(suggestionAnnouncement({ items, selectedIndex: 0 }), 'Bookmarked, 1 of 1, bookmark');
+});
+
+test('suggestionAnnouncement: malformed/missing fields never throw', () => {
+  assert.doesNotThrow(() => {
+    assert.equal(suggestionAnnouncement(/** @type {any} */ (null)), 'No matches');
+    assert.equal(suggestionAnnouncement(/** @type {any} */ (undefined)), 'No matches');
+    assert.equal(suggestionAnnouncement(/** @type {any} */ ({})), 'No matches');
+    assert.equal(suggestionAnnouncement(/** @type {any} */ ({ items: [{}], selectedIndex: 0 })), ', 1 of 1');
+    // Out-of-range selectedIndex (beyond what buildSuggestionModel would ever
+    // hand it, but this function is defensive independent of its one caller)
+    // falls back to the plain-count branch rather than reading undefined.
+    assert.equal(
+      suggestionAnnouncement({ items: [{ primary: 'A', secondary: '', kind: 'history' }], selectedIndex: 5 }),
+      '1 suggestion'
+    );
+  });
+});
+
+test('buildSuggestionModel: announcement matches the pure suggestionAnnouncement output for the same model', () => {
+  const suggestions = [
+    { url: 'https://bm.example/', title: 'Bookmarked', kind: 'bookmark' },
+    { url: 'https://hist.example/', title: 'History Row' }
+  ];
+  const model = buildSuggestionModel(suggestions, 0);
+  assert.equal(model.announcement, suggestionAnnouncement(model));
+  assert.equal(model.announcement, 'Bookmarked, bm.example, 1 of 2, bookmark');
 });

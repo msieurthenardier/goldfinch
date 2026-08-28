@@ -8,6 +8,7 @@ export function createNavigationController(deps) {
     ctx,
     els,
     activeTab,
+    findTabByWcId, // M17 F1 L2 (DD7): resolves a tab-did-navigate wcId to its tab record for the focus-handoff one-shot
     isInternalTab,
     isWebTab,
     createTab,
@@ -179,6 +180,42 @@ export function createNavigationController(deps) {
     return buildSearchUrl(engine, s);
   }
 
+  /* --------------------------------------------------- focus-handoff on commit */
+  // M17 F1 L2 (DD7): Enter in the address bar focuses the page once the
+  // navigation the user just requested COMMITS. A one-shot keyed by the
+  // logical TAB id, not the wcId: on a welcome tab, navigate() goes through
+  // attachView(tab, url) and the guest's wcId does not exist until
+  // tabCreate() resolves (tab-controller.js), so matching by tab id covers
+  // that most-common flow (new tab → type URL → Enter) without a second hook
+  // into attachView. Armed by the Enter handler below (both branches, right
+  // after blur()); a single module-scoped slot — the next arm silently
+  // replaces any still-pending one, which is exactly how a same-URL/hash-only
+  // navigation or a search-query Enter (neither ever fires tab-did-navigate)
+  // "expires": nothing ever matches, and it sits inert until overwritten or
+  // cleared. Cleared on tab switch through resetSuggestionsForActivation
+  // below, the SAME activation-class site that already resets suggest state.
+  let pendingFocusGuest = null;
+
+  function armFocusGuestOneShot() {
+    const tab = activeTab();
+    pendingFocusGuest = tab ? { tabId: tab.id } : null;
+  }
+
+  // The controller subscribes to goldfinch.onTabDidNavigate ITSELF (the
+  // shortcut-controller.js onTabBoundary precedent) — the bridge's onXxx
+  // listeners are additive (plain ipcRenderer.on), so renderer.js's own
+  // module-level onTabDidNavigate subscriber (url-cache / address-chip /
+  // find bookkeeping) is untouched and both fire on the same push.
+  window.goldfinch.onTabDidNavigate(({ wcId }) => {
+    if (!pendingFocusGuest) return;
+    const record = findTabByWcId(wcId);
+    if (!record || record.id !== pendingFocusGuest.tabId) return; // a different tab's wcId
+    if (record.id !== ctx.activeTabId) return; // the armed tab is no longer active
+    if (document.activeElement === els.address) return; // the operator re-focused the address bar
+    pendingFocusGuest = null;
+    window.goldfinch.focusActiveGuest();
+  });
+
   /* ------------------------------------------------------- omnibox suggestions */
   // Suggestions controller (M08 Flight 4 Leg 3 / flight DD5): chrome-owned
   // state, combobox-like. The pure decision module
@@ -211,11 +248,16 @@ export function createNavigationController(deps) {
     cancelSuggestTimers();
     suggest.items = [];
     suggest.selectedIndex = -1;
+    els.suggestStatus.textContent = ''; // M17 F1 L3 (DD12): covers every close/switch path below
   }
 
   function resetSuggestionsForActivation() {
     suggest.seq++;
     resetSuggestState();
+    // M17 F1 L2 (DD7): tab-switch clear for the Enter-focus-handoff one-shot —
+    // the same activation-class site (tab-controller.js's activateTab) that
+    // already invalidates in-flight suggestions.
+    pendingFocusGuest = null;
   }
 
   // The query-gate snapshot for the CURRENT moment — shared by the input
@@ -251,6 +293,7 @@ export function createNavigationController(deps) {
   // move OS focus off #address.
   function paintSuggestions() {
     const model = buildSuggestionModel(suggest.items, suggest.selectedIndex);
+    els.suggestStatus.textContent = model.announcement; // M17 F1 L3 (DD12): before opening
     openOverlayMenu('suggestions', model, suggestAnchor(), 0, { noFocus: true });
   }
 
@@ -364,11 +407,13 @@ export function createNavigationController(deps) {
         closeSuggestions('activated');
         navigate(item.url);
         els.address.blur();
+        armFocusGuestOneShot(); // DD7
         return;
       }
       // Existing behavior — byte-identical when no suggestion is selected.
       navigate(els.address.value);
       els.address.blur();
+      armFocusGuestOneShot(); // DD7
     }
   });
   els.back.addEventListener('click', () => {
@@ -540,11 +585,8 @@ export function createNavigationController(deps) {
   }
 
   function handleSuggestionsClosed(reason) {
-    cancelSuggestTimers();
-    if (reason !== 'activated') {
-      suggest.items = [];
-      suggest.selectedIndex = -1;
-    }
+    if (reason !== 'activated') resetSuggestState();
+    else cancelSuggestTimers();
   }
 
   return {

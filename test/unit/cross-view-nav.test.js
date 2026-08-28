@@ -41,11 +41,18 @@ test('bare l (no modifier) → null — a plain letter must reach the page', () 
 });
 
 // ---------------------------------------------------------------------------
-// Unmodified Tab → tab-handoff; any modifier → null
+// Unmodified Tab → null (M17 F1 L1, DD3); any modifier → null
 // ---------------------------------------------------------------------------
 
-test('unmodified Tab → tab-handoff', () => {
-  assert.equal(k('Tab'), 'tab-handoff');
+// INVERTED, not deleted-and-re-added (M17 F1 L1, DD3/AC2): the pinned
+// 'unmodified Tab → tab-handoff' expectation from M05 F5 L2 is retired.
+// `crossViewNavAction` no longer ejects on every mid-page Tab — the
+// guest-tab-boundary signal (src/shared/tab-boundary.js, wired from both
+// guest preloads) now decides per-press whether Tab is actually leaving the
+// page's tabbable sequence, and only a genuine boundary reaches the chrome
+// via a different, payload-minimal channel. This module's Tab case is gone.
+test('unmodified Tab → null (handled by the guest-tab-boundary signal, M17 F1)', () => {
+  assert.equal(k('Tab'), null);
 });
 
 test('Shift+Tab → null (out of scope — Chromium default)', () => {
@@ -56,6 +63,32 @@ test('Ctrl+Tab / Alt+Tab / Cmd+Tab → null (modified Tab is not the handoff pat
   assert.equal(k('Tab', { control: true }), null);
   assert.equal(k('Tab', { alt: true }), null);
   assert.equal(k('Tab', { meta: true }), null);
+});
+
+// ---------------------------------------------------------------------------
+// F6 / Shift+F6 (M17 F1 L2, DD6): the guest-side half of the chrome↔content
+// focus cycle Leg 1 wired chrome→guest. Unmodified F6 → 'focus-address'
+// (Chrome's own F6 contract); Shift+F6 → 'focus-chrome-end' (the chrome's
+// last visible tabbable); any of ctrl/meta/alt held → null (parity with the
+// chrome-side keydownToAction gate).
+// ---------------------------------------------------------------------------
+
+test('unmodified F6 → focus-address', () => {
+  assert.equal(k('F6'), 'focus-address');
+});
+
+test('Shift+F6 → focus-chrome-end', () => {
+  assert.equal(k('F6', { shift: true }), 'focus-chrome-end');
+});
+
+test('Ctrl+F6 / Meta+F6 / Alt+F6 → null (parity gate — modified F6 is a no-op on both sides)', () => {
+  assert.equal(k('F6', { control: true }), null);
+  assert.equal(k('F6', { meta: true }), null);
+  assert.equal(k('F6', { alt: true }), null);
+});
+
+test('Ctrl+Shift+F6 → null (a held ctrl/meta/alt wins over shift)', () => {
+  assert.equal(k('F6', { control: true, shift: true }), null);
 });
 
 // ---------------------------------------------------------------------------

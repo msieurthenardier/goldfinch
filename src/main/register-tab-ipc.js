@@ -888,6 +888,27 @@ function registerTabIpc(deps) {
     }
   });
 
+  // Focus-entry gesture (M17 Flight 1 Leg 1, DD2/DD4/AC4): the renderer-invocable
+  // counterpart to tab-set-active's wasPageFocused branch below, which only ever
+  // PRESERVES focus a guest already had — this is the first path that GRANTS it.
+  // Sender-validated like every other chrome-trust handler in this file: resolves
+  // the CALLING window's own record via requireChrome (never trusts a payload),
+  // then focuses ONLY that window's CURRENTLY ACTIVE tab's guest — no wcId rides
+  // the call at all, so there is no "other tab id" to validate against; the
+  // active tab is structurally the only tab this handler can ever reach. A
+  // window with no active tab, or an active tab whose view is gone/destroyed,
+  // refuses (returns false) rather than throwing.
+  ipcMain.handle('tab-focus-guest', (event) => {
+    const rec = requireChrome(event);
+    if (!rec) return false;
+    const wcId = rec.activeTabWcId;
+    if (wcId == null) return false;
+    const entry = rec.tabViews.get(wcId);
+    if (!entry || entry.view.webContents.isDestroyed()) return false;
+    entry.view.webContents.focus();
+    return true;
+  });
+
   ipcMain.on('tab-set-active', (event, { wcId, bounds }) => {
     // Class 1 (F6 DD2): activation is scoped to the tab's OWNING window's record —
     // activating a tab in window 2 must not touch window 1's active state.

@@ -1,0 +1,20 @@
+<!--
+  keyboard-nav fixture (M17 Flight 1 Leg 1 — chrome-guest-keyboard-nav behavior
+  spec, Variants). Three links (#l1 #l2 #l3), in DOM order — links accept no
+  text, so entry/traversal is proven via activeElement + the AX tree's focused
+  node instead of typeText. No scripts.
+-->
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>keyboard-nav: links</title>
+  </head>
+  <body>
+    <h1>keyboard-nav fixture — links</h1>
+    <p>Three links, in DOM order.</p>
+    <a id="l1" href="#one">first</a>
+    <a id="l2" href="#two">second</a>
+    <a id="l3" href="#three">third</a>
+  </body>
+</html>

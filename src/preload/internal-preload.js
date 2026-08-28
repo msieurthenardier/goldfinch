@@ -14,6 +14,7 @@
 // main-side origin check anyway.
 
 const { contextBridge, ipcRenderer } = require('electron');
+const { tabBoundary } = require('../shared/tab-boundary');
 
 // The internal-origin allowlist (Flight 5, extended Flight 3 F3). The trust boundary is
 // "internal page vs web," NOT "settings vs downloads vs jars" — every inhabitant is an
@@ -31,6 +32,28 @@ const INTERNAL_ORIGINS = new Set([
 // Only expose the bridge when this preload is running in a genuine internal page.
 // When the origin does not match, expose NOTHING — not even `version`.
 if (INTERNAL_ORIGINS.has(location.origin)) {
+  // Guest tab-boundary signal (M17 Flight 1 Leg 1, DD2/DD5) — the SAME
+  // capturing keydown handoff as webview-preload.js's web branch, mirrored
+  // here for internal `goldfinch://` pages (this preload is bundled — DD5 —
+  // specifically because it now has this relative require onto
+  // ../shared/tab-boundary, which its sandboxed loader cannot resolve
+  // unbundled). Captured natives even though internal content is trusted:
+  // parity with the web branch's discipline keeps the two preloads
+  // structurally identical on this path (the source-pin test asserts both).
+  const nativeAddEventListener = window.addEventListener.bind(window);
+  const nativePreventDefault = Event.prototype.preventDefault;
+  nativeAddEventListener(
+    'keydown',
+    (event) => {
+      if (event.key !== 'Tab' || event.ctrlKey || event.metaKey || event.altKey || event.repeat) return;
+      const direction = event.shiftKey ? 'backward' : 'forward';
+      if (!tabBoundary(document, direction).atBoundary) return;
+      nativePreventDefault.call(event);
+      ipcRenderer.send('guest-tab-boundary', { direction });
+    },
+    true
+  );
+
   // DD5: listener-handle map — lets on() return a numeric handle and off(h) remove
   // the exact wrapper, preventing accumulation across guest reloads (electronmon
   // reloads the goldfinch://settings guest; without off/pagehide cleanup, each reload

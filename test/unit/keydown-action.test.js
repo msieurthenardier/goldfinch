@@ -24,6 +24,40 @@ test('F12 (no modifier) -> devtools', () => {
   assert.equal(keydownToAction(desc({ key: 'F12' })), 'devtools');
 });
 
+// ---------------------------------------------------------------------------
+// F6 / Shift+F6 (M17 F1 L1, DD1/AC5) — decided before the modifier gate,
+// beside F12.
+// ---------------------------------------------------------------------------
+
+test('F6 (no modifier) -> focus-content', () => {
+  assert.equal(keydownToAction(desc({ key: 'F6' })), 'focus-content');
+});
+
+test('Shift+F6 -> focus-chrome', () => {
+  assert.equal(keydownToAction(desc({ key: 'F6', shift: true })), 'focus-chrome');
+});
+
+test('F6 is NOT lightbox-deferred (unlike F12)', () => {
+  assert.equal(keydownToAction(desc({ key: 'F6', lightboxOpen: true })), 'focus-content');
+  assert.equal(keydownToAction(desc({ key: 'F6', shift: true, lightboxOpen: true })), 'focus-chrome');
+});
+
+// INVERTED, not deleted (M17 F1 L2, DD6 parity ruling): F6 is still decided
+// before the modifier gate (beside F12), but F6 itself is now GATED on
+// !ctrl/!meta/!alt so Ctrl+F6/Meta+F6/Alt+F6 is a no-op on both sides of the
+// chrome↔guest boundary, matching the guest-side crossViewNavAction's
+// identical gate — the F12 precedent (an unmodified key resolving regardless
+// of ctrl/meta) no longer applies to F6.
+test('Ctrl/Meta/Alt+F6 -> null (M17 F1 L2, DD6 parity — was "still resolves" pre-Leg-2)', () => {
+  assert.equal(keydownToAction(desc({ key: 'F6', ctrl: true })), null);
+  assert.equal(keydownToAction(desc({ key: 'F6', meta: true })), null);
+  assert.equal(keydownToAction(desc({ key: 'F6', alt: true })), null);
+});
+
+test('Ctrl+Shift+F6 -> null (a held ctrl wins over shift)', () => {
+  assert.equal(keydownToAction(desc({ key: 'F6', ctrl: true, shift: true })), null);
+});
+
 test('Ctrl+= -> zoom-in', () => {
   assert.equal(keydownToAction(desc({ key: '=', ctrl: true })), 'zoom-in');
 });

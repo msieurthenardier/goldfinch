@@ -62,10 +62,40 @@ function clampSelection(index, count) {
 }
 
 /**
+ * Compose the chrome-owned `#suggest-status` live region's announcement text
+ * for a suggestions model (M17 F1 L3 / DD12): "No matches" when there are no
+ * items; the plain count when there is no selection; otherwise the
+ * highlighted row's primary/secondary text plus its position, with a
+ * trailing ", bookmark" for bookmark rows (mirroring the sheet's own sr-only
+ * row description). Never throws on malformed input — every field is
+ * defensively typed/defaulted, matching buildSuggestionModel's own
+ * non-throwing discipline.
+ * @param {{ items?: Array<{ primary?: any, secondary?: any, kind?: any }>, selectedIndex?: number }} model
+ * @returns {string}
+ */
+export function suggestionAnnouncement(model) {
+  const items = model && Array.isArray(model.items) ? model.items : [];
+  if (items.length === 0) return 'No matches';
+  const selectedIndex = model && Number.isInteger(model.selectedIndex) ? model.selectedIndex : -1;
+  if (selectedIndex < 0 || selectedIndex > items.length - 1) {
+    return `${items.length} suggestion${items.length === 1 ? '' : 's'}`;
+  }
+  const item = items[selectedIndex] || {};
+  const primary = typeof item.primary === 'string' ? item.primary : '';
+  const secondary = typeof item.secondary === 'string' ? item.secondary : '';
+  const parts = [primary];
+  if (secondary) parts.push(secondary);
+  parts.push(`${selectedIndex + 1} of ${items.length}`);
+  let text = parts.join(', ');
+  if (item.kind === 'bookmark') text += ', bookmark';
+  return text;
+}
+
+/**
  * Build the sheet's `suggestions` template model from a raw store response.
  * @param {Array<{ url?: any, title?: any, kind?: any }> | null | undefined} suggestions
  * @param {number} selectedIndex
- * @returns {{ items: Array<{ primary: string, secondary: string, kind: 'bookmark' | 'history' }>, selectedIndex: number, emptyNote?: string }}
+ * @returns {{ items: Array<{ primary: string, secondary: string, kind: 'bookmark' | 'history' }>, selectedIndex: number, emptyNote?: string, announcement: string }}
  */
 export function buildSuggestionModel(suggestions, selectedIndex) {
   const list = Array.isArray(suggestions) ? suggestions : [];
@@ -80,9 +110,12 @@ export function buildSuggestionModel(suggestions, selectedIndex) {
     const kind = s && s.kind === 'bookmark' ? 'bookmark' : 'history';
     return { primary: title || url, secondary: hostOf(url), kind };
   });
-  /** @type {{ items: Array<{ primary: string, secondary: string, kind: 'bookmark' | 'history' }>, selectedIndex: number, emptyNote?: string }} */
-  const model = { items, selectedIndex: clampSelection(selectedIndex, items.length) };
+  /** @type {{ items: Array<{ primary: string, secondary: string, kind: 'bookmark' | 'history' }>, selectedIndex: number, emptyNote?: string, announcement: string }} */
+  const model = { items, selectedIndex: clampSelection(selectedIndex, items.length), announcement: '' };
   if (items.length === 0) model.emptyNote = 'No matches';
+  // DD12: composed from the model itself, after clamping — so the announcement
+  // always agrees with what the sheet is about to render.
+  model.announcement = suggestionAnnouncement(model);
   return model;
 }
 

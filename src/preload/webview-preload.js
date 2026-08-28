@@ -12,6 +12,41 @@ const { fillLoginForm, findAllLoginFields, findLoginFields } = require('./vault-
 const { fillCardForm, findAllCardFields, findCardFields } = require('./vault-card-fields');
 const { createVaultIconController } = require('./vault-fill-icon');
 const { createBookmarkDropListeners } = require('./guest-bookmark-drop');
+const { tabBoundary } = require('../shared/tab-boundary');
+
+// ---------------------------------------------------------------------------
+// Guest tab-boundary signal (M17 Flight 1 Leg 1, DD2). A capturing keydown on
+// window sees an unmodified Tab / Shift+Tab BEFORE any page listener and
+// before Chromium's own default Tab action. When tabBoundary says the press
+// would leave the page's tabbable sequence, this preload preventDefault()s
+// (today's only guest→chrome key handoff — the Ctrl/Cmd+L bridge below —
+// always does the same, so the async main round-trip never races a synchronous
+// default action) and hands off to main via a payload-minimal
+// 'guest-tab-boundary' send — main derives the trusted wcId from
+// event.sender.id (the guest-vault-gesture shape), never a renderer-supplied
+// one.
+//
+// Captured EARLY (module top, before any page script can run in this
+// main-world preload — contextIsolation:false means this file's top-level
+// code executes as the page's first script): addEventListener, and
+// Event.prototype.preventDefault, mirroring the setTimeout / isTrustedGet
+// capture discipline used elsewhere in this file — a hostile page can
+// override Event.prototype's own preventDefault, so the boundary handoff
+// calls the CAPTURED native, not event.preventDefault() directly.
+// ---------------------------------------------------------------------------
+const nativeAddEventListener = window.addEventListener.bind(window);
+const nativePreventDefault = Event.prototype.preventDefault;
+nativeAddEventListener(
+  'keydown',
+  (event) => {
+    if (event.key !== 'Tab' || event.ctrlKey || event.metaKey || event.altKey || event.repeat) return;
+    const direction = event.shiftKey ? 'backward' : 'forward';
+    if (!tabBoundary(document, direction).atBoundary) return;
+    nativePreventDefault.call(event);
+    ipcRenderer.send('guest-tab-boundary', { direction });
+  },
+  true
+);
 
 function absUrl(src) {
   if (!src) return null;

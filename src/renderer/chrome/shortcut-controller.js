@@ -1,3 +1,5 @@
+import { tabSequence } from '../../shared/tab-boundary.js';
+
 /** @param {any} deps */
 export function createShortcutController(deps) {
   const {
@@ -23,6 +25,26 @@ export function createShortcutController(deps) {
     handleBookmarkStarActivate
   } = deps;
   /* --------------------------------------------------------------- shortcuts */
+
+  // ------------------------------------------------------------------------
+  // Backward-boundary / Shift+F6 target (M17 F1 L1 DD2/DD4, M17 F1 L2 DD6/DD9):
+  // the chrome's own LAST visible tabbable. Through Leg 1 this file carried
+  // its own duplicate of src/shared/tab-boundary.js's selector +
+  // visibility-filter logic, because that module was CJS-by-design (required
+  // by the two Node-context guest preloads via require()) while this file is
+  // a real browser ES module (import, not require) — the two module systems
+  // couldn't share the one function. DD9 converts tab-boundary.js to a real
+  // ES module (esbuild inlines it into both bundled preloads; the chrome
+  // imports it directly, same as any other src/shared/ helper), so the
+  // duplicate is retired: `tabSequence(document)` is the SAME live-DOM walk
+  // (selector list, `getClientRects().length === 0` display:none test, and
+  // the computed-`visibility` check that excludes a `visibility:hidden`
+  // collapsed panel button even though it still reports non-empty client
+  // rects, DD4) that the guest preloads use.
+  function chromeLastVisibleTabbable() {
+    const seq = tabSequence(document);
+    return seq.length ? seq[seq.length - 1] : null;
+  }
 
   /**
    * The IMPURE chrome-shortcut dispatch, extracted from the global keydown handler
@@ -181,6 +203,28 @@ export function createShortcutController(deps) {
       case 'toggle-bookmarks-bar':
         window.goldfinch.toggleBookmarksBar();
         return true;
+      // F6 / Shift+F6 (M17 F1 L1, DD1/DD4) — chrome↔content focus-cycling.
+      case 'focus-content':
+        // No wcId argument — main resolves the sender window's OWN active
+        // tab (tab-focus-guest). Fire-and-forget from this handler's point
+        // of view; the resolved boolean isn't actionable here (no UI to
+        // update either way).
+        window.goldfinch.focusActiveGuest();
+        return true;
+      case 'focus-chrome':
+        // The chrome is already the target when Shift+F6 is pressed FROM the
+        // chrome — a deliberate no-op in this leg (DD4). Still "handled" so
+        // the key doesn't fall through to whatever default the browser gives
+        // an unhandled F6 chord.
+        return true;
+      // Shift+F6 FROM the guest (M17 F1 L2, DD6): the guest→chrome mirror of
+      // the backward-boundary placement — the chrome's own last visible
+      // tabbable, via the same shared tabSequence(document) walk (DD9).
+      case 'focus-chrome-end': {
+        const last = chromeLastVisibleTabbable();
+        if (last) last.focus();
+        return true;
+      }
     }
     return false;
   }
@@ -214,6 +258,20 @@ export function createShortcutController(deps) {
   // (main already swallowed the sheet-side input).
   window.goldfinch.onChromeShortcutAction(({ action }) => {
     if (typeof action === 'string') dispatchChromeAction(action);
+  });
+
+  // Guest tab-boundary signal (M17 F1 L1, DD2/DD4): forward Tab on the guest's
+  // last tabbable → focus #address; Shift+Tab on the guest's first → focus the
+  // chrome's own last visible tabbable. Cloned from the onChromeShortcutAction
+  // subscription above — the generic onXxx bridge pattern.
+  window.goldfinch.onTabBoundary(({ direction }) => {
+    if (direction === 'forward') {
+      els.address.focus();
+      els.address.select();
+    } else if (direction === 'backward') {
+      const last = chromeLastVisibleTabbable();
+      if (last) last.focus();
+    }
   });
 
   return { dispatchChromeAction };

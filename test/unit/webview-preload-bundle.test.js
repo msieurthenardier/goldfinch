@@ -68,7 +68,14 @@ test('bundle inlines the two leaves — their exported function names are presen
   // when no-minify keeps readable names — substring checks are deliberately
   // used (not exact-identifier regexes) so the pin survives that renaming
   // while still proving the leaf source is present, not just referenced.
-  const expectedNames = ['fillLoginForm', 'findAllLoginFields', 'findLoginFields', 'createVaultIconController'];
+  const expectedNames = [
+    'fillLoginForm',
+    'findAllLoginFields',
+    'findLoginFields',
+    'createVaultIconController',
+    // M17 F1 L1 (DD2/DD5): the shared guest tab-boundary helper is now inlined too.
+    'tabBoundary'
+  ];
   for (const name of expectedNames) {
     assert.ok(src.includes(name), `expected inlined function name "${name}" to appear in the bundle`);
   }

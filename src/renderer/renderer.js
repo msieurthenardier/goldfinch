@@ -464,7 +464,7 @@ const overlayMenus = {
     open: false,
     token: 0,
     blurClosedAt: -Infinity,
-    ariaTarget: () => els.address,
+    ariaTarget: () => null, // DD11: textbox disallows aria-expanded; listbox is cross-document
     refocus() {}
   },
   // HTTP basic-auth credential prompt (M14 F1 L2, flight DD2). Raised from main's
@@ -529,6 +529,7 @@ navigationController = createNavigationController({
   ctx,
   els,
   activeTab,
+  findTabByWcId, // M17 F1 L2 (DD7): resolves tab-did-navigate's wcId for the Enter-focus-handoff one-shot
   isInternalTab,
   isWebTab,
   createTab,

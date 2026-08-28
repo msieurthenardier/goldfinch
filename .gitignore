@@ -20,10 +20,12 @@ goldfinch-*.png
 test-out.txt
 test-time.txt
 
-# Generated preload bundle (flight/02 leg 1) — regenerated at every
-# launch/test/build entry, never committed (source↔bundle drift is
-# structurally impossible when it's always freshly built).
+# Generated preload bundles (flight/02 leg 1; internal bundle added M17 F1 L1,
+# DD5) — regenerated at every launch/test/build entry, never committed
+# (source↔bundle drift is structurally impossible when it's always freshly
+# built).
 src/preload/webview-preload.bundle.js
+src/preload/internal-preload.bundle.js
 
 # Throwaway TLS fixture certs/keys (web-compat client-cert leg) — generated
 # locally by tests/behavior/fixtures/web-compat/gen-certs.mjs, never committed
