@@ -2,7 +2,7 @@
 
 **Date**: 2026-08-28
 **Flight**: [Automation-Surface Internal-Session Invariant](flight.md)
-**Status**: landed
+**Status**: completed
 **Duration**: 2026-08-28 (single session — recon → pivot → Legs 1–4 → land)
 **Legs Completed**: 4 of 4
 
