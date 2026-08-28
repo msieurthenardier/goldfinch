@@ -162,15 +162,43 @@ export function buildSearchUrl(id, query) {
 }
 
 /**
- * Normalize a home-page-field input by prepending `https://` to a bare
- * domain (M16 F3 Leg 2, HAT item 5): a bare `example.com` typed into the
- * welcome surface's home-page field or Settings' home-page field "looks
- * like a domain" but carries no scheme, so the store validator
- * (`isSafeTabUrl`, which requires one) rejects it — even though the address
- * bar already accepts the same bare domain via its own domain rule. This
- * function is that same rule, applied at the two home-page write sites so
- * they agree with the address bar; the store validator is unchanged and
- * stays the actual gate.
+ * A bare loopback literal, matched ONLY to pick a default *scheme* (never to
+ * validate or authorize a host — see `url-safety.js`'s `isSafeTabUrl`, the
+ * actual gate, and `automation/origin-guard.js`'s `isLoopbackHostname` for
+ * that unrelated allow-list concern). Squawk 0046: a bare `127.0.0.1:8001/x`
+ * "looks like a domain" (has dots) and was getting `https://` forced onto
+ * it, which fails the TLS handshake against a plain-http loopback dev server
+ * and lands on a blank `chrome-error://` page.
+ *
+ * Deliberately narrow — three forms, scheme only, no other policy change:
+ *   - `127.0.0.0/8`  (e.g. `127.0.0.1`), bare or with `:port` and/or `/path`
+ *   - `::1` bare (unambiguous by itself), or bracketed `[::1]` with
+ *     `:port` and/or `/path` (an unbracketed `::1:port` is NOT matched — it
+ *     is a different, non-loopback IPv6 address, not "loopback plus port")
+ *   - `localhost` — ONLY when a `:port` or `/path` follows. A bare
+ *     `localhost` with nothing after it is deliberately EXCLUDED: that
+ *     no-dot case is normalizeHomePageInput's pre-existing, intentionally
+ *     tested gap (M16 F3 Leg 2, HAT item 5) and is out of this squawk's
+ *     contained scope — widening it would change the Settings/welcome
+ *     home-page write sites' already-agreed contract for that exact input,
+ *     which is a design decision, not a defect fix.
+ * Not handled (by design, per squawk 0046's qualification note): non-
+ * loopback IP literals, public hosts, and any TLS-failure retry — those are
+ * scheme-policy decisions beyond loopback and stay out of this rule.
+ */
+const LOOPBACK_LITERAL_RE =
+  /^(?:127(?:\.\d{1,3}){3}(?::\d+)?(?:\/.*)?|\[::1\](?::\d+)?(?:\/.*)?|::1|localhost(?=[:/])(?::\d+)?(?:\/.*)?)$/i;
+
+/**
+ * Normalize a home-page-field input by prepending a scheme to a bare
+ * domain or loopback literal (M16 F3 Leg 2 HAT item 5; loopback carve-out
+ * squawk 0046): a bare `example.com` typed into the welcome surface's
+ * home-page field or Settings' home-page field "looks like a domain" but
+ * carries no scheme, so the store validator (`isSafeTabUrl`, which requires
+ * one) rejects it — even though the address bar already accepts the same
+ * bare domain via its own domain rule. This function is that same rule,
+ * applied at the two home-page write sites so they agree with the address
+ * bar; the store validator is unchanged and stays the actual gate.
  *
  * Lives here, not in navigation-controller.js, to reuse this module's
  * existing internal-page route (served to Settings at `/search-engines.js`)
@@ -181,16 +209,21 @@ export function buildSearchUrl(id, query) {
  * one source instead of two copies of the regex.
  *
  * Trims first, then: an empty string, or a value that already carries a
- * `scheme://` prefix, is returned unchanged (trimmed); a bare-domain-looking
- * value (has a dot, no whitespace) gets `https://` prepended; anything else
- * — a bare word, `localhost` (no dot — a documented gap shared with the
- * address bar's own rule), or free text with spaces — is returned unchanged.
+ * `scheme://` prefix, is returned unchanged (trimmed) — an explicit scheme,
+ * including an explicit `http://` on a loopback host, is always respected;
+ * a bare loopback literal (see LOOPBACK_LITERAL_RE) gets `http://`
+ * prepended, preserving any port/path; a bare-domain-looking value (has a
+ * dot, no whitespace) gets `https://` prepended; anything else — a bare
+ * word, a bare `localhost` with nothing following (no dot — a documented
+ * gap shared with the address bar's own rule), or free text with spaces —
+ * is returned unchanged.
  * @param {unknown} input
  * @returns {string}
  */
 export function normalizeHomePageInput(input) {
   const s = String(input ?? '').trim();
   if (s === '' || /^[a-z]+:\/\//i.test(s)) return s;
+  if (LOOPBACK_LITERAL_RE.test(s)) return 'http://' + s;
   if (/^[^\s]+\.[^\s]{2,}(\/.*)?$/.test(s)) return 'https://' + s;
   return s;
 }

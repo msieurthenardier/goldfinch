@@ -1,6 +1,6 @@
 # Squawk 0049: `tabSequence` / `FOCUSABLE_SELECTOR` does not pierce open shadow roots
 
-**Status**: open
+**Status**: deferred
 **Type**: defect
 **Severity**: routine
 **Reported**: 2026-08-28
@@ -16,6 +16,10 @@ The shared tabbable enumerator built in Mission 17 Flight 1 walks the light DOM 
 
 - `src/shared/tab-boundary.js:90` — `const nodes = Array.from(doc.querySelectorAll(FOCUSABLE_SELECTOR));` (no `shadowRoot` / `assignedNodes` traversal).
 - `src/shared/tab-boundary.js:31` — `FOCUSABLE_SELECTOR` (light-DOM selector only).
+
+## Deferral
+
+**Deferred 2026-08-28** (turnaround 2026-08-28). Reason: the gap is **latent** — no guest surface or chrome control in the tree uses an open shadow root for focusable content, so nothing misbehaves today, and implementing shadow-DOM traversal now is speculative (flattened-tree / slot focus order is subtle and borders on a design decision without a real surface to validate against). **Revisit trigger:** the first time any guest fixture or chrome surface adopts an open shadow root with focusable content — at which point complete per the Corrective Action below.
 
 ## Corrective Action
 

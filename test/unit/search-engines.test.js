@@ -591,6 +591,51 @@ test('normalizeHomePageInput leaves "localhost" unchanged (documented gap: the d
   assert.equal(normalizeHomePageInput('localhost'), 'localhost');
 });
 
+// ---------------------------------------------------------------------------
+// normalizeHomePageInput loopback carve-out (squawk 0046): a bare loopback
+// literal gets http:// instead of https://, so a plain-http loopback dev
+// server (the common case) doesn't fail a TLS handshake to a blank page. A
+// real domain is unaffected — still forced to https. The bare-"localhost"
+// (no port/path) gap immediately above is unchanged by design (out of this
+// squawk's contained scope).
+// ---------------------------------------------------------------------------
+test('normalizeHomePageInput prepends http:// (not https://) to a bare IP:port/path loopback literal', () => {
+  assert.equal(normalizeHomePageInput('127.0.0.1:8001/links.html'), 'http://127.0.0.1:8001/links.html');
+});
+
+test('normalizeHomePageInput prepends http:// to a bare 127.0.0.1 with no port or path', () => {
+  assert.equal(normalizeHomePageInput('127.0.0.1'), 'http://127.0.0.1');
+});
+
+test('normalizeHomePageInput prepends http:// to localhost:port', () => {
+  assert.equal(normalizeHomePageInput('localhost:3000'), 'http://localhost:3000');
+});
+
+test('normalizeHomePageInput prepends http:// to localhost/path (no port)', () => {
+  assert.equal(normalizeHomePageInput('localhost/app'), 'http://localhost/app');
+});
+
+test('normalizeHomePageInput prepends http:// to bare ::1 (IPv6 loopback)', () => {
+  assert.equal(normalizeHomePageInput('::1'), 'http://::1');
+});
+
+test('normalizeHomePageInput prepends http:// to bracketed [::1]:port/path', () => {
+  assert.equal(normalizeHomePageInput('[::1]:8001/x'), 'http://[::1]:8001/x');
+});
+
+test('normalizeHomePageInput does NOT treat unbracketed ::1:port as loopback (a distinct, non-loopback IPv6 address)', () => {
+  assert.equal(normalizeHomePageInput('::1:3000'), '::1:3000');
+});
+
+test('normalizeHomePageInput leaves a real domain unchanged — still forced to https', () => {
+  assert.equal(normalizeHomePageInput('example.com'), 'https://example.com');
+  assert.equal(normalizeHomePageInput('example.com:8001/x'), 'https://example.com:8001/x');
+});
+
+test('normalizeHomePageInput respects an explicit http:// on a loopback host (no double-prepend)', () => {
+  assert.equal(normalizeHomePageInput('http://127.0.0.1:8001/x'), 'http://127.0.0.1:8001/x');
+});
+
 test('normalizeHomePageInput leaves free text with spaces unchanged', () => {
   assert.equal(normalizeHomePageInput('foo bar'), 'foo bar');
 });

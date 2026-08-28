@@ -19,9 +19,9 @@ function harness() {
   };
   const window = {
     // Real getClientRects() stays non-empty for a `visibility: hidden`
-    // element (only display:none zeroes it) — lastVisibleChromeTabbable
-    // needs computed visibility too. Fake elements below default to
-    // 'visible' via an own `style` object.
+    // element (only display:none zeroes it) — chromeLastVisibleTabbable's
+    // tabSequence(document) walk needs computed visibility too. Fake
+    // elements below default to 'visible' via an own `style` object.
     getComputedStyle: (el) => ({ visibility: el.style?.visibility ?? 'visible' }),
     goldfinch: {
       toggleDevtools: (x) => calls.push(['devtools', x]),
@@ -44,8 +44,8 @@ function harness() {
     }
   };
   // Fake chrome-document tabbables for the backward-boundary target
-  // (lastVisibleChromeTabbable). Order matters — the LAST one is the expected
-  // Shift+Tab landing spot.
+  // (chromeLastVisibleTabbable, via tabSequence(document)). Order matters —
+  // the LAST one is the expected Shift+Tab landing spot.
   const chromeFakeButton1 = {
     focus: () => calls.push('focus-fake-1'),
     attrs: {},
