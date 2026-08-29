@@ -96,6 +96,12 @@ import {
   const report = createSheetReport(window.menuOverlay);
   const reportDismissed = () => report.reportDismissed();
 
+  // Thin per-file partial (squawk 0050): every sheet registration injects the same
+  // two deps — the controller's register and the shared reportDismissed. `sheet` bakes
+  // them in so each call site carries only its sheet-specific args; `...o` last preserves
+  // any explicit per-site override of either key.
+  const sheet = (o) => createSheetEntry({ register: menuController.register, reportDismissed, ...o });
+
   // Whether the CURRENT render opted into keep-focus (payload.keepFocus): the menu must
   // survive, and hold OS focus across, a focus steal by its own guest. Exactly one menu
   // uses it today — the unlock-to-save prompt raised when a login submit into a LOCKED
@@ -171,9 +177,7 @@ import {
   // trigger-keydown opener; opens are programmatic (per init). No-op focusReturn (the
   // factory default): trigger === menu (a now-hidden node) — Escape/Tab must not try to
   // focus it. The real refocus is main-side (focusChrome) + chrome trigger focus.
-  const menuEntry = createSheetEntry({
-    register: menuController.register,
-    reportDismissed,
+  const menuEntry = sheet({
     node: menuNode,
     items,
     /** @param {number} [startIndex] */
@@ -469,9 +473,7 @@ import {
   const POPUP_LABELS = { 'site-info': 'Site information' }; // parity with chrome #site-info-popup
 
   // no `items` — roving no-ops (controller guard). No onClose middle (hide + report only).
-  const popupEntry = createSheetEntry({
-    register: menuController.register,
-    reportDismissed,
+  const popupEntry = sheet({
     node: popupNode,
     onOpen() {
       popupNode.classList.remove('hidden');
@@ -586,9 +588,7 @@ import {
 
   // no `items` — roving no-ops; Tab-cycling is dialog-local below. onOpen clears the
   // value BEFORE unhide (its own order); no onClose middle (hide + report only).
-  const dialogEntry = createSheetEntry({
-    register: menuController.register,
-    reportDismissed,
+  const dialogEntry = sheet({
     node: dialogNode,
     onOpen() {
       dialogInput.value = '';
@@ -677,9 +677,7 @@ import {
 
   // no `items` — roving no-ops (controller guard); NOTHING focused on open (DD2 — the
   // onOpen hook shows only, never moves focus). No onClose middle (hide + report only).
-  const suggestionsEntry = createSheetEntry({
-    register: menuController.register,
-    reportDismissed,
+  const suggestionsEntry = sheet({
     node: suggestionsNode,
     onOpen() {
       suggestionsNode.classList.remove('hidden');
@@ -795,9 +793,7 @@ import {
 
   // no `items` — roving no-ops; Tab-cycling + Escape are dialog-local below. No onClose
   // middle (hide + report only).
-  const vaultEntry = createSheetEntry({
-    register: menuController.register,
-    reportDismissed,
+  const vaultEntry = sheet({
     node: vaultNode,
     onOpen() {
       vaultInput.value = '';
@@ -901,9 +897,7 @@ import {
 
   // no `items` — roving no-ops; Tab-cycling + Escape are dialog-local below. No onClose
   // middle (hide + report only).
-  const authEntry = createSheetEntry({
-    register: menuController.register,
-    reportDismissed,
+  const authEntry = sheet({
     node: authNode,
     onOpen() {
       auth.username.value = '';
@@ -1022,9 +1016,7 @@ import {
   // below (the controller's pointerdown sees pickerNode.contains(target) === true for every
   // in-sheet click — parity with the input-dialog / vault-unlock backdrops). No onClose
   // middle (hide + report only).
-  const pickerEntry = createSheetEntry({
-    register: menuController.register,
-    reportDismissed,
+  const pickerEntry = sheet({
     node: pickerNode,
     items: pickerItems,
     /** @param {number} [startIndex] */
@@ -1101,9 +1093,7 @@ import {
 
   // trigger === menu === backdrop: opens are programmatic per init (the vault-picker
   // registration rationale applies verbatim — see above). No onClose middle (hide + report).
-  const certPickerEntry = createSheetEntry({
-    register: menuController.register,
-    reportDismissed,
+  const certPickerEntry = sheet({
     node: certPickerNode,
     items: certPickerItems,
     /** @param {number} [startIndex] */
@@ -1185,9 +1175,7 @@ import {
   let captureDefaultVaultId;
   let captureBusy = false; // guards a concurrent Save (double-Enter / Enter+click).
 
-  const captureEntry = createSheetEntry({
-    register: menuController.register,
-    reportDismissed,
+  const captureEntry = sheet({
     node: captureNode,
     // no `items` — roving no-ops; Tab-cycling + Escape are dialog-local below.
     // dismissible: false — but NOT for the one-time-key reason. The capture offer is SPAWNED BY a
@@ -1293,9 +1281,7 @@ import {
   let vaultSetBusy = false;
 
   // no `items` — roving no-ops; Tab-cycling + Escape are the modal-card helper below.
-  const vaultSetEntry = createSheetEntry({
-    register: menuController.register,
-    reportDismissed,
+  const vaultSetEntry = sheet({
     node: vaultSetNode,
     onOpen() {
       vaultSet.input.value = '';
@@ -1396,9 +1382,7 @@ import {
   let recoveryKey = null;
 
   // no `items` — roving no-ops; Tab-cycling is the modal-card helper below.
-  const recoveryEntry = createSheetEntry({
-    register: menuController.register,
-    reportDismissed,
+  const recoveryEntry = sheet({
     node: recoveryNode,
     dismissible: false, // DD5 — the menu-controller blur/outside-click guards skip it
     onOpen() {
@@ -1465,9 +1449,7 @@ import {
   let vaultStepupMode = 'mint';
 
   // no `items` — roving no-ops; Tab-cycling + Escape are the modal-card helper below.
-  const vaultStepupEntry = createSheetEntry({
-    register: menuController.register,
-    reportDismissed,
+  const vaultStepupEntry = sheet({
     node: vaultStepupNode,
     onOpen() {
       vaultStepup.input.value = '';
@@ -1601,9 +1583,7 @@ import {
   let accessKeySecret = null;
 
   // no `items` — roving no-ops; Tab-cycling is the modal-card helper below.
-  const accessKeyEntry = createSheetEntry({
-    register: menuController.register,
-    reportDismissed,
+  const accessKeyEntry = sheet({
     node: accessKeyNode,
     dismissible: false, // DD5 — the menu-controller blur/outside-click guards skip it
     onOpen() {
@@ -1660,9 +1640,7 @@ import {
   let adminKeySecret = null;
 
   // no `items` — roving no-ops; Tab-cycling is the modal-card helper below.
-  const adminKeyEntry = createSheetEntry({
-    register: menuController.register,
-    reportDismissed,
+  const adminKeyEntry = sheet({
     node: adminKeyNode,
     dismissible: false, // DD4 — the menu-controller blur/outside-click guards skip it
     onOpen() {
@@ -1717,9 +1695,7 @@ import {
   let vaultImportBusy = false;
 
   // no `items` — roving no-ops; Tab-cycling + Escape are the modal-card helper below.
-  const vaultImportEntry = createSheetEntry({
-    register: menuController.register,
-    reportDismissed,
+  const vaultImportEntry = sheet({
     node: vaultImportNode,
     onOpen() {
       vaultImport.input.value = '';
@@ -1828,9 +1804,7 @@ import {
   // Guards a concurrent submit (double-Enter / Enter+click); reset on every open.
   let vaultChangeMasterBusy = false;
 
-  const vaultChangeMasterEntry = createSheetEntry({
-    register: menuController.register,
-    reportDismissed,
+  const vaultChangeMasterEntry = sheet({
     node: vaultChangeMasterNode,
     onOpen() {
       vaultChangeMaster.oldInput.value = '';
@@ -1946,9 +1920,7 @@ import {
   // Guards a concurrent submit (double-Enter / Enter+click); reset on every open.
   let vaultRecoverBusy = false;
 
-  const vaultRecoverEntry = createSheetEntry({
-    register: menuController.register,
-    reportDismissed,
+  const vaultRecoverEntry = sheet({
     node: vaultRecoverNode,
     onOpen() {
       vaultRecover.recoveryInput.value = '';
@@ -2073,9 +2045,7 @@ import {
   // no `items` — roving no-ops (controller guard); the local keydown owns Tab. No onClose
   // middle (hide + report only). The downloads-local keydown sets lastStimulus before
   // calling menuController.close — the factory must not touch it (it doesn't).
-  const downloadsEntry = createSheetEntry({
-    register: menuController.register,
-    reportDismissed,
+  const downloadsEntry = sheet({
     node: downloadsNode,
     onOpen() {
       downloadsNode.classList.remove('hidden');
@@ -2308,9 +2278,7 @@ import {
   let bookmarkEditBusy = false; // guards a concurrent submit (double-Enter / Enter+click)
 
   // no `items` — roving no-ops; Tab-cycling + Escape are the modal-card helper below.
-  const bookmarkEditEntry = createSheetEntry({
-    register: menuController.register,
-    reportDismissed,
+  const bookmarkEditEntry = sheet({
     node: bookmarkEditNode,
     onOpen() {
       bookmarkEditBusy = false;
