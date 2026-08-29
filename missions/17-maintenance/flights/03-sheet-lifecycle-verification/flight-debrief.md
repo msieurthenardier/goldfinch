@@ -2,7 +2,7 @@
 
 **Date**: 2026-08-29
 **Flight**: [Sheet Lifecycle Verification](flight.md)
-**Status**: landed
+**Status**: completed
 **Duration**: 2026-08-28 (design ruling → land, single session) — debrief 2026-08-29
 **Legs Completed**: 2 of 2 (+ the design-ruling leg `sheet-verification-design`)
 
@@ -166,7 +166,7 @@ behaviorally covered.
 ## Action Items
 
 - [x] Correct 3988 → 3982 in the flight log and leg outcomes (done in the debrief pass)
-- [ ] Collapse the 19× `createSheetEntry` injected-dep repetition with a thin per-file `sheet()` partial (squawk candidate — servicing)
+- [ ] Collapse the 19× `createSheetEntry` injected-dep repetition with a thin per-file `sheet()` partial — logged as **squawk 0050** (servicing, routine, open)
 - [ ] Reconcile the flight spec's stale Lever-A Technical Approach + Post-Flight Verification text (artifact hygiene)
 - [ ] Carry F34's remaining popup + drag CLAUDE.md subsections to the next flight touching those files
 - [ ] Standing watch: the recurring transient behavior-test flake (did not reproduce this flight)
