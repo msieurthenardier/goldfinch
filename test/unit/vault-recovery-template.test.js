@@ -82,3 +82,16 @@ test('each buildVaultRecoveryCard call yields a fresh, independent node tree', (
   assert.notEqual(a.node, b.node);
   assert.notEqual(a.keyValue, b.keyValue);
 });
+
+// The "never retained past the display" invariant (DD5), pinned against IMPORTABLE code.
+// menu-overlay.js's onClose calls refs.scrub() instead of an inline textContent = ''; this
+// test goes RED if the scrub() body is deleted — the real red-on-delete pin the flight's
+// Verification requires (not a source-text presence check, not a mock-node factory test).
+test('scrub() empties the recovery key display node (never retained past the display)', () => {
+  const document = createDocument();
+  const card = buildVaultRecoveryCard(document);
+  card.keyValue.textContent = 'RECOVERY-KEY-abcd-efgh-ijkl';
+  assert.equal(card.keyValue.textContent, 'RECOVERY-KEY-abcd-efgh-ijkl', 'precondition: key is displayed');
+  card.scrub();
+  assert.equal(card.keyValue.textContent, '', 'scrub() clears the recovery key from the DOM');
+});

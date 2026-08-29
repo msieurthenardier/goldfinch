@@ -129,7 +129,7 @@ and the next mission's crew. N/A beyond that.
       boundary) and 4 (vault predicates + download validation). Tests 3843 → 3966;
       resolve.js untouched. A false "admin is dev-only" justification was caught
       and corrected mid-flight; operator kept the pivot on corrected facts. Debrief pending.
-- [ ] Flight 3: **Sheet lifecycle verification** — make the 17 unverified
+- [x] Flight 3: **Sheet lifecycle verification** — make the 17 unverified
       sheets in `menu-overlay.js` verifiable (F14) via a test-scoped
       `AUTOMATABLE_MENU_TYPES` widening and/or a `createSheetEntry`
       extraction with isolated unit tests (F23); closes with the

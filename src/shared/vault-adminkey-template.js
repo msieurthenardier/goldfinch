@@ -29,6 +29,7 @@ import { buildCopyIcon } from './copy-icon.js';
  *   keyValue: HTMLElement,
  *   copy: HTMLButtonElement,
  *   acknowledge: HTMLButtonElement,
+ *   scrub: () => void,
  * }}
  */
 export function buildVaultAdminKeyCard(document) {
@@ -91,5 +92,12 @@ export function buildVaultAdminKeyCard(document) {
   actions.appendChild(acknowledge);
   card.appendChild(actions);
 
-  return { node, card, keyValue, copy, acknowledge };
+  // Scrub the displayed admin private key from the DOM — the "never retained past the
+  // display" invariant (M15 F3 DD1f). Closes over the key display node so menu-overlay.js's
+  // onClose clears it via an importable, unit-testable seam (refs.scrub()).
+  const scrub = () => {
+    keyValue.textContent = '';
+  };
+
+  return { node, card, keyValue, copy, acknowledge, scrub };
 }

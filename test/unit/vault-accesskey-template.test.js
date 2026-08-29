@@ -79,3 +79,20 @@ test('each buildVaultAccessKeyCard call yields a fresh, independent node tree', 
   assert.notEqual(a.node, b.node);
   assert.notEqual(a.secretValue, b.secretValue);
 });
+
+// The "never retained past the display" invariant (DD5), pinned against IMPORTABLE code.
+// menu-overlay.js's onClose calls refs.scrub() instead of inline textContent = ''; this test
+// goes RED if the scrub() body is deleted. scrub() clears BOTH the secret AND the keyId —
+// preserving the exact behavior of the old inline onClose (the keyId is a non-secret
+// revocation fingerprint but is cleared today alongside the secret).
+test('scrub() empties BOTH the access secret and the keyId display nodes', () => {
+  const document = createDocument();
+  const card = buildVaultAccessKeyCard(document);
+  card.secretValue.textContent = 'ACCESS-SECRET-9f8e7d';
+  card.keyIdValue.textContent = 'keyid-1234';
+  assert.equal(card.secretValue.textContent, 'ACCESS-SECRET-9f8e7d', 'precondition: secret displayed');
+  assert.equal(card.keyIdValue.textContent, 'keyid-1234', 'precondition: keyId displayed');
+  card.scrub();
+  assert.equal(card.secretValue.textContent, '', 'scrub() clears the access secret');
+  assert.equal(card.keyIdValue.textContent, '', 'scrub() also clears the keyId (behavior-preserving)');
+});

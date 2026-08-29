@@ -73,7 +73,12 @@ import { buildVaultAdminKeyCard } from '../shared/vault-adminkey-template.js';
 import { buildVaultImportCard } from '../shared/vault-import-template.js';
 import { buildVaultChangeMasterCard } from '../shared/vault-change-master-template.js';
 import { buildVaultRecoverCard } from '../shared/vault-recover-template.js';
-import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../shared/modal-card-controller.js';
+import {
+  createSheetReport,
+  createSheetEntry,
+  attachModalCard,
+  attachBackdropPressGate
+} from '../shared/modal-card-controller.js';
 
 (() => {
   const root = document.getElementById('menu-root');
@@ -162,11 +167,14 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
 
   const items = () => /** @type {HTMLElement[]} */ ([...menuNode.querySelectorAll('[role="menuitem"]')]);
 
-  const menuEntry = menuController.register({
-    // trigger === menu (like the chrome page-context-menu entry): the controller
-    // skips its trigger-keydown opener; opens are programmatic (per init).
-    trigger: menuNode,
-    menu: menuNode,
+  // trigger === menu (like the chrome page-context-menu entry): the controller skips its
+  // trigger-keydown opener; opens are programmatic (per init). No-op focusReturn (the
+  // factory default): trigger === menu (a now-hidden node) — Escape/Tab must not try to
+  // focus it. The real refocus is main-side (focusChrome) + chrome trigger focus.
+  const menuEntry = createSheetEntry({
+    register: menuController.register,
+    reportDismissed,
+    node: menuNode,
     items,
     /** @param {number} [startIndex] */
     onOpen(startIndex = 0) {
@@ -175,14 +183,8 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
       if (list.length) focusItem(list, startIndex === -1 ? list.length - 1 : startIndex);
     },
     onClose() {
-      menuNode.classList.add('hidden');
       hideOverflowIndicator();
-      reportDismissed();
-    },
-    // No-op focusReturn: trigger === menu (a now-hidden node) — Escape/Tab must
-    // not try to focus it. The real refocus is main-side (focusChrome) + chrome
-    // trigger focus, resolved per reason.
-    focusReturn: () => {}
+    }
   });
 
   /* ───────────────────────── bar → overflow DROP TARGET (M15 F3 Leg 5a) ─────
@@ -466,22 +468,18 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
 
   const POPUP_LABELS = { 'site-info': 'Site information' }; // parity with chrome #site-info-popup
 
-  const popupEntry = menuController.register({
-    trigger: popupNode,
-    menu: popupNode,
-    // no `items` — roving no-ops (controller guard)
+  // no `items` — roving no-ops (controller guard). No onClose middle (hide + report only).
+  const popupEntry = createSheetEntry({
+    register: menuController.register,
+    reportDismissed,
+    node: popupNode,
     onOpen() {
       popupNode.classList.remove('hidden');
       // Focus the action button if present (web state), else the container
       // (internal note state) — parity with the chrome popup's (btn || popup).focus().
       const btn = /** @type {HTMLElement | null} */ (popupNode.querySelector('button'));
       (btn || popupNode).focus();
-    },
-    onClose() {
-      popupNode.classList.add('hidden');
-      reportDismissed();
-    },
-    focusReturn: () => {}
+    }
   });
 
   popupNode.addEventListener('keydown', (e) => {
@@ -586,20 +584,17 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
   dialogActions.append(dialogCreate, dialogCancel);
   dialogCard.append(dialogLabel, dialogInput, dialogActions);
 
-  const dialogEntry = menuController.register({
-    trigger: dialogNode,
-    menu: dialogNode,
-    // no `items` — roving no-ops; Tab-cycling is dialog-local below
+  // no `items` — roving no-ops; Tab-cycling is dialog-local below. onOpen clears the
+  // value BEFORE unhide (its own order); no onClose middle (hide + report only).
+  const dialogEntry = createSheetEntry({
+    register: menuController.register,
+    reportDismissed,
+    node: dialogNode,
     onOpen() {
       dialogInput.value = '';
       dialogNode.classList.remove('hidden');
       dialogInput.focus();
-    },
-    onClose() {
-      dialogNode.classList.add('hidden');
-      reportDismissed();
-    },
-    focusReturn: () => {}
+    }
   });
 
   // Enter or Create → channel 4 {id:'create', value}. Empty-after-trim → PAGE-SIDE
@@ -680,18 +675,15 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
   suggestionsNode.classList.add('hidden');
   root.appendChild(suggestionsNode);
 
-  const suggestionsEntry = menuController.register({
-    trigger: suggestionsNode,
-    menu: suggestionsNode,
-    // no `items` — roving no-ops (controller guard); NOTHING focused (DD2).
+  // no `items` — roving no-ops (controller guard); NOTHING focused on open (DD2 — the
+  // onOpen hook shows only, never moves focus). No onClose middle (hide + report only).
+  const suggestionsEntry = createSheetEntry({
+    register: menuController.register,
+    reportDismissed,
+    node: suggestionsNode,
     onOpen() {
       suggestionsNode.classList.remove('hidden');
-    },
-    onClose() {
-      suggestionsNode.classList.add('hidden');
-      reportDismissed();
-    },
-    focusReturn: () => {}
+    }
   });
 
   /** Render the suggestions listbox. All text via textContent (DD8). `model` for
@@ -801,22 +793,19 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
   // invokes; reset on every open.
   let vaultBusy = false;
 
-  const vaultEntry = menuController.register({
-    trigger: vaultNode,
-    menu: vaultNode,
-    // no `items` — roving no-ops; Tab-cycling + Escape are dialog-local below.
+  // no `items` — roving no-ops; Tab-cycling + Escape are dialog-local below. No onClose
+  // middle (hide + report only).
+  const vaultEntry = createSheetEntry({
+    register: menuController.register,
+    reportDismissed,
+    node: vaultNode,
     onOpen() {
       vaultInput.value = '';
       vaultError.textContent = '';
       vaultBusy = false;
       vaultNode.classList.remove('hidden');
       vaultInput.focus();
-    },
-    onClose() {
-      vaultNode.classList.add('hidden');
-      reportDismissed();
-    },
-    focusReturn: () => {}
+    }
   });
 
   // Submit → the DEDICATED secret channel. Encode to a Uint8Array (never a JS
@@ -910,10 +899,12 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
 
   let authBusy = false; // guards a concurrent submit (double-Enter / Enter+click)
 
-  const authEntry = menuController.register({
-    trigger: authNode,
-    menu: authNode,
-    // no `items` — roving no-ops; Tab-cycling + Escape are dialog-local below.
+  // no `items` — roving no-ops; Tab-cycling + Escape are dialog-local below. No onClose
+  // middle (hide + report only).
+  const authEntry = createSheetEntry({
+    register: menuController.register,
+    reportDismissed,
+    node: authNode,
     onOpen() {
       auth.username.value = '';
       auth.password.value = '';
@@ -921,12 +912,7 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
       authBusy = false;
       authNode.classList.remove('hidden');
       auth.username.focus();
-    },
-    onClose() {
-      authNode.classList.add('hidden');
-      reportDismissed();
-    },
-    focusReturn: () => {}
+    }
   });
 
   /** Render the host + realm context line from the init model (textContent only),
@@ -1027,18 +1013,19 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
   let pickerRows = [];
   const pickerItems = () => pickerRows;
 
-  const pickerEntry = menuController.register({
-    // trigger === menu === pickerNode (the backdrop): opens are programmatic (per
-    // init), so the controller skips its trigger-keydown opener — CRITICAL, since an
-    // opener on the same node would fire on the roving list's own Arrow/Enter keys and
-    // closeAll() it mid-navigation. The roving `items` live inside pickerList; their
-    // keydowns bubble up to pickerNode's menu-keydown listener (the shared APG roving
-    // contract), and pickerList carries role="menu"/menuitem for a11y. Outside-click
-    // is the local backdrop handler below (the controller's pointerdown sees
-    // pickerNode.contains(target) === true for every in-sheet click — parity with the
-    // input-dialog / vault-unlock backdrops).
-    trigger: pickerNode,
-    menu: pickerNode,
+  // trigger === menu === pickerNode (the backdrop): opens are programmatic (per init), so
+  // the controller skips its trigger-keydown opener — CRITICAL, since an opener on the same
+  // node would fire on the roving list's own Arrow/Enter keys and closeAll() it
+  // mid-navigation. The roving `items` live inside pickerList; their keydowns bubble up to
+  // pickerNode's menu-keydown listener (the shared APG roving contract), and pickerList
+  // carries role="menu"/menuitem for a11y. Outside-click is the local backdrop handler
+  // below (the controller's pointerdown sees pickerNode.contains(target) === true for every
+  // in-sheet click — parity with the input-dialog / vault-unlock backdrops). No onClose
+  // middle (hide + report only).
+  const pickerEntry = createSheetEntry({
+    register: menuController.register,
+    reportDismissed,
+    node: pickerNode,
     items: pickerItems,
     /** @param {number} [startIndex] */
     onOpen(startIndex = 0) {
@@ -1046,12 +1033,7 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
       const list = pickerItems();
       if (list.length) focusItem(list, startIndex === -1 ? list.length - 1 : startIndex);
       else pickerList.focus(); // empty (note) state — focus the list so Escape/Tab work
-    },
-    onClose() {
-      pickerNode.classList.add('hidden');
-      reportDismissed();
-    },
-    focusReturn: () => {}
+    }
   });
 
   // The header's close (X) is a deliberate dismiss — parity with Escape/backdrop. A mouse
@@ -1117,11 +1099,12 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
   let certPickerRows = [];
   const certPickerItems = () => certPickerRows;
 
-  const certPickerEntry = menuController.register({
-    // trigger === menu === backdrop: opens are programmatic per init (the
-    // vault-picker registration rationale applies verbatim — see above).
-    trigger: certPickerNode,
-    menu: certPickerNode,
+  // trigger === menu === backdrop: opens are programmatic per init (the vault-picker
+  // registration rationale applies verbatim — see above). No onClose middle (hide + report).
+  const certPickerEntry = createSheetEntry({
+    register: menuController.register,
+    reportDismissed,
+    node: certPickerNode,
     items: certPickerItems,
     /** @param {number} [startIndex] */
     onOpen(startIndex = 0) {
@@ -1129,12 +1112,7 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
       const list = certPickerItems();
       if (list.length) focusItem(list, startIndex === -1 ? list.length - 1 : startIndex);
       else certPickerList.focus(); // defensive empty (note) state
-    },
-    onClose() {
-      certPickerNode.classList.add('hidden');
-      reportDismissed();
-    },
-    focusReturn: () => {}
+    }
   });
 
   // Header close (X): a deliberate dismiss — parity with Escape/backdrop; the
@@ -1207,9 +1185,10 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
   let captureDefaultVaultId;
   let captureBusy = false; // guards a concurrent Save (double-Enter / Enter+click).
 
-  const captureEntry = menuController.register({
-    trigger: captureNode,
-    menu: captureNode,
+  const captureEntry = createSheetEntry({
+    register: menuController.register,
+    reportDismissed,
+    node: captureNode,
     // no `items` — roving no-ops; Tab-cycling + Escape are dialog-local below.
     // dismissible: false — but NOT for the one-time-key reason. The capture offer is SPAWNED BY a
     // login-form submit, which also navigates the page; when the submitted page finishes loading it
@@ -1228,12 +1207,8 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
       // Focus the first vault choice on a save, else the Save button (update has none).
       if (captureChoiceInputs.length) captureChoiceInputs[0].focus();
       else capture.save.focus();
-    },
-    onClose() {
-      captureNode.classList.add('hidden');
-      reportDismissed();
-    },
-    focusReturn: () => {}
+    }
+    // no onClose middle (hide + report only)
   });
 
   // Save → the DEDICATED captureSave invoke ({ token, captureId, vaultId }). The
@@ -1317,10 +1292,11 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
   // Guards a concurrent submit (double-Enter / Enter+click); reset on every open.
   let vaultSetBusy = false;
 
-  const vaultSetEntry = menuController.register({
-    trigger: vaultSetNode,
-    menu: vaultSetNode,
-    // no `items` — roving no-ops; Tab-cycling + Escape are the modal-card helper below.
+  // no `items` — roving no-ops; Tab-cycling + Escape are the modal-card helper below.
+  const vaultSetEntry = createSheetEntry({
+    register: menuController.register,
+    reportDismissed,
+    node: vaultSetNode,
     onOpen() {
       vaultSet.input.value = '';
       vaultSet.confirm.value = '';
@@ -1330,14 +1306,11 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
       vaultSet.input.focus();
     },
     onClose() {
-      vaultSetNode.classList.add('hidden');
       // Scrub the fields' DOM values on close (best-effort — the input V8 strings
       // themselves are unscrubbable, the accepted DD4 limitation).
       vaultSet.input.value = '';
       vaultSet.confirm.value = '';
-      reportDismissed();
-    },
-    focusReturn: () => {}
+    }
   });
 
   // Submit → the DEDICATED setup channel. Client-side: empty guard + confirm-MATCH check
@@ -1422,23 +1395,22 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
   /** @type {string | null} the recovery key currently displayed — dropped on close. */
   let recoveryKey = null;
 
-  const recoveryEntry = menuController.register({
-    trigger: recoveryNode,
-    menu: recoveryNode,
+  // no `items` — roving no-ops; Tab-cycling is the modal-card helper below.
+  const recoveryEntry = createSheetEntry({
+    register: menuController.register,
+    reportDismissed,
+    node: recoveryNode,
     dismissible: false, // DD5 — the menu-controller blur/outside-click guards skip it
-    // no `items` — roving no-ops; Tab-cycling is the modal-card helper below.
     onOpen() {
       recoveryNode.classList.remove('hidden');
       recovery.keyValue.focus();
     },
     onClose() {
-      recoveryNode.classList.add('hidden');
       // Drop the key reference + scrub the DOM text — never retained past the display.
-      recovery.keyValue.textContent = '';
+      // scrub() lives in the importable template (red-on-delete pinned there).
+      recovery.scrub();
       recoveryKey = null;
-      reportDismissed();
-    },
-    focusReturn: () => {}
+    }
   });
 
   recovery.copy.addEventListener('click', () => {
@@ -1492,10 +1464,11 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
    * different store op + one-time display. */
   let vaultStepupMode = 'mint';
 
-  const vaultStepupEntry = menuController.register({
-    trigger: vaultStepupNode,
-    menu: vaultStepupNode,
-    // no `items` — roving no-ops; Tab-cycling + Escape are the modal-card helper below.
+  // no `items` — roving no-ops; Tab-cycling + Escape are the modal-card helper below.
+  const vaultStepupEntry = createSheetEntry({
+    register: menuController.register,
+    reportDismissed,
+    node: vaultStepupNode,
     onOpen() {
       vaultStepup.input.value = '';
       vaultStepup.error.textContent = '';
@@ -1504,13 +1477,10 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
       vaultStepup.input.focus();
     },
     onClose() {
-      vaultStepupNode.classList.add('hidden');
       // Scrub the field's DOM value on close (best-effort — the input V8 strings
       // themselves are unscrubbable, the accepted DD4 limitation).
       vaultStepup.input.value = '';
-      reportDismissed();
-    },
-    focusReturn: () => {}
+    }
   });
 
   // Submit → the DEDICATED stepup-mint channel. Client-side: empty guard only (no confirm —
@@ -1630,24 +1600,22 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
   /** @type {string | null} the minted secret currently displayed — dropped on close. */
   let accessKeySecret = null;
 
-  const accessKeyEntry = menuController.register({
-    trigger: accessKeyNode,
-    menu: accessKeyNode,
+  // no `items` — roving no-ops; Tab-cycling is the modal-card helper below.
+  const accessKeyEntry = createSheetEntry({
+    register: menuController.register,
+    reportDismissed,
+    node: accessKeyNode,
     dismissible: false, // DD5 — the menu-controller blur/outside-click guards skip it
-    // no `items` — roving no-ops; Tab-cycling is the modal-card helper below.
     onOpen() {
       accessKeyNode.classList.remove('hidden');
       accessKey.secretValue.focus();
     },
     onClose() {
-      accessKeyNode.classList.add('hidden');
-      // Drop the secret reference + scrub the DOM text — never retained past the display.
-      accessKey.secretValue.textContent = '';
-      accessKey.keyIdValue.textContent = '';
+      // Drop the secret reference + scrub the DOM text (secret AND keyId) — never retained
+      // past the display. scrub() lives in the importable template (red-on-delete pinned there).
+      accessKey.scrub();
       accessKeySecret = null;
-      reportDismissed();
-    },
-    focusReturn: () => {}
+    }
   });
 
   accessKey.copy.addEventListener('click', () => {
@@ -1691,23 +1659,22 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
   /** @type {string | null} the minted admin private key currently displayed — dropped on close. */
   let adminKeySecret = null;
 
-  const adminKeyEntry = menuController.register({
-    trigger: adminKeyNode,
-    menu: adminKeyNode,
+  // no `items` — roving no-ops; Tab-cycling is the modal-card helper below.
+  const adminKeyEntry = createSheetEntry({
+    register: menuController.register,
+    reportDismissed,
+    node: adminKeyNode,
     dismissible: false, // DD4 — the menu-controller blur/outside-click guards skip it
-    // no `items` — roving no-ops; Tab-cycling is the modal-card helper below.
     onOpen() {
       adminKeyNode.classList.remove('hidden');
       adminKey.keyValue.focus();
     },
     onClose() {
-      adminKeyNode.classList.add('hidden');
       // Drop the key reference + scrub the DOM text — never retained past the display.
-      adminKey.keyValue.textContent = '';
+      // scrub() lives in the importable template (red-on-delete pinned there).
+      adminKey.scrub();
       adminKeySecret = null;
-      reportDismissed();
-    },
-    focusReturn: () => {}
+    }
   });
 
   adminKey.copy.addEventListener('click', () => {
@@ -1749,10 +1716,11 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
   // Guards a concurrent submit (double-Enter / Enter+click); reset on every open.
   let vaultImportBusy = false;
 
-  const vaultImportEntry = menuController.register({
-    trigger: vaultImportNode,
-    menu: vaultImportNode,
-    // no `items` — roving no-ops; Tab-cycling + Escape are the modal-card helper below.
+  // no `items` — roving no-ops; Tab-cycling + Escape are the modal-card helper below.
+  const vaultImportEntry = createSheetEntry({
+    register: menuController.register,
+    reportDismissed,
+    node: vaultImportNode,
     onOpen() {
       vaultImport.input.value = '';
       vaultImport.error.textContent = '';
@@ -1763,13 +1731,10 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
       vaultImport.input.focus();
     },
     onClose() {
-      vaultImportNode.classList.add('hidden');
       // Scrub the field's DOM value on close (best-effort — the input V8 strings themselves
       // are unscrubbable, the accepted DD4 limitation).
       vaultImport.input.value = '';
-      reportDismissed();
-    },
-    focusReturn: () => {}
+    }
   });
 
   // Submit → the DEDICATED vault-import channel. Client-side: empty guard only. Read the
@@ -1863,9 +1828,10 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
   // Guards a concurrent submit (double-Enter / Enter+click); reset on every open.
   let vaultChangeMasterBusy = false;
 
-  const vaultChangeMasterEntry = menuController.register({
-    trigger: vaultChangeMasterNode,
-    menu: vaultChangeMasterNode,
+  const vaultChangeMasterEntry = createSheetEntry({
+    register: menuController.register,
+    reportDismissed,
+    node: vaultChangeMasterNode,
     onOpen() {
       vaultChangeMaster.oldInput.value = '';
       vaultChangeMaster.newInput.value = '';
@@ -1876,15 +1842,12 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
       vaultChangeMaster.oldInput.focus();
     },
     onClose() {
-      vaultChangeMasterNode.classList.add('hidden');
       // Scrub the field DOM values on close (best-effort — the input V8 strings are unscrubbable,
       // the accepted DD4 limitation).
       vaultChangeMaster.oldInput.value = '';
       vaultChangeMaster.newInput.value = '';
       vaultChangeMaster.confirm.value = '';
-      reportDismissed();
-    },
-    focusReturn: () => {}
+    }
   });
 
   // Submit → the DEDICATED change-master channel. Client-side: empty guards + confirm-MATCH check
@@ -1983,9 +1946,10 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
   // Guards a concurrent submit (double-Enter / Enter+click); reset on every open.
   let vaultRecoverBusy = false;
 
-  const vaultRecoverEntry = menuController.register({
-    trigger: vaultRecoverNode,
-    menu: vaultRecoverNode,
+  const vaultRecoverEntry = createSheetEntry({
+    register: menuController.register,
+    reportDismissed,
+    node: vaultRecoverNode,
     onOpen() {
       vaultRecover.recoveryInput.value = '';
       vaultRecover.newInput.value = '';
@@ -1996,13 +1960,10 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
       vaultRecover.recoveryInput.focus();
     },
     onClose() {
-      vaultRecoverNode.classList.add('hidden');
       vaultRecover.recoveryInput.value = '';
       vaultRecover.newInput.value = '';
       vaultRecover.confirm.value = '';
-      reportDismissed();
-    },
-    focusReturn: () => {}
+    }
   });
 
   // Submit → the DEDICATED recover channel. Client-side: empty guards + confirm-MATCH check.
@@ -2109,22 +2070,20 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
 
   const DOWNLOADS_LABELS = { downloads: 'Downloads' };
 
-  const downloadsEntry = menuController.register({
-    trigger: downloadsNode,
-    menu: downloadsNode,
-    // no `items` — roving no-ops (controller guard); the local keydown owns Tab.
+  // no `items` — roving no-ops (controller guard); the local keydown owns Tab. No onClose
+  // middle (hide + report only). The downloads-local keydown sets lastStimulus before
+  // calling menuController.close — the factory must not touch it (it doesn't).
+  const downloadsEntry = createSheetEntry({
+    register: menuController.register,
+    reportDismissed,
+    node: downloadsNode,
     onOpen() {
       downloadsNode.classList.remove('hidden');
       // Focus the first button (a completed row's filename, or — when every row is
       // in-progress — the always-present footer). querySelector('button') is safe:
       // only completed rows and the footer render buttons, all enabled.
       (downloadsNode.querySelector('button') || downloadsNode).focus();
-    },
-    onClose() {
-      downloadsNode.classList.add('hidden');
-      reportDismissed();
-    },
-    focusReturn: () => {}
+    }
   });
 
   // Local keydown: Escape → dismiss (escape flavor); Tab/Shift+Tab → cycle focus
@@ -2348,21 +2307,19 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
   let bookmarkEditId = null;
   let bookmarkEditBusy = false; // guards a concurrent submit (double-Enter / Enter+click)
 
-  const bookmarkEditEntry = menuController.register({
-    trigger: bookmarkEditNode,
-    menu: bookmarkEditNode,
-    // no `items` — roving no-ops; Tab-cycling + Escape are the modal-card helper below.
+  // no `items` — roving no-ops; Tab-cycling + Escape are the modal-card helper below.
+  const bookmarkEditEntry = createSheetEntry({
+    register: menuController.register,
+    reportDismissed,
+    node: bookmarkEditNode,
     onOpen() {
       bookmarkEditBusy = false;
       bookmarkEditNode.classList.remove('hidden');
       bookmarkEdit.name.focus();
     },
     onClose() {
-      bookmarkEditNode.classList.add('hidden');
       bookmarkEditId = null;
-      reportDismissed();
-    },
-    focusReturn: () => {}
+    }
   });
 
   /** Render the name/url fields + reset the error line from the object model
