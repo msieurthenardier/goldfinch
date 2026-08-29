@@ -185,6 +185,12 @@ flight log Flight Director Notes.)*
 ### Verification
 
 The F14 coverage table re-derived at the flight debrief with every row in
-a verified column; the `downloads` and `auth-basic` run logs dated after
-this flight; unit tests for `createSheetEntry` that go red when the
-secret-scrub call is deleted.
+a verified column; unit tests for `createSheetEntry` and the template
+`scrub()` closures that go red when the secret-scrub call is deleted.
+
+> **Reconciled 2026-08-29 (debrief).** The original clause "the `downloads`
+> and `auth-basic` run logs dated after this flight" was a **Lever A**
+> verification step (re-running the stale behavior specs under a widened
+> allowlist). Lever A was cut (DD1), so those run logs were never produced —
+> the clause is struck. The Technical Approach above still describes Lever A
+> as a snapshot of the original plan; DD1 records that it was not taken.

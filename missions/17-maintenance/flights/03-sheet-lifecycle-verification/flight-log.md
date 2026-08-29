@@ -53,7 +53,7 @@ cut; admin "god mode" deferred to a future feature flight. In-flight on
   restored.
 - **`resolve.js` / `AUTOMATABLE_MENU_TYPES` untouched** (DD1/DD3) — Flight 2's secret-sheet
   wall unchanged.
-- **Checks:** full `node --test` suite green (3988 pass, 0 fail); `typecheck`, `eslint .`,
+- **Checks:** full `node --test` suite green (3982 pass, 0 fail); `typecheck`, `eslint .`,
   `prettier --check .` all clean. No sheet DOM markup changed (template edits add only a
   `scrub` closure + a refs field — no `createElement`/attribute changes), so `npm run a11y`
   was not required per the leg's conditional step.
@@ -83,7 +83,7 @@ cut; admin "god mode" deferred to a future feature flight. In-flight on
   16-family list below the preamble is untouched (squawk 0028 not regressed). The separate "shared
   modal-card helper" mention (line ~45) was left as-is — it refers to `attachModalCard` (Tab-cycle/Escape),
   a distinct helper in the same module that `createSheetEntry` does not subsume, so it does not "now apply".
-- **Checks:** `prettier --check .` clean; full `node --test` suite green (3988 pass, 0 fail — unchanged
+- **Checks:** `prettier --check .` clean; full `node --test` suite green (3982 pass, 0 fail — unchanged
   from Leg 1); `typecheck` and `eslint .` clean. `git diff --stat` among non-artifact files shows only
   `CLAUDE.md` + `docs/renderer-menu.md` (the `src/`+`test/` changes in the tree are Leg 1's uncommitted
   work, left untouched).

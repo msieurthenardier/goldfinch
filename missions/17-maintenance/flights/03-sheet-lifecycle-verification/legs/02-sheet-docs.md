@@ -128,5 +128,5 @@ no source/test changes.
 - **AC4** — `git diff --stat`: among non-artifact files, only `CLAUDE.md` and
   `docs/renderer-menu.md` (the `src/`+`test/` changes present are Leg 1's
   uncommitted work, untouched).
-- **AC5** — `prettier --check .` clean; full `node --test` suite green (3988 pass,
+- **AC5** — `prettier --check .` clean; full `node --test` suite green (3982 pass,
   0 fail); `npm run typecheck` and `eslint .` clean.

@@ -262,7 +262,7 @@ required beyond the leg.
   `scrub()` empties the node(s) and go **RED** when the scrub body is deleted (verified for
   all three, then restored) — pinned against real importable code, incl. the NEW
   `test/unit/vault-adminkey-template.test.js`.
-- **AC5** — full `node --test` suite green (3988 pass / 0 fail); `typecheck`, `eslint .`,
+- **AC5** — full `node --test` suite green (3982 pass / 0 fail); `typecheck`, `eslint .`,
   `prettier --check .` clean.
 - **AC7** — `AUTOMATABLE_MENU_TYPES` (`resolve.js:53`) untouched; no allowlist widening.
 
