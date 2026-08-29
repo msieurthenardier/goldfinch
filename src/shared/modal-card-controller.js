@@ -8,10 +8,14 @@
 // behaviorally unit-testable module (a11y won't run headless; menu-overlay.js is an
 // IIFE with no controller test — this is the only real net for the landed F2 unlock UI).
 //
-// Two exports:
+// Four exports:
 //   createSheetReport(bridge) — the one-report-per-open-token state machine (exactly one
 //     of activated / dismissed per token, first send wins), shared module-wide across
 //     EVERY sheet template (menu / popup / dialog / suggestions / vault-* alike).
+//   createSheetEntry(opts) — the hand-repeated menuController.register sheet-lifecycle
+//     scaffolding (show/hide + trailing reportDismissed + no-op focusReturn), extracted
+//     from the ~19 near-identical register sites in menu-overlay.js so every sheet's
+//     lifecycle envelope becomes IMPORTABLE and unit-testable with mock nodes (F14/F23).
 //   attachModalCard(opts) — wires a backdrop-card node's dialog-local keyboard (Escape +
 //     Tab-cycle) + backdrop-click dismissal onto a menu-controller entry. PARAMETERIZES
 //     dismissibility: vault-recovery-show passes { dismissible: false } so Escape /
@@ -88,6 +92,72 @@ export function createSheetReport(bridge) {
       return true;
     }
   };
+}
+
+/**
+ * Extract the hand-repeated `menuController.register({...})` sheet-lifecycle scaffolding
+ * into one importable factory (F14/F23). Wraps an INJECTED `register` (+ injected
+ * `reportDismissed`) so it is unit-testable with mock nodes — no real DOM, no
+ * menu-overlay IIFE load, no `menuController` global.
+ *
+ * ENVELOPE COMPOSITION ORDER — load-bearing; this is the primary regression vector.
+ * The seam owns only the two invariant edges and lets each sheet keep its variable middle:
+ *
+ *   OPEN  — the `onOpen` hook owns show (`classList.remove('hidden')`) + focus. The order
+ *           of those two varies per sheet (some focus after unhide; the input-dialog
+ *           clears `value` BEFORE unhide; `suggestions` never focuses at all), so the
+ *           factory owns NOTHING on open — it only forwards the roving start-index
+ *           (including the `-1` "focus last" path) through to the hook.
+ *   CLOSE — hide (`classList.add('hidden')`) → the `onClose` hook (everything a site does
+ *           between hide and report: scrub / field-reset / drop-ref / hideOverflowIndicator)
+ *           → `reportDismissed()`. The factory owns ONLY the bracketing hide + the trailing
+ *           report; the hook owns the middle.
+ *
+ * The factory does NOT touch `lastStimulus` — `reportDismissed` already resets it to
+ * 'blur' after send, and external dismiss handlers (`picker.close`, the downloads
+ * local-keydown, the popup keydown) set the flavor before calling `menuController.close`.
+ *
+ * `focusReturn` defaults to a no-op — matching every current register site (all pass
+ * `focusReturn: () => {}`; none rely on the controller's `else entry.trigger.focus()`
+ * path, because every sheet here is a backdrop whose trigger === menu === its own node).
+ *
+ * @param {{
+ *   register: (entry: any) => any,
+ *   reportDismissed: () => void,
+ *   node: any,
+ *   trigger?: any,
+ *   menu?: any,
+ *   items?: () => any[],
+ *   dismissible?: boolean,
+ *   focusReturn?: () => void,
+ *   onOpen?: (startIndex?: number) => void,
+ *   onClose?: () => void,
+ * }} opts
+ * @returns {any} the registered menu entry
+ */
+export function createSheetEntry(opts) {
+  const { register, reportDismissed, node } = opts;
+  const onOpen = opts.onOpen;
+  const onClose = opts.onClose;
+  /** @type {any} */
+  const entry = {
+    trigger: opts.trigger || node,
+    menu: opts.menu || node,
+    // Forward the roving start-index (incl. the -1 focus-last path) to the sheet hook,
+    // which owns show + focus. The factory adds nothing on open.
+    onOpen(/** @type {number} */ startIndex) {
+      if (onOpen) onOpen(startIndex);
+    },
+    onClose() {
+      node.classList.add('hidden'); // factory-owned hide — idempotent, safe on an already-hidden node
+      if (onClose) onClose(); // sheet middle: scrub / field-reset / drop-ref / hideOverflowIndicator
+      reportDismissed(); // factory-owned trailing report
+    },
+    focusReturn: opts.focusReturn || (() => {})
+  };
+  if (opts.items) entry.items = opts.items;
+  if (opts.dismissible !== undefined) entry.dismissible = opts.dismissible;
+  return register(entry);
 }
 
 /**

@@ -28,6 +28,7 @@ import { buildCopyIcon } from './copy-icon.js';
  *   replacingLede: HTMLElement,
  *   copy: HTMLButtonElement,
  *   acknowledge: HTMLButtonElement,
+ *   scrub: () => void,
  * }}
  */
 export function buildVaultRecoveryCard(document) {
@@ -96,5 +97,12 @@ export function buildVaultRecoveryCard(document) {
   actions.appendChild(acknowledge);
   card.appendChild(actions);
 
-  return { node, card, keyValue, replacingLede, copy, acknowledge };
+  // Scrub the displayed recovery key from the DOM — the "never retained past the display"
+  // invariant (M15 F3 DD1f). Closes over the key display node so the caller's onClose can clear it
+  // via an importable, unit-testable seam (menu-overlay.js's onClose calls refs.scrub()).
+  const scrub = () => {
+    keyValue.textContent = '';
+  };
+
+  return { node, card, keyValue, replacingLede, copy, acknowledge, scrub };
 }

@@ -19,9 +19,12 @@ consumers, not code.
 
 ## Consumers
 
-The sheet page (`src/renderer/menu-overlay.js`) registers one controller entry per template
-(all via `menuController.register({...})`, every one with **`trigger === menu`** — the sheet
-has no in-document trigger buttons; opens are programmatic on `menu-overlay:init`):
+The sheet page (`src/renderer/menu-overlay.js`) registers one controller entry per template —
+each now composed through the shared `createSheetEntry` factory
+(`src/shared/modal-card-controller.js`, M17 F3 Leg 1), which wraps `menuController.register({...})`
+with the sheet's show/hide/`reportDismissed`/`focusReturn` envelope plus `onOpen`/`onClose` hooks.
+Every entry registers with **`trigger === menu`** — the sheet has no in-document trigger buttons;
+opens are programmatic on `menu-overlay:init`:
 
 - **`menu` template** (kebab ⋮, container ▾, page-context incl. toolbar-Unpin mode,
   tab-context, bookmarks-overflow (M15 F1 Leg 3, the bar's overflow chevron menu) —

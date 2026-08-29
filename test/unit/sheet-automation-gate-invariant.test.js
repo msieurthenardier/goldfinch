@@ -9,11 +9,17 @@
 //         menuType and not only isVisible(). NO TEST IN THIS REPO LOADS main.js
 //         (test/helpers/source-scan.js says so outright), so this is a scan, not a unit test.
 //   AC8 — the CO-RESIDENCY PREMISE that makes admitting readDom on the sheet sound: the three
-//         one-time-secret cards scrub their own textContent in their onClose bodies, and
+//         one-time-secret cards scrub their secret display in their onClose bodies, and
 //         onInit's pre-scrub early-return set is ENUMERATED so a new early return added ahead
 //         of the scrub fails here. src/renderer/menu-overlay.js is a 2400-line ESM page script
 //         with 17 top-level imports and preload-bridge access; the repo tests only its pure
 //         template builders (vault-accesskey-template.test.js states that gap outright).
+//         M17 F3 L1: the actual textContent clearing moved into each card template's importable
+//         scrub() closure (pinned red-on-delete by vault-{recovery,accesskey,adminkey}-template
+//         .test.js); the onClose bodies now CALL refs.scrub(). This pin tracks that call site —
+//         it guarantees each secret card still scrubs on the close paths that matter
+//         (menuController.closeAll runs onClose), while the template tests guarantee scrub()
+//         actually empties the node.
 //   AC9 — sheetMenuFor is wired at BOTH createEngine sites. The fallback is SILENT (absent →
 //         the sheet is simply refused), so a half-wired seam produces no test failure
 //         anywhere — the house dual-site grep-pin convention (engine.js's listWindows note).
@@ -108,13 +114,16 @@ function enclosingOnCloseBody(masked, needleIdx) {
   return masked.slice(braceOpen + 1, braceClose);
 }
 
-test('AC8: each one-time-secret card clears its own textContent INSIDE an onClose() body', () => {
+test('AC8: each one-time-secret card scrubs its secret display INSIDE an onClose() body', () => {
   const masked = readMasked('renderer', 'menu-overlay.js');
 
+  // M17 F3 L1: the onClose bodies call the card template's importable scrub() closure rather
+  // than clearing textContent inline. This pin guarantees the CALL sits on the close path;
+  // the template tests pin that scrub() actually empties the secret node (red-on-delete).
   const scrubs = [
-    "recovery.keyValue.textContent = ''", // vault-recovery-show
-    "accessKey.secretValue.textContent = ''", // vault-accesskey-show
-    "adminKey.keyValue.textContent = ''" // vault-adminkey-show
+    'recovery.scrub()', // vault-recovery-show → keyValue
+    'accessKey.scrub()', // vault-accesskey-show → secretValue + keyIdValue
+    'adminKey.scrub()' // vault-adminkey-show → keyValue
   ];
   for (const scrub of scrubs) {
     const idx = masked.indexOf(scrub);

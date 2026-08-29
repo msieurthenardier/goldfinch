@@ -31,6 +31,7 @@ import { buildCopyIcon } from './copy-icon.js';
  *   secretValue: HTMLElement,
  *   copy: HTMLButtonElement,
  *   acknowledge: HTMLButtonElement,
+ *   scrub: () => void,
  * }}
  */
 export function buildVaultAccessKeyCard(document) {
@@ -109,5 +110,15 @@ export function buildVaultAccessKeyCard(document) {
   actions.appendChild(acknowledge);
   card.appendChild(actions);
 
-  return { node, card, keyIdValue, secretValue, copy, acknowledge };
+  // Scrub the displayed access secret AND the keyId from the DOM — the "never retained
+  // past the display" invariant (M15 F3 DD1f). The keyId is documented non-secret (a revocation
+  // fingerprint) but is cleared today alongside the secret; scrub() preserves that exact
+  // behavior. Closes over both display nodes so menu-overlay.js's onClose clears them via
+  // an importable, unit-testable seam (refs.scrub()).
+  const scrub = () => {
+    secretValue.textContent = '';
+    keyIdValue.textContent = '';
+  };
+
+  return { node, card, keyIdValue, secretValue, copy, acknowledge, scrub };
 }

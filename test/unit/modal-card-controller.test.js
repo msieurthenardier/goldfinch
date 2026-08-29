@@ -14,6 +14,7 @@ const assert = require('node:assert/strict');
 const { createDocument } = require('./helpers/jars-page-dom');
 const {
   createSheetReport,
+  createSheetEntry,
   attachModalCard,
   attachBackdropPressGate
 } = require('../../src/shared/modal-card-controller.js');
@@ -101,6 +102,148 @@ test('createSheetReport: sendActivatedOnce passes value through with the live to
   report.begin(3);
   report.sendActivatedOnce({ id: 'create', value: 'Shopping' });
   assert.deepEqual(bridge.activated, [{ id: 'create', value: 'Shopping', token: 3 }]);
+});
+
+// ---------------------------------------------------------------------------
+// createSheetEntry — the sheet-lifecycle register envelope (F14/F23). Constructed
+// here with an INJECTED register + reportDismissed and MOCK nodes — no real DOM, no
+// menu-overlay IIFE load, no menuController global. These pin the load-bearing
+// envelope composition order that every one of the ~19 converted sheets now shares.
+// ---------------------------------------------------------------------------
+
+// A minimal register harness: captures the entry createSheetEntry builds and returns it
+// (matching menuController.register, which pushes + returns the entry). The controller
+// drives an entry by calling entry.onOpen(startIndex) / entry.onClose() — we do the same.
+function makeSheetHarness(document, opts = {}) {
+  const node = document.createElement('div');
+  node.classList.add('hidden');
+  const registered = [];
+  const reports = [];
+  const entry = createSheetEntry(
+    Object.assign(
+      {
+        register: (e) => {
+          registered.push(e);
+          return e;
+        },
+        reportDismissed: () => reports.push('report'),
+        node
+      },
+      opts
+    )
+  );
+  return { node, entry, registered, reports };
+}
+
+test('createSheetEntry: registers an entry via the INJECTED register with mock nodes (no real DOM)', () => {
+  const document = createDocument();
+  const { node, entry, registered } = makeSheetHarness(document);
+  assert.equal(registered.length, 1, 'the injected register received exactly one entry');
+  assert.equal(registered[0], entry, 'createSheetEntry returns what register returned');
+  assert.equal(entry.trigger, node, 'trigger defaults to the node (backdrop === trigger === menu)');
+  assert.equal(entry.menu, node, 'menu defaults to the node');
+});
+
+test('createSheetEntry: open runs the onOpen hook (show + focus) and forwards the roving start-index', () => {
+  const document = createDocument();
+  const opens = [];
+  const { node, entry } = makeSheetHarness(document, {
+    onOpen(startIndex) {
+      node.classList.remove('hidden'); // the hook owns show
+      opens.push(startIndex);
+    }
+  });
+  entry.onOpen(0);
+  assert.equal(node.classList.contains('hidden'), false, 'opening unhides the node via the hook');
+  assert.deepEqual(opens, [0]);
+  // The -1 "focus last" roving path must survive the factory's onOpen wrapper.
+  entry.onOpen(-1);
+  assert.deepEqual(opens, [0, -1], 'the -1 focus-last start-index is forwarded, not dropped');
+});
+
+test('createSheetEntry: close hides, runs the onClose MIDDLE between hide and report, then reports', () => {
+  const document = createDocument();
+  const order = [];
+  const { node, entry } = makeSheetHarness(document, {
+    onClose() {
+      // The middle runs AFTER the factory-owned hide (node already hidden) and BEFORE report.
+      order.push('hook:hidden=' + node.classList.contains('hidden'));
+    },
+    reportDismissed: () => order.push('report')
+  });
+  node.classList.remove('hidden'); // simulate the open state
+  entry.onClose();
+  assert.equal(node.classList.contains('hidden'), true, 'closing hides the node (factory-owned)');
+  assert.deepEqual(order, ['hook:hidden=true', 'report'], 'order is hide → onClose middle → reportDismissed');
+});
+
+test('createSheetEntry: a plain sheet (no onClose middle) still hides then reports on close', () => {
+  const document = createDocument();
+  const { node, entry, reports } = makeSheetHarness(document); // no onOpen/onClose
+  node.classList.remove('hidden');
+  entry.onClose();
+  assert.equal(node.classList.contains('hidden'), true, 'hide runs with no middle hook');
+  assert.deepEqual(reports, ['report'], 'reportDismissed still fires');
+});
+
+test('createSheetEntry: hide is idempotent — closing an already-hidden node does not throw', () => {
+  const document = createDocument();
+  const { node, entry, reports } = makeSheetHarness(document);
+  assert.equal(node.classList.contains('hidden'), true, 'starts hidden');
+  entry.onClose(); // double-close / close-before-open — must not throw
+  assert.equal(node.classList.contains('hidden'), true);
+  assert.deepEqual(reports, ['report']);
+});
+
+test('createSheetEntry: focusReturn defaults to a no-op (never auto-focuses a trigger)', () => {
+  const document = createDocument();
+  const { entry } = makeSheetHarness(document);
+  assert.equal(typeof entry.focusReturn, 'function');
+  assert.doesNotThrow(() => entry.focusReturn(), 'the default focusReturn is a safe no-op');
+});
+
+test('createSheetEntry: a supplied focusReturn is passed through unchanged', () => {
+  const document = createDocument();
+  const calls = [];
+  const { entry } = makeSheetHarness(document, { focusReturn: () => calls.push('fr') });
+  entry.focusReturn();
+  assert.deepEqual(calls, ['fr']);
+});
+
+test('createSheetEntry: items + dismissible pass through only when supplied', () => {
+  const document = createDocument();
+  const items = () => [];
+  const withOpts = makeSheetHarness(document, { items, dismissible: false });
+  assert.equal(withOpts.entry.items, items, 'items forwarded (menu / picker / cert-picker)');
+  assert.equal(withOpts.entry.dismissible, false, 'dismissible forwarded (secret sheets, capture)');
+  // A plain sheet omits both — dismissible undefined means the controller treats it as
+  // dismissible (its guard is `=== false`), matching the un-annotated register sites.
+  const plain = makeSheetHarness(document);
+  assert.equal('items' in plain.entry, false, 'no items key when not supplied');
+  assert.equal('dismissible' in plain.entry, false, 'no dismissible key when not supplied');
+});
+
+test('createSheetEntry: the factory never touches lastStimulus (it reports via the injected fn only)', () => {
+  const document = createDocument();
+  // A report object whose lastStimulus setter would flip a flag if the factory wrote it.
+  let stimulusTouched = false;
+  const report = {
+    reportDismissed() {},
+    set lastStimulus(_v) {
+      stimulusTouched = true;
+    },
+    get lastStimulus() {
+      return 'blur';
+    }
+  };
+  const node = document.createElement('div');
+  const entry = createSheetEntry({
+    register: (e) => e,
+    reportDismissed: () => report.reportDismissed(),
+    node
+  });
+  entry.onClose();
+  assert.equal(stimulusTouched, false, 'the factory does not write lastStimulus — external handlers own the flavor');
 });
 
 // ---------------------------------------------------------------------------
