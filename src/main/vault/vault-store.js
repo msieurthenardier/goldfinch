@@ -306,6 +306,15 @@ class VaultStore {
     /** @type {any} */
     this._timer = null;
 
+    // M17 F4 L3 (AC4): idle auto-lock SUPPRESSION flag — consulted ONLY in the
+    // _touch timer callback (never in any crypto/rotation path). While set, a
+    // fired idle timer RE-ARMS instead of calling lockNow(). Main drives it
+    // across a fresh-adopt key-surfacing window (SET when the one-time admin key
+    // is stashed, CLEARED on the recovery-show ack / pending drop / window
+    // teardown) so the recovery-adopt path cannot autolock into a permanent
+    // lockout before its rotated one-time recovery key is acknowledged.
+    this._suspendAutoLock = false;
+
     // Unlock GENERATION (PR#112 finding 3): bumped on every lock-state transition
     // (install / lock / reset). An async manager mutation captures it before its
     // scrypt await and re-checks after, so a lockNow()/re-unlock that fired mid-derive
@@ -375,6 +384,10 @@ class VaultStore {
     if (!doc.kdf || typeof doc.kdf !== 'object') {
       throw new vc.VaultFormatError('manager.json: missing kdf');
     }
+    // M17 F4 DD1: fail-closed KDF validation on read. setup() is the sole writer of
+    // manager.json.kdf and always writes in-bounds params, so out-of-bounds kdf here
+    // means vault-file tampering — refuse to open rather than trust downgraded params.
+    validateImportedKdf(doc.kdf);
     if (typeof doc.adminPublicKeyB64 !== 'string') {
       throw new vc.VaultFormatError('manager.json: missing adminPublicKeyB64');
     }
@@ -458,12 +471,34 @@ class VaultStore {
     const safeMins = typeof mins === 'number' && mins >= 1 ? mins : 10;
     const ms = safeMins * 60 * 1000;
     this._timer = this._setTimeout(() => {
+      // M17 F4 L3 (AC4): while a fresh-adopt is surfacing its one-time recovery +
+      // admin keys, autolock would be a permanent lockout on the recovery-adopt
+      // path. Re-arm instead of locking; main clears the suppression once the
+      // recovery key is acknowledged (or on window teardown), and the next fire
+      // locks normally. Timer surface ONLY — no crypto/rotation state touched.
+      if (this._suspendAutoLock) {
+        this._touch();
+        return;
+      }
       this.lockNow();
     }, ms);
     // Don't let a real idle timer keep the process alive (headless / tests).
     if (this._timer && typeof this._timer.unref === 'function') {
       this._timer.unref();
     }
+  }
+
+  /**
+   * M17 F4 L3 (AC4): set/clear the idle auto-lock suppression flag. Consulted
+   * ONLY by the _touch timer callback (a re-arm-instead-of-lock guard); it never
+   * touches key material or the arming logic. Driven by main across a fresh-adopt
+   * key-surfacing window so the rotated one-time recovery key cannot be lost to
+   * autolock before the operator acknowledges it (a hard lockout on the
+   * recovery-adopt path).
+   * @param {boolean} suspended
+   */
+  setAutoLockSuspended(suspended) {
+    this._suspendAutoLock = suspended === true;
   }
 
   /**
@@ -962,8 +997,11 @@ class VaultStore {
    * collision unless `overwrite`; evict the destination's cached key (a stale cached key
    * GCM-fails against the new ciphertext); zeroize the transient bundle MRK + vault key.
    * @param {any} bundle
+   * On a FRESH adopt the return also carries the two force-rotated one-time secrets
+   * (`recoveryKeyDisplay`, `adminPrivateKeyB64`) for the surfacing leg; the EXISTING-profile
+   * return omits them (M17 F4 Leg 2 / DD2).
    * @param {{ destinationTarget?: string, secret: Buffer, secretKind?: 'master'|'recovery', overwrite?: boolean }} opts
-   * @returns {Promise<{ imported: true, fresh: boolean, vaultId: string }>}
+   * @returns {Promise<{ imported: true, fresh: boolean, vaultId: string, recoveryKeyDisplay?: string, adminPrivateKeyB64?: string }>}
    */
   async importVault(bundle, opts = /** @type {any} */ ({})) {
     const { destinationTarget, secret, secretKind, overwrite } = opts;
@@ -1045,20 +1083,41 @@ class VaultStore {
         // FRESH profile: adopt the bundle's manager. Vault FIRST (to GLOBAL_ID — the sole
         // target resolvable on a jar-less fresh profile), then manager.json, then install.
         this._writeVaultForKey(GLOBAL_ID, vaultKey, mrk, items);
+
+        // M17 F4 Leg 2 / DD2: FORCE ROTATION of the one-time recovery key and the admin
+        // keypair inline under the ALREADY-LIVE `mrk` (unwrapped above from the donor secret),
+        // so neither donor envelope survives in the adopted manager.json — the donor operator
+        // can never unlock or admin-open this adopted profile. Minted exactly as setup() does
+        // (no master-password step-up: a recovery-kind adopt has no password, and the live MRK
+        // already authenticates the wrap). The two new one-time secrets are RETURNED so the
+        // surfacing leg (Leg 3) can reveal them. The donor MASTER envelope is intentionally
+        // RETAINED (DD4 residual — documented in Leg 4, not severed here).
+        const rec = vc.generateRecoveryKey();
+        const recoveryEnv = vc.wrapRecovery(mrk, rec.material, { version: MANAGER_VERSION });
+        rec.material.fill(0); // the recovery is now operator-held via `display` — drop the buffer (mirrors setup).
+        const admin = vc.generateAdminKeypair();
+        const adminEnv = vc.sealToAdmin(mrk, admin.publicKey, { version: MANAGER_VERSION });
+
         this._writeManager({
           format: MANAGER_FORMAT,
           version: MANAGER_VERSION,
           kdf: bundle.kdf,
-          adminPublicKeyB64: bundle.adminPublicKeyB64,
+          adminPublicKeyB64: admin.publicKeyB64, // NEW — the donor pubkey is discarded.
           mrk: {
-            master: bundle.mrk.master,
-            recovery: bundle.mrk.recovery,
-            admin: bundle.mrk.admin
+            master: bundle.mrk.master, // DONOR master envelope RETAINED (DD4).
+            recovery: recoveryEnv, // NEW — the donor recovery envelope is discarded.
+            admin: adminEnv // NEW — the donor admin seal is discarded.
           }
         });
         this._installMrk(mrk); // leaves UNLOCKED, fires onUnlock; takes ownership of `mrk`.
         mrk = null; // INSTALLED — do NOT zeroize in the finally.
-        return { imported: true, fresh: true, vaultId: GLOBAL_ID };
+        return {
+          imported: true,
+          fresh: true,
+          vaultId: GLOBAL_ID,
+          recoveryKeyDisplay: rec.display,
+          adminPrivateKeyB64: admin.privateKeyB64
+        };
       }
 
       // EXISTING profile: re-key the source vault key under the DESTINATION MRK.

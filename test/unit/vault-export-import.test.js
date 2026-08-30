@@ -3,10 +3,12 @@
 // Unit tests for the portable export / import store ops (M12 Flight 4 Leg 1 export-import,
 // DD1 — Option A). Electron-free: real temp dirs + FAST scrypt (the vault-store.test.js
 // idiom). Covers exportVault (no password, ciphertext-only, all three mrk envelopes),
-// importVault on a FRESH profile (adopt the bundle's manager; unlock by the SOURCE master
-// password AND, independently, by the SOURCE recovery key — the mission portability
-// criterion), and importVault on an EXISTING profile (re-key under the destination MRK;
-// refuse-on-collision; unknown-target refused; wrong-secret → VaultAuthError, nothing written).
+// importVault on a FRESH profile (adopt the bundle's manager, FORCING rotation of the
+// recovery key + admin keypair under the live MRK — M17 F4 Leg 2 / DD2 — so the SOURCE
+// master password still unlocks but the donor recovery/admin secrets are invalidated and
+// the two NEW one-time secrets are returned), and importVault on an EXISTING profile (re-key
+// under the destination MRK; refuse-on-collision; unknown-target refused; wrong-secret →
+// VaultAuthError, nothing written).
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -58,13 +60,15 @@ function roundTrip(bundle) {
   return JSON.parse(JSON.stringify(bundle));
 }
 
-// A fully set-up SOURCE store with one login item in global; returns { dir, store, recovery }.
+// A fully set-up SOURCE store with one login item in global; returns
+// { dir, store, recovery, adminPriv }. The donor admin private key is captured so the
+// fresh-adopt rotation tests can assert it is REJECTED after the forced rotation.
 async function makeSource() {
   const dir = tmpDir();
   const store = makeStore(dir);
-  const { recoveryKeyDisplay } = await store.setup({ masterPassword: MASTER });
+  const { recoveryKeyDisplay, adminPrivateKeyB64 } = await store.setup({ masterPassword: MASTER });
   store.saveItem('global', loginItem());
-  return { dir, store, recovery: recoveryKeyDisplay };
+  return { dir, store, recovery: recoveryKeyDisplay, adminPriv: adminPrivateKeyB64 };
 }
 
 // ---------------------------------------------------------------------------
@@ -209,7 +213,7 @@ test('exportVault on a LOCKED manager throws VaultLockedError (policy — export
 // importVault — FRESH profile (adopt the manager; unlock by master AND by recovery)
 // ---------------------------------------------------------------------------
 
-test('FRESH profile import (adopt-manager): sets up + leaves unlocked; the item is readable; manager adopts all three mrk slots + kdf + adminPublicKeyB64', async () => {
+test('FRESH profile import (MASTER-kind adopt): forces rotation of recovery + admin under the live MRK; keeps the donor MASTER envelope (DD4); returns the two new one-time secrets', async () => {
   const src = await makeSource();
   const bundle = roundTrip(src.store.exportVault('global'));
   const srcManager = JSON.parse(fs.readFileSync(managerPath(src.dir), 'utf8'));
@@ -224,7 +228,15 @@ test('FRESH profile import (adopt-manager): sets up + leaves unlocked; the item 
       secret: Buffer.from(MASTER, 'utf8'),
       secretKind: 'master'
     });
-    assert.deepEqual(res, { imported: true, fresh: true, vaultId: 'global' });
+    // The fresh branch returns the new 5-field shape: the fixed trio plus the two
+    // force-rotated one-time secrets (dynamic values — asserted as non-empty strings).
+    assert.equal(res.imported, true);
+    assert.equal(res.fresh, true);
+    assert.equal(res.vaultId, 'global');
+    assert.equal(typeof res.recoveryKeyDisplay, 'string');
+    assert.ok(res.recoveryKeyDisplay.length > 0, 'a new recovery display is returned');
+    assert.equal(typeof res.adminPrivateKeyB64, 'string');
+    assert.ok(res.adminPrivateKeyB64.length > 0, 'a new admin private key is returned');
 
     // Vault file written; manager adopted; left UNLOCKED (analogous to setup).
     assert.ok(fs.existsSync(vaultPath(freshDir, 'global')), 'global vault written');
@@ -236,14 +248,37 @@ test('FRESH profile import (adopt-manager): sets up + leaves unlocked; the item 
     assert.equal(items[0].password, 'hunter2');
     assert.equal(items[0].username, 'user@example.com');
 
-    // The adopted manager mirrors the bundle's envelopes verbatim.
+    // Forced rotation: neither donor envelope/seal survives — recovery + admin differ, and
+    // the admin PUBLIC key differs. The donor MASTER envelope is RETAINED verbatim (DD4
+    // residual — proves the scope boundary is intentional). kdf is adopted unchanged.
     const adopted = JSON.parse(fs.readFileSync(managerPath(freshDir), 'utf8'));
     assert.equal(adopted.format, 'gfmanager');
     assert.deepEqual(adopted.kdf, srcManager.kdf);
-    assert.equal(adopted.adminPublicKeyB64, srcManager.adminPublicKeyB64);
-    for (const slot of ['master', 'recovery', 'admin']) {
-      assert.deepEqual(adopted.mrk[slot], srcManager.mrk[slot], `mrk.${slot} adopted verbatim`);
-    }
+    assert.deepEqual(adopted.mrk.master, srcManager.mrk.master, 'donor MASTER envelope survives (DD4)');
+    assert.notDeepEqual(adopted.mrk.recovery, srcManager.mrk.recovery, 'recovery envelope was rotated');
+    assert.notDeepEqual(adopted.mrk.admin, srcManager.mrk.admin, 'admin seal was rotated');
+    assert.notEqual(adopted.adminPublicKeyB64, srcManager.adminPublicKeyB64, 'admin public key was rotated');
+
+    // The RETURNED new recovery key unlocks the adopted profile (no lockout on rotation).
+    store.lockNow();
+    store.unlockWithRecovery(res.recoveryKeyDisplay);
+    assert.equal(store.isUnlocked(), true, 'the new recovery key unlocks the adopted profile');
+    // The DONOR recovery key is now REJECTED (its envelope no longer exists).
+    store.lockNow();
+    assert.throws(
+      () => store.unlockWithRecovery(src.recovery),
+      (e) => e instanceof vc.VaultAuthError
+    );
+
+    // The RETURNED new admin private key opens all vaults; the DONOR admin private key is
+    // REJECTED (its seal was replaced — mirrors vault-admin-key-provision.test.js:120-124).
+    const opened = store.openAllWithAdminKey(res.adminPrivateKeyB64);
+    assert.ok(opened.has('global'), 'the new admin private key opens the global vault');
+    for (const k of opened.values()) k.fill(0);
+    assert.throws(
+      () => store.openAllWithAdminKey(src.adminPriv),
+      (e) => e instanceof vc.VaultAuthError
+    );
   } finally {
     rm(src.dir);
     rm(freshDir);
@@ -279,26 +314,56 @@ test('FRESH profile import → unlock by the SOURCE MASTER password on restart (
   }
 });
 
-test('FRESH profile import → unlock by the SOURCE RECOVERY key on restart (independently of the master password)', async () => {
+test('FRESH profile import (RECOVERY-kind adopt): rotation invalidates the SOURCE recovery key; the RETURNED new recovery key unlocks; donor admin key rejected', async () => {
   const src = await makeSource();
   const bundle = roundTrip(src.store.exportVault('global'));
+  const srcManager = JSON.parse(fs.readFileSync(managerPath(src.dir), 'utf8'));
 
   const freshDir = tmpDir();
   try {
     const store = vs.load(freshDir, { scryptParams: FAST_SCRYPT, listJars: () => [] });
-    // Import by the RECOVERY key (a base32 display STRING carried as Buffer bytes).
-    await store.importVault(bundle, {
+    // Import by the RECOVERY key (a base32 display STRING carried as Buffer bytes). A
+    // recovery-kind adopt has NO master password, yet the live MRK (unwrapped from the donor
+    // recovery key) still authenticates the inline forced rotation — no step-up needed.
+    const res = await store.importVault(bundle, {
       destinationTarget: 'global',
       secret: Buffer.from(src.recovery, 'utf8'),
       secretKind: 'recovery'
     });
     assert.equal(store.isUnlocked(), true);
+    assert.equal(res.fresh, true);
+    assert.equal(typeof res.recoveryKeyDisplay, 'string');
+    assert.ok(res.recoveryKeyDisplay.length > 0);
+    assert.equal(typeof res.adminPrivateKeyB64, 'string');
+    assert.ok(res.adminPrivateKeyB64.length > 0);
 
-    // Restart: lock, then unlock with the SOURCE recovery key.
+    // Forced rotation, recovery-kind: recovery + admin rotated, donor MASTER retained (DD4).
+    const adopted = JSON.parse(fs.readFileSync(managerPath(freshDir), 'utf8'));
+    assert.deepEqual(adopted.mrk.master, srcManager.mrk.master, 'donor MASTER envelope survives (DD4)');
+    assert.notDeepEqual(adopted.mrk.recovery, srcManager.mrk.recovery, 'recovery envelope was rotated');
+    assert.notDeepEqual(adopted.mrk.admin, srcManager.mrk.admin, 'admin seal was rotated');
+    assert.notEqual(adopted.adminPublicKeyB64, srcManager.adminPublicKeyB64, 'admin public key was rotated');
+
+    // Restart: the SOURCE recovery key is now REJECTED (its envelope was rotated away) …
     store.lockNow();
-    store.unlockWithRecovery(src.recovery);
-    assert.equal(store.isUnlocked(), true, 'the source recovery key unlocks the imported profile');
+    assert.throws(
+      () => store.unlockWithRecovery(src.recovery),
+      (e) => e instanceof vc.VaultAuthError,
+      'the source recovery key no longer unlocks after rotation'
+    );
+    // … while the RETURNED new recovery key unlocks (no lockout on a recovery-kind adopt).
+    store.unlockWithRecovery(res.recoveryKeyDisplay);
+    assert.equal(store.isUnlocked(), true, 'the new recovery key unlocks the imported profile');
     assert.equal(store.listItems('global')[0].password, 'hunter2');
+
+    // The RETURNED new admin private key opens; the DONOR admin private key is REJECTED.
+    const opened = store.openAllWithAdminKey(res.adminPrivateKeyB64);
+    assert.ok(opened.has('global'));
+    for (const k of opened.values()) k.fill(0);
+    assert.throws(
+      () => store.openAllWithAdminKey(src.adminPriv),
+      (e) => e instanceof vc.VaultAuthError
+    );
   } finally {
     rm(src.dir);
     rm(freshDir);

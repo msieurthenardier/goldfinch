@@ -134,7 +134,7 @@ and the next mission's crew. N/A beyond that.
       `AUTOMATABLE_MENU_TYPES` widening and/or a `createSheetEntry`
       extraction with isolated unit tests (F23); closes with the
       menu-overlay / chrome-indicator CLAUDE.md subsection (F34, partial)
-- [ ] Flight 4: **Vault trust-boundary hardening** — `validateImportedKdf`
+- [x] Flight 4: **Vault trust-boundary hardening** — `validateImportedKdf`
       from `_readManager` with a legacy-compat ruling (F2); forced
       `rotateRecovery` + `rotateAdminKey` after a fresh adopt (F8)
 - [x] Flight 5: **Prettier adoption** *(completed 2026-08-27 — PRs #182, #184; debriefed)* — one-time reformat under the existing

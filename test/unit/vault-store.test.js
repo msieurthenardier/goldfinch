@@ -419,6 +419,50 @@ test('the idle timer arms from the setting, resets on each op, and locks on fire
   }
 });
 
+// M17 F4 L3 (AC4): idle-autolock suppression window. While set, a fired idle timer
+// RE-ARMS instead of locking (the lockout-window guard for a fresh-adopt surfacing
+// its rotated one-time recovery + admin keys); once cleared, the next fire locks as
+// normal. Touches ONLY the timer surface — no crypto/rotation path is involved.
+test('setAutoLockSuspended: a fired idle timer re-arms instead of locking while suspended, then locks again once cleared', async () => {
+  const dir = tmpDir();
+  try {
+    let armed = null;
+    let armCount = 0;
+    const store = makeStore(dir, {
+      getAutoLockMinutes: () => 5,
+      setTimeout: (fn, ms) => {
+        armCount += 1;
+        armed = { fn, ms };
+        return `token-${armCount}`;
+      },
+      clearTimeout: () => {}
+    });
+
+    await store.setup({ masterPassword: MASTER });
+    assert.equal(store.isUnlocked(), true, 'setup leaves the store unlocked');
+
+    // Suspend, then fire the idle timer: it must RE-ARM, not lock.
+    store.setAutoLockSuspended(true);
+    const armsBeforeFire = armCount;
+    const mrkRef = store.mrk;
+    armed.fn();
+    assert.equal(store.isUnlocked(), true, 'suspended: a fired idle timer does NOT lock');
+    assert.equal(store.mrk, mrkRef, 'suspended: the MRK is not zeroized/replaced');
+    assert.ok(armCount > armsBeforeFire, 'suspended: the fired timer RE-ARMS the idle timer');
+
+    // Clear the suppression: the next fire locks as normal.
+    store.setAutoLockSuspended(false);
+    armed.fn();
+    assert.equal(store.isUnlocked(), false, 'cleared: a fired idle timer locks the store');
+    assert.ok(
+      mrkRef.every((b) => b === 0),
+      'cleared: firing the timer zeroizes the MRK'
+    );
+  } finally {
+    rm(dir);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Step-up re-auth + access keys
 // ---------------------------------------------------------------------------

@@ -100,6 +100,18 @@ renamed, quarantined, or recreated — the operator's ciphertext is treated as s
 is the deliberate opposite of `app-db.js`, which quarantines a corrupt config row and boots
 on defaults.)
 
+**KDF params validated on read (fail-closed).** `manager.json`'s KDF params are checked
+against sane bounds on *every* read — not just on import — because `_readManager` calls
+`validateImportedKdf(doc.kdf)` on the parsed document. Every unlock / rotate / recover /
+export path funnels through `_readManager`, so an out-of-bounds parameter (an
+attacker-lowered scrypt `N`, say) makes the manager **refuse to open** (fail-closed) rather
+than silently deriving the master key under a weakened work factor. `setup()` is the only
+writer of these params and only ever writes in-bounds values, so there is no legitimate
+manager to repair — recovery from a tampered `manager.json` is by re-importing from a
+trusted bundle. This closes the **silent-KDF-downgrade** vector: an attacker who lowered `N`
+on the un-step-up-gated recovery path could previously weaken the master-password derivation
+undetected; the read-path check now rejects it before any derive or write.
+
 ## Key hierarchy — the MRK model
 
 `setup()` mints **one random 256-bit Manager Root Key (MRK)**. The MRK is never stored in
@@ -328,11 +340,20 @@ recovery-key and admin portability on the far side.
 writes/installs nothing). The source **master password** (a Buffer) or the source **recovery
 key** (a base32 display string) opens the bundle:
 
-- **Fresh profile** (`!isSetUp()`): **adopt** the bundle's manager — write the vault file
-  first (to `global`, the only target resolvable on a jar-less fresh profile, so a failure
-  never flips `isSetUp()` true without a vault), then `manager.json` from the bundle, then
-  install the MRK (leaving the profile unlocked). The source master password / recovery key
-  unlock this profile on restart.
+- **Fresh profile** (`!isSetUp()`): **adopt** the bundle's manager, but not verbatim — a
+  fresh adopt **forces a recovery + admin rotation** before the profile is usable. Write the
+  vault file first (to `global`, the only target resolvable on a jar-less fresh profile, so a
+  failure never flips `isSetUp()` true without a vault); then, still under the bundle's live
+  MRK, mint a fresh recovery key and a fresh admin keypair and write **those** envelopes
+  (`mrk.recovery`, `mrk.admin`, and `adminPublicKeyB64`) into the adopted `manager.json`
+  instead of the donor's — so the donor retains **neither** the recovery key **nor** the
+  admin private key into the adopted vault. The donor's `mrk.master` envelope is carried over
+  unchanged (see the master-residual note under Rotation & recovery and the threat model), so
+  the source **master password** still unlocks the adopted profile on restart — but the
+  source **recovery key is rotated away** and no longer opens it. Finally install the MRK
+  (leaving the profile unlocked). The two new one-time keys are surfaced **once**, recovery
+  first and admin only after the recovery key is acknowledged, and the profile stays unlocked
+  until that lockout-critical recovery key is acknowledged.
 - **Existing profile** (set up + unlocked): **re-key** the source vault key under the
   destination profile's own MRK at the resolved destination target; a collision is refused
   unless `overwrite`. The transient bundle MRK and vault key are zeroized.
@@ -355,6 +376,14 @@ every `.gfvault` file are untouched:
 anew every time because F3's setup-minted admin private key was discarded; both the sealed
 envelope **and** the stored public key are overwritten together (a stale public key would
 mismatch the seal and corrupt a subsequent export).
+
+**Fresh-profile adopt forces these two rotations up front.** Adopting a bundle onto a fresh
+profile (see Portability) does the recovery-key and admin-keypair rotation **inline under the
+live bundle MRK** — no master-password step-up, since the live MRK already authenticates the
+wrap — so the donor cannot retain recovery or admin access into the adopted vault. It does
+**not** rotate the donor's master envelope: severing the donor's master password is a
+`changeMasterPassword` the adopter runs afterward (compromise-mode backlog), not part of
+adopt.
 
 ## Lifecycle
 
@@ -435,6 +464,11 @@ no plaintext key and adding no fourth recovery route.
   rotated-out admin key used against a copied `manager.json`, or a memory capture while
   unlocked — no subsequent rotation revokes that access. Compromise-mode rotation (minting a
   fresh MRK) is not implemented.
+- **The donor's master password after a fresh-profile adopt.** A fresh adopt rotates the
+  recovery key and admin key away from the donor, but it does **not** rotate the donor's
+  master envelope — the donor's master password still unwraps the adopted vault's MRK. Fully
+  severing the donor is a master-password change (`changeMasterPassword`), on the
+  compromise-mode backlog; adopt does not perform it.
 
 **The admin key — break-glass / multi-vault.** The X25519 admin key is the intended path for
 opening every vault at once (multi-vault automation, operator break-glass). Handing the admin

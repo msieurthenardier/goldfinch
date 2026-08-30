@@ -34,9 +34,17 @@ function makeHarness({ importResult, importThrows } = {}) {
   const chromeSends = [];
   const sheetSender = { id: 42, isDestroyed: () => false }; // the sheet's OWN overlay webContents
   const win = { id: 1 };
+  // M17 F4 L3: the presented menu is now MUTABLE — step 1 (the import invoke) sees
+  // `vault-import`; step 2 (the recovery-show ack that chains adminkey-show) presents
+  // `vault-recovery-show`. Initialized to the pre-leg fixed stub so every prior test
+  // (token 7 / vault-import) is byte-unchanged.
+  let currentMenu = { token: 7, menuType: 'vault-import' };
+  const setCurrentMenu = (m) => {
+    currentMenu = m;
+  };
   const sheet = {
     getView: () => ({ webContents: sheetSender }),
-    getCurrentMenu: () => ({ token: 7, menuType: 'vault-import' }),
+    getCurrentMenu: () => currentMenu,
     closeMenuOverlay: (reason, token) => closeCalls.push([reason, token])
   };
   const rec = { sheet, win };
@@ -58,17 +66,57 @@ function makeHarness({ importResult, importThrows } = {}) {
     return importResult || { ok: true };
   };
 
+  // M17 F4 L3 (AC2-AC4): a faithful stand-in for main's pending-admin-key store + store
+  // autolock suppression. stash SETS suppression; take (consume) CLEARS it once nothing is
+  // pending — mirroring main.js's stashAdoptAdminKey / takeAdoptAdminKey. `suspendCalls`
+  // records the suppression transitions so AC4 is asserted through this seam at the IPC layer
+  // (the real store timer is exercised by vault-store.test.js).
+  const pendingAdmin = new Map();
+  const suspendCalls = []; // booleans: true = suspended, false = resumed
+  const stashAdoptAdminKey = (chromeId, adminPrivateKeyB64) => {
+    if (chromeId == null) return;
+    pendingAdmin.set(chromeId, adminPrivateKeyB64);
+    suspendCalls.push(true);
+  };
+  const takeAdoptAdminKey = (chromeId) => {
+    if (chromeId == null || !pendingAdmin.has(chromeId)) return undefined;
+    const k = pendingAdmin.get(chromeId);
+    pendingAdmin.delete(chromeId);
+    if (pendingAdmin.size === 0) suspendCalls.push(false);
+    return k;
+  };
+
   registerOverlayIpc({
     ipcMain,
     registry,
     chromeForAttachment: (w) => (w === win ? chrome : null),
     chromeForTab: () => null,
     sanitizeActivatedValue: (v) => (typeof v === 'string' && v.length <= 24 ? v : undefined),
-    vaultImport
+    vaultImport,
+    stashAdoptAdminKey,
+    takeAdoptAdminKey
   });
 
   const handler = ipcMain.handlers.get('menu-overlay:vault-import');
-  return { handler, sheetSender, closeCalls, chromeSends, captured };
+  const activated = ipcMain.listeners.get('menu-overlay:activated');
+  return {
+    handler,
+    activated,
+    sheetSender,
+    closeCalls,
+    chromeSends,
+    captured,
+    setCurrentMenu,
+    suspendCalls,
+    pendingAdmin
+  };
+}
+
+// M17 F4 L3: channel-filter helper — the activated handler ALSO echoes a
+// `menu-overlay-activated` onto chromeSends, so the show-sheet assertions must
+// filter by channel, never by array length.
+function sendsOn(chromeSends, channel) {
+  return chromeSends.filter(([ch]) => ch === channel);
 }
 
 test('the import handler is GATED on the vaultImport injection (offline overlay tests omit it)', () => {
@@ -209,4 +257,106 @@ test('a non-Uint8Array secret → { ok:false }', async () => {
   );
   assert.deepEqual(res, { ok: false });
   assert.equal(captured.called, 0);
+});
+
+// ---------------------------------------------------------------------------
+// M17 F4 L3 (surface-adopted-keys): the fresh-adopt one-time-secret surfacing
+// chain. The delegate is STUBBED here, so these pin the DELEGATE RETURN-SHAPE
+// branches (fresh vs existing) — secretKind is vacuous at this layer (both-kind
+// crypto coverage lives in Leg 2's store tests). Sequential guarantee: the
+// recovery-show sheet is shown on the import ack; the adminkey-show sheet opens
+// ONLY after the recovery-show is itself acknowledged (never back-to-back).
+// ---------------------------------------------------------------------------
+
+test('FRESH adopt: import shows recovery-show ONLY (no adminkey-show), suspends autolock, and stashes the admin key; no secrets in the invoke reply', async () => {
+  const { handler, sheetSender, closeCalls, chromeSends, suspendCalls, pendingAdmin } = makeHarness({
+    importResult: {
+      ok: true,
+      fresh: true,
+      recoveryKeyDisplay: 'RCV-AAAA-BBBB-CCCC',
+      adminPrivateKeyB64: 'ADMINKEYb64=='
+    }
+  });
+  const secret = new TextEncoder().encode('donor recovery key');
+
+  const res = await handler({ sender: sheetSender }, { token: 7, secret, secretKind: 'recovery' });
+
+  // The invoke reply carries NO secret material.
+  assert.deepEqual(res, { ok: true }, 'invoke reply is a bare { ok:true } — no recovery/admin key');
+  assert.deepEqual(closeCalls, [['activated', 7]], 'the import sheet is closed on success');
+
+  // Exactly one recovery-show, with the new recovery key; and NO adminkey-show yet.
+  const recShows = sendsOn(chromeSends, 'vault-recovery-show');
+  assert.equal(recShows.length, 1, 'exactly one vault-recovery-show sent');
+  assert.deepEqual(recShows[0][1], { recoveryKey: 'RCV-AAAA-BBBB-CCCC', replacing: true });
+  assert.equal(
+    sendsOn(chromeSends, 'vault-adminkey-show').length,
+    0,
+    'adminkey-show is NOT sent before the recovery ack'
+  );
+
+  // AC4 seam: autolock suspended on stash; the admin key is held (not surfaced yet).
+  assert.deepEqual(suspendCalls, [true], 'idle autolock is suspended when the admin key is stashed');
+  assert.equal(pendingAdmin.get(77), 'ADMINKEYb64==', 'the admin key is stashed keyed by the window chrome id');
+});
+
+test('FRESH adopt: the recovery-show ACK chains adminkey-show (exactly once, with the admin key), drops the pending key, and clears autolock suppression', async () => {
+  const { handler, activated, sheetSender, chromeSends, suspendCalls, setCurrentMenu, pendingAdmin } = makeHarness({
+    importResult: {
+      ok: true,
+      fresh: true,
+      recoveryKeyDisplay: 'RCV-AAAA-BBBB-CCCC',
+      adminPrivateKeyB64: 'ADMINKEYb64=='
+    }
+  });
+  const secret = new TextEncoder().encode('donor recovery key');
+  await handler({ sender: sheetSender }, { token: 7, secret, secretKind: 'recovery' });
+
+  // The recovery-show sheet is now the presented menu; acknowledge it (its ONLY close path).
+  setCurrentMenu({ token: 99, menuType: 'vault-recovery-show' });
+  activated({ sender: sheetSender }, { id: 'ack', token: 99 });
+
+  const adminShows = sendsOn(chromeSends, 'vault-adminkey-show');
+  assert.equal(adminShows.length, 1, 'exactly one vault-adminkey-show, sent only AFTER the recovery ack');
+  assert.deepEqual(adminShows[0][1], { adminPrivateKey: 'ADMINKEYb64==' });
+  // Still exactly one recovery-show across the whole flow — no re-send.
+  assert.equal(sendsOn(chromeSends, 'vault-recovery-show').length, 1, 'the recovery-show is not re-sent');
+
+  // AC3/AC4: the pending key is dropped and suppression is cleared on the ack.
+  assert.equal(pendingAdmin.has(77), false, 'the pending admin key is dropped on the recovery ack');
+  assert.deepEqual(suspendCalls, [true, false], 'autolock suppression is set on stash then cleared on ack');
+});
+
+test('EXISTING-profile adopt: NEITHER show channel is sent, autolock is never suspended, no admin key stashed', async () => {
+  const { handler, activated, sheetSender, closeCalls, chromeSends, suspendCalls, setCurrentMenu, pendingAdmin } =
+    makeHarness({ importResult: { ok: true, fresh: false } });
+  const secret = new TextEncoder().encode('donor master password');
+
+  const res = await handler({ sender: sheetSender }, { token: 7, secret, secretKind: 'master' });
+
+  assert.deepEqual(res, { ok: true }, 'invoke reply is a bare { ok:true }');
+  assert.deepEqual(closeCalls, [['activated', 7]], 'the import sheet is closed');
+  assert.equal(sendsOn(chromeSends, 'vault-recovery-show').length, 0, 'no recovery-show on an existing-profile adopt');
+  assert.equal(sendsOn(chromeSends, 'vault-adminkey-show').length, 0, 'no adminkey-show on an existing-profile adopt');
+  assert.deepEqual(suspendCalls, [], 'idle autolock is never suspended on an existing-profile adopt');
+  assert.equal(pendingAdmin.size, 0, 'no admin key stashed');
+
+  // Even a stray recovery-show ack (none should be pending) chains nothing.
+  setCurrentMenu({ token: 99, menuType: 'vault-recovery-show' });
+  activated({ sender: sheetSender }, { id: 'ack', token: 99 });
+  assert.equal(
+    sendsOn(chromeSends, 'vault-adminkey-show').length,
+    0,
+    'a recovery-show ack with no pending admin key is inert'
+  );
+});
+
+test('a recovery-show ack with NO pending admin key (setup / rotate-recovery) is fully unaffected — no adminkey-show, no suppression toggle', () => {
+  // No import invoke at all: this window never adopted. A bare recovery-show ack
+  // (as setup / rotate-recovery produce) must not chain adminkey-show.
+  const { activated, sheetSender, chromeSends, suspendCalls, setCurrentMenu } = makeHarness();
+  setCurrentMenu({ token: 99, menuType: 'vault-recovery-show' });
+  activated({ sender: sheetSender }, { id: 'ack', token: 99 });
+  assert.equal(sendsOn(chromeSends, 'vault-adminkey-show').length, 0, 'no adminkey-show for a non-adopt recovery-show');
+  assert.deepEqual(suspendCalls, [], 'no suppression toggle for a non-adopt recovery-show');
 });
