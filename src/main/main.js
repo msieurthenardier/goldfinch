@@ -822,6 +822,47 @@ function broadcastVaultLockState() {
 const { createPendingImportStore } = require('./vault/pending-imports');
 const _pendingVaultImports = createPendingImportStore(() => crypto.randomUUID());
 
+// M17 F4 L3 (AC2-AC4): the pending fresh-adopt ADMIN key store — the SECOND of the
+// two one-time secrets a fresh adopt rotates (the first, the recovery key, is shown
+// immediately; the admin key waits until the recovery-show sheet is acknowledged so
+// the two dismiss-locked sheets never clobber each other). Held main-side, keyed by
+// the owning CHROME contents id (the same keying idiom as _pendingVaultImports), only
+// between the recovery-show open and its ack. `adminPrivateKeyB64` is a JS string —
+// immutable, NOT fill(0)-zeroizable — consistent with the other one-time secrets
+// (recovery display, mint secret); dwell is minimized (dropped on the recovery-show
+// ack in AC3, or on window teardown). Stashing SETS the store's idle-autolock
+// suppression (the lockout-window guard, AC4); taking / clearing it CLEARS the
+// suppression once nothing remains pending.
+const _pendingAdoptAdminKeys = new Map(); // chromeId(number) -> adminPrivateKeyB64(string)
+
+// Stash the fresh-adopt admin key for a window and SUSPEND idle autolock (AC2/AC4).
+function stashAdoptAdminKey(chromeId, adminPrivateKeyB64) {
+  if (chromeId == null) return;
+  _pendingAdoptAdminKeys.set(chromeId, adminPrivateKeyB64);
+  getVaultStore().setAutoLockSuspended(true);
+}
+
+// Consume + drop a window's pending admin key (AC3). Returns the key, or undefined
+// when none is held (setup / rotate-recovery recovery-show acks fall through here as
+// a no-op). Clears autolock suppression once no window still has one pending.
+function takeAdoptAdminKey(chromeId) {
+  if (chromeId == null || !_pendingAdoptAdminKeys.has(chromeId)) return undefined;
+  const adminPrivateKeyB64 = _pendingAdoptAdminKeys.get(chromeId);
+  _pendingAdoptAdminKeys.delete(chromeId);
+  if (_pendingAdoptAdminKeys.size === 0) getVaultStore().setAutoLockSuspended(false);
+  return adminPrivateKeyB64;
+}
+
+// Window-teardown cleanup (AC4): drop any pending admin key held for a destroyed
+// window (its recovery-show sheet is torn down without an ack, so AC3 never runs)
+// and clear the suppression once nothing remains pending. No-op when the window
+// held nothing — so it never force-constructs the store on an unrelated close.
+function clearAdoptAdminKeyForWindow(chromeId) {
+  if (chromeId == null || !_pendingAdoptAdminKeys.has(chromeId)) return;
+  _pendingAdoptAdminKeys.delete(chromeId);
+  if (_pendingAdoptAdminKeys.size === 0) getVaultStore().setAutoLockSuspended(false);
+}
+
 // Pick a save location for an export bundle — runs the save dialog ONLY (no build, no write).
 // The vault page's Export modal calls this to choose a location up front, then binds
 // source→path at submit time via vaultSaveBundleToFile(bundle, savePath). Holds NO main-side
@@ -959,7 +1000,14 @@ async function vaultImportFromSheet(chromeId, buf, secretKind) {
   const pending = _pendingVaultImports.peek(chromeId);
   if (!pending) return { ok: false };
   try {
-    await getVaultStore().importVault(pending.bundle, {
+    // M17 F4 L3 AC1: capture the store return. A FRESH adopt (Leg 2) rotates the
+    // recovery key + admin keypair inline and returns the two one-time secrets
+    // ({ imported, fresh:true, recoveryKeyDisplay, adminPrivateKeyB64 }); an
+    // existing-profile adopt returns { imported, fresh:false } (no secrets). Map
+    // imported→ok and pass fresh + the two secrets through so the overlay handler
+    // can surface them on the dismiss-locked one-time sheets (NEVER in this invoke
+    // reply, NEVER in any page DOM — mirrors rotate-recovery / rotate-admin).
+    const res = await getVaultStore().importVault(pending.bundle, {
       destinationTarget: pending.destinationTarget,
       secret: buf,
       secretKind,
@@ -970,7 +1018,15 @@ async function vaultImportFromSheet(chromeId, buf, secretKind) {
     });
     _pendingVaultImports.clear(chromeId); // consume on success only.
     broadcastVaultLockState();
-    return { ok: true };
+    if (res && res.fresh === true) {
+      return {
+        ok: true,
+        fresh: true,
+        recoveryKeyDisplay: res.recoveryKeyDisplay,
+        adminPrivateKeyB64: res.adminPrivateKeyB64
+      };
+    }
+    return { ok: true, fresh: false };
   } catch (e) {
     // Wrong secret → { ok:false } (the sheet re-prompts, nothing written). A CODED collision → a
     // distinguishable { reason:'collision' } so the sheet shows a truthful "already exists" message
@@ -1336,6 +1392,11 @@ const { createWindow } = createWindowFactory({
   getHistoryRecorder: () => historyRecorder,
   faviconFetcher,
   popupRegistry,
+  // M17 F4 L3 (AC4): window-teardown cleanup for a pending fresh-adopt admin key.
+  // A window closed mid-surfacing (recovery-show shown, not yet acked) would leak
+  // the held one-time admin-key string and leave idle autolock suspended; the
+  // factory calls this from its 'close' handler to drop both.
+  clearPendingAdoptAdminKey: clearAdoptAdminKeyForWindow,
   defer: setImmediate,
   logger: console
 });
@@ -1648,6 +1709,14 @@ registerOverlayIpc({
   // is written; the held { bundle, destinationTarget } is consumed here. The handler owns the
   // Buffer copy + dual-zeroize; this delegate only runs the store op.
   vaultImport: (chromeId, buf, secretKind) => vaultImportFromSheet(chromeId, buf, secretKind),
+  // M17 F4 L3 (AC2/AC3): the fresh-adopt one-time-secret surfacing seam. On a fresh
+  // adopt the handler stashes the rotated admin private key (which also suspends idle
+  // autolock — the lockout-window guard) and shows the recovery key first; the
+  // recovery-show ack then takes the stashed key (clearing suppression) to open the
+  // adminkey-show sheet. Both are narrow bound functions (never getVaultStore itself)
+  // so the electron-free overlay registrar stays store-decoupled.
+  stashAdoptAdminKey: (chromeId, adminPrivateKeyB64) => stashAdoptAdminKey(chromeId, adminPrivateKeyB64),
+  takeAdoptAdminKey: (chromeId) => takeAdoptAdminKey(chromeId),
   // M12 F4 Leg 2 (key-rotation): the vault-stepup sheet's RECOVERY-ROTATION delegate. Follows
   // the vaultUnlock pattern (VaultAuthError → { ok:false }) so a WRONG master-password step-up
   // re-prompts and NOTHING is rotated; any other error propagates (the handler still dual-

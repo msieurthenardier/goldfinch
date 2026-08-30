@@ -54,6 +54,7 @@ function createWindowFactory(deps) {
     getHistoryRecorder,
     faviconFetcher,
     popupRegistry,
+    clearPendingAdoptAdminKey,
     defer,
     logger
   } = deps;
@@ -253,6 +254,13 @@ function createWindowFactory(deps) {
       // head, not queued challenges (load-bearing; unit-pinned). Every native
       // login callback is answered before any view teardown runs.
       authChallenges?.cancelForWindow(record);
+      // M17 F4 L3 (AC4): drop any pending fresh-adopt admin key held for THIS
+      // window and clear the store's idle-autolock suppression. The recovery-show
+      // sheet is torn down just below without an ack, so the ack-driven cleanup
+      // (AC3) never runs for it. Keyed by the window's chrome id (still resolvable
+      // during 'close', before registry.remove on 'closed'); a no-op when the
+      // window held nothing pending.
+      clearPendingAdoptAdminKey?.(chromeForAttachment(win)?.id);
       // M14 F2 L1 (DD1f): popups close WITH their owner window — after the
       // window-wide auth cancel above (unit-pinned to stay first), before any
       // sheet/overlay teardown. closeAllForRecord itself runs the DD1f order

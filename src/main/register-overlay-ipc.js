@@ -43,6 +43,13 @@ function registerOverlayIpc({
   vaultSetup,
   vaultMintAccessKey,
   vaultImport,
+  // M17 F4 L3 (AC2/AC3): fresh-adopt one-time-secret surfacing seam. `stashAdoptAdminKey`
+  // holds the rotated admin private key for a window (and suspends idle autolock) after the
+  // recovery key is shown; `takeAdoptAdminKey` consumes it on the recovery-show ack (clearing
+  // suppression) so the adminkey-show sheet opens SECOND, never clobbering the recovery sheet.
+  // Optional (offline overlay tests omit them) — the fresh-adopt branch only fires when present.
+  stashAdoptAdminKey,
+  takeAdoptAdminKey,
   vaultRotateRecovery,
   vaultRotateAdminKey,
   vaultChangeMaster,
@@ -108,6 +115,22 @@ function registerOverlayIpc({
       if (certIndex != null) certSelectFromSheet(rec, certIndex);
     }
     rec.sheet.closeMenuOverlay('activated', token);
+    // M17 F4 L3 (AC3): the fresh-adopt surfacing chain. The dismiss-locked
+    // vault-recovery-show sheet closes ONLY through this activated path; on that
+    // ack, if a pending adopt admin key is held for this window, open the SECOND
+    // one-time sheet (vault-adminkey-show) — sequentially, so it never supersedes
+    // the recovery sheet before it is read. `takeAdoptAdminKey` drops the pending
+    // record AND clears the autolock suppression (AC4). A recovery-show with no
+    // pending admin key (setup / rotate-recovery) returns undefined here → no send,
+    // fully unaffected. The token === current.token guard above already blocks a
+    // stale double-fire.
+    if (current.menuType === 'vault-recovery-show') {
+      const chrome = chromeForAttachment(rec.win);
+      const adminPrivateKey = takeAdoptAdminKey?.(chrome?.id);
+      if (adminPrivateKey !== undefined) {
+        chrome?.send('vault-adminkey-show', { adminPrivateKey });
+      }
+    }
     const out = { menuType: current.menuType, id };
     const cleanValue = sanitizeActivatedValue(value);
     if (cleanValue !== undefined) out.value = cleanValue;
@@ -294,10 +317,23 @@ function registerOverlayIpc({
         // overlay webContents (distinct from the chrome), so we key by the window's CHROME contents
         // id — chromeForAttachment(rec.win) — which is the SAME object the page's pick step keyed
         // under (chromeForTab(pageTabId)). A window can only ever import its own picked bundle.
-        const chromeId = chromeForAttachment(rec.win)?.id;
-        const res = await vaultImport(chromeId, buf, kind); // { ok, reason? }
+        const chrome = chromeForAttachment(rec.win);
+        const chromeId = chrome?.id;
+        const res = await vaultImport(chromeId, buf, kind); // { ok, fresh?, recoveryKeyDisplay?, adminPrivateKeyB64?, reason? }
         if (res && res.ok) {
           rec.sheet.closeMenuOverlay('activated', current.token);
+          // M17 F4 L3 (AC2): a FRESH adopt rotated the recovery key + admin keypair inline
+          // (Leg 2) and returned both one-time secrets. Show the recovery key FIRST on its
+          // dismiss-locked sheet (mirrors rotate-recovery's send, `replacing:true`), and stash
+          // the admin private key for this window — which also suspends idle autolock (AC4).
+          // The adminkey-show sheet opens only AFTER the recovery-show ack (AC3, the activated
+          // handler), so the two dismiss-locked sheets never clobber each other. The invoke
+          // reply stays { ok:true } with NO secret material. Existing-profile adopt
+          // (res.fresh !== true) is UNCHANGED — no sends, no stash.
+          if (res.fresh === true) {
+            stashAdoptAdminKey?.(chromeId, res.adminPrivateKeyB64);
+            chrome?.send('vault-recovery-show', { recoveryKey: res.recoveryKeyDisplay, replacing: true });
+          }
           return { ok: true };
         }
         // M12 F5 HAT tail (review HIGH-1 / MEDIUM-4): forward the NON-SECRET failure reason so the
