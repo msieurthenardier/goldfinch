@@ -187,6 +187,19 @@ business logic and no privileged APIs; it renders a model and runs the APG keybo
   window-blur do not close them — only an explicit "acknowledge" does (the value is
   unrecoverable, so an accidental dismiss must not lose it). On close the reference is dropped
   and the DOM text is scrubbed; a model-replace never re-emits a stale key.
+- **Sequential dismiss-locked one-time sheets (M17 F4 L3).** Opening a second sheet
+  immediately after a dismiss-locked one-time sheet is NOT safe: `menu-overlay-manager.js`'s
+  `openMenu` treats any open-while-open as a model-replace and fires `'superseded'` on the
+  still-open sheet (its `if (currentMenu) { … }` branch), clobbering the first secret before
+  it is acknowledged — a lockout-class trap for an unrecoverable value. Fresh-profile adopt
+  (the first flow to surface two one-time secrets in one operation — a rotated recovery key
+  and a rotated admin private key) establishes the idiom instead: stash the second secret,
+  show only the first sheet, and chain the second on the first's explicit acknowledgment. See
+  `src/main/register-overlay-ipc.js`'s `menu-overlay:vault-import` handler (`stashAdoptAdminKey`
+  + the `vault-recovery-show` send) and its `menu-overlay:activated` handler (the
+  `vault-recovery-show` branch that calls `takeAdoptAdminKey` and sends `vault-adminkey-show`
+  only on that ack). Reuse this stash-then-chain shape for the next multi-one-time-sheet flow
+  rather than opening both sheets in succession.
 - **Human fill dispatch.** For a gesture fill, `vault-human.js` resolves the credential by
   `(vaultId, itemId)` under the MRK **in main** and hands `{ wcId, credential }` to the fill
   effect. The picker model and the activated selection are metadata / an index only — the

@@ -19,6 +19,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const vs = require('../../src/main/vault/vault-store');
+const vc = require('../../src/main/vault/vault-crypto');
 
 // In-bounds memory-cheap scrypt (same as vault-store.test.js): N=2^12, r=8, p=1,
 // maxmem 64 MiB. The tampered-doc maxmem floor is 128*N*r relative to the TAMPERED
@@ -159,4 +160,26 @@ test('recoverMasterPassword refuses an out-of-bounds kdf and writes nothing', as
   } finally {
     rm(dir);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Squawk 0052 — DD1 coupling guard. The truth table above and the AC3 test prove
+// _readManager fails closed on OUT-of-bounds kdf. That guarantee is only sound for
+// legitimate managers because setup() is the sole kdf writer and always writes
+// vc.SCRYPT_PARAMS, which today sits INSIDE validateImportedKdf's bounds. Nothing
+// else pins that second half: a future production-param bump past the import
+// bounds (or a second kdf writer) would make _readManager fail closed on every
+// LEGITIMATE manager — surfacing at a user's unlock, not at test time. Assert the
+// coupling directly against the same validator :387's read-path guard calls, so a
+// violation fails loudly here instead. (An equivalent assertion already exists in
+// vault-export-import.test.js, from the import-hardening work that predates the F4
+// read-path guard — this copy is co-located with the read-path guarantee it backs.)
+// ---------------------------------------------------------------------------
+
+test('vc.SCRYPT_PARAMS (the production KDF) passes validateImportedKdf — DD1 coupling guard', () => {
+  assert.doesNotThrow(
+    () => vs.validateImportedKdf(vc.SCRYPT_PARAMS),
+    'production SCRYPT_PARAMS drifted outside validateImportedKdf bounds — _readManager would now ' +
+      'fail closed on every legitimate manager at unlock, not just tampered ones'
+  );
 });

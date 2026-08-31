@@ -273,3 +273,80 @@ test('absent popupRegistry dep is tolerated at window close (optional-chained)',
   const rec = h.factory.createWindow();
   assert.doesNotThrow(() => rec.win.emit('close'));
 });
+
+// ---------------------------------------------------------------------------
+// M17 F4 L3 (AC4, squawk 0051) — pending fresh-adopt admin-key window-teardown
+// cleanup. main.js itself cannot be require()'d under node:test (see
+// test/helpers/source-scan.js's "NO TEST IN THIS REPO LOADS main.js"), so these
+// tests exercise the window-factory close-handler wiring against a fake
+// `clearPendingAdoptAdminKey` delegate that models main.js's real
+// `clearAdoptAdminKeyForWindow` contract byte-for-byte: delete the chrome id's
+// entry from the pending Map, and clear the store's `_suspendAutoLock`
+// suppression once the map is empty (main.js:856-864).
+// ---------------------------------------------------------------------------
+
+function pendingAdoptAdminKeyFake(initialEntries) {
+  const pending = new Map(initialEntries);
+  const store = { suspendAutoLock: true };
+  const calls = [];
+  const clearPendingAdoptAdminKey = (chromeId) => {
+    calls.push(chromeId);
+    if (chromeId == null || !pending.has(chromeId)) return;
+    pending.delete(chromeId);
+    if (pending.size === 0) store.suspendAutoLock = false;
+  };
+  return { pending, store, calls, clearPendingAdoptAdminKey };
+}
+
+test('window close clears the pending adopt admin key for the resolved chrome id and clears autolock suspension', () => {
+  const fake = pendingAdoptAdminKeyFake([[900, 'admin-key-b64']]);
+  const h = createHarness({
+    clearPendingAdoptAdminKey: fake.clearPendingAdoptAdminKey,
+    chromeForAttachment: (win) => (win ? { id: 900 } : null)
+  });
+  const rec = h.factory.createWindow();
+  rec.win.emit('close');
+
+  assert.deepEqual(fake.calls, [900], 'called with the resolved chrome id');
+  assert.equal(fake.pending.has(900), false, 'the pending admin-key entry is removed');
+  assert.equal(fake.pending.size, 0, 'the pending map is emptied');
+  assert.equal(fake.store.suspendAutoLock, false, '_suspendAutoLock is cleared once nothing remains pending');
+});
+
+test('window close leaves autolock suspended while another window still has a pending adopt admin key', () => {
+  const fake = pendingAdoptAdminKeyFake([
+    [900, 'this-window-key'],
+    [901, 'other-window-key']
+  ]);
+  const h = createHarness({
+    clearPendingAdoptAdminKey: fake.clearPendingAdoptAdminKey,
+    chromeForAttachment: (win) => (win ? { id: 900 } : null)
+  });
+  const rec = h.factory.createWindow();
+  rec.win.emit('close');
+
+  assert.deepEqual(fake.calls, [900]);
+  assert.equal(fake.pending.has(900), false, "this window's entry is removed");
+  assert.equal(fake.pending.has(901), true, "another window's pending entry is untouched");
+  assert.equal(fake.store.suspendAutoLock, true, 'suspension stays while another window still holds a pending key');
+});
+
+test('window close calls clearPendingAdoptAdminKey with undefined when the window resolves no chrome (no-op, per the real contract)', () => {
+  const fake = pendingAdoptAdminKeyFake([[900, 'admin-key-b64']]);
+  const h = createHarness({
+    clearPendingAdoptAdminKey: fake.clearPendingAdoptAdminKey,
+    chromeForAttachment: () => null
+  });
+  const rec = h.factory.createWindow();
+  rec.win.emit('close');
+
+  assert.deepEqual(fake.calls, [undefined]);
+  assert.equal(fake.pending.size, 1, 'an unrelated window close never touches a pending entry it does not own');
+  assert.equal(fake.store.suspendAutoLock, true);
+});
+
+test('absent clearPendingAdoptAdminKey dep is tolerated at window close (optional-chained)', () => {
+  const h = createHarness({ chromeForAttachment: (win) => (win ? { id: 900 } : null) });
+  const rec = h.factory.createWindow();
+  assert.doesNotThrow(() => rec.win.emit('close'));
+});

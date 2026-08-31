@@ -220,9 +220,15 @@ function createHarness(options = {}) {
     // M14 F2 L1 (DD1f): the popup registry (optional-chained). Tests pass a
     // recording fake to pin the close-order slot.
     popupRegistry: options.popupRegistry,
+    // M17 F4 L3 (AC4, squawk 0051): resolves the chrome for a window (used to key the
+    // pending fresh-adopt-admin-key cleanup below). Tests pass a fake that returns an
+    // object carrying `id`.
     computeFindOverlayBounds: () => null,
     getTabContents: (wcId) => options.tabContents?.get(wcId) || null,
-    chromeForAttachment: () => null,
+    chromeForAttachment: options.chromeForAttachment || (() => null),
+    // M17 F4 L3 (AC4, squawk 0051): the pending fresh-adopt admin-key cleanup
+    // (optional-chained in production). Tests pass a recording/modeling fake.
+    clearPendingAdoptAdminKey: options.clearPendingAdoptAdminKey,
     sheetAcceleratorAction: () => null,
     isInternalContents: () => false,
     isGuestActionAllowed: () => true,
