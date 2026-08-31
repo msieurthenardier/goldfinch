@@ -1,6 +1,6 @@
 # Mission: Codebase Health — 2026-08-27 Maintenance
 
-**Status**: active
+**Status**: completed
 
 ## Outcome
 
@@ -25,16 +25,16 @@ and are not part of this mission.
 
 ## Success Criteria
 
-- [ ] A keyboard-only user can move focus from the chrome into the active
+- [x] A keyboard-only user can move focus from the chrome into the active
       guest page, Tab forward through the page's focusable elements, and
       return to the chrome — pinned by a rewritten `chrome-guest-keyboard-nav`
       spec whose guest entry is by keyboard, plus a keyboard-only
       navigate→activate-link→fill-field spec (F48 / #174)
-- [ ] Omnibox suggestion highlighting is exposed to assistive technology
+- [x] Omnibox suggestion highlighting is exposed to assistive technology
       across the view boundary (a chrome-owned announcement or equivalent
       ruled in design), with the mechanism shared with criterion 1's focus
       handoff rather than a second cross-view scheme (F49)
-- [ ] The internal-session boundary is tier-based: **non-admin** keys are
+- [x] The internal-session boundary is tier-based: **non-admin** keys are
       refused internal `goldfinch://` targets on every op (already enforced at
       the resolver), the **admin** key (a high-bar, deliberately-enabled,
       loopback-bound, key-gated tier — env `GOLDFINCH_AUTOMATION_ADMIN` + a
@@ -47,22 +47,22 @@ and are not part of this mission.
       internal) already holds, and the secret sheet stays walled for all. (An
       earlier draft mis-justified this as "admin is dev-only" — false; corrected
       under the flight's DD2, operator re-decided keep-as-is.)*
-- [ ] `vaultFill`/`vaultAnswerAuth` resolve targets through the same
+- [x] `vaultFill`/`vaultAnswerAuth` resolve targets through the same
       sheet/popup/tab-view predicate set as every other tool (F9), and
       `download-media` validates a renderer-supplied `webContentsId`
       against tab contents (F10c)
-- [ ] The vault/auth/cert-picker/downloads sheet lifecycles have executable
+- [x] The vault/auth/cert-picker/downloads sheet lifecycles have executable
       verification — behavior-drivable under a test-scoped allowlist and/or
       isolated unit tests of an extracted `createSheetEntry` — such that no
       sheet in `menu-overlay.js` is verified by source-text presence alone
       (F14, F23)
-- [ ] `manager.json` KDF parameters are validated on read with a ruled
+- [x] `manager.json` KDF parameters are validated on read with a ruled
       legacy-compat policy, and a fresh-profile bundle adopt forces recovery
       and admin key rotation before the profile is usable (F2, F8)
 - [x] Prettier is enforced: `prettier --check .` is clean on `main` and runs in
       both CI definitions; the `renderer.js` line budget is re-based on the
       formatted size and both budgets still guard growth *(Flight 5, 2026-08-27)* (escalated from squawk 0039; Flight 5)
-- [ ] All existing gates stay green throughout (suite, typecheck, lint;
+- [x] All existing gates stay green throughout (suite, typecheck, lint;
       `npm run a11y` where UI pages are touched)
 
 ## Stakeholders

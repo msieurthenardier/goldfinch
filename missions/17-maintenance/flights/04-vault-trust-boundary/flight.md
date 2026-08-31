@@ -161,7 +161,7 @@ import uses if a documented reason exists.
 ### Completion Checklist
 
 - [x] All legs completed
-- [ ] Code merged
+- [x] Code merged
 - [x] Tests passing
 - [x] Documentation updated (`docs/vault.md` read-path validation + adopt behaviour; squawk 0022's threat-model bullet if not already landed)
 
