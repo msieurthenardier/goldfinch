@@ -11,10 +11,13 @@ consumer contract (endpoint, auth model, tool reference, refusal semantics) live
 | --- | --- | --- | --- |
 | `npm start` | production `userData` | binds only on the Settings `automationEnabled` toggle (human-only) | Settings → Keys UI |
 | `npm run dev:automation` | dev (`…/goldfinch-dev`, isolated) | force-bound (`--automation-dev`, `!app.isPackaged`-gated) | none minted — every request is rejected unless a previously minted dev key is supplied; admin-tier ops refused without an admin key |
-| `GOLDFINCH_AUTOMATION_ADMIN=1 GOLDFINCH_AUTOMATION_DEV_MINT=1 npm run dev:automation` | dev | force-bound | jar + admin keys minted at startup, printed once |
+| `GOLDFINCH_AUTOMATION_ADMIN=1 GOLDFINCH_AUTOMATION_DEV_MINT=1 npm run dev:automation` | dev | force-bound | jar + admin keys minted at startup, printed once — **replaces** the prior jar/admin hash, so any config or env var still holding an older key starts 401ing |
 
 The last row is the **canonical dev/test launch** — always use it unless you specifically
-want a keyless run. It is dev-only and profile-isolated; there is no downside to minting.
+want a keyless run. It is dev-only and profile-isolated; there is no downside to minting a
+*first* key. But minting is rotation, not addition (one hash per jar, one admin hash — see
+`mcp-automation.md`'s rotation warning), so if you already have a working key stored in a
+client config, prefer relaunching without `DEV_MINT` (row above) over re-minting.
 
 `scripts/dev-launch.mjs` (behind `npm run dev:automation`) also decides the ozone platform:
 it passes `--ozone-platform=wayland` when a Wayland socket is reachable (X11 under WSLg

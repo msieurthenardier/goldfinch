@@ -147,6 +147,15 @@ It is **double-gated and dev-only**: it fires only under `shouldAutoMint` (the e
 observable. Minting writes only the key *hash*; the plaintext is shown once on this
 line and never persisted or re-derivable.
 
+> **⚠️ Minting rotates, it doesn't add.** `mintJarKey` stores a **single** hash per
+> jar (`hashes[jarId] = hashKey(key)`, overwriting whatever was there) and
+> `mintAdminKey` stores a **single** admin hash (`automationAdminKeyHash`) the same
+> way — there is no multi-key window per identity. Every `DEV_MINT` launch therefore
+> **invalidates** whichever key was minted before it: any `.mcp.json` entry or
+> exported env var still holding the old token starts getting a bare `401` on its
+> next request. Re-minting means re-syncing every config/env that references the
+> old token, not just picking up an additional one.
+
 **Recipe — attach a script to a dev key:**
 
 ```bash
@@ -165,6 +174,17 @@ node scripts/a11y-audit.mjs                 # or any consumer of scripts/lib/mcp
 `Authorization: Bearer <key>` header. This is the **attach** model — the operator
 launches the app out-of-band and the script connects to the already-running loopback
 server; it does not spawn the app.
+
+**Recommended steady state — mint once, don't relaunch with `DEV_MINT` every time.**
+The recipe above is for the *first* mint (or a deliberate re-mint). For routine dev
+work — especially any MCP client that holds a standing config (a `.mcp.json` entry,
+a long-lived env var) — mint once, store the printed key there, then relaunch with
+plain `npm run dev:automation` (add `GOLDFINCH_AUTOMATION_ADMIN=1` at launch if
+admin-tier ops are needed) and drop `GOLDFINCH_AUTOMATION_DEV_MINT`. Minted hashes
+persist in the dev profile (`…/goldfinch-dev`) across relaunches, so the stored
+token keeps working. Reach for a fresh `DEV_MINT` launch only when you actually need
+a new key — each one rotates out whatever was minted before it, everywhere it's
+configured.
 
 ## Endpoint
 
