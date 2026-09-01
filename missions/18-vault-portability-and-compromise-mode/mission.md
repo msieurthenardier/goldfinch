@@ -50,12 +50,13 @@ existing primitives (per-vault whole-blob re-encryption, fresh-key minting,
 envelope wrapping, admin-key enumeration); access-key revocation and live
 automation-session teardown fall out of machinery that already ships
 (`revalidate()` probes the access envelope per op). The surfacing problem
-does **not** multiply with vault count: fresh adopt surfaces two one-time
-secrets (recovery + admin, the F4 stash-then-chain idiom), and compromise
-mode surfaces one (recovery only — the admin key is revoked, not
-re-minted, per Flight 1 ruling R5); the autolock-suppression guard
-generalizes directly. *(This note reconciled to R5 at the Flight 1
-debrief, 2026-09-01.)*
+does **not** multiply with vault count: both compromise mode and fresh
+adopt surface exactly one one-time secret (the new recovery key) — admin
+keys are never minted implicitly (Flight 1 ruling R5; extended to adopt at
+Flight 2 planning), so F4's two-sheet stash-then-chain machinery has no
+remaining consumer once Flight 3 lands; the autolock-suppression guard
+generalizes directly. *(Reconciled to R5 at the Flight 1 debrief and to
+the adopt extension at Flight 2 planning, 2026-09-01.)*
 The genuinely new structure is contained: a multi-file transaction layer
 with load-time recovery in the vault store, and the restore-mapping
 workflow spanning store + jar registry + IPC/UI.
@@ -118,12 +119,18 @@ workflow spanning store + jar registry + IPC/UI.
       flight's design). *(Refined during Flight 1 alignment, 2026-09-01 —
       observations O1–O3 in the flight log.)*
 - [ ] **Fresh-adopt guarantees extend to multi-vault bundles.** A fresh
-      adopt of a multi-vault bundle still forces recovery + admin rotation
-      before the profile is usable, and the adopt surfacing chain
-      (recovery → ack → admin, no clobber, unlocked throughout) is backed
-      by a hybrid witnessed behavior test of the same form as the
-      compromise-mode chain — closing the F4 debrief's standing
-      recommendation.
+      adopt of a multi-vault bundle still forces a recovery-key rotation
+      before the profile is usable, and **no admin key is provisioned** —
+      the donor's admin access is severed by omission, and an admin key
+      exists only when the operator deliberately provisions one (same
+      opt-in rule as compromise mode). The adopt surfacing (a single
+      dismiss-locked recovery sheet, profile unlocked until the
+      acknowledgment) is backed by a hybrid witnessed behavior test of the
+      same form as the compromise-mode one — closing the F4 debrief's
+      standing recommendation. *(Amended at Flight 2 planning, 2026-09-01
+      — operator ruling: admin keys are never minted implicitly; extends
+      Flight 1 ruling R5 to the restore workflow. Supersedes F4's
+      two-key-chain form of this guarantee.)*
 - [ ] **Selective jar transplant.** The operator can bring a chosen subset
       of a bundle's vaults into an existing profile, re-keyed under the
       destination's own MRK; a destination collision is never resolved
