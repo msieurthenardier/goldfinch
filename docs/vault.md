@@ -48,7 +48,8 @@ Module layout:
 Everything lives under `userData/vaults/`:
 
 - **`manager.json`** — one per profile, owned by `vault-store.js` (format id `gfmanager`,
-  version 1). It holds no item data — only the wrapped Manager Root Key and the KDF params:
+  version 1 or 2 — see the v2 note below). It holds no item data — only the wrapped
+  Manager Root Key and the KDF params (v1 shown):
 
   ```json
   {
@@ -66,6 +67,16 @@ Everything lives under `userData/vaults/`:
 
   The only plaintext of consequence is `adminPublicKeyB64` (a *public* key). All three MRK
   wraps are ciphertext.
+
+  **Manager version 2 (M18): the admin fields are optional.** A `version: 2` manager may
+  omit `mrk.admin` and `adminPublicKeyB64` entirely — an unprovisioned (or
+  compromise-revoked) admin slot is a deliberate state, not corruption. When present they
+  are validated exactly as in v1, and they are present *together* or absent *together* (a
+  lone seal or lone public key is malformed → `VaultFormatError`). v1 managers (all three
+  slots required) remain readable unchanged. Manager envelopes bind the *document's* stated
+  version in their AAD, and a document's envelopes are always homogeneous: v2 is written
+  only by operations that rewrite the full envelope set (compromise-mode rotation today);
+  single-slot rotations preserve the document's existing version.
 
 - **`<vaultId>.gfvault`** — one per vault (`global.gfvault`, then `<jarId>.gfvault` created
   lazily on the first credential save into that jar). Format id `gfvault`, version 1, owned
@@ -341,13 +352,16 @@ refuse non-login items, and the documented "never card data" guarantee in
 a policy choice (every input is already on disk) and takes **no password**. The bundle
 carries, all as ciphertext:
 
-- the manager's **three** MRK envelopes (`master`, `recovery`, `admin`),
+- the manager's MRK envelopes — `master` and `recovery` always; the `admin` envelope +
+  the admin **public** key (`adminPublicKeyB64`) only when an admin key is provisioned
+  (a v2 no-admin manager, e.g. after a compromise-mode rotation, exports without them),
 - the KDF params,
-- the admin **public** key (`adminPublicKeyB64`),
+- the source manager's stated version (`managerVersion`; absent ⇒ 1 in old bundles) — the
+  envelopes are AAD-bound to it, so import unwraps at the bundle's stated version,
 - the target `.gfvault` document (its `mrk` envelope + item ciphertext).
 
-No plaintext secret ever enters the bundle. Carrying all three MRK envelopes preserves both
-recovery-key and admin portability on the far side.
+No plaintext secret ever enters the bundle. Carrying the MRK envelope set preserves
+recovery-key (and, when provisioned, admin) portability on the far side.
 
 `importVault(bundle, opts)` does all crypto **before any write** (a wrong secret throws and
 writes/installs nothing). The source **master password** (a Buffer) or the source **recovery
@@ -373,9 +387,10 @@ key** (a base32 display string) opens the bundle:
 
 ## Rotation & recovery
 
-All rotations require the manager unlocked and a **step-up re-auth**, rewrite exactly **one**
-`manager.json` slot, and never re-key the MRK — item ciphertext, the other MRK slots, and
-every `.gfvault` file are untouched:
+The four **single-slot** rotations require the manager unlocked and a **step-up re-auth**,
+rewrite exactly **one** `manager.json` slot, and never re-key the MRK — item ciphertext,
+the other MRK slots, and every `.gfvault` file are untouched. (**Compromise mode**, below,
+is the deliberate exception: it re-keys everything.)
 
 | Operation | Step-up | Effect |
 |---|---|---|
@@ -390,13 +405,47 @@ anew every time because F3's setup-minted admin private key was discarded; both 
 envelope **and** the stored public key are overwritten together (a stale public key would
 mismatch the seal and corrupt a subsequent export).
 
+**Compromise mode (`compromiseRotate`, M18)** is the one rotation that *does* re-key the
+MRK — the answer to "a party already extracted my key material". One operator action
+(Settings → "Rotate Everything…" → confirm → the combined credential sheet) mints a fresh
+MRK **and** a fresh key for every vault, re-encrypts every vault's items, **drops every
+per-jar access envelope**, **removes the admin provision** (the manager is rewritten at
+version 2 with no admin slot — re-provision afterward via `rotateAdminKey`), and re-wraps
+under a required **new** master password (new ≠ old, enforced on both branches). Two
+credential branches, both reachable from either lock state: the current master password,
+or the recovery key (the "forgot password" switch on the sheet). The whole rewrite is a
+crash-safe multi-file transaction with load-time recovery: any pre-commit failure leaves
+disk and live state untouched ("nothing changed; your existing keys remain valid" is
+literal truth), and once the op resolves the rotation is durable and the profile ends
+**unlocked** (the fresh MRK is installed). The new recovery key is shown **once**, on the
+dismiss-locked recovery sheet, only **after** the durable commit; acknowledging it
+completes the flow, and the page then shows a persistent completion card naming the
+revoked admin key and every vault whose access keys were dropped (held in memory for the
+app session — dismissing it or relaunching clears it). While a rotation is in flight,
+every other vault write refuses with a transient busy error ("a rotation is already in
+progress") — retry after it completes.
+
+- **Scope of the sever**: compromise mode severs the **live profile** — after it, no
+  previously issued or extracted key material (old master password, old recovery key,
+  admin private key, per-jar access keys, even a raw captured MRK or vault key) opens
+  anything in this profile. It does **not** reach previously exported bundle files the
+  operator holds: a pre-rotation `.gfvaultbundle` still opens with the secrets it was
+  exported under (it carries its own envelope set), so treat old bundles as carrying the
+  old keys and re-export after a rotation.
+- **Accepted residual — quitting during the reveal**: the one-time recovery-key display
+  is held only in memory between the commit and its acknowledgment. If the owning window
+  dies mid-flow the reveal re-surfaces on the next window; but quitting the app entirely
+  while it is still pending loses the display. This is not a lockout — the operator just
+  set the new master password and can mint a fresh recovery key from it (Master-key
+  management → Rotate recovery key).
+
 **Fresh-profile adopt forces these two rotations up front.** Adopting a bundle onto a fresh
 profile (see Portability) does the recovery-key and admin-keypair rotation **inline under the
 live bundle MRK** — no master-password step-up, since the live MRK already authenticates the
 wrap — so the donor cannot retain recovery or admin access into the adopted vault. It does
 **not** rotate the donor's master envelope: severing the donor's master password is a
-`changeMasterPassword` the adopter runs afterward (compromise-mode backlog), not part of
-adopt.
+`changeMasterPassword` (or a full compromise-mode rotation) the adopter runs afterward,
+not part of adopt.
 
 ## Lifecycle
 
@@ -449,7 +498,8 @@ no plaintext key and adding no fourth recovery route.
   `enumerateWindows` (`sheetWcId`).
   - **No vault sheet is ever readable.** `vault-unlock` / `vault-set` / `vault-stepup` /
     `vault-recovery-show` / `vault-accesskey-show` / `vault-adminkey-show` / `vault-import` /
-    `vault-change-master` / `vault-recover` are all off the allowlist, so a script can neither
+    `vault-change-master` / `vault-recover` / `vault-compromise` / `vault-compromise-recover`
+    are all off the allowlist, so a script can neither
     install an input listener on the sheet (no `evaluate`/`injectScript` at any tier, ever) nor
     read the secrets it renders.
   - **The DOM is scrubbed at CLOSE, not at the next open (DD1f).** `closeMenuOverlay` sends the
@@ -472,16 +522,24 @@ no plaintext key and adding no fourth recovery route.
   the exposure window, not a defense against in-process compromise.
 - **A keylogger at master entry.** Capturing the master password as the human types it into
   the sheet is outside the vault's control.
-- **A party that already extracted the MRK.** Rotation re-wraps envelopes; it never re-keys
-  the MRK itself. If the MRK was already extracted — via a returned recovery key or a
-  rotated-out admin key used against a copied `manager.json`, or a memory capture while
-  unlocked — no subsequent rotation revokes that access. Compromise-mode rotation (minting a
-  fresh MRK) is not implemented.
+- **A party that already extracted the MRK — answered by compromise mode (M18), with a
+  stated scope.** Single-slot rotation re-wraps envelopes and never re-keys the MRK, so it
+  cannot revoke an extracted MRK. **Compromise-mode rotation now exists for exactly this
+  case** (see Rotation & recovery): it mints a fresh MRK and fresh vault keys, re-encrypts
+  every item, drops every access envelope, and removes the admin provision — after it,
+  extracted pre-rotation material (old MRK and vault keys included) fails against the live
+  profile. Two bounds stay out of scope, stated plainly: it severs the **live profile
+  only** — previously exported bundle files the operator (or an attacker) holds still open
+  with the secrets they were exported under, so old bundles must be treated as carrying
+  the old keys; and an app-quit while the one-time recovery-key reveal is still pending
+  loses that display (accepted residual, not a lockout — the operator knows the new
+  master password and can re-mint a recovery key from it).
 - **The donor's master password after a fresh-profile adopt.** A fresh adopt rotates the
   recovery key and admin key away from the donor, but it does **not** rotate the donor's
   master envelope — the donor's master password still unwraps the adopted vault's MRK. Fully
-  severing the donor is a master-password change (`changeMasterPassword`), on the
-  compromise-mode backlog; adopt does not perform it.
+  severing the donor is a master-password change (`changeMasterPassword`) — or, for the
+  suspected-compromise case, a full compromise-mode rotation — run by the adopter
+  afterward; adopt does not perform it.
 
 **The admin key — break-glass / multi-vault.** The X25519 admin key is the intended path for
 opening every vault at once (multi-vault automation, operator break-glass). Handing the admin

@@ -50,6 +50,17 @@ function registerOverlayIpc({
   // Optional (offline overlay tests omit them) — the fresh-adopt branch only fires when present.
   stashAdoptAdminKey,
   takeAdoptAdminKey,
+  // M18 F2 L4 (compromise-mode rotation): the compromise sheets' delegate + surfacing
+  // seams. `vaultCompromiseRotate` runs the store op and maps the five ruled error
+  // classes to non-secret reasons; `stashCompromiseReveal` stashes the one-time
+  // recovery key + revocation report main-side AND acquires the refcounted autolock-
+  // suppression hold (H2 — called BEFORE any sheet interaction); `ackCompromiseReveal`
+  // consumes a window's pending compromise marker on the recovery-show ack (H1 —
+  // only-if-present, exact-pair release) and fires the completion broadcast. All
+  // optional (offline overlay tests omit them).
+  vaultCompromiseRotate,
+  stashCompromiseReveal,
+  ackCompromiseReveal,
   vaultRotateRecovery,
   vaultRotateAdminKey,
   vaultChangeMaster,
@@ -129,6 +140,17 @@ function registerOverlayIpc({
       const adminPrivateKey = takeAdoptAdminKey?.(chrome?.id);
       if (adminPrivateKey !== undefined) {
         chrome?.send('vault-adminkey-show', { adminPrivateKey });
+      } else {
+        // M18 F2 L4 (design-review H1): the ack's cross-flow discrimination. The
+        // adopt marker is checked FIRST, the compromise marker second (Q2 ruling:
+        // both-on-one-window is unreachable — a dismiss-locked sheet blocks the
+        // page — but the fixed order makes even the impossible state
+        // deterministic). The delegate consumes THIS window's compromise marker
+        // ONLY if present — releasing exactly the (chromeId, 'compromise') hold,
+        // never "any hold for this window" — then fires the completion broadcast
+        // (re-broadcast vault-lock-state; the page refreshes off it). Setup /
+        // rotate-recovery acks reach it and no-op, exactly like the adopt branch.
+        ackCompromiseReveal?.(chrome?.id);
       }
     }
     const out = { menuType: current.menuType, id };
@@ -492,6 +514,116 @@ function registerOverlayIpc({
           return { ok: true };
         }
         return { ok: false };
+      } finally {
+        recoveryBuf.fill(0);
+        newBuf.fill(0);
+        recoverySecret.fill?.(0);
+        newSecret.fill?.(0);
+      }
+    });
+  }
+
+  // M18 F2 L4 (compromise-mode rotation, flight DD4/DD5): the vault-compromise sheet's
+  // TWO-SECRET channel (current + new master passwords), mirroring vault-change-master's
+  // discipline (sender identity + open-token + `instanceof Uint8Array` + Buffer.from
+  // copies + DUAL-ZEROIZE all four buffers in finally) PLUS the menuType guard named as
+  // a predicate (the M15 F3 lesson — one persistent sheet document hosts every menuType,
+  // and this channel triggers a DESTRUCTIVE whole-hierarchy re-key). Main is
+  // AUTHORITATIVE about routing: only a live `vault-compromise` menu reaches
+  // `compromiseRotate` (DD4 mode carriage — no renderer-supplied flag).
+  //
+  // Success path (design-review H2, hold-and-resurface — ORDER IS LOAD-BEARING):
+  //  1. STASH the reveal (one-time recovery key + revocation report) main-side and
+  //     acquire the suppression hold — BEFORE any sheet interaction, so a window that
+  //     died during the 2–3-scrypt await can never lose the reveal to a throw on a
+  //     dead handle AFTER a durable commit.
+  //  2. NULL-GUARD the window: only when `rec.sheet`/`rec.win` are still alive, close
+  //     the credential sheet ('activated'; a mid-op dismissal already closed it — the
+  //     stale-token close is a pinned no-op) and open the dismiss-locked
+  //     vault-recovery-show sheet (POST-write ordering; the key never rides the invoke
+  //     reply). Window gone → the reveal stays pending and re-surfaces on the next
+  //     chrome boot (main.js's onChromeBooted re-key).
+  // The chromeId is captured BEFORE the await — the record's win/chrome handles may be
+  // dead by resolution time, but the stash must still key to the window that submitted.
+  // Failure: the delegate's non-secret `reason` ('reuse'|'auth'|'format'|'busy'|'state')
+  // rides back so the sheet renders the ruled inline copy; unknown errors reject the
+  // invoke (the finally still dual-zeroizes) and the sheet shows the DD5 pre-commit
+  // copy. Gated on the vaultCompromiseRotate injection.
+  if (vaultCompromiseRotate) {
+    ipcMain.handle('menu-overlay:vault-compromise', async (event, payload) => {
+      const rec = recordForSheetSender(event.sender);
+      if (!rec || !rec.sheet) return { ok: false };
+      const { token, oldSecret, newSecret } = payload || {};
+      if (typeof token !== 'number' || !(oldSecret instanceof Uint8Array) || !(newSecret instanceof Uint8Array)) {
+        return { ok: false };
+      }
+      const current = rec.sheet.getCurrentMenu();
+      if (!current || token !== current.token) return { ok: false };
+      if (current.menuType !== 'vault-compromise') return { ok: false };
+      const oldBuf = Buffer.from(oldSecret);
+      const newBuf = Buffer.from(newSecret);
+      try {
+        const chromeId = chromeForAttachment(rec.win)?.id;
+        const res = await vaultCompromiseRotate({ oldMasterPassword: oldBuf, newMasterPassword: newBuf });
+        if (res && res.ok) {
+          // H2 step 1 — stash + hold FIRST (before ANY sheet interaction).
+          stashCompromiseReveal?.(chromeId, { recoveryKey: res.recoveryKey, revoked: res.revoked });
+          // H2 step 2 — the null-guarded window path.
+          if (rec.sheet && rec.win && !rec.win.isDestroyed?.()) {
+            rec.sheet.closeMenuOverlay('activated', current.token);
+            chromeForAttachment(rec.win)?.send('vault-recovery-show', {
+              recoveryKey: res.recoveryKey,
+              replacing: true
+            });
+          }
+          return { ok: true };
+        }
+        return res && res.reason ? { ok: false, reason: res.reason } : { ok: false };
+      } finally {
+        oldBuf.fill(0);
+        newBuf.fill(0);
+        oldSecret.fill?.(0);
+        newSecret.fill?.(0);
+      }
+    });
+  }
+
+  // M18 F2 L4: the vault-compromise-recover sheet's TWO-SECRET channel (recovery key +
+  // new master password) — the compromise flow's recovery branch, mirroring the
+  // vault-compromise handler above byte-for-byte in discipline (sender identity +
+  // open-token + menuType predicate + Uint8Array checks + Buffer copies + DUAL-ZEROIZE
+  // all four in finally) and in the H2 success ordering (stash+hold BEFORE the
+  // null-guarded close/recovery-show). The recovery key rides as a Buffer; the main
+  // delegate decodes it for parseRecoveryKey (the vaultRecover precedent). Gated on the
+  // same vaultCompromiseRotate injection.
+  if (vaultCompromiseRotate) {
+    ipcMain.handle('menu-overlay:vault-compromise-recover', async (event, payload) => {
+      const rec = recordForSheetSender(event.sender);
+      if (!rec || !rec.sheet) return { ok: false };
+      const { token, recoverySecret, newSecret } = payload || {};
+      if (typeof token !== 'number' || !(recoverySecret instanceof Uint8Array) || !(newSecret instanceof Uint8Array)) {
+        return { ok: false };
+      }
+      const current = rec.sheet.getCurrentMenu();
+      if (!current || token !== current.token) return { ok: false };
+      if (current.menuType !== 'vault-compromise-recover') return { ok: false };
+      const recoveryBuf = Buffer.from(recoverySecret);
+      const newBuf = Buffer.from(newSecret);
+      try {
+        const chromeId = chromeForAttachment(rec.win)?.id;
+        const res = await vaultCompromiseRotate({ recoveryKey: recoveryBuf, newMasterPassword: newBuf });
+        if (res && res.ok) {
+          stashCompromiseReveal?.(chromeId, { recoveryKey: res.recoveryKey, revoked: res.revoked });
+          if (rec.sheet && rec.win && !rec.win.isDestroyed?.()) {
+            rec.sheet.closeMenuOverlay('activated', current.token);
+            chromeForAttachment(rec.win)?.send('vault-recovery-show', {
+              recoveryKey: res.recoveryKey,
+              replacing: true
+            });
+          }
+          return { ok: true };
+        }
+        return res && res.reason ? { ok: false, reason: res.reason } : { ok: false };
       } finally {
         recoveryBuf.fill(0);
         newBuf.fill(0);

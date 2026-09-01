@@ -38,6 +38,10 @@ const crypto = require('node:crypto');
 
 const vc = require('./vault-crypto');
 const { writeFileAtomic } = require('./atomic-write');
+// M18 F2 Leg 2 (DD2): the multi-file transaction primitive. The store consumes
+// ONLY `recover` today (idempotent load-time recovery in the constructor);
+// beginTransaction/commit are driven by the compromise rotation (leg 3).
+const vtxn = require('./vault-txn');
 
 // The global (non-jar) vault's stable id / filename base. Single-sourced in
 // src/shared/reserved-ids.js (M12 F3 DD8) so this sentinel and jars.js's
@@ -59,8 +63,28 @@ const { metadataOf, secretFieldsFor } = require('../../shared/vault-item-schema'
 const { originMatches } = require('../../shared/origin-match');
 
 // The manager document format id + version (vault-store OWNS this format).
+//
+// TWO versions are READABLE (M18 F2 Leg 1 / DD1):
+//   - v1: all three `mrk` slots (master/recovery/admin) + `adminPublicKeyB64`
+//     required — the original format, validated exactly as before.
+//   - v2: `mrk.master` + `mrk.recovery` required; the ADMIN PAIR (`mrk.admin` +
+//     `adminPublicKeyB64`) may be deliberately ABSENT (unprovisioned/revoked) —
+//     but always present TOGETHER or absent TOGETHER (a lone seal is unopenable;
+//     a lone pubkey corrupts export and fools revalidate) — one without the
+//     other is malformed-present → VaultFormatError.
+// MANAGER_VERSION stays 1: `setup()` still WRITES v1 (v2 writers are the
+// compromise rotation / Flight 3's adopt — later legs). Every manager-envelope
+// wrap/unwrap site passes the DOCUMENT'S stated version (never the constant), and
+// single-slot rotations preserve the version they read — so a document's
+// envelopes are always AAD-homogeneous and no operation can create a
+// mixed-version document.
 const MANAGER_FORMAT = 'gfmanager';
 const MANAGER_VERSION = 1;
+// v2 is written ONLY by operations that rewrite the FULL envelope set (DD1's
+// homogeneity rule): the compromise rotation below (M18 F2 Leg 3 — the first
+// legitimate v2 writer) and Flight 3's fresh adopt (bundle-driven).
+const MANAGER_VERSION_V2 = 2;
+const READABLE_MANAGER_VERSIONS = new Set([MANAGER_VERSION, MANAGER_VERSION_V2]);
 
 // The portable export-bundle format id + version (M12 F4 Leg 1 / DD1 — Option A).
 // A bundle is `{ format, version, sourceVaultId, kdf, mrk:{master,recovery,admin},
@@ -85,6 +109,35 @@ class VaultLockedError extends Error {
   constructor(message) {
     super(message);
     this.name = 'VaultLockedError';
+  }
+}
+
+/**
+ * A compromise rotation holds write exclusivity (M18 F2 Leg 2 / DD3): the store
+ * is temporarily refusing mutating (and export-read) operations. Transient by
+ * design — callers surface "busy, retry when the rotation completes" and never
+ * treat it as an auth/format failure.
+ */
+class VaultBusyError extends Error {
+  /** @param {string} message */
+  constructor(message) {
+    super(message);
+    this.name = 'VaultBusyError';
+  }
+}
+
+/**
+ * The compromise rotation's R7 refusal (M18 F2 Leg 3): the NEW master password
+ * matches the OLD one on either credential branch. A DISTINCT class — leg 4's
+ * sheet handler maps it to the ruled inline copy ("Your new master password
+ * must be different from your old one"), so it must be discriminable from a
+ * wrong-credential VaultAuthError without message-matching.
+ */
+class VaultPasswordReuseError extends Error {
+  /** @param {string} message */
+  constructor(message) {
+    super(message);
+    this.name = 'VaultPasswordReuseError';
   }
 }
 
@@ -171,6 +224,43 @@ function mrkEnvelopeAad(version) {
  */
 function isNonEmptySecret(secret) {
   return (typeof secret === 'string' && secret.length > 0) || (Buffer.isBuffer(secret) && secret.length > 0);
+}
+
+/**
+ * Byte-equality of two secret arguments (string or Buffer — the shapes
+ * `isNonEmptySecret` admits). The compromise rotation's master-branch R7 check
+ * (M18 F2 Leg 3). Timing safety is deliberately NOT required here: the
+ * comparison's outcome is disclosed to the operator who supplied BOTH inputs,
+ * so there is no oracle to protect. Any temp Buffer minted from a string
+ * argument is zeroized before returning; caller-supplied Buffers are never
+ * touched (the sheet handler owns their lifetime).
+ * @param {string | Buffer} a
+ * @param {string | Buffer} b
+ * @returns {boolean}
+ */
+function secretsEqual(a, b) {
+  const aBuf = Buffer.isBuffer(a) ? a : Buffer.from(a, 'utf8');
+  const bBuf = Buffer.isBuffer(b) ? b : Buffer.from(b, 'utf8');
+  const equal = aBuf.equals(bBuf);
+  if (aBuf !== a) aBuf.fill(0);
+  if (bBuf !== b) bBuf.fill(0);
+  return equal;
+}
+
+/**
+ * Structural shape check for a stored GCM envelope (the manager `mrk.*` slots and
+ * the bundle's `mrk.*` slots share it): an object carrying string iv/ct/tag. The
+ * crypto layer authenticates the CONTENT; this only rejects malformed documents
+ * loudly at read/validate time (M18 F2 Leg 1 — one helper so the manager's and the
+ * bundle's slot validation cannot drift).
+ * @param {unknown} env
+ * @returns {boolean}
+ */
+function isEnvelopeShaped(env) {
+  const e = /** @type {any} */ (env);
+  return Boolean(
+    e && typeof e === 'object' && typeof e.iv === 'string' && typeof e.ct === 'string' && typeof e.tag === 'string'
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -327,6 +417,33 @@ class VaultStore {
     /** @type {Promise<any>} */
     this._managerLock = Promise.resolve();
 
+    // M18 F2 Leg 2 (DD3): write-exclusivity machinery for the compromise
+    // rotation. `_rekeyInProgress` is the store-wide re-key gate — the eight
+    // gated ops refuse at ENTRY (VaultBusyError) while it is up, and the write
+    // sinks (`_writeManager` / `_writeVault`) re-check it as a SECOND WALL so a
+    // mutator that awaited past its entry check can never persist a
+    // pre-rotation document. `_inFlightOps` counts gated ops currently
+    // executing (each holds it for its FULL duration, released in `finally`);
+    // `_acquireRekeyGate` raises the gate then DRAINS — awaits the counter
+    // reaching zero — before its caller may write. The four `_withManagerLock`
+    // ops do NOT join the counter (designer ruling for leg 3): the rotation
+    // enters `_withManagerLock` first and raises the gate inside its lock turn,
+    // so lock serialization is their coverage; the sink-level second wall
+    // covers them incidentally regardless.
+    this._rekeyInProgress = false;
+    this._inFlightOps = 0;
+    /** @type {Array<() => void>} */
+    this._drainWaiters = [];
+
+    // M18 F2 Leg 2 (DD2): idempotent transaction recovery runs on EVERY store
+    // construction — between path setup above and the load-loudly manager
+    // validation below (a committed journal may be what MAKES manager.json
+    // current). Committed journal ⇒ roll forward; uncommitted ⇒ roll back;
+    // orphaned `.tmp-*` atomic-write temps are swept. ENOENT-tolerant on a
+    // missing `vaults/` dir (fresh profile) and ciphertext-only — it never
+    // reads or repairs vault content.
+    vtxn.recover(this.vaultsDir);
+
     // Load-loudly: validate an existing manager.json up front so a corrupt file
     // surfaces at load(), not silently later. A missing file just means "not set
     // up yet".
@@ -378,7 +495,7 @@ class VaultStore {
     if (doc.format !== MANAGER_FORMAT) {
       throw new vc.VaultFormatError(`manager.json: unknown format "${doc.format}"`);
     }
-    if (doc.version !== MANAGER_VERSION) {
+    if (!READABLE_MANAGER_VERSIONS.has(doc.version)) {
       throw new vc.VaultFormatError(`manager.json: unsupported version "${doc.version}"`);
     }
     if (!doc.kdf || typeof doc.kdf !== 'object') {
@@ -388,22 +505,39 @@ class VaultStore {
     // manager.json.kdf and always writes in-bounds params, so out-of-bounds kdf here
     // means vault-file tampering — refuse to open rather than trust downgraded params.
     validateImportedKdf(doc.kdf);
-    if (typeof doc.adminPublicKeyB64 !== 'string') {
-      throw new vc.VaultFormatError('manager.json: missing adminPublicKeyB64');
-    }
     if (!doc.mrk || typeof doc.mrk !== 'object') {
       throw new vc.VaultFormatError('manager.json: missing mrk envelope set');
     }
-    for (const slot of ['master', 'recovery', 'admin']) {
-      const env = doc.mrk[slot];
-      if (
-        !env ||
-        typeof env !== 'object' ||
-        typeof env.iv !== 'string' ||
-        typeof env.ct !== 'string' ||
-        typeof env.tag !== 'string'
-      ) {
+    // master + recovery are required at EVERY version; the admin slot's rules are
+    // version-dependent (M18 F2 Leg 1 / DD1 — see the format comment above).
+    for (const slot of ['master', 'recovery']) {
+      if (!isEnvelopeShaped(doc.mrk[slot])) {
         throw new vc.VaultFormatError(`manager.json: malformed mrk.${slot} envelope`);
+      }
+    }
+    const hasAdminSeal = doc.mrk.admin !== undefined;
+    const hasAdminPub = doc.adminPublicKeyB64 !== undefined;
+    if (doc.version === 1) {
+      // v1 rules unchanged: the admin pair is REQUIRED (absence is malformed).
+      if (typeof doc.adminPublicKeyB64 !== 'string') {
+        throw new vc.VaultFormatError('manager.json: missing adminPublicKeyB64');
+      }
+      if (!isEnvelopeShaped(doc.mrk.admin)) {
+        throw new vc.VaultFormatError('manager.json: malformed mrk.admin envelope');
+      }
+    } else if (hasAdminSeal !== hasAdminPub) {
+      // v2 pairing rule: present TOGETHER or absent TOGETHER — a lone field is
+      // malformed-present, never a deliberate absence.
+      throw new vc.VaultFormatError(
+        'manager.json: mrk.admin and adminPublicKeyB64 must be present together or absent together'
+      );
+    } else if (hasAdminSeal) {
+      // v2 with-admin: the pair is validated exactly as v1.
+      if (typeof doc.adminPublicKeyB64 !== 'string') {
+        throw new vc.VaultFormatError('manager.json: missing adminPublicKeyB64');
+      }
+      if (!isEnvelopeShaped(doc.mrk.admin)) {
+        throw new vc.VaultFormatError('manager.json: malformed mrk.admin envelope');
       }
     }
     return doc;
@@ -413,6 +547,11 @@ class VaultStore {
    * @param {any} manager
    */
   _writeManager(manager) {
+    // M18 F2 Leg 2 (DD3): the SECOND WALL lives inside the write sinks — a
+    // mutator that awaited past its entry check while the gate rose must never
+    // persist a pre-rotation document. Leg 3's rotation writes go through the
+    // transaction primitive, never these sinks, so it cannot self-block.
+    this._assertNotRekeying('write refused');
     this._ensureVaultsDir();
     writeFileAtomic(this.managerPath, Buffer.from(JSON.stringify(manager), 'utf8'));
   }
@@ -439,6 +578,10 @@ class VaultStore {
    * @param {{ envelopes: any[], items: any, kdf?: any }} parts
    */
   _writeVault(vaultId, parts) {
+    // M18 F2 Leg 2 (DD3): second wall — see _writeManager. Living in the sink
+    // (not at call sites) automatically covers the indirect sink
+    // `_writeVaultForKey` and every future caller.
+    this._assertNotRekeying('write refused');
     this._ensureVaultsDir();
     const json = vc.serializeVault({
       vaultId,
@@ -589,6 +732,74 @@ class VaultStore {
   }
 
   // -------------------------------------------------------------------------
+  // Write exclusivity — re-key gate + in-flight drain (M18 F2 Leg 2 / DD3)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Throw VaultBusyError while the re-key gate is up. Used at every gated op's
+   * ENTRY and, with a distinct qualifier, as the sinks' SECOND WALL.
+   * @param {string} [what]
+   * @returns {void}
+   */
+  _assertNotRekeying(what = 'operation refused') {
+    if (this._rekeyInProgress) {
+      throw new VaultBusyError(`vault-store: a security rotation is in progress — ${what}, retry when it completes`);
+    }
+  }
+
+  /**
+   * Enter a gated op: refuse (VaultBusyError) while the gate is up, else hold
+   * the in-flight counter. Returns the release function — the caller MUST call
+   * it in `finally` (design review: ANY throw while holding, a second-wall
+   * VaultBusyError or an ordinary auth error included, must not deadlock the
+   * drain). Idempotent per handle; nested holds (an op calling another gated
+   * op) count and release correctly.
+   * @returns {() => void}
+   */
+  _enterGatedOp() {
+    this._assertNotRekeying();
+    this._inFlightOps++;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this._inFlightOps--;
+      if (this._inFlightOps === 0 && this._drainWaiters.length > 0) {
+        const waiters = this._drainWaiters;
+        this._drainWaiters = [];
+        for (const wake of waiters) wake();
+      }
+    };
+  }
+
+  /**
+   * Raise the re-key gate and DRAIN: resolves only once every in-flight gated
+   * op has finished (success or failure), so the caller may then write with
+   * write exclusivity. New gated ops refuse at entry from the moment the gate
+   * rises; an op already past its entry check either completes (fully
+   * synchronous ops) or fails on the sinks' second wall (the mid-await ops) —
+   * either way it releases the counter and the drain completes. Returns the
+   * release function (idempotent). No public consumer yet — leg 3's rotation
+   * acquires this inside its `_withManagerLock` turn.
+   * @returns {Promise<() => void>}
+   */
+  async _acquireRekeyGate() {
+    // Only one rotation at a time — an already-raised gate is a busy condition,
+    // never a queue.
+    this._assertNotRekeying('cannot start another rotation');
+    this._rekeyInProgress = true;
+    while (this._inFlightOps > 0) {
+      await new Promise((resolve) => this._drainWaiters.push(() => resolve(undefined)));
+    }
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this._rekeyInProgress = false;
+    };
+  }
+
+  // -------------------------------------------------------------------------
   // Query
   // -------------------------------------------------------------------------
 
@@ -636,13 +847,14 @@ class VaultStore {
     const params = this.scryptParams;
 
     // Manager-envelope AAD binds the MANAGER document version (gfmanager), NOT
-    // vault-crypto's `.gfvault` VERSION (M12 F1 review). Both are 1 today, but the
-    // two version spaces are OWNED separately — passing MANAGER_VERSION explicitly
-    // keeps the mrk envelopes bound to the manager format's version, so a future
-    // gfmanager bump (independent of the gfvault bump) does not silently relabel
-    // these envelopes' AAD. The matching unwrap sites (unlock / unlockWithRecovery /
-    // unlockWithAdmin / mintAccessKey step-up / openAllWithAdminKey) pass the SAME
-    // MANAGER_VERSION so GCM auth still matches.
+    // vault-crypto's `.gfvault` VERSION (M12 F1 review) — the two version spaces are
+    // OWNED separately. setup() still WRITES v1 (M18 F2 Leg 1: v2 writers are the
+    // full-envelope-set rewrites of later legs), so these wraps pass MANAGER_VERSION.
+    // Every unwrap site (unlock / unlockWithRecovery / unlockWithAdmin / the rotation
+    // step-ups / mintAccessKey / openAllWithAdminKey / import's bundle unwraps) passes
+    // the DOCUMENT'S stated version — v1 documents keep matching these envelopes, and
+    // a v2 document's envelopes (wrapped at 2 by their writer) match theirs. A
+    // relabel/downgrade of the document version fails GCM auth (DD1 homogeneity).
     const masterEnv = await vc.wrapMaster(mrk, masterPassword, { version: MANAGER_VERSION, params });
     const recoveryEnv = vc.wrapRecovery(mrk, recovery.material, { version: MANAGER_VERSION });
     const adminEnv = vc.sealToAdmin(mrk, admin.publicKey, { version: MANAGER_VERSION });
@@ -705,7 +917,7 @@ class VaultStore {
   async unlock(masterPassword) {
     const manager = this._readManager();
     const mrk = await vc.unwrapMaster(manager.mrk.master, masterPassword, {
-      version: MANAGER_VERSION,
+      version: manager.version, // the DOCUMENT'S stated version (DD1) — never the constant.
       params: manager.kdf
     });
     this._installMrk(mrk);
@@ -720,7 +932,7 @@ class VaultStore {
     const material = vc.parseRecoveryKey(recoveryDisplay);
     let mrk;
     try {
-      mrk = vc.unwrapRecovery(manager.mrk.recovery, material, { version: MANAGER_VERSION });
+      mrk = vc.unwrapRecovery(manager.mrk.recovery, material, { version: manager.version });
     } finally {
       material.fill(0);
     }
@@ -733,13 +945,19 @@ class VaultStore {
    */
   unlockWithAdmin(adminPrivateKeyB64) {
     const manager = this._readManager();
+    if (manager.mrk.admin === undefined) {
+      // M18 F2 Leg 1 / DD1: deliberate absence (a no-admin v2 manager) is a named,
+      // discriminable STATE — not a format defect, not a GCM failure. The exact
+      // message is a ruled contract the flow-wiring leg's Settings state relies on.
+      throw new VaultStateError('no admin key provisioned');
+    }
     let privateKey;
     try {
       privateKey = vc.importAdminPrivateKey(adminPrivateKeyB64);
     } catch (err) {
       throw new vc.VaultFormatError(`admin private key: unreadable (${/** @type {Error} */ (err).message})`);
     }
-    const mrk = vc.openAdminSeal(manager.mrk.admin, privateKey, { version: MANAGER_VERSION });
+    const mrk = vc.openAdminSeal(manager.mrk.admin, privateKey, { version: manager.version });
     this._installMrk(mrk);
   }
 
@@ -795,13 +1013,13 @@ class VaultStore {
       // Step-up re-auth: re-unwrap the master envelope with the OLD password. A wrong old
       // password throws VaultAuthError and rewrites NOTHING (the step-up precedes any write).
       const stepUpMrk = await vc.unwrapMaster(manager.mrk.master, oldMasterPassword, {
-        version: MANAGER_VERSION,
+        version: manager.version, // the document's stated version (DD1) — a v1 manager stays v1, a v2 stays v2.
         params: manager.kdf
       });
       stepUpMrk.fill(0); // zeroize the transient step-up buffer after the re-unwrap.
       this._assertMrkGeneration(gen); // locked/re-keyed during the step-up derive → refuse before using mrk.
       const newMasterEnv = await vc.wrapMaster(mrk, newMasterPassword, {
-        version: MANAGER_VERSION,
+        version: manager.version, // wrap at the SAME version the document carries (AAD homogeneity).
         params: manager.kdf
       });
       this._assertMrkGeneration(gen); // and again before persisting.
@@ -832,7 +1050,7 @@ class VaultStore {
       const manager = this._readManager();
       // Step-up re-auth: re-unwrap the master envelope. Wrong password → VaultAuthError, no write.
       const stepUpMrk = await vc.unwrapMaster(manager.mrk.master, masterPassword, {
-        version: MANAGER_VERSION,
+        version: manager.version, // the document's stated version (DD1).
         params: manager.kdf
       });
       stepUpMrk.fill(0); // zeroize the transient step-up buffer after the re-unwrap.
@@ -840,7 +1058,7 @@ class VaultStore {
       // would seal a zeroized MRK into the recovery slot (the exact reproduced defect).
       this._assertMrkGeneration(gen);
       const rec = vc.generateRecoveryKey();
-      manager.mrk.recovery = vc.wrapRecovery(mrk, rec.material, { version: MANAGER_VERSION });
+      manager.mrk.recovery = vc.wrapRecovery(mrk, rec.material, { version: manager.version });
       this._writeManager(manager);
       rec.material.fill(0); // the recovery is now operator-held via `display` — drop the buffer.
       this._touch();
@@ -874,13 +1092,16 @@ class VaultStore {
       const manager = this._readManager();
       // Step-up re-auth: re-unwrap the master envelope. Wrong password → VaultAuthError, no write.
       const stepUpMrk = await vc.unwrapMaster(manager.mrk.master, masterPassword, {
-        version: MANAGER_VERSION,
+        version: manager.version, // the document's stated version (DD1).
         params: manager.kdf
       });
       stepUpMrk.fill(0); // zeroize the transient step-up buffer after the re-unwrap.
       this._assertMrkGeneration(gen); // finding 3: never seal a zeroized/replaced MRK to the new admin key.
       const admin = vc.generateAdminKeypair();
-      manager.mrk.admin = vc.sealToAdmin(mrk, admin.publicKey, { version: MANAGER_VERSION });
+      // On a no-admin v2 manager this IS the from-scratch provision (M18 F2 Leg 1 /
+      // DD1): both fields are written together below, and the document's version is
+      // preserved — the seal is wrapped at that same version (AAD homogeneity).
+      manager.mrk.admin = vc.sealToAdmin(mrk, admin.publicKey, { version: manager.version });
       manager.adminPublicKeyB64 = admin.publicKeyB64; // BOTH — a stale pubkey mismatches the seal + corrupts export.
       this._writeManager(manager);
       this._touch();
@@ -915,7 +1136,7 @@ class VaultStore {
       const material = vc.parseRecoveryKey(recoveryDisplay);
       let mrk;
       try {
-        mrk = vc.unwrapRecovery(manager.mrk.recovery, material, { version: MANAGER_VERSION });
+        mrk = vc.unwrapRecovery(manager.mrk.recovery, material, { version: manager.version });
       } finally {
         material.fill(0);
       }
@@ -923,13 +1144,286 @@ class VaultStore {
       const gen = this._mrkGen; // capture AFTER install so a lockNow during the wrap below is caught.
       // Rewrap the master envelope under the new password — the recovery proof authenticated it.
       const newMasterEnv = await vc.wrapMaster(mrk, newMasterPassword, {
-        version: MANAGER_VERSION,
+        version: manager.version, // preserve the document's version (DD1 — no mixed-version documents).
         params: manager.kdf
       });
       this._assertMrkGeneration(gen); // finding 3: refuse if locked/re-keyed mid-derive.
       manager.mrk.master = newMasterEnv;
       this._writeManager(manager);
       this._touch();
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Compromise rotation (M18 F2 Leg 3 / flight DD1–DD3)
+  // -------------------------------------------------------------------------
+
+  /**
+   * COMPROMISE-MODE ROTATION: the single operation that severs every previously
+   * issued or extracted credential in one crash-safe transaction. Mints a fresh
+   * MRK and a fresh key for EVERY vault, re-encrypts every vault's items, drops
+   * every access envelope, removes the admin provision, re-wraps under a
+   * REQUIRED NEW master password (v2 no-admin manager — the first legitimate v2
+   * writer, DD1), commits it all through the leg-2 transaction primitive,
+   * installs the new MRK strictly POST-COMMIT, and returns the new one-time
+   * recovery key plus the revocation report.
+   *
+   * Works from LOCKED or UNLOCKED (DD3's re-derived discipline): the OLD MRK is
+   * derived from the supplied credential — never `this.mrk` — and every wrap
+   * targets the fresh local MRK, so the op is independent of live lock state
+   * mid-flight and `_assertMrkGeneration` is not applicable. The profile ends
+   * UNLOCKED regardless of entry state (`_installMrk` fires onUnlock).
+   *
+   * Two credential branches:
+   *  - MASTER: `{ oldMasterPassword, newMasterPassword }` — step-up = unwrap
+   *    the old master envelope. R7: byte-equality of old/new FIRST (cheapest,
+   *    before any scrypt) → VaultPasswordReuseError.
+   *  - RECOVERY: `{ recoveryKey, newMasterPassword }` (display string +
+   *    Buffer) — unwrap the MRK via the recovery envelope. R7: TEST-UNWRAP the
+   *    old master envelope with the candidate; an unwrap SUCCESS is the reuse.
+   *    A malformed display throws VaultFormatError from parseRecoveryKey
+   *    (distinct from wrong-credential VaultAuthError — leg 4's error mapping).
+   *
+   * The caller-supplied password Buffers are NOT zeroized here — the sheet
+   * handler owns them (the `changeMasterPassword` idiom, inherited by leg 4).
+   * @param {{ oldMasterPassword?: string | Buffer, recoveryKey?: string, newMasterPassword: string | Buffer }} args
+   * @returns {Promise<{ recoveryKey: string, revoked: { admin: boolean, vaultIds: string[] } }>}
+   *   `recoveryKey` is the one-time display (surfaced once by leg 4, never
+   *   persisted); `revoked.admin` is true iff the manager carried the admin
+   *   pair; `revoked.vaultIds` names exactly the vaults that carried ≥1 access
+   *   envelope (GLOBAL_ID may legitimately appear — mintAccessKey accepts the
+   *   global target).
+   */
+  async compromiseRotate({ oldMasterPassword, recoveryKey, newMasterPassword } = /** @type {any} */ ({})) {
+    const viaRecovery = recoveryKey !== undefined;
+    if (viaRecovery) {
+      if (typeof recoveryKey !== 'string' || recoveryKey.length === 0) {
+        throw new VaultStateError('vault-store: recoveryKey must be a non-empty string');
+      }
+      if (oldMasterPassword !== undefined) {
+        throw new VaultStateError('vault-store: supply oldMasterPassword OR recoveryKey, not both');
+      }
+    } else if (!isNonEmptySecret(oldMasterPassword)) {
+      throw new VaultStateError('vault-store: oldMasterPassword or recoveryKey is required');
+    }
+    if (!isNonEmptySecret(newMasterPassword)) {
+      throw new VaultStateError('vault-store: newMasterPassword is required');
+    }
+    if (!this.isSetUp()) {
+      throw new VaultStateError('vault-store: not set up');
+    }
+    // Serialized with the other manager mutations; the re-key gate is acquired
+    // INSIDE this lock turn (leg-2 designer ruling) so the four lock-serialized
+    // ops need no counter and the rotation cannot interleave with them.
+    return this._withManagerLock(async () => {
+      const manager = this._readManager();
+
+      /** @type {Buffer | null} */
+      let oldMrk = null;
+      /** @type {Buffer | null} */
+      let newMrk = null;
+      let installed = false;
+      // Every OLD and NEW vault-key working buffer lands here for the finally.
+      /** @type {Buffer[]} */
+      const workingKeys = [];
+      /** @type {(() => void) | null} */
+      let releaseGate = null;
+      try {
+        // ---- credential step-up + R7 — BEFORE the gate (fail cheap, never drain
+        // in-flight ops for a credential that was wrong all along) ----
+        if (viaRecovery) {
+          // Malformed display → VaultFormatError (parseRecoveryKey), before any unwrap.
+          const material = vc.parseRecoveryKey(recoveryKey);
+          try {
+            // Wrong key → VaultAuthError, nothing derived, nothing written.
+            oldMrk = vc.unwrapRecovery(manager.mrk.recovery, material, { version: manager.version });
+          } finally {
+            material.fill(0); // transient recovery material (mirrors unlockWithRecovery).
+          }
+          // R7 (recovery branch): the operator never typed the old password, so
+          // reuse is detected by TEST-UNWRAPPING the old master envelope with
+          // the candidate (doc kdf + doc version). An unwrap SUCCESS is the
+          // reuse; the GOOD case throws VaultAuthError and is swallowed as "not
+          // a reuse" — ONLY that class from THIS call, anything else propagates.
+          /** @type {Buffer | null} */
+          let reuseMrk = null;
+          try {
+            reuseMrk = await vc.unwrapMaster(manager.mrk.master, newMasterPassword, {
+              version: manager.version,
+              params: manager.kdf
+            });
+          } catch (err) {
+            if (!(err instanceof vc.VaultAuthError)) throw err;
+          }
+          if (reuseMrk !== null) {
+            reuseMrk.fill(0); // the probe unwrapped a LIVE MRK — zeroize before surfacing the refusal.
+            throw new VaultPasswordReuseError(
+              'vault-store: the new master password must be different from the old one'
+            );
+          }
+        } else {
+          // R7 (master branch): byte-equality FIRST — cheapest check, before the
+          // step-up scrypt (see secretsEqual for the timing-safety justification).
+          if (secretsEqual(/** @type {string | Buffer} */ (oldMasterPassword), newMasterPassword)) {
+            throw new VaultPasswordReuseError(
+              'vault-store: the new master password must be different from the old one'
+            );
+          }
+          // Step-up: the old password must unwrap the CURRENT master envelope
+          // (doc's stated version + doc kdf). Wrong password → VaultAuthError,
+          // nothing derived, nothing written.
+          oldMrk = await vc.unwrapMaster(manager.mrk.master, oldMasterPassword, {
+            version: manager.version,
+            params: manager.kdf
+          });
+        }
+
+        // ---- write exclusivity: raise the gate + drain (released in finally).
+        // From here every gated op refuses at entry and the sinks' second wall
+        // refuses any straddler — ALL rotation writes go through the
+        // transaction primitive, which bypasses the sinks (no self-block). ----
+        releaseGate = await this._acquireRekeyGate();
+
+        // ---- enumerate: the REGISTRY recipe ∪ a DISK readdir (designer ruling,
+        // design review Q3). Registry recipe = openAllWithAdminKey's idiom
+        // (GLOBAL first; jars minus any 'global' impostor; lazily-absent vaults
+        // null-skip below). The union adds any *.gfvault outside the registry:
+        // one whose mrk envelope unwraps under the old MRK is rotated like any
+        // other (registry drift must never leave a vault severed under the old
+        // key); one that fails to parse or unwrap fails the rotation LOUDLY,
+        // PRE-COMMIT — a foreign/corrupt vault file during a security operation
+        // is an integrity anomaly to surface, never to skip silently. ----
+        this._ensureVaultsDir();
+        const registryIds = [
+          GLOBAL_ID,
+          ...this.listJars()
+            .map((j) => j.id)
+            .filter((id) => id !== GLOBAL_ID)
+        ];
+        const diskIds = fs
+          .readdirSync(this.vaultsDir)
+          .filter((name) => name.endsWith('.gfvault') && name.length > '.gfvault'.length)
+          .map((name) => name.slice(0, -'.gfvault'.length));
+        const vaultIds = [...new Set([...registryIds, ...diskIds])];
+
+        // ---- mint + rebuild every vault IN MEMORY (nothing touches disk until
+        // the transaction below) ----
+        newMrk = vc.newVaultKey();
+        const rec = vc.generateRecoveryKey();
+        const hadAdmin = manager.mrk.admin !== undefined;
+        /** @type {string[]} */
+        const revokedVaultIds = [];
+        /** @type {Array<{ finalName: string, content: Buffer }>} */
+        const rebuilt = [];
+        for (const vaultId of vaultIds) {
+          // Direct _readVault-level reads ONLY — the gated public ops would
+          // self-block at entry now that the gate is up.
+          const doc = this._readVault(vaultId); // corrupt → VaultFormatError, loud pre-commit.
+          if (doc === null) continue; // lazily-absent registry vault — skip (the enumeration recipe's null-skip).
+          const env = doc.envelopes.find((/** @type {any} */ e) => e.keyId === 'mrk');
+          if (!env) {
+            throw new vc.VaultFormatError(`vault "${vaultId}": missing mrk envelope`);
+          }
+          // Un-unwrappable under the old MRK → VaultAuthError, loud pre-commit.
+          const oldKey = vc.unwrapVaultKey(env, oldMrk, mrkEnvelopeAad(doc.version));
+          workingKeys.push(oldKey);
+          const items = vc.decryptItems(doc.items, oldKey);
+          if (doc.envelopes.some((/** @type {any} */ e) => e.keyId !== 'mrk')) {
+            revokedVaultIds.push(vaultId); // carried ≥1 access envelope — reported as revoked.
+          }
+          const newKey = vc.newVaultKey();
+          workingKeys.push(newKey);
+          // EXACTLY ONE envelope on the rebuilt doc: the new mrk envelope at the
+          // vault-doc's own AAD version (unchanged) — every access envelope is
+          // dropped by construction, which is what revokes the access keys.
+          const newEnv = { keyId: 'mrk', type: 'mrk', ...vc.wrapVaultKey(newKey, newMrk, mrkEnvelopeAad(doc.version)) };
+          const json = vc.serializeVault({
+            vaultId,
+            kdf: doc.kdf,
+            envelopes: [newEnv],
+            items: vc.encryptItems(items, newKey)
+          });
+          rebuilt.push({ finalName: `${vaultId}.gfvault`, content: Buffer.from(json, 'utf8') });
+          // The decrypted item plaintext lives only in `items` — transient JS
+          // objects released with this iteration (the same exposure class as
+          // every listItems call); no Buffer form exists at this layer to fill.
+        }
+
+        // ---- the new manager: version 2 with NO admin fields (DD1 — absence is
+        // the deliberate revoked/unprovisioned state; rotateAdminKey is the
+        // from-scratch re-provision if the operator ever wants one back).
+        // KDF ruling (design review Q2): PRESERVE manager.kdf — the document's
+        // existing params, exactly as every existing rotation does; never the
+        // bare SCRYPT_PARAMS constant and never a silent swap of an adopted
+        // profile's params. Read-time bounds are already guaranteed by
+        // validateImportedKdf on every _readManager. ----
+        const masterEnv = await vc.wrapMaster(newMrk, newMasterPassword, {
+          version: MANAGER_VERSION_V2, // v2 AAD — homogeneous with every envelope written below.
+          params: manager.kdf
+        });
+        const recoveryEnv = vc.wrapRecovery(newMrk, rec.material, { version: MANAGER_VERSION_V2 });
+        rec.material.fill(0); // operator-held via `display` from here — drop the buffer (the setup idiom).
+        const newManager = {
+          format: MANAGER_FORMAT,
+          version: MANAGER_VERSION_V2,
+          kdf: manager.kdf,
+          mrk: { master: masterEnv, recovery: recoveryEnv }
+        };
+
+        // ---- ONE transaction: manager.json + every rebuilt vault (DD2) ----
+        /** @type {ReturnType<typeof vtxn.beginTransaction> | null} */
+        let handle = null;
+        try {
+          handle = vtxn.beginTransaction(this.vaultsDir, [
+            { finalName: 'manager.json', content: Buffer.from(JSON.stringify(newManager), 'utf8') },
+            ...rebuilt
+          ]);
+          vtxn.commit(handle);
+        } catch (err) {
+          // FAILURE DISCRIMINATION (design-review HIGH): branch on the handle's
+          // `committed` flag — set immediately after the commit-discriminator
+          // rename in vault-txn.commit.
+          if (handle !== null && handle.committed) {
+            // COMMITTED: the rotation SUCCEEDED — a final rename or the journal
+            // unlink threw in-process AFTER the discriminator. Finish the
+            // roll-forward and proceed to install + return; NEVER rethrow on
+            // this branch — a rethrow would tell the operator "nothing changed"
+            // over a durably rotated disk and lose the one-time recovery key.
+            try {
+              vtxn.recover(this.vaultsDir);
+            } catch {
+              // Best-effort: recovery is idempotent and re-runs on every store
+              // construction, so the next load finishes the roll-forward. Still
+              // never rethrow over a durably committed rotation.
+            }
+          } else {
+            // UNCOMMITTED: roll back — disk untouched, live state untouched.
+            vtxn.recover(this.vaultsDir);
+            throw err;
+          }
+        }
+
+        // ---- POST-COMMIT: install the fresh MRK. _resetKeys inside zeroizes
+        // and clears EVERY cached vault key wholesale, bumps the generation,
+        // and fires onUnlock — the profile ends UNLOCKED regardless of entry
+        // lock state (DD3/DD6). _installMrk takes OWNERSHIP of newMrk. ----
+        this._installMrk(newMrk);
+        installed = true;
+        return {
+          recoveryKey: rec.display,
+          revoked: { admin: hadAdmin, vaultIds: revokedVaultIds }
+        };
+      } finally {
+        // Zeroization discipline (design-review ownership ruling): the old MRK
+        // and every old/new vault-key WORKING buffer die here on every path;
+        // newMrk is owned by _installMrk on success and by this finally only on
+        // the uncommitted-failure path; the caller-supplied password buffers
+        // are NOT zeroized by the op — the sheet handler owns them.
+        if (releaseGate) releaseGate();
+        if (oldMrk) oldMrk.fill(0);
+        for (const key of workingKeys) key.fill(0);
+        if (newMrk && !installed) newMrk.fill(0);
+      }
     });
   }
 
@@ -941,33 +1435,64 @@ class VaultStore {
    * Build a self-contained, portable export bundle for one vault (flight DD1 —
    * Option A). Requires the manager UNLOCKED (POLICY, not a crypto necessity — every
    * input is already on disk); takes NO password (satisfies mission.md:150 "encrypted
-   * export not re-prompted"). The bundle carries the manager's ALL THREE mrk envelopes
-   * (`master`, `recovery`, `admin` — `_readManager` structurally requires all three, so
-   * the fresh-profile adopt must have all three or the adopted profile wedges at boot;
-   * `mrk.admin` is ciphertext sealed to the pubkey, no plaintext, preserving admin
-   * portability), the KDF params, the admin PUBLIC key, and the target `.gfvault`
-   * document (its `mrk` envelope + item ciphertext). EVERYTHING is ciphertext — no
-   * plaintext secret ever enters the bundle. NO write.
+   * export not re-prompted"). The bundle carries the manager's `mrk.master` +
+   * `mrk.recovery` envelopes ALWAYS, the admin pair (`mrk.admin` +
+   * `adminPublicKeyB64`) only WHEN PROVISIONED (M18 F2 Leg 1 / DD7 — a no-admin v2
+   * manager omits both; `mrk.admin` is ciphertext sealed to the pubkey, no plaintext,
+   * preserving admin portability when present), the KDF params, the source MANAGER'S
+   * VERSION as `managerVersion` (always written — bundle envelopes are AAD-bound to
+   * it, so import must unwrap at this version), and the target `.gfvault` document
+   * (its `mrk` envelope + item ciphertext). `format`/`version` stay at bundle v1 —
+   * the bundle-version bump is reserved for Flight 3's multi-vault format.
+   * EVERYTHING is ciphertext — no plaintext secret ever enters the bundle. NO write.
    * @param {string} target  `'global'` or a persistent jar id.
-   * @returns {{ format: string, version: number, sourceVaultId: string, kdf: any,
-   *   mrk: { master: any, recovery: any, admin: any }, adminPublicKeyB64: string, vault: any }}
+   * @returns {{ format: string, version: number, managerVersion: number,
+   *   sourceVaultId: string, kdf: any,
+   *   mrk: { master: any, recovery: any, admin?: any }, adminPublicKeyB64?: string, vault: any }}
    */
   exportVault(target) {
+    // GATED for its READS (M18 F2 Leg 2 / DD3, second-review coherence note):
+    // export performs no write, but minting a portable bundle of
+    // about-to-be-severed credentials mid-rotation must be refused, and the
+    // gate guarantees a consistent manager+vault snapshot. Fully synchronous,
+    // so entry-check + drain genuinely suffice.
+    const releaseOp = this._enterGatedOp();
+    try {
+      return this._exportVault(target);
+    } finally {
+      releaseOp();
+    }
+  }
+
+  /**
+   * @param {string} target
+   * @returns {ReturnType<VaultStore['exportVault']>}
+   */
+  _exportVault(target) {
     this._requireMrk(); // POLICY: export is an unlock-window op (VaultLockedError → catchLocked).
     const sourceVaultId = this._resolveTarget(target);
-    const m = this._readManager(); // requires format+version+kdf+adminPublicKeyB64+all three mrk slots.
+    const m = this._readManager(); // requires format+version+kdf+master/recovery slots; admin pair per-version.
     const vaultDoc = this._readVault(sourceVaultId);
     if (vaultDoc === null) {
       throw new VaultStateError(`vault-store: no vault for "${sourceVaultId}" — nothing to export`);
     }
+    // _readManager enforces the pairing rule, so seal-presence implies pub-presence.
+    const hasAdmin = m.mrk.admin !== undefined;
     return {
       format: BUNDLE_FORMAT,
       version: BUNDLE_VERSION,
+      // The source manager's version (DD7): the bundle's mrk envelopes carry it in
+      // their AAD, so import unwraps at this — absent (pre-change bundles) means 1.
+      managerVersion: m.version,
       sourceVaultId,
       kdf: m.kdf,
-      // All THREE envelopes (review [HIGH]) — ciphertext only.
-      mrk: { master: m.mrk.master, recovery: m.mrk.recovery, admin: m.mrk.admin },
-      adminPublicKeyB64: m.adminPublicKeyB64,
+      // master + recovery always; the admin pair only when provisioned — ciphertext only.
+      mrk: {
+        master: m.mrk.master,
+        recovery: m.mrk.recovery,
+        ...(hasAdmin ? { admin: m.mrk.admin } : {})
+      },
+      ...(hasAdmin ? { adminPublicKeyB64: m.adminPublicKeyB64 } : {}),
       vault: vaultDoc
     };
   }
@@ -1004,6 +1529,24 @@ class VaultStore {
    * @returns {Promise<{ imported: true, fresh: boolean, vaultId: string, recoveryKeyDisplay?: string, adminPrivateKeyB64?: string }>}
    */
   async importVault(bundle, opts = /** @type {any} */ ({})) {
+    // GATED (M18 F2 Leg 2 / DD3): import awaits scrypt mid-op, so it holds the
+    // in-flight counter for its FULL duration (released in finally — any throw
+    // included) and its writes hit the sinks' second wall if the gate rises
+    // during the derive.
+    const releaseOp = this._enterGatedOp();
+    try {
+      return await this._importVault(bundle, opts);
+    } finally {
+      releaseOp();
+    }
+  }
+
+  /**
+   * @param {any} bundle
+   * @param {{ destinationTarget?: string, secret: Buffer, secretKind?: 'master'|'recovery', overwrite?: boolean }} opts
+   * @returns {Promise<{ imported: true, fresh: boolean, vaultId: string, recoveryKeyDisplay?: string, adminPrivateKeyB64?: string }>}
+   */
+  async _importVault(bundle, opts) {
     const { destinationTarget, secret, secretKind, overwrite } = opts;
 
     // ---- validate the bundle (loud — VaultFormatError / VaultStateError) ----
@@ -1016,23 +1559,43 @@ class VaultStore {
     if (bundle.version !== BUNDLE_VERSION) {
       throw new vc.VaultFormatError(`vault-store: unsupported bundle version "${bundle.version}"`);
     }
+    // The bundle's EFFECTIVE manager version (M18 F2 Leg 1 / DD7): absent means 1
+    // (every pre-change bundle), else it must be a readable manager version. The
+    // bundle's mrk envelopes are AAD-bound to it, so both unwrap sites below pass it —
+    // without this, a v2-source bundle would fail unwrap with a misleading
+    // "wrong secret" GCM error.
+    let managerVersion = 1;
+    if (bundle.managerVersion !== undefined) {
+      if (!READABLE_MANAGER_VERSIONS.has(bundle.managerVersion)) {
+        throw new vc.VaultFormatError(`vault-store: unsupported bundle managerVersion "${bundle.managerVersion}"`);
+      }
+      managerVersion = bundle.managerVersion;
+    }
     if (!bundle.mrk || typeof bundle.mrk !== 'object') {
       throw new vc.VaultFormatError('vault-store: bundle missing mrk envelope set');
     }
-    for (const slot of ['master', 'recovery', 'admin']) {
-      const env = bundle.mrk[slot];
-      if (
-        !env ||
-        typeof env !== 'object' ||
-        typeof env.iv !== 'string' ||
-        typeof env.ct !== 'string' ||
-        typeof env.tag !== 'string'
-      ) {
+    // master + recovery are required; the admin pair (mrk.admin + adminPublicKeyB64)
+    // is tolerated ABSENT — present together or absent together, a lone field is
+    // malformed (DD7 relaxation, mirroring _readManager's v2 pairing rule).
+    for (const slot of ['master', 'recovery']) {
+      if (!isEnvelopeShaped(bundle.mrk[slot])) {
         throw new vc.VaultFormatError(`vault-store: malformed bundle mrk.${slot} envelope`);
       }
     }
-    if (typeof bundle.adminPublicKeyB64 !== 'string') {
-      throw new vc.VaultFormatError('vault-store: bundle missing adminPublicKeyB64');
+    const bundleHasAdminSeal = bundle.mrk.admin !== undefined;
+    const bundleHasAdminPub = bundle.adminPublicKeyB64 !== undefined;
+    if (bundleHasAdminSeal !== bundleHasAdminPub) {
+      throw new vc.VaultFormatError(
+        'vault-store: bundle mrk.admin and adminPublicKeyB64 must be present together or absent together'
+      );
+    }
+    if (bundleHasAdminSeal) {
+      if (!isEnvelopeShaped(bundle.mrk.admin)) {
+        throw new vc.VaultFormatError('vault-store: malformed bundle mrk.admin envelope');
+      }
+      if (typeof bundle.adminPublicKeyB64 !== 'string') {
+        throw new vc.VaultFormatError('vault-store: bundle missing adminPublicKeyB64');
+      }
     }
     // Bounded scrypt-param schema (finding 4): reject absent fields (they silently
     // collapse to Node's weak scrypt defaults) AND resource-exhausting values —
@@ -1059,12 +1622,13 @@ class VaultStore {
       // Recovery is a base32 STRING (review [HIGH]) — parseRecoveryKey throws on a Buffer.
       const material = vc.parseRecoveryKey(secret.toString('utf8'));
       try {
-        mrk = vc.unwrapRecovery(bundle.mrk.recovery, material, { version: MANAGER_VERSION });
+        // The bundle's EFFECTIVE manager version (DD7) — its envelopes are AAD-bound to it.
+        mrk = vc.unwrapRecovery(bundle.mrk.recovery, material, { version: managerVersion });
       } finally {
         material.fill(0); // zeroize the transient recovery material (mirrors unlockWithRecovery).
       }
     } else {
-      mrk = await vc.unwrapMaster(bundle.mrk.master, secret, { version: MANAGER_VERSION, params: bundle.kdf });
+      mrk = await vc.unwrapMaster(bundle.mrk.master, secret, { version: managerVersion, params: bundle.kdf });
     }
 
     // From here `mrk` is a live buffer. The FRESH path INSTALLS it (retains); every other
@@ -1092,15 +1656,23 @@ class VaultStore {
         // already authenticates the wrap). The two new one-time secrets are RETURNED so the
         // surfacing leg (Leg 3) can reveal them. The donor MASTER envelope is intentionally
         // RETAINED (DD4 residual — documented in Leg 4, not severed here).
+        // M18 F2 Leg 1 / DD7: the adopted manager is written at the BUNDLE'S effective
+        // manager version, and the minted envelopes are wrapped at that SAME version —
+        // the donor master envelope is retained verbatim (AAD-bound to the source
+        // version), so wrapping the minted slots at any other version would create
+        // exactly the mixed-version document DD1 forbids (validates at boot, fails
+        // AAD on every master unlock).
         const rec = vc.generateRecoveryKey();
-        const recoveryEnv = vc.wrapRecovery(mrk, rec.material, { version: MANAGER_VERSION });
+        const recoveryEnv = vc.wrapRecovery(mrk, rec.material, { version: managerVersion });
         rec.material.fill(0); // the recovery is now operator-held via `display` — drop the buffer (mirrors setup).
+        // Adopt still mints a fresh admin pair TODAY — a no-admin bundle simply adopts
+        // as with-admin. The adopt admin-minting removal is Flight 3 (DD8), not here.
         const admin = vc.generateAdminKeypair();
-        const adminEnv = vc.sealToAdmin(mrk, admin.publicKey, { version: MANAGER_VERSION });
+        const adminEnv = vc.sealToAdmin(mrk, admin.publicKey, { version: managerVersion });
 
         this._writeManager({
           format: MANAGER_FORMAT,
-          version: MANAGER_VERSION,
+          version: managerVersion,
           kdf: bundle.kdf,
           adminPublicKeyB64: admin.publicKeyB64, // NEW — the donor pubkey is discarded.
           mrk: {
@@ -1212,6 +1784,26 @@ class VaultStore {
    * @returns {{ deleted: boolean }}  `deleted: true` iff a file was actually removed.
    */
   deleteVault(vaultId) {
+    // GATED (M18 F2 Leg 2 / DD3): reached from jar delete — a racing jar delete
+    // could otherwise unlink a journal-named file and have roll-forward
+    // resurrect a vault for a jar the registry no longer has. Mutates via
+    // unlinkSync (not the sinks) but is fully synchronous, so entry-check +
+    // drain suffice. The jar-delete composition is fail-closed on the busy
+    // throw ({ok:false, 'vault-delete-failed'}, jar kept — verified at flight
+    // design review).
+    const releaseOp = this._enterGatedOp();
+    try {
+      return this._deleteVault(vaultId);
+    } finally {
+      releaseOp();
+    }
+  }
+
+  /**
+   * @param {string} vaultId
+   * @returns {{ deleted: boolean }}
+   */
+  _deleteVault(vaultId) {
     if (vaultId === GLOBAL_ID) {
       throw new VaultStateError('vault-store: refusing to delete the global vault');
     }
@@ -1309,6 +1901,22 @@ class VaultStore {
    * @returns {VaultItem}
    */
   saveItem(target, item) {
+    // GATED (M18 F2 Leg 2 / DD3). Fully synchronous — entry-check + drain
+    // suffice; the counter hold is still released in finally (uniform shape).
+    const releaseOp = this._enterGatedOp();
+    try {
+      return this._saveItem(target, item);
+    } finally {
+      releaseOp();
+    }
+  }
+
+  /**
+   * @param {string} target
+   * @param {any} item
+   * @returns {VaultItem}
+   */
+  _saveItem(target, item) {
     this._requireMrk();
     const vaultId = this._resolveTarget(target);
     this._touch();
@@ -1405,6 +2013,21 @@ class VaultStore {
    * @returns {boolean} true if an item was removed.
    */
   deleteItem(target, itemId) {
+    // GATED (M18 F2 Leg 2 / DD3). Fully synchronous — see saveItem.
+    const releaseOp = this._enterGatedOp();
+    try {
+      return this._deleteItem(target, itemId);
+    } finally {
+      releaseOp();
+    }
+  }
+
+  /**
+   * @param {string} target
+   * @param {string} itemId
+   * @returns {boolean}
+   */
+  _deleteItem(target, itemId) {
     this._requireMrk();
     const vaultId = this._resolveTarget(target);
     this._touch();
@@ -1443,6 +2066,23 @@ class VaultStore {
    * @returns {VaultItem}
    */
   saveItemPreservingSecrets(target, item, unchangedFields = []) {
+    // GATED (M18 F2 Leg 2 / DD3). Fully synchronous; the inner `saveItem` call
+    // takes a nested (correctly counted) hold of its own.
+    const releaseOp = this._enterGatedOp();
+    try {
+      return this._saveItemPreservingSecrets(target, item, unchangedFields);
+    } finally {
+      releaseOp();
+    }
+  }
+
+  /**
+   * @param {string} target
+   * @param {any} item
+   * @param {string[]} unchangedFields
+   * @returns {VaultItem}
+   */
+  _saveItemPreservingSecrets(target, item, unchangedFields) {
     this._requireMrk();
     if (!item || typeof item !== 'object' || Array.isArray(item)) {
       throw new VaultStateError('vault-store: item must be an object');
@@ -1639,7 +2279,25 @@ class VaultStore {
    * @param {{ masterPassword: string }} args
    * @returns {Promise<{ secret: string, keyId: string }>}
    */
-  async mintAccessKey(target, { masterPassword } = /** @type {any} */ ({})) {
+  async mintAccessKey(target, args = /** @type {any} */ ({})) {
+    // GATED (M18 F2 Leg 2 / DD3): mint awaits scrypt between its entry check
+    // and its write — DD3's named mid-await hazard. It holds the counter for
+    // its full duration (released in finally, auth failures included) and its
+    // `_writeVault` hits the second wall if the gate rose during the derive.
+    const releaseOp = this._enterGatedOp();
+    try {
+      return await this._mintAccessKey(target, args);
+    } finally {
+      releaseOp();
+    }
+  }
+
+  /**
+   * @param {string} target
+   * @param {{ masterPassword: string }} args
+   * @returns {Promise<{ secret: string, keyId: string }>}
+   */
+  async _mintAccessKey(target, { masterPassword } = /** @type {any} */ ({})) {
     this._requireMrk();
     const vaultId = this._resolveTarget(target);
     this._touch();
@@ -1648,7 +2306,7 @@ class VaultStore {
     // A wrong password throws (VaultAuthError) and mints nothing.
     const manager = this._readManager();
     const stepUpMrk = await vc.unwrapMaster(manager.mrk.master, masterPassword, {
-      version: MANAGER_VERSION,
+      version: manager.version, // the document's stated version (DD1) — never the constant.
       params: manager.kdf
     });
     stepUpMrk.fill(0); // zeroize the transient step-up buffer after the compare.
@@ -1731,10 +2389,12 @@ class VaultStore {
    * overwrites it, so a mismatch means the admin key was rotated and the session must drop
    * its keys (the rotated-out admin private key can no longer open the vaults). Reads
    * manager.json fresh; throws (→ caller drops the session) if the manager is gone.
-   * @returns {string}
+   * NULL — coerced, never `undefined` — on a no-admin v2 manager (M18 F2 Leg 1 / DD1);
+   * vault-context.revalidate's strict-equality grant check fail-closes against it.
+   * @returns {string | null}
    */
   adminPublicKey() {
-    return this._readManager().adminPublicKeyB64;
+    return this._readManager().adminPublicKeyB64 ?? null;
   }
 
   /**
@@ -1756,13 +2416,18 @@ class VaultStore {
    */
   openAllWithAdminKey(adminPrivateKeyB64) {
     const manager = this._readManager();
+    if (manager.mrk.admin === undefined) {
+      // M18 F2 Leg 1 / DD1: deliberate absence is a named, discriminable state —
+      // the exact message is a ruled contract (mirrors unlockWithAdmin).
+      throw new VaultStateError('no admin key provisioned');
+    }
     let privateKey;
     try {
       privateKey = vc.importAdminPrivateKey(adminPrivateKeyB64);
     } catch (err) {
       throw new vc.VaultFormatError(`admin private key: unreadable (${/** @type {Error} */ (err).message})`);
     }
-    const mrk = vc.openAdminSeal(manager.mrk.admin, privateKey, { version: MANAGER_VERSION });
+    const mrk = vc.openAdminSeal(manager.mrk.admin, privateKey, { version: manager.version });
     /** @type {Map<string, Buffer>} */
     const out = new Map();
     try {
@@ -1817,6 +2482,21 @@ class VaultStore {
    * @returns {boolean} true if an envelope was removed.
    */
   revokeAccessKey(vaultId, keyId) {
+    // GATED (M18 F2 Leg 2 / DD3). Fully synchronous — see saveItem.
+    const releaseOp = this._enterGatedOp();
+    try {
+      return this._revokeAccessKey(vaultId, keyId);
+    } finally {
+      releaseOp();
+    }
+  }
+
+  /**
+   * @param {string} vaultId
+   * @param {string} keyId
+   * @returns {boolean}
+   */
+  _revokeAccessKey(vaultId, keyId) {
     this._requireMrk();
     this._touch();
     const doc = this._readVault(vaultId);
@@ -1858,6 +2538,14 @@ module.exports = {
   GLOBAL_ID,
   VaultLockedError,
   VaultStateError,
+  // M18 F2 Leg 2 (DD3): a compromise rotation holds write exclusivity — gated
+  // ops refuse with this while the gate is up. Transient; callers surface
+  // "busy, retry", never an auth/format failure.
+  VaultBusyError,
+  // M18 F2 Leg 3 (R7): the compromise rotation's new-password-equals-old
+  // refusal — discriminable from a wrong-credential VaultAuthError so leg 4's
+  // sheet maps it to the ruled inline copy.
+  VaultPasswordReuseError,
   // The coded import-collision (M12 F5 HAT tail) — re-exported so main/tests distinguish an
   // "already exists" refusal from a wrong-secret / bad-target failure.
   VaultCollisionError,

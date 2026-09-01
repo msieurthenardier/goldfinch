@@ -281,6 +281,17 @@ export function createVaultController({
   goldfinch.onVaultRequestRecover(() => {
     openOverlayMenu('vault-recover', [], null, 0);
   });
+  // Compromise-mode rotation trigger (M18 F2 L4, flight DD4). The vault page's confirm
+  // modal Continue routes page → main (internal-vault-request-compromise) → chrome (here).
+  // Opens the MASTER branch; the sheet's own "Use your recovery key instead" switch
+  // reopens the recovery branch via the handleActivation case below (close-then-reopen —
+  // design-review M1). Reachable from BOTH lock states (R4: the sheet doubles as unlock).
+  // NO secret crosses this bare trigger. The compromise sheets can never be requested
+  // while a vault-recovery-show is live (Q2: the dismiss-locked sheet blocks the page,
+  // so the page's Continue is unreachable underneath it).
+  goldfinch.onVaultRequestCompromise(() => {
+    openOverlayMenu('vault-compromise', [], null, 0);
+  });
 
   // Vault capture offer (M12 F2 Leg 4 capture-save, DD7). Main forwards { captureId,
   // model } after a login-form submit in a set-up, unlocked, persistent-jar tab (model =
@@ -356,8 +367,8 @@ export function createVaultController({
     })
     .catch(() => {});
 
-  // The 11 vault sheet overlay-menu states (the `downloads:` single-entry precedent
-  // generalized to a spread — none of these eleven sheets has a chrome trigger element,
+  // The 13 vault sheet overlay-menu states (the `downloads:` single-entry precedent
+  // generalized to a spread — none of these thirteen sheets has a chrome trigger element,
   // so none has an aria-expanded target or trigger refocus; the guest, or nothing, owns
   // focus on close). Comments below narrate WHY each sheet has no trigger.
   const overlayStates = {
@@ -461,6 +472,26 @@ export function createVaultController({
       ariaTarget: () => null,
       refocus() {}
     },
+    // Compromise-mode rotation sheets (M18 F2 L4, flight DD4). Both raised from the
+    // goldfinch://vault page's cross-renderer request path (page → main → chrome) — no
+    // chrome trigger element, so no aria-expanded target and no trigger refocus.
+    // vault-compromise is the master-branch credential entry (current + new + confirm +
+    // the recovery switch); vault-compromise-recover is the recovery branch (recovery
+    // key + new + confirm), reopened via handleActivation's 'use-recovery' case.
+    'vault-compromise': {
+      open: false,
+      token: 0,
+      blurClosedAt: -Infinity,
+      ariaTarget: () => null,
+      refocus() {}
+    },
+    'vault-compromise-recover': {
+      open: false,
+      token: 0,
+      blurClosedAt: -Infinity,
+      ariaTarget: () => null,
+      refocus() {}
+    },
     // Admin-key provision/rotate display (M12 F4 Leg 3 admin-key-provision, DD4). Raised from the
     // goldfinch://vault page's cross-renderer request/response path (page → main → chrome) — no chrome
     // trigger element, so no aria-expanded target and no trigger refocus. vault-adminkey-show is the
@@ -477,13 +508,15 @@ export function createVaultController({
 
   // Channel-6 activation dispatch for the vault-owned menuTypes (the `downloads:`
   // `handleActivation` precedent, chained ahead of `dispatchOverlayActivation` in
-  // renderer.js). Returns `true` (handled) for vault-picker's real dispatch and for
-  // the three DISMISS-DISABLED show/ack sheets' validated no-op (their only ever
+  // renderer.js). Returns `true` (handled) for vault-picker's real dispatch, for
+  // vault-compromise's recovery-branch switch (M18 F2 L4 — the close-then-reopen), and
+  // for the three DISMISS-DISABLED show/ack sheets' validated no-op (their only ever
   // activation is id:'ack', already consumed by main closing the sheet); `false` for
   // every non-vault menuType and for the vault menuTypes with no channel-4 activation
   // at all (vault-unlock, vault-set, vault-capture, vault-stepup, vault-import-unlock,
-  // vault-change-master, vault-recover) — those fall through exactly as they did when
-  // `dispatchOverlayActivation`'s switch had no case for them (unchanged behavior).
+  // vault-change-master, vault-recover, vault-compromise-recover) — those fall through
+  // exactly as they did when `dispatchOverlayActivation`'s switch had no case for them
+  // (unchanged behavior).
   /** @param {{ menuType: string, id: string, value?: string }} payload */
   function handleActivation(payload) {
     if (!payload || typeof payload.menuType !== 'string') return false;
@@ -520,12 +553,26 @@ export function createVaultController({
         .catch(() => {});
       return true;
     }
+    if (menuType === 'vault-compromise') {
+      // Compromise-mode recovery-branch switch (M18 F2 L4, design-review M1). The
+      // master-branch sheet's "Use your recovery key instead" sent id:'use-recovery';
+      // main has ALREADY closed the compromise sheet ('activated') by the time this
+      // forward arrives, so re-opening here is a clean open, never a model replace
+      // ('superseded' closes even dismiss-locked sheets — the F17-4 clobber lesson).
+      // No secret rides this path — both credential entries live on the sheets.
+      if (id === 'use-recovery') {
+        openOverlayMenu('vault-compromise-recover', [], null, 0);
+      }
+      return true;
+    }
     if (menuType === 'vault-recovery-show') {
       // First-run recovery-key acknowledge (M12 F3 Leg 4). The only activation is
       // id:'ack' — the deliberate "I've saved it". Main already closed the sheet and the
       // vault page already moved to unlocked off the setup lock-state broadcast, so there
       // is nothing more to do here (no secret ever reaches this dispatch — the key lived
-      // only on the sheet).
+      // only on the sheet). For a COMPROMISE reveal's ack (M18 F2 L4), main's activated
+      // handler already consumed the per-window marker, released the suppression hold,
+      // and re-broadcast vault-lock-state — same nothing-more-to-do here.
       return true;
     }
     if (menuType === 'vault-accesskey-show') {
@@ -643,6 +690,13 @@ export function createVaultController({
     openOverlayMenu('vault-adminkey-show', { adminPrivateKey: 'ADMIN-PRIVATE-KEY-PLACEHOLDER' }, null, 0, {
       dismissible: false
     });
+  // M18 F2 L4 (compromise-mode rotation, DD4/DD9): a11y SHEET_STATES hooks for the two
+  // compromise sheets. Both open with an empty array model (no secret; the destination is
+  // the manager itself); each renders its three password fields + error + pending +
+  // danger submit/cancel (dialog-style, Escape-dismissible; the master branch adds the
+  // recovery switch link). Same evaluate-seam precedent as openVaultChangeMasterOverlayForAudit.
+  const openVaultCompromiseOverlayForAudit = () => openOverlayMenu('vault-compromise', [], null, 0);
+  const openVaultCompromiseRecoverOverlayForAudit = () => openOverlayMenu('vault-compromise-recover', [], null, 0);
 
   return {
     overlayStates,
@@ -657,6 +711,8 @@ export function createVaultController({
     openVaultImportUnlockOverlayForAudit,
     openVaultChangeMasterOverlayForAudit,
     openVaultRecoverOverlayForAudit,
-    openVaultAdminKeyShowOverlayForAudit
+    openVaultAdminKeyShowOverlayForAudit,
+    openVaultCompromiseOverlayForAudit,
+    openVaultCompromiseRecoverOverlayForAudit
   };
 }

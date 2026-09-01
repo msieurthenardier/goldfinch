@@ -571,7 +571,11 @@ if (INTERNAL_ORIGINS.has(location.origin)) {
      * unlocked, and the vault list (the manager-wide `global` vault plus each
      * persistent jar's vault) as LABELS ONLY — { vaultId, label }. No item counts
      * (they need the MRK — leg 2) and no secret ever crosses this channel.
-     * @returns {Promise<{ setUp: boolean, unlocked: boolean, vaults: Array<{ vaultId: string, label: string, count?: number }> }>}
+     * M18 F2 L4 adds two NON-SECRET fields: `adminProvisioned` (is an admin key
+     * provisioned — drives the Master-key section's provision state) and
+     * `compromiseReport` (the session-held compromise-rotation revocation report
+     * behind the persistent "Everything rotated" card; null when none).
+     * @returns {Promise<{ setUp: boolean, unlocked: boolean, vaults: Array<{ vaultId: string, label: string, count?: number }>, adminProvisioned?: boolean, compromiseReport?: ({ admin: boolean, vaultIds: string[] } | null) }>}
      */
     vaultState: () => ipcRenderer.invoke('internal-vault-state'),
 
@@ -775,6 +779,24 @@ if (INTERNAL_ORIGINS.has(location.origin)) {
     /** Request the RECOVER-after-forgotten-master sheet (chrome-owned vault-recover card:
      * recovery key + new + confirm; the recovery key is the step-up, installs the MRK). */
     requestRecover: () => ipcRenderer.invoke('internal-vault-request-recover'),
+
+    // Compromise-mode rotation (M18 F2 L4). The page's confirm modal Continue fires the
+    // BARE trigger below (no secret — the chrome opens the vault-compromise sheet, which
+    // owns every credential entry and the one-time recovery display); the persistent
+    // "Everything rotated" card's dismiss drops the session-held revocation report.
+
+    /** Request the COMPROMISE-MODE rotation sheet (chrome-owned vault-compromise card:
+     * current + new + confirm, with a recovery-branch switch). Reachable from BOTH lock
+     * states (the sheet doubles as unlock on the locked path). NO secret crosses here. */
+    requestCompromiseRotate: () => ipcRenderer.invoke('internal-vault-request-compromise'),
+
+    /**
+     * Dismiss the persistent compromise completion card: clears the session-held
+     * revocation report main-side. Carries NO secret; the page re-fetches its state
+     * after the invoke resolves. Resolves { ok: true }.
+     * @returns {Promise<{ ok: boolean }>}
+     */
+    compromiseDismiss: () => ipcRenderer.invoke('internal-vault-compromise-dismiss'),
 
     /**
      * Subscribe to vault lock-state transitions (`{ setUp, unlocked }`). The vault page

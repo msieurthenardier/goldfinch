@@ -187,6 +187,9 @@ test('browser registrar preserves channel inventory and owner-routed media forwa
       'internal-vault-request-rotate-admin',
       'internal-vault-request-change-master',
       'internal-vault-request-recover',
+      // M18 F2 L4 (compromise-mode rotation): the bare compromise trigger, registered
+      // immediately after the rotation/recover triggers.
+      'internal-vault-request-compromise',
       'internal-open-tab-in-jar'
     ]
   );

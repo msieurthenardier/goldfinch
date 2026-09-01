@@ -73,6 +73,7 @@ import { buildVaultAdminKeyCard } from '../shared/vault-adminkey-template.js';
 import { buildVaultImportCard } from '../shared/vault-import-template.js';
 import { buildVaultChangeMasterCard } from '../shared/vault-change-master-template.js';
 import { buildVaultRecoverCard } from '../shared/vault-recover-template.js';
+import { buildVaultCompromiseCard, buildVaultCompromiseRecoverCard } from '../shared/vault-compromise-template.js';
 import {
   createSheetReport,
   createSheetEntry,
@@ -2017,6 +2018,300 @@ import {
     }
   });
 
+  /* ------------------------------------------------------ template: vault-compromise */
+  // Compromise-mode rotation entry, MASTER branch (M18 F2 L4, flight DD4) — a dialog-style
+  // card mirroring vault-change-master (current + new + confirm) with the compromise
+  // lede/labels, the danger-styled "Rotate everything" submit, a PENDING state for the
+  // op's 2–3-scrypt + per-vault-AES latency, and the "Use your recovery key instead"
+  // switch. The switch is channel-4 close-then-reopen (design-review M1 — no in-sheet
+  // swap idiom exists, and a model replace would ride the 'superseded' clobber): it
+  // sends {id:'use-recovery'}; main closes this sheet ('activated') and the chrome's
+  // handleActivation reopens vault-compromise-recover. Only the OLD + NEW secrets cross
+  // the DEDICATED menu-overlay:vault-compromise Buffer channel — NEVER channel-4.
+  //
+  // Pending rules (leg L1/L2): fields + submit + switch DISABLED, progress note shown;
+  // Cancel/Escape stay LIVE — a dismissal mid-op is safe (on success main's stale-token
+  // close no-ops and the reveal arrives via the main-side pending-reveal mechanism).
+  // The sheet awaits { ok, reason? }: ok → close (main already closed + opened the
+  // dismiss-locked recovery-show); a mapped reason → the ruled inline copy; an
+  // unexpected rejection → the DD5 pre-commit copy ("Nothing changed; your existing
+  // keys remain valid.").
+
+  const vaultCompromise = buildVaultCompromiseCard(document);
+  const vaultCompromiseNode = vaultCompromise.node;
+  root.appendChild(vaultCompromiseNode);
+
+  // Guards a concurrent submit (double-Enter / Enter+click); reset on every open.
+  let vaultCompromiseBusy = false;
+
+  function setVaultCompromisePending(on) {
+    vaultCompromise.oldInput.disabled = on;
+    vaultCompromise.newInput.disabled = on;
+    vaultCompromise.confirm.disabled = on;
+    vaultCompromise.submit.disabled = on;
+    vaultCompromise.switchLink.disabled = on;
+    vaultCompromise.pending.textContent = on ? 'Rotating everything — this can take a moment.' : '';
+  }
+
+  const vaultCompromiseEntry = sheet({
+    node: vaultCompromiseNode,
+    onOpen() {
+      vaultCompromise.oldInput.value = '';
+      vaultCompromise.newInput.value = '';
+      vaultCompromise.confirm.value = '';
+      vaultCompromise.error.textContent = '';
+      vaultCompromiseBusy = false;
+      setVaultCompromisePending(false);
+      vaultCompromiseNode.classList.remove('hidden');
+      vaultCompromise.oldInput.focus();
+    },
+    onClose() {
+      // Scrub the field DOM values on close (best-effort — the input V8 strings are
+      // unscrubbable, the accepted DD4 limitation).
+      vaultCompromise.oldInput.value = '';
+      vaultCompromise.newInput.value = '';
+      vaultCompromise.confirm.value = '';
+    }
+  });
+
+  // The mapped-reason → ruled inline copy table (leg-3 error map). 'format' on THIS
+  // branch is an integrity anomaly (there is no recovery display to malform), so it
+  // falls to the DD5 pre-commit copy alongside 'state' and unexpected rejections.
+  /** @param {string | undefined} reason @returns {string} */
+  function vaultCompromiseErrorCopy(reason) {
+    if (reason === 'reuse') return 'Your new master password must be different from your old one.';
+    if (reason === 'auth') return 'Wrong current master password. Nothing was changed.';
+    if (reason === 'busy') return 'A rotation is already in progress.';
+    return 'Nothing changed; your existing keys remain valid.';
+  }
+
+  async function submitVaultCompromise() {
+    if (report.sent || report.token == null || vaultCompromiseBusy) return;
+    const oldValue = vaultCompromise.oldInput.value;
+    const newValue = vaultCompromise.newInput.value;
+    if (!oldValue) {
+      vaultCompromise.error.textContent = 'Enter your current master password';
+      vaultCompromise.oldInput.focus();
+      return;
+    }
+    if (!newValue) {
+      vaultCompromise.error.textContent = 'Choose a new master password';
+      vaultCompromise.newInput.focus();
+      return;
+    }
+    if (newValue !== vaultCompromise.confirm.value) {
+      vaultCompromise.error.textContent = 'New passwords do not match';
+      vaultCompromise.confirm.focus();
+      return;
+    }
+    const token = report.token;
+    const oldSecret = new TextEncoder().encode(oldValue);
+    const newSecret = new TextEncoder().encode(newValue);
+    vaultCompromiseBusy = true;
+    vaultCompromise.error.textContent = '';
+    setVaultCompromisePending(true);
+    let res;
+    try {
+      res = await window.menuOverlay.compromiseRotate({ token, oldSecret, newSecret });
+    } catch {
+      res = { ok: false };
+    } finally {
+      vaultCompromiseBusy = false;
+      oldSecret.fill(0);
+      newSecret.fill(0);
+    }
+    // The sheet may have been dismissed (Cancel/Escape stay live during pending) or
+    // re-opened under a new token while the op ran — say nothing stale.
+    if (report.token !== token || report.sent) return;
+    setVaultCompromisePending(false);
+    if (res && res.ok) {
+      report.sent = true; // suppress the trailing dismissed; main closes the sheet.
+      menuController.close(vaultCompromiseEntry);
+      return;
+    }
+    vaultCompromise.error.textContent = vaultCompromiseErrorCopy(res && res.reason);
+    if (res && res.reason === 'auth') {
+      vaultCompromise.oldInput.value = '';
+      vaultCompromise.oldInput.focus();
+    } else if (res && res.reason === 'reuse') {
+      vaultCompromise.newInput.focus();
+    }
+  }
+
+  vaultCompromise.submit.addEventListener('click', () => {
+    void submitVaultCompromise();
+  });
+  vaultCompromise.cancel.addEventListener('click', () => {
+    report.lastStimulus = 'escape';
+    menuController.close(vaultCompromiseEntry);
+  });
+  // The recovery-branch switch (M1 close-then-reopen): channel-4, one-shot, then close.
+  // Inert while pending (disabled) — the button never carries a secret.
+  vaultCompromise.switchLink.addEventListener('click', () => {
+    if (vaultCompromiseBusy) return;
+    if (sendActivatedOnce({ id: 'use-recovery' })) menuController.close(vaultCompromiseEntry);
+  });
+  const vaultCompromiseEnter = (/** @type {any} */ e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      void submitVaultCompromise();
+    }
+  };
+  vaultCompromise.oldInput.addEventListener('keydown', vaultCompromiseEnter);
+  vaultCompromise.newInput.addEventListener('keydown', vaultCompromiseEnter);
+  vaultCompromise.confirm.addEventListener('keydown', vaultCompromiseEnter);
+  attachModalCard({
+    node: vaultCompromiseNode,
+    getCycle: () =>
+      [
+        vaultCompromise.oldInput,
+        vaultCompromise.newInput,
+        vaultCompromise.confirm,
+        vaultCompromise.switchLink,
+        vaultCompromise.submit,
+        vaultCompromise.cancel
+      ].filter((el) => !el.disabled),
+    close: (stimulus) => {
+      report.lastStimulus = stimulus;
+      menuController.close(vaultCompromiseEntry);
+    }
+  });
+
+  /* -------------------------------------------- template: vault-compromise-recover */
+  // Compromise-mode rotation entry, RECOVERY branch (M18 F2 L4, flight DD4) — the
+  // vault-recover template shape (recovery key + new + confirm) with the compromise
+  // lede and the same danger submit / pending rules as the master branch above. Only
+  // the RECOVERY + NEW secrets cross the DEDICATED menu-overlay:vault-compromise-recover
+  // Buffer channel — NEVER channel-4. Reached via the master sheet's switch (main
+  // routes the reopen); no switch back (Cancel and re-enter covers it).
+
+  const vaultCompromiseRecover = buildVaultCompromiseRecoverCard(document);
+  const vaultCompromiseRecoverNode = vaultCompromiseRecover.node;
+  root.appendChild(vaultCompromiseRecoverNode);
+
+  let vaultCompromiseRecoverBusy = false;
+
+  function setVaultCompromiseRecoverPending(on) {
+    vaultCompromiseRecover.recoveryInput.disabled = on;
+    vaultCompromiseRecover.newInput.disabled = on;
+    vaultCompromiseRecover.confirm.disabled = on;
+    vaultCompromiseRecover.submit.disabled = on;
+    vaultCompromiseRecover.pending.textContent = on ? 'Rotating everything — this can take a moment.' : '';
+  }
+
+  const vaultCompromiseRecoverEntry = sheet({
+    node: vaultCompromiseRecoverNode,
+    onOpen() {
+      vaultCompromiseRecover.recoveryInput.value = '';
+      vaultCompromiseRecover.newInput.value = '';
+      vaultCompromiseRecover.confirm.value = '';
+      vaultCompromiseRecover.error.textContent = '';
+      vaultCompromiseRecoverBusy = false;
+      setVaultCompromiseRecoverPending(false);
+      vaultCompromiseRecoverNode.classList.remove('hidden');
+      vaultCompromiseRecover.recoveryInput.focus();
+    },
+    onClose() {
+      vaultCompromiseRecover.recoveryInput.value = '';
+      vaultCompromiseRecover.newInput.value = '';
+      vaultCompromiseRecover.confirm.value = '';
+    }
+  });
+
+  // 'auth' AND 'format' both render the wrong-key idiom on THIS branch: a malformed
+  // recovery display (VaultFormatError from parseRecoveryKey) reads to the operator
+  // exactly like a mistyped key — the vault-recover sheet's existing message idiom.
+  /** @param {string | undefined} reason @returns {string} */
+  function vaultCompromiseRecoverErrorCopy(reason) {
+    if (reason === 'reuse') return 'Your new master password must be different from your old one.';
+    if (reason === 'auth' || reason === 'format') return 'Wrong recovery key. Nothing was changed.';
+    if (reason === 'busy') return 'A rotation is already in progress.';
+    return 'Nothing changed; your existing keys remain valid.';
+  }
+
+  async function submitVaultCompromiseRecover() {
+    if (report.sent || report.token == null || vaultCompromiseRecoverBusy) return;
+    const recoveryValue = vaultCompromiseRecover.recoveryInput.value;
+    const newValue = vaultCompromiseRecover.newInput.value;
+    if (!recoveryValue) {
+      vaultCompromiseRecover.error.textContent = 'Enter your recovery key';
+      vaultCompromiseRecover.recoveryInput.focus();
+      return;
+    }
+    if (!newValue) {
+      vaultCompromiseRecover.error.textContent = 'Choose a new master password';
+      vaultCompromiseRecover.newInput.focus();
+      return;
+    }
+    if (newValue !== vaultCompromiseRecover.confirm.value) {
+      vaultCompromiseRecover.error.textContent = 'New passwords do not match';
+      vaultCompromiseRecover.confirm.focus();
+      return;
+    }
+    const token = report.token;
+    const recoverySecret = new TextEncoder().encode(recoveryValue);
+    const newSecret = new TextEncoder().encode(newValue);
+    vaultCompromiseRecoverBusy = true;
+    vaultCompromiseRecover.error.textContent = '';
+    setVaultCompromiseRecoverPending(true);
+    let res;
+    try {
+      res = await window.menuOverlay.compromiseRotateRecover({ token, recoverySecret, newSecret });
+    } catch {
+      res = { ok: false };
+    } finally {
+      vaultCompromiseRecoverBusy = false;
+      recoverySecret.fill(0);
+      newSecret.fill(0);
+    }
+    if (report.token !== token || report.sent) return;
+    setVaultCompromiseRecoverPending(false);
+    if (res && res.ok) {
+      report.sent = true; // suppress the trailing dismissed; main closes the sheet.
+      menuController.close(vaultCompromiseRecoverEntry);
+      return;
+    }
+    vaultCompromiseRecover.error.textContent = vaultCompromiseRecoverErrorCopy(res && res.reason);
+    if (res && (res.reason === 'auth' || res.reason === 'format')) {
+      vaultCompromiseRecover.recoveryInput.value = '';
+      vaultCompromiseRecover.recoveryInput.focus();
+    } else if (res && res.reason === 'reuse') {
+      vaultCompromiseRecover.newInput.focus();
+    }
+  }
+
+  vaultCompromiseRecover.submit.addEventListener('click', () => {
+    void submitVaultCompromiseRecover();
+  });
+  vaultCompromiseRecover.cancel.addEventListener('click', () => {
+    report.lastStimulus = 'escape';
+    menuController.close(vaultCompromiseRecoverEntry);
+  });
+  const vaultCompromiseRecoverEnter = (/** @type {any} */ e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      void submitVaultCompromiseRecover();
+    }
+  };
+  vaultCompromiseRecover.recoveryInput.addEventListener('keydown', vaultCompromiseRecoverEnter);
+  vaultCompromiseRecover.newInput.addEventListener('keydown', vaultCompromiseRecoverEnter);
+  vaultCompromiseRecover.confirm.addEventListener('keydown', vaultCompromiseRecoverEnter);
+  attachModalCard({
+    node: vaultCompromiseRecoverNode,
+    getCycle: () =>
+      [
+        vaultCompromiseRecover.recoveryInput,
+        vaultCompromiseRecover.newInput,
+        vaultCompromiseRecover.confirm,
+        vaultCompromiseRecover.submit,
+        vaultCompromiseRecover.cancel
+      ].filter((el) => !el.disabled),
+    close: (stimulus) => {
+      report.lastStimulus = stimulus;
+      menuController.close(vaultCompromiseRecoverEntry);
+    }
+  });
+
   /* ----------------------------------------------------------- template: downloads */
   // Downloads popup (M11 Flight 1 Leg 3, DD2/DD3): a role="dialog" list of the
   // current/recent downloads in the latest chrome-owned model. The sheet remains
@@ -2379,7 +2674,7 @@ import {
 
   /* ----------------------------------------------------- registry + init dispatch */
 
-  /** @type {{ [menuType: string]: 'menu' | 'info-popup' | 'input-dialog' | 'suggestions' | 'downloads' | 'vault-unlock' | 'vault-picker' | 'vault-capture' | 'vault-set' | 'vault-recovery-show' | 'vault-stepup' | 'vault-accesskey-show' | 'vault-import' | 'vault-change-master' | 'vault-recover' | 'vault-adminkey-show' | 'auth-basic' | 'cert-picker' | 'bookmark-edit' }} */
+  /** @type {{ [menuType: string]: 'menu' | 'info-popup' | 'input-dialog' | 'suggestions' | 'downloads' | 'vault-unlock' | 'vault-picker' | 'vault-capture' | 'vault-set' | 'vault-recovery-show' | 'vault-stepup' | 'vault-accesskey-show' | 'vault-import' | 'vault-change-master' | 'vault-recover' | 'vault-compromise' | 'vault-compromise-recover' | 'vault-adminkey-show' | 'auth-basic' | 'cert-picker' | 'bookmark-edit' }} */
   const TEMPLATES = {
     kebab: 'menu',
     container: 'menu',
@@ -2401,6 +2696,8 @@ import {
     'vault-change-master': 'vault-change-master', // M12 F4 Leg 2 — the THIRTEENTH kind (master-pw change)
     'vault-recover': 'vault-recover', // M12 F4 Leg 2 — the FOURTEENTH kind (recover-after-forgotten-master)
     'vault-adminkey-show': 'vault-adminkey-show', // M12 F4 Leg 3 — the FIFTEENTH kind (dismiss-disabled)
+    'vault-compromise': 'vault-compromise', // M18 F2 L4 — the SIXTEENTH kind (compromise rotation, master branch)
+    'vault-compromise-recover': 'vault-compromise-recover', // M18 F2 L4 — the SEVENTEENTH kind (recovery branch)
     // LOAD-BEARING (M08 Flight 4 DD2): the fallback below (`TEMPLATES[menuType] ||
     // 'menu'`) is the FOCUSING menu template — an unregistered/missing entry here
     // would silently fall into it and break the suggestions template's
@@ -2427,6 +2724,8 @@ import {
     [vaultImportEntry, vaultImportNode],
     [vaultChangeMasterEntry, vaultChangeMasterNode],
     [vaultRecoverEntry, vaultRecoverNode],
+    [vaultCompromiseEntry, vaultCompromiseNode],
+    [vaultCompromiseRecoverEntry, vaultCompromiseRecoverNode],
     [adminKeyEntry, adminKeyNode],
     [bookmarkEditEntry, bookmarkEditNode]
   ]);
@@ -2653,6 +2952,17 @@ import {
       // anchor is ignored, model is an empty array. onOpen clears + focuses the recovery-key
       // input; it must NOT fall through to the non-focusing 'menu' fallback.
       menuController.open(vaultRecoverEntry, 0);
+    } else if (template === 'vault-compromise') {
+      // Fixed layout (current + new + confirm + switch + error + pending + Rotate/Cancel),
+      // centered via CSS — the anchor is ignored, model is an empty array. onOpen clears +
+      // resets pending + focuses the current-password input; it must NOT fall through to the
+      // non-focusing 'menu' fallback. (M18 F2 L4.)
+      menuController.open(vaultCompromiseEntry, 0);
+    } else if (template === 'vault-compromise-recover') {
+      // Fixed layout (recovery + new + confirm + error + pending + Rotate/Cancel), centered
+      // via CSS — the anchor is ignored, model is an empty array. onOpen clears + resets
+      // pending + focuses the recovery-key input. (M18 F2 L4.)
+      menuController.open(vaultCompromiseRecoverEntry, 0);
     } else if (template === 'downloads') {
       // Flat item array (modelShapeOk's non-suggestions branch). startIndex is
       // meaningless without items — onOpen focuses the first enabled button.

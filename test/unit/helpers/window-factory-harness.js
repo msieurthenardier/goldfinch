@@ -226,9 +226,11 @@ function createHarness(options = {}) {
     computeFindOverlayBounds: () => null,
     getTabContents: (wcId) => options.tabContents?.get(wcId) || null,
     chromeForAttachment: options.chromeForAttachment || (() => null),
-    // M17 F4 L3 (AC4, squawk 0051): the pending fresh-adopt admin-key cleanup
-    // (optional-chained in production). Tests pass a recording/modeling fake.
-    clearPendingAdoptAdminKey: options.clearPendingAdoptAdminKey,
+    // M17 F4 L3 (AC4, squawk 0051), re-modeled M18 F2 L4 (flight DD5): the
+    // window-close release of ALL of this window's vault suppression holds
+    // (optional-chained in production). Tests pass a recording/modeling fake
+    // built over the REAL refcounted holder (vault/autolock-suppression.js).
+    releaseVaultHoldsForWindow: options.releaseVaultHoldsForWindow,
     sheetAcceleratorAction: () => null,
     isInternalContents: () => false,
     isGuestActionAllowed: () => true,

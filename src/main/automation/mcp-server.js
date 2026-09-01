@@ -380,7 +380,7 @@ async function freePortInRange(lo = 49152, hi = 65535) {
  *   openAllWithAdminKey: (privB64: string) => Map<string, Buffer>,
  *   readVaultItems: (vaultId: string, key: Buffer) => any[],
  *   accessEnvelopeExists: (vaultId: string, keyId: string) => boolean,
- *   adminPublicKey: () => string,
+ *   adminPublicKey: () => string | null,
  * }} [opts.vaultStore]  the STATELESS vault-store methods (M12 F1 Leg 3) the
  *   per-session vault context dispatches to — never the human-lock singleton.
  *   Absent (engine-only tests) → vault ops degrade to "nothing unlocks".

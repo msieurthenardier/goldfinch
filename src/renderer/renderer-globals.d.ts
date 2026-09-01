@@ -527,6 +527,9 @@ interface GoldfinchBridge {
   onVaultRequestRotateRecovery(cb: () => void): void;
   onVaultRequestChangeMaster(cb: () => void): void;
   onVaultRequestRecover(cb: () => void): void;
+  // Compromise-mode rotation trigger (M18 F2 L4). A bare trigger — the chrome opens the
+  // vault-compromise sheet; the one-time recovery key reuses onVaultRecoveryShow.
+  onVaultRequestCompromise(cb: () => void): void;
   // Admin-key provision/rotate cross-renderer triggers (M12 F4 Leg 3 admin-key-provision, DD4).
   // onVaultRequestRotateAdmin is a bare trigger (reuses vault-stepup, mode 'rotate-admin');
   // onVaultAdminKeyShow carries the new one-time admin private key for the adminkey-show sheet.
@@ -695,11 +698,15 @@ interface GoldfinchInternalBridge {
   // --- vault management surface (M12 Flight 3, Leg 1; item CRUD added Leg 2) ---
   /** Vault state: setup/lock flags + the vault list ('global' + each persistent jar).
    * Each row carries a metadata-only item `count` when UNLOCKED (omitted when locked);
-   * never a secret. */
+   * never a secret. M18 F2 L4 adds `adminProvisioned` (the Master-key section's
+   * provision state) and `compromiseReport` (the session-held compromise-rotation
+   * revocation report behind the persistent "Everything rotated" card; null when none). */
   vaultState(): Promise<{
     setUp: boolean;
     unlocked: boolean;
     vaults: Array<{ vaultId: string; label: string; count?: number }>;
+    adminProvisioned?: boolean;
+    compromiseReport?: { admin: boolean; vaultIds: string[] } | null;
   }>;
   /** Metadata-only item list for one vault (no secret, ever) — { items } or { locked }. */
   vaultList(vaultId: string): Promise<{ items?: Array<VaultItemMeta>; locked?: boolean }>;
@@ -786,6 +793,12 @@ interface GoldfinchInternalBridge {
   requestChangeMaster(): Promise<{ ok: boolean }>;
   /** Request the RECOVER-after-forgotten-master sheet (vault-recover: recovery key + new). */
   requestRecover(): Promise<{ ok: boolean }>;
+  /** Request the COMPROMISE-MODE rotation sheet (M18 F2 L4; vault-compromise: current + new,
+   * with a recovery-branch switch). Bare trigger — reachable from BOTH lock states. */
+  requestCompromiseRotate(): Promise<{ ok: boolean }>;
+  /** Dismiss the persistent compromise completion card — clears the session-held
+   * revocation report main-side (M18 F2 L4). No secret; { ok }. */
+  compromiseDismiss(): Promise<{ ok: boolean }>;
   /** Subscribe to vault lock-state transitions; the page re-queries on every push.
    * Returns a numeric handle for offVaultLockState. */
   onVaultLockState(cb: (d: { setUp: boolean; unlocked: boolean }) => void): number;

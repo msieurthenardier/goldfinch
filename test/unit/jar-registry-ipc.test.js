@@ -483,6 +483,40 @@ test("jars-remove removes the deleted jar's .gfvault while the GLOBAL vault surv
   assert.ok(fs.existsSync(vaultFile(dir, 'global')), 'the GLOBAL vault survives a jar delete');
 });
 
+// M18 F2 Leg 2 (DD3): deleteVault is one of the eight re-key-gated ops. A jar
+// delete racing a compromise rotation hits the VaultBusyError entry wall, and
+// the composition above is FAIL-CLOSED on any deleteVault throw — the jar (and
+// its vault) is kept, exactly as verified at the flight's design review.
+test('jars-remove during a re-key gate stays FAIL-CLOSED: VaultBusyError → { ok:false }, the jar and its vault are KEPT (real store)', async (t) => {
+  const dir = tmpVaultDir();
+  const store = await realVaultStore(t, dir);
+  store.saveItem('personal', { type: 'login', title: 'P', password: 'p' });
+  const releaseGate = await store._acquireRekeyGate();
+  t.after(() => releaseGate());
+
+  const h = makeHarness(t, { getVaultStore: () => store });
+  const result = await h.invoke('jars-remove', { id: 'personal' });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'vault-delete-failed');
+  assert.deepEqual(
+    h.jars
+      .list()
+      .map((c) => c.id)
+      .sort(),
+    ['personal', 'work'],
+    'the jar is kept — its id is never freed while its vault survives'
+  );
+  assert.ok(fs.existsSync(vaultFile(dir, 'personal')), "the busy-refused jar's vault is untouched");
+
+  // Once the rotation releases, the same delete goes through.
+  releaseGate();
+  const retry = await h.invoke('jars-remove', { id: 'personal' });
+  assert.equal(retry.ok, true);
+  assert.equal(retry.vaultRemoved, true);
+  assert.ok(!fs.existsSync(vaultFile(dir, 'personal')));
+});
+
 test('jars-WIPE leaves the .gfvault intact (spare-on-wipe lifecycle pin)', async (t) => {
   const dir = tmpVaultDir();
   const store = await realVaultStore(t, dir);

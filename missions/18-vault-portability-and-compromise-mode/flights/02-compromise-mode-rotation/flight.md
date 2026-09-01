@@ -1,6 +1,6 @@
 # Flight: Compromise-Mode Rotation
 
-**Status**: ready
+**Status**: in-flight
 **Mission**: [Vault Portability & Compromise Mode](../../mission.md)
 
 ## Contributing to Criteria

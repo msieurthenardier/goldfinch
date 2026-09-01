@@ -2,7 +2,8 @@
 
 // Unit tests for the portable export / import store ops (M12 Flight 4 Leg 1 export-import,
 // DD1 — Option A). Electron-free: real temp dirs + FAST scrypt (the vault-store.test.js
-// idiom). Covers exportVault (no password, ciphertext-only, all three mrk envelopes),
+// idiom). Covers exportVault (no password, ciphertext-only; master+recovery always, the
+// admin pair when provisioned, + managerVersion — M18 F2 Leg 1),
 // importVault on a FRESH profile (adopt the bundle's manager, FORCING rotation of the
 // recovery key + admin keypair under the live MRK — M17 F4 Leg 2 / DD2 — so the SOURCE
 // master password still unlocks but the donor recovery/admin secrets are invalidated and
@@ -155,10 +156,13 @@ test('importVault rejects a bundle with downgraded/absent KDF params before pers
 });
 
 // ---------------------------------------------------------------------------
-// exportVault — no password, ciphertext-only, all three mrk envelopes
+// exportVault — no password, ciphertext-only; master+recovery always, the admin
+// pair when provisioned, + managerVersion (M18 F2 Leg 1 — inverted from the
+// "all three mrk envelopes" pin; the no-admin omission is pinned in
+// vault-manager-v2.test.js)
 // ---------------------------------------------------------------------------
 
-test('exportVault(global) builds a ciphertext-only bundle with all three mrk envelopes + kdf + the .gfvault — NO password, NO write', async () => {
+test('exportVault(global) builds a ciphertext-only bundle: master+recovery always, admin-pair-when-provisioned, + managerVersion + kdf + the .gfvault — NO password, NO write', async () => {
   const { dir, store } = await makeSource();
   try {
     // exportVault takes ONLY a target — no password argument.
@@ -170,11 +174,16 @@ test('exportVault(global) builds a ciphertext-only bundle with all three mrk env
     assert.deepEqual(fs.readFileSync(vaultPath(dir, 'global')), before);
 
     assert.equal(bundle.format, 'gfvault-bundle');
-    assert.equal(bundle.version, 1);
+    assert.equal(bundle.version, 1, 'BUNDLE_VERSION stays 1 — the bundle bump is reserved for Flight 3');
+    // The bundle carries the SOURCE MANAGER'S version (M18 F2 Leg 1 / DD7) — always
+    // written going forward; this v1-manager source stamps 1.
+    assert.equal(bundle.managerVersion, 1);
     assert.equal(bundle.sourceVaultId, 'global');
     assert.deepEqual(bundle.kdf, FAST_SCRYPT);
+    // master + recovery ALWAYS; this source is a with-admin (setup) manager, so the
+    // admin pair rides too — each ciphertext, no plaintext. (The no-admin omission
+    // half of the contract is pinned in vault-manager-v2.test.js.)
     assert.equal(typeof bundle.adminPublicKeyB64, 'string');
-    // ALL THREE mrk envelopes (review [HIGH]) — each ciphertext, no plaintext.
     for (const slot of ['master', 'recovery', 'admin']) {
       assert.ok(bundle.mrk[slot] && typeof bundle.mrk[slot].ct === 'string', `mrk.${slot} present`);
     }

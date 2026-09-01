@@ -822,6 +822,20 @@ function broadcastVaultLockState() {
 const { createPendingImportStore } = require('./vault/pending-imports');
 const _pendingVaultImports = createPendingImportStore(() => crypto.randomUUID());
 
+// M18 F2 L4 (flight DD5): the ONE refcounted idle-autolock suppression holder —
+// the single authority over the store's `setAutoLockSuspended` flag (flag =
+// holders > 0, a holder being a distinct `(chromeId, reason)` pair). Both
+// one-time-reveal flows — the fresh-adopt admin-key chain ('adopt') and the
+// compromise-mode recovery reveal ('compromise') — acquire/release through it,
+// so neither flow's teardown can un-suppress while the other still has a live
+// dismiss-locked reveal (the pre-migration two-independent-`size===0`-checks
+// hazard). The store accessor is lazy (transition-only pushes), so an unrelated
+// window close never force-constructs the store.
+const { createSuppressionHolder } = require('./vault/autolock-suppression');
+const _autolockSuppression = createSuppressionHolder({
+  setSuspended: (on) => getVaultStore().setAutoLockSuspended(on)
+});
+
 // M17 F4 L3 (AC2-AC4): the pending fresh-adopt ADMIN key store — the SECOND of the
 // two one-time secrets a fresh adopt rotates (the first, the recovery key, is shown
 // immediately; the admin key waits until the recovery-show sheet is acknowledged so
@@ -830,37 +844,107 @@ const _pendingVaultImports = createPendingImportStore(() => crypto.randomUUID())
 // between the recovery-show open and its ack. `adminPrivateKeyB64` is a JS string —
 // immutable, NOT fill(0)-zeroizable — consistent with the other one-time secrets
 // (recovery display, mint secret); dwell is minimized (dropped on the recovery-show
-// ack in AC3, or on window teardown). Stashing SETS the store's idle-autolock
-// suppression (the lockout-window guard, AC4); taking / clearing it CLEARS the
-// suppression once nothing remains pending.
+// ack in AC3, or on window teardown). Suppression halves MIGRATED to the refcounted
+// holder above (M18 F2 L4, DD5): stashing ACQUIRES the window's 'adopt' hold (the
+// lockout-window guard, AC4); taking / clearing it RELEASES exactly that hold.
 const _pendingAdoptAdminKeys = new Map(); // chromeId(number) -> adminPrivateKeyB64(string)
 
 // Stash the fresh-adopt admin key for a window and SUSPEND idle autolock (AC2/AC4).
 function stashAdoptAdminKey(chromeId, adminPrivateKeyB64) {
   if (chromeId == null) return;
   _pendingAdoptAdminKeys.set(chromeId, adminPrivateKeyB64);
-  getVaultStore().setAutoLockSuspended(true);
+  _autolockSuppression.acquire(chromeId, 'adopt');
 }
 
 // Consume + drop a window's pending admin key (AC3). Returns the key, or undefined
 // when none is held (setup / rotate-recovery recovery-show acks fall through here as
-// a no-op). Clears autolock suppression once no window still has one pending.
+// a no-op). Releases exactly this window's 'adopt' hold — the holder un-suppresses
+// only once NO window holds anything (adopt or compromise) pending.
 function takeAdoptAdminKey(chromeId) {
   if (chromeId == null || !_pendingAdoptAdminKeys.has(chromeId)) return undefined;
   const adminPrivateKeyB64 = _pendingAdoptAdminKeys.get(chromeId);
   _pendingAdoptAdminKeys.delete(chromeId);
-  if (_pendingAdoptAdminKeys.size === 0) getVaultStore().setAutoLockSuspended(false);
+  _autolockSuppression.release(chromeId, 'adopt');
   return adminPrivateKeyB64;
 }
 
-// Window-teardown cleanup (AC4): drop any pending admin key held for a destroyed
-// window (its recovery-show sheet is torn down without an ack, so AC3 never runs)
-// and clear the suppression once nothing remains pending. No-op when the window
-// held nothing — so it never force-constructs the store on an unrelated close.
-function clearAdoptAdminKeyForWindow(chromeId) {
-  if (chromeId == null || !_pendingAdoptAdminKeys.has(chromeId)) return;
+// Window-teardown cleanup (M17 F4 L3 AC4, generalized by M18 F2 L4 DD5): drop any
+// pending admin key held for a closing window (its recovery-show sheet is torn down
+// without an ack, so the ack-driven cleanup never runs) and release ALL of that
+// window's suppression holds. A pending COMPROMISE reveal deliberately survives the
+// window (H2 hold-and-resurface): only its hold is released here; the reveal itself
+// re-surfaces — re-keyed and re-held — on the next chrome boot. No-op store-wise
+// when the window held nothing (the holder pushes only on 0↔>0 transitions), so an
+// unrelated close never force-constructs the store.
+function releaseVaultHoldsForWindow(chromeId) {
+  if (chromeId == null) return;
   _pendingAdoptAdminKeys.delete(chromeId);
-  if (_pendingAdoptAdminKeys.size === 0) getVaultStore().setAutoLockSuspended(false);
+  _autolockSuppression.releaseWindow(chromeId);
+}
+
+// M18 F2 L4 (design-review H1/H2): the per-window pending compromise reveals — the
+// one-time recovery key stashed at op resolution BEFORE any sheet interaction, keyed
+// by the owning chrome id, consumed on the recovery-show ack, re-keyed to a freshly
+// booted window when the original died mid-op. Wired onto the suppression holder so
+// stash/ack/rekey move the 'compromise' hold atomically with the record.
+const { createCompromiseRevealStore } = require('./vault/pending-compromise-reveals');
+const _compromiseReveals = createCompromiseRevealStore(_autolockSuppression);
+
+// M18 F2 L4 (flight DD6): the compromise-mode revocation report — held main-side in
+// memory for the APP SESSION (never persisted; manager.json stays crypto-only) and
+// exposed on the internal vault-state surface so the page's persistent "Everything
+// rotated" card survives reloads and re-renders. Set at op resolution (the card
+// renders from it on the next state fetch regardless of whether the completion
+// broadcast ever fired); cleared on operator dismissal or app relaunch.
+/** @type {{ admin: boolean, vaultIds: string[] } | null} */
+let _compromiseReport = null;
+
+// Stash the pending compromise reveal + report at op resolution (H2: this runs
+// BEFORE any sheet interaction — the stash + hold must be durable-in-memory before
+// the handler touches a possibly-dead sheet/window handle).
+function stashCompromiseReveal(chromeId, { recoveryKey, revoked }) {
+  _compromiseReport = revoked
+    ? {
+        admin: revoked.admin === true,
+        vaultIds: Array.isArray(revoked.vaultIds) ? revoked.vaultIds.filter((id) => typeof id === 'string') : []
+      }
+    : { admin: false, vaultIds: [] };
+  _compromiseReveals.stash(chromeId, recoveryKey);
+}
+
+// The recovery-show ack's compromise branch (H1): consume THIS window's pending
+// compromise reveal if present — releasing exactly the (chromeId, 'compromise')
+// hold — then fire the completion broadcast (design-review M3: re-broadcast
+// vault-lock-state; the page refreshes off that channel, and chrome's handlers
+// treat the duplicate unlocked state as inert). A window with no compromise
+// marker (setup / rotate-recovery / adopt acks) is a strict no-op: no broadcast.
+function ackCompromiseReveal(chromeId) {
+  if (!_compromiseReveals.ack(chromeId)) return false;
+  broadcastVaultLockState();
+  return true;
+}
+
+// H2 resurface: on a chrome boot, re-key any ORPHANED pending compromise reveal
+// (its owning window is gone) to the freshly booted window and re-open the
+// dismiss-locked recovery-show sheet there. The recovery-show display needs no
+// unlock, so this works whatever the lock state. At most one reveal can be
+// orphaned in practice (the store's busy gate serializes rotations), but the
+// scan is written over the full set anyway. An app-quit with a reveal still
+// pending loses it — the accepted, documented residual (docs/vault.md).
+function resurfaceCompromiseReveal(rec) {
+  const chrome = rec && rec.chromeView ? rec.chromeView.webContents : null;
+  if (!chrome || chrome.isDestroyed()) return;
+  const liveChromeIds = new Set();
+  for (const r of registry.records()) {
+    const cc = r.chromeView && r.chromeView.webContents;
+    if (cc && !cc.isDestroyed()) liveChromeIds.add(cc.id);
+  }
+  for (const staleId of _compromiseReveals.chromeIds()) {
+    if (liveChromeIds.has(staleId)) continue;
+    const reveal = _compromiseReveals.rekey(staleId, chrome.id);
+    if (reveal) chrome.send('vault-recovery-show', { recoveryKey: reveal.recoveryKey, replacing: true });
+    break;
+  }
 }
 
 // Pick a save location for an export bundle — runs the save dialog ONLY (no build, no write).
@@ -1392,11 +1476,15 @@ const { createWindow } = createWindowFactory({
   getHistoryRecorder: () => historyRecorder,
   faviconFetcher,
   popupRegistry,
-  // M17 F4 L3 (AC4): window-teardown cleanup for a pending fresh-adopt admin key.
-  // A window closed mid-surfacing (recovery-show shown, not yet acked) would leak
-  // the held one-time admin-key string and leave idle autolock suspended; the
-  // factory calls this from its 'close' handler to drop both.
-  clearPendingAdoptAdminKey: clearAdoptAdminKeyForWindow,
+  // M17 F4 L3 (AC4), re-modeled M18 F2 L4 (DD5): window-teardown release of ALL of
+  // this window's vault suppression holds. A window closed mid-surfacing
+  // (recovery-show shown, not yet acked) would leak the held one-time adopt
+  // admin-key string and leave idle autolock suspended; the factory calls this
+  // from its 'close' handler to drop the adopt key and release the window's
+  // holds on the refcounted holder. A pending COMPROMISE reveal survives (H2
+  // hold-and-resurface) — only its hold is released; the reveal re-keys and
+  // re-holds at the next chrome boot.
+  releaseVaultHoldsForWindow,
   defer: setImmediate,
   logger: console
 });
@@ -1717,6 +1805,35 @@ registerOverlayIpc({
   // so the electron-free overlay registrar stays store-decoupled.
   stashAdoptAdminKey: (chromeId, adminPrivateKeyB64) => stashAdoptAdminKey(chromeId, adminPrivateKeyB64),
   takeAdoptAdminKey: (chromeId) => takeAdoptAdminKey(chromeId),
+  // M18 F2 L4: the compromise-mode rotation delegate. Maps the leg-3 error classes to
+  // NON-SECRET reasons so the sheet renders the ruled inline copy — deliberately WIDER
+  // than the VaultAuthError-only sibling delegates (the op has five ruled failure
+  // classes) — and still rethrows unknowns (the handler dual-zeroizes in finally; the
+  // sheet's catch shows the DD5 pre-commit copy). The recovery branch's key arrives as
+  // a Buffer from the handler and is decoded here for parseRecoveryKey (the vaultRecover
+  // precedent). Success carries the one-time recovery key + the revocation report to the
+  // HANDLER ONLY — the handler stashes both main-side and forwards the key to the
+  // chrome-owned recovery-show sheet; neither ever reaches the invoke reply.
+  vaultCompromiseRotate: async ({ oldMasterPassword, recoveryKey, newMasterPassword }) => {
+    try {
+      const args = recoveryKey
+        ? { recoveryKey: recoveryKey.toString('utf8'), newMasterPassword }
+        : { oldMasterPassword, newMasterPassword };
+      const res = await getVaultStore().compromiseRotate(args);
+      return { ok: true, recoveryKey: res.recoveryKey, revoked: res.revoked };
+    } catch (e) {
+      if (e instanceof vaultStoreModule.VaultPasswordReuseError) return { ok: false, reason: 'reuse' };
+      if (e instanceof vaultStoreModule.VaultAuthError) return { ok: false, reason: 'auth' };
+      if (e instanceof vaultStoreModule.VaultFormatError) return { ok: false, reason: 'format' };
+      if (e instanceof vaultStoreModule.VaultBusyError) return { ok: false, reason: 'busy' };
+      if (e instanceof vaultStoreModule.VaultStateError) return { ok: false, reason: 'state' };
+      throw e;
+    }
+  },
+  // M18 F2 L4 (H2/H1): the compromise surfacing seams — narrow bound functions (never
+  // the stores themselves) so the Electron-free overlay registrar stays decoupled.
+  stashCompromiseReveal: (chromeId, reveal) => stashCompromiseReveal(chromeId, reveal),
+  ackCompromiseReveal: (chromeId) => ackCompromiseReveal(chromeId),
   // M12 F4 Leg 2 (key-rotation): the vault-stepup sheet's RECOVERY-ROTATION delegate. Follows
   // the vaultUnlock pattern (VaultAuthError → { ok:false }) so a WRONG master-password step-up
   // re-prompts and NOTHING is rotated; any other error propagates (the handler still dual-
@@ -2081,7 +2198,14 @@ registerVaultIpc({
   // (the jars delete-first offer) run the dialog. vaultPickSavePath runs the save dialog ONLY
   // (no write) so the page modal can pick a location up front.
   vaultSaveBundle: vaultSaveBundleToFile,
-  vaultPickSavePath
+  vaultPickSavePath,
+  // M18 F2 L4 (DD6): the session-held compromise revocation report — read by the
+  // internal-vault-state handler (the page's persistent card renders from it) and
+  // cleared by the page's dismiss affordance. Gated — offline tests may omit them.
+  getCompromiseReport: () => _compromiseReport,
+  clearCompromiseReport: () => {
+    _compromiseReport = null;
+  }
 });
 
 registerAppLifecycle({
@@ -2165,6 +2289,9 @@ registerAppLifecycle({
   appDb,
   // M14 F1 L2 (DD2): the pending-challenge store behind app.on('login').
   authChallenges,
+  // M18 F2 L4 (H2 resurface): a chrome just served window-boot-config — re-key any
+  // orphaned pending compromise reveal to it and re-open the recovery-show sheet.
+  onChromeBooted: (rec) => resurfaceCompromiseReveal(rec),
   getAllWindows: () => BaseWindow.getAllWindows(),
   argv: process.argv,
   env: process.env,

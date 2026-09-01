@@ -50,22 +50,26 @@ function vaultEvent() {
 }
 
 // Fake store: isSetUp/isUnlocked + a listItemsMeta that yields `counts[vaultId]`
-// metadata rows (for the isUnlocked-guarded count path).
-function makeStore({ setUp = true, unlocked = false, counts = {} } = {}) {
+// metadata rows (for the isUnlocked-guarded count path). `adminKey` (M18 F2 L4)
+// backs adminPublicKey() — null models the unprovisioned/revoked state.
+function makeStore({ setUp = true, unlocked = false, counts = {}, adminKey = null } = {}) {
   return {
     isSetUp: () => setUp,
     isUnlocked: () => unlocked,
+    adminPublicKey: () => adminKey,
     listItemsMeta: (vaultId) => Array.from({ length: counts[vaultId] || 0 }, (_v, i) => ({ id: `${vaultId}-${i}` }))
   };
 }
 
-function wire({ store = makeStore(), jarsList = [] } = {}) {
+function wire({ store = makeStore(), jarsList = [], getCompromiseReport, clearCompromiseReport } = {}) {
   const ipcMain = makeFakeIpcMain();
   registerVaultIpc({
     ipcMain,
     registerInternalHandler,
     getVaultStore: () => store,
-    jars: { list: () => jarsList }
+    jars: { list: () => jarsList },
+    getCompromiseReport,
+    clearCompromiseReport
   });
   return ipcMain;
 }
@@ -225,6 +229,89 @@ test('internal-vault-state carries LABELS ONLY — no secret, no counts (grep AC
   for (const needle of ['password', 'secret', 'mrk', 'recovery', 'privateKey', 'partition', 'count']) {
     assert.equal(json.toLowerCase().includes(needle.toLowerCase()), false, `payload must not carry "${needle}"`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// M18 F2 L4 (flight DD1/DD6) — the two additive NON-SECRET state fields +
+// the compromise-report dismiss channel.
+// ---------------------------------------------------------------------------
+
+test('internal-vault-state: adminProvisioned derives from adminPublicKey() — true when provisioned, false when absent, false pre-setup', () => {
+  assert.equal(
+    wire({ store: makeStore({ adminKey: 'BASE64-SPKI' }) }).invoke('internal-vault-state', vaultEvent())
+      .adminProvisioned,
+    true
+  );
+  assert.equal(
+    wire({ store: makeStore({ adminKey: null }) }).invoke('internal-vault-state', vaultEvent()).adminProvisioned,
+    false,
+    'a v2 no-admin manager (e.g. post-compromise-rotation) reports unprovisioned'
+  );
+  assert.equal(
+    wire({ store: makeStore({ setUp: false }) }).invoke('internal-vault-state', vaultEvent()).adminProvisioned,
+    false,
+    'pre-setup reports false without touching adminPublicKey'
+  );
+});
+
+test('internal-vault-state: a throwing adminPublicKey degrades to false — the state read stays non-throwing', () => {
+  const store = {
+    ...makeStore(),
+    adminPublicKey: () => {
+      throw new Error('corrupt manager');
+    }
+  };
+  const state = wire({ store }).invoke('internal-vault-state', vaultEvent());
+  assert.equal(state.adminProvisioned, false);
+});
+
+test('internal-vault-state: compromiseReport surfaces the session-held report; null when none / when the accessor is not wired', () => {
+  const report = { admin: true, vaultIds: ['global', 'work'] };
+  const withReport = wire({ getCompromiseReport: () => report }).invoke('internal-vault-state', vaultEvent());
+  assert.deepEqual(withReport.compromiseReport, report);
+
+  const noReport = wire({ getCompromiseReport: () => null }).invoke('internal-vault-state', vaultEvent());
+  assert.equal(noReport.compromiseReport, null);
+
+  const unwired = wire().invoke('internal-vault-state', vaultEvent());
+  assert.equal(unwired.compromiseReport, null);
+});
+
+test('internal-vault-state: the report rides BOTH lock states (the card renders wherever the page lands — R8)', () => {
+  const report = { admin: false, vaultIds: ['personal'] };
+  for (const unlocked of [true, false]) {
+    const state = wire({
+      store: makeStore({ setUp: true, unlocked }),
+      getCompromiseReport: () => report
+    }).invoke('internal-vault-state', vaultEvent());
+    assert.deepEqual(state.compromiseReport, report, `report present while unlocked=${unlocked}`);
+  }
+});
+
+test('internal-vault-compromise-dismiss: GATED on the clearCompromiseReport injection', () => {
+  assert.equal('internal-vault-compromise-dismiss' in wire()._handlers, false);
+});
+
+test('internal-vault-compromise-dismiss: an internal sender clears the report exactly once and returns { ok: true }', () => {
+  const calls = [];
+  const ipcMain = wire({ clearCompromiseReport: () => calls.push('clear') });
+  const res = ipcMain.invoke('internal-vault-compromise-dismiss', vaultEvent());
+  assert.deepEqual(res, { ok: true });
+  assert.deepEqual(calls, ['clear'], 'exactly one clear, no broadcast side-channel');
+});
+
+test('internal-vault-compromise-dismiss rejects a non-internal sender (forbidden) — report kept', () => {
+  const calls = [];
+  const ipcMain = wire({ clearCompromiseReport: () => calls.push('clear') });
+  const webEvent = {
+    senderFrame: { origin: 'https://evil.test', url: 'https://evil.test/' },
+    sender: { session: { __goldfinchInternal: true } } // right session, wrong origin
+  };
+  assert.throws(
+    () => ipcMain.invoke('internal-vault-compromise-dismiss', webEvent),
+    (err) => err instanceof Error && err.message.includes('forbidden')
+  );
+  assert.deepEqual(calls, []);
 });
 
 test('internal-vault-state never double-lists the reserved global sentinel (defense in depth)', () => {

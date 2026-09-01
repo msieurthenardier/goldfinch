@@ -80,7 +80,11 @@ const A11Y_AUDIT_MJS = path.join(REPO_ROOT, 'scripts/a11y-audit.mjs');
 // is that welcome-home-routing's behavior-spec step 5 needs the burner path
 // to run through the same evaluate-reachable entry point the container-menu
 // dispatch already uses, which this closed set otherwise has no seam for.
-const SEAM_COUNT = 34;
+// M18 F2 L4 (compromise-mode rotation, DD4/DD9): +2 for
+// openVaultCompromiseOverlayForAudit / openVaultCompromiseRecoverOverlayForAudit — the
+// SHEET_STATES 'sheet:vault-compromise' / 'sheet:vault-compromise-recover' a11y drivers
+// (same leg-authorized seam-addition precedent as the other vault sheets).
+const SEAM_COUNT = 36;
 // Renderer line budget: raised from M11's 1200 to absorb Mission 12's password-manager
 // renderer work (the chrome-owned vault sheets + indicator wiring). See the merge of
 // PR #112; renderer.js extraction remains banked architecture debt.
@@ -152,7 +156,12 @@ const SEAM_COUNT = 34;
 // line count by this test's own metric (source.split(/\r?\n/).length) —
 // zero headroom, same zero-headroom policy the pre-format 1650 carried.
 // +1 for the DD7 findTabByWcId dep (M17 F1 L2, 2026-08-28).
-const RENDERER_LINE_BUDGET = 1828;
+// M18 F2 L4 (compromise-mode rotation): +7 (1828 → 1835) for the two compromise
+// a11y seam hooks — the destructure lines, the two seam entries, and the seam-block
+// comment note — the minimum per-sheet renderer.js footprint (the vault-controller
+// owns all the flow wiring). Planned, deliberate bump per the leg's registry-join
+// deliverable; zero headroom, same policy as the Prettier re-base.
+const RENDERER_LINE_BUDGET = 1835;
 
 // Bookmarks-bar line budget (squawk 0025, M15 debrief finding F25): bar/
 // overflow rendering, measurement, and dispatch business logic lives in

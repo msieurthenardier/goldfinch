@@ -417,7 +417,9 @@ const {
   openVaultImportUnlockOverlayForAudit,
   openVaultChangeMasterOverlayForAudit,
   openVaultRecoverOverlayForAudit,
-  openVaultAdminKeyShowOverlayForAudit
+  openVaultAdminKeyShowOverlayForAudit,
+  openVaultCompromiseOverlayForAudit,
+  openVaultCompromiseRecoverOverlayForAudit
 } = vaultController;
 
 /* ---- menu-overlay sheet state (shared monotonic open-token discipline) ---- */
@@ -1757,11 +1759,11 @@ Promise.all([
 // page globals — but the evaluate-driven surfaces (chrome-tier `evaluate` in
 // dogfooding/live-boot procedures, behavior-test specs under tests/behavior/,
 // and scripts/a11y-audit.mjs) call these entry points by global name via
-// `executeJavaScript`. This block republishes EXACTLY the FD-approved 34-entry
+// `executeJavaScript`. This block republishes EXACTLY the FD-approved 36-entry
 // set on globalThis, each tagged with its consumer class. It is NOT the
 // classic-script shared-scope collision class (deliberate assignments from
 // module scope, not top-level declares in a shared lexical scope). CLOSED SET:
-// do not grow it without an FD ruling — an evaluate caller outside these 34 is
+// do not grow it without an FD ruling — an evaluate caller outside these 36 is
 // a design change, not a seam addition. (M09 F5 Leg 1 FD ruling: added
 // openTabContextMenuForAudit for the new sheet:tab-context a11y state — see
 // the flight's Checkpoints. M11 F1 Leg 3 FD ruling: added
@@ -1784,7 +1786,10 @@ Promise.all([
 // openBookmarksOverflowOverlayForAudit for the new sheet:bookmarks-overflow
 // a11y state (32 → 33, same every-new-sheet precedent) — CLAUDE.md's
 // dual-source note updated in the same change. M16 F2 Leg 1 FD ruling: added
-// openNewTab (33 → 34, see its inline comment below) — CLAUDE.md's dual-source note updated too.)
+// openNewTab (33 → 34, see its inline comment below) — CLAUDE.md's dual-source note updated too.
+// M18 F2 L4: added openVaultCompromiseOverlayForAudit + openVaultCompromiseRecoverOverlayForAudit
+// (34 → 36) for the sheet:vault-compromise / vault-compromise-recover a11y states — the
+// every-new-sheet, leg-authorized precedent; CLAUDE.md's dual-source note updated in the same change.)
 Object.assign(/** @type {any} */ (globalThis), {
   // dogfooding (flight live-boot procedures, docs/mcp-automation.md)
   openJarsPage,
@@ -1823,5 +1828,7 @@ Object.assign(/** @type {any} */ (globalThis), {
   openAuthBasicOverlayForAudit, // M14 F1 L2 — SHEET_STATES 'sheet:auth-basic' (leg-authorized addition)
   openCertPickerOverlayForAudit, // M14 F1 L3 — SHEET_STATES 'sheet:cert-picker' (leg-authorized addition)
   openBookmarkEditOverlayForAudit, // M15 F1 Leg 2 — SHEET_STATES 'sheet:bookmark-edit' (FD-ruled addition)
-  openBookmarksOverflowOverlayForAudit // M15 F1 Leg 3 — SHEET_STATES 'sheet:bookmarks-overflow' (FD-ruled addition)
+  openBookmarksOverflowOverlayForAudit, // M15 F1 Leg 3 — SHEET_STATES 'sheet:bookmarks-overflow' (FD-ruled addition)
+  openVaultCompromiseOverlayForAudit, // M18 F2 L4 — SHEET_STATES 'sheet:vault-compromise' (leg-authorized addition)
+  openVaultCompromiseRecoverOverlayForAudit // M18 F2 L4 — SHEET_STATES 'sheet:vault-compromise-recover' (leg-authorized addition)
 });

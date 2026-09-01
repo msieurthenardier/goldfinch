@@ -39,9 +39,66 @@ test('flags are strict === true (truthy-but-not-true does not unlock)', () => {
 });
 
 test('malformed / absent payload degrades to not-set-up with no vaults', () => {
-  assert.deepEqual(selectVaultView(), { mode: 'not-set-up', vaults: [] });
-  assert.deepEqual(selectVaultView(null), { mode: 'not-set-up', vaults: [] });
-  assert.deepEqual(selectVaultView({ setUp: true, unlocked: true }), { mode: 'unlocked', vaults: [] });
+  const empty = { mode: 'not-set-up', vaults: [], adminProvisioned: false, compromiseReport: null };
+  assert.deepEqual(selectVaultView(), empty);
+  assert.deepEqual(selectVaultView(null), empty);
+  assert.deepEqual(selectVaultView({ setUp: true, unlocked: true }), {
+    mode: 'unlocked',
+    vaults: [],
+    adminProvisioned: false,
+    compromiseReport: null
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M18 F2 L4 (flight DD1/DD6; R4/R8 — the lock-state matrix at the page-model
+// level, per design-review M4: vault.js has no DOM harness, so DOM placement /
+// copy pins are leg 5's behavior test; the MODEL half is pinned here).
+// ---------------------------------------------------------------------------
+
+test('R8 matrix: the compromise report rides BOTH the locked and unlocked views (the card renders wherever the page lands)', () => {
+  const report = { admin: true, vaultIds: ['global', 'personal'] };
+  for (const unlocked of [true, false]) {
+    const view = selectVaultView({ setUp: true, unlocked, vaults: rows, compromiseReport: report });
+    assert.equal(view.mode, unlocked ? 'unlocked' : 'locked');
+    assert.deepEqual(view.compromiseReport, report, `report carried while unlocked=${unlocked}`);
+  }
+});
+
+test('R4 matrix: adminProvisioned is carried in BOTH lock states (strict === true), and false when absent', () => {
+  for (const unlocked of [true, false]) {
+    assert.equal(selectVaultView({ setUp: true, unlocked, adminProvisioned: true }).adminProvisioned, true);
+    assert.equal(selectVaultView({ setUp: true, unlocked }).adminProvisioned, false);
+    assert.equal(selectVaultView({ setUp: true, unlocked, adminProvisioned: 1 }).adminProvisioned, false);
+  }
+});
+
+test('not-set-up drops both fields (a rotated profile is by definition set up)', () => {
+  const view = selectVaultView({
+    setUp: false,
+    unlocked: false,
+    adminProvisioned: true,
+    compromiseReport: { admin: true, vaultIds: ['x'] }
+  });
+  assert.equal(view.adminProvisioned, false);
+  assert.equal(view.compromiseReport, null);
+});
+
+test('the compromise report is normalized: malformed → null; vaultIds keeps non-empty strings only; admin is strict boolean', () => {
+  const base = { setUp: true, unlocked: true, vaults: rows };
+  assert.equal(selectVaultView({ ...base, compromiseReport: 'rotated' }).compromiseReport, null);
+  assert.equal(selectVaultView({ ...base, compromiseReport: ['x'] }).compromiseReport, null);
+  assert.deepEqual(selectVaultView({ ...base, compromiseReport: {} }).compromiseReport, {
+    admin: false,
+    vaultIds: []
+  });
+  assert.deepEqual(
+    selectVaultView({
+      ...base,
+      compromiseReport: { admin: 1, vaultIds: ['global', 7, null, '', 'work'] }
+    }).compromiseReport,
+    { admin: false, vaultIds: ['global', 'work'] }
+  );
 });
 
 test('vault rows are normalized to { vaultId, label }; a missing label falls back to the id', () => {
