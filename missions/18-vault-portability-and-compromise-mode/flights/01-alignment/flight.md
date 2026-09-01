@@ -1,6 +1,6 @@
 # Flight: Alignment — Vault Flows Prototyping
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Vault Portability & Compromise Mode](../../mission.md)
 
 ## Contributing to Criteria

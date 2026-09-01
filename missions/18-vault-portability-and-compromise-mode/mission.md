@@ -50,9 +50,12 @@ existing primitives (per-vault whole-blob re-encryption, fresh-key minting,
 envelope wrapping, admin-key enumeration); access-key revocation and live
 automation-session teardown fall out of machinery that already ships
 (`revalidate()` probes the access envelope per op). The surfacing problem
-does **not** multiply: compromise mode and fresh adopt each surface exactly
-two one-time secrets (recovery + admin) regardless of vault count — the F4
-stash-then-chain idiom and autolock-suppression guard generalize directly.
+does **not** multiply with vault count: fresh adopt surfaces two one-time
+secrets (recovery + admin, the F4 stash-then-chain idiom), and compromise
+mode surfaces one (recovery only — the admin key is revoked, not
+re-minted, per Flight 1 ruling R5); the autolock-suppression guard
+generalizes directly. *(This note reconciled to R5 at the Flight 1
+debrief, 2026-09-01.)*
 The genuinely new structure is contained: a multi-file transaction layer
 with load-time recovery in the vault store, and the restore-mapping
 workflow spanning store + jar registry + IPC/UI.
