@@ -46,7 +46,18 @@ export function fixedTriggerMenu(trigger) {
   };
 }
 
-export function createOverlayMenus({ bridge, states, now, onActivated, onClosed }) {
+// `measureSlot` (squawk 0057): optional — the chrome's #webviews slot-rect
+// measurer (tab-controller.js's measureWebviewsSlotDIP, injected by
+// renderer.js). When present, every open rides the current slot rect on the
+// Ch1 payload as `slotBounds`, so main can place the sheet even when the
+// active tab is a VIEWLESS welcome record: main's own bounds source is the
+// active guest view, and a fresh-install window whose only tab is the welcome
+// surface has never had one — the sheet stayed at its default zero bounds and
+// every menu (kebab/container/site-info) opened invisible. Main prefers the
+// live guest bounds and reads slotBounds only as the viewless fallback
+// (register-overlay-ipc.js) — same chrome-measured-geometry authority as
+// tabSetBounds/tabSetActive, no new trust surface.
+export function createOverlayMenus({ bridge, states, now, onActivated, onClosed, measureSlot }) {
   let token = 0;
 
   function open(menuType, model, anchor, startIndex, options = {}) {
@@ -54,7 +65,10 @@ export function createOverlayMenus({ bridge, states, now, onActivated, onClosed 
     if (!state) return false;
     state.token = ++token;
     state.open = true;
-    bridge.menuOverlayOpen({ menuType, model, anchor, startIndex, token: state.token, ...options });
+    /** @type {any} */
+    const payload = { menuType, model, anchor, startIndex, token: state.token, ...options };
+    if (measureSlot) payload.slotBounds = measureSlot(); // squawk 0057 — after the spread: measurement always wins
+    bridge.menuOverlayOpen(payload);
     state.ariaTarget()?.setAttribute('aria-expanded', 'true');
     return true;
   }

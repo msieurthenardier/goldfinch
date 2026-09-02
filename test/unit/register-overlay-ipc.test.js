@@ -724,3 +724,91 @@ test('menu-overlay:refocus is sheet-sender-gated and never steals focus from ano
   assert.doesNotThrow(() => refocus({ sender: sheetSender }));
   assert.deepEqual(events, []);
 });
+
+// ---------------------------------------------------------------------------
+// Squawk 0057: menu-overlay:open bounds resolution for a VIEWLESS active tab.
+// A fresh-install window's only tab is the welcome record — no guest view
+// exists, so the handler's active-guest bounds resolve to null and the sheet
+// opened at its default zero bounds (invisible kebab/container/site-info
+// menus until the first page load synced guest bounds). The chrome now rides
+// its measured #webviews slot rect on the open payload (`slotBounds`); main
+// uses it ONLY when no live guest bounds exist, and strips the transport-only
+// field before forwarding the payload to the sheet.
+// ---------------------------------------------------------------------------
+
+function makeOpenBoundsHarness({ activeEntry = null } = {}) {
+  const ipcMain = makeIpc();
+  const opens = [];
+  const chromeSender = {};
+  const sheet = {
+    getView: () => ({ webContents: { isDestroyed: () => false } }),
+    getCurrentMenu: () => null,
+    openMenu: (payload, attachment) => opens.push({ payload, bounds: attachment.bounds }),
+    closeMenuOverlay: () => {}
+  };
+  const rec = {
+    win: { contentView: {} },
+    sheet,
+    activeTabWcId: activeEntry ? 42 : null,
+    tabViews: activeEntry ? new Map([[42, activeEntry]]) : new Map()
+  };
+  const registry = {
+    records: () => [rec],
+    getWindowForChrome: (sender) => (sender === chromeSender ? rec : null),
+    getWindowForGuest: () => null
+  };
+  registerOverlayIpc({
+    ipcMain,
+    registry,
+    chromeForAttachment: () => null,
+    chromeForTab: () => null,
+    sanitizeActivatedValue: () => undefined
+  });
+  return { open: ipcMain.listeners.get('menu-overlay:open'), chromeSender, opens };
+}
+
+test('viewless active tab: menu opens on the chrome-measured slotBounds fallback, stripped from the forwarded payload', () => {
+  const h = makeOpenBoundsHarness();
+  h.open(
+    { sender: h.chromeSender },
+    { menuType: 'kebab', token: 1, slotBounds: { x: 0, y: 79.6, width: 1280.4, height: 720 } }
+  );
+  assert.equal(h.opens.length, 1);
+  // Rounded like tab-set-bounds; the sheet is placed over the #webviews slot.
+  assert.deepEqual(h.opens[0].bounds, { x: 0, y: 80, width: 1280, height: 720 });
+  // Transport-only field never reaches the sheet's init payload.
+  assert.deepEqual(h.opens[0].payload, { menuType: 'kebab', token: 1 });
+});
+
+test('live guest bounds stay authoritative over a payload slotBounds', () => {
+  const guest = {
+    view: {
+      webContents: { isDestroyed: () => false },
+      getBounds: () => ({ x: 0, y: 80, width: 1000, height: 600 })
+    }
+  };
+  const h = makeOpenBoundsHarness({ activeEntry: guest });
+  h.open({ sender: h.chromeSender }, { menuType: 'kebab', token: 2, slotBounds: { x: 9, y: 9, width: 9, height: 9 } });
+  assert.deepEqual(h.opens[0].bounds, { x: 0, y: 80, width: 1000, height: 600 });
+  assert.deepEqual(h.opens[0].payload, { menuType: 'kebab', token: 2 });
+});
+
+test('malformed or degenerate slotBounds resolve to null bounds, never a bogus rect', () => {
+  const h = makeOpenBoundsHarness();
+  const bad = [
+    undefined, // absent (an older/foreign payload shape)
+    'wide', // non-object
+    { x: 0, y: 0, width: NaN, height: 500 }, // non-finite member
+    { x: 0, y: 0, width: 800 }, // missing member
+    { x: 0, y: 0, width: 0, height: 500 }, // zero-size slot
+    { x: 0, y: 0, width: 800, height: -1 } // negative size
+  ];
+  bad.forEach((slotBounds, i) => {
+    h.open({ sender: h.chromeSender }, { menuType: 'kebab', token: 10 + i, slotBounds });
+  });
+  assert.equal(h.opens.length, bad.length);
+  for (const { payload, bounds } of h.opens) {
+    assert.equal(bounds, null);
+    assert.equal('slotBounds' in payload, false);
+  }
+});

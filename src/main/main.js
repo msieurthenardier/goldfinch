@@ -1778,9 +1778,16 @@ registerOverlayIpc({
   // M12 F3 Leg 5 (access-keys): the vault-stepup sheet's MINT delegate. Follows the
   // vaultUnlock pattern (catch VaultAuthError → { ok:false }) so a WRONG step-up password
   // is a normal { ok:false } (the sheet re-prompts, nothing minted) rather than a rejected
-  // invoke; any other error propagates (the handler still dual-zeroizes in its finally).
-  // Adapts to the store's POSITIONAL target: mintAccessKey(target, { masterPassword }) —
-  // no Buffer widening needed (mintAccessKey has no string guard; the password flows to
+  // invoke. Squawk 0058: the two OTHER reachable failure classes ride as NON-SECRET
+  // reasons (the vaultCompromiseRotate precedent) instead of rejecting — a rejected
+  // invoke collapsed sheet-side into the wrong-password copy: 'state' is the lazy-vault
+  // gap (a jar with no item ever saved has no .gfvault → VaultStateError from
+  // _mintAccessKey, reached with a CORRECT password); 'busy' is the re-key gate (mint is
+  // a GATED op — _enterGatedOp refuses at entry, and _writeVault's second wall refuses
+  // mid-derive, while a compromise rotation runs). Unknown errors still propagate (the
+  // handler still dual-zeroizes in its finally). Adapts to the store's POSITIONAL
+  // target: mintAccessKey(target, { masterPassword }) — no Buffer widening needed
+  // (mintAccessKey has no string guard; the password flows to
   // unwrapMaster→deriveMasterKey→scrypt, all string|Buffer). Returns { ok, secret, keyId }
   // on success; the handler forwards secret+keyId to the chrome vault-accesskey-show sheet.
   vaultMintAccessKey: async (buf, target) => {
@@ -1789,6 +1796,8 @@ registerOverlayIpc({
       return { ok: true, secret, keyId };
     } catch (e) {
       if (e instanceof vaultStoreModule.VaultAuthError) return { ok: false };
+      if (e instanceof vaultStoreModule.VaultStateError) return { ok: false, reason: 'state' };
+      if (e instanceof vaultStoreModule.VaultBusyError) return { ok: false, reason: 'busy' };
       throw e;
     }
   },
@@ -1834,10 +1843,19 @@ registerOverlayIpc({
   // the stores themselves) so the Electron-free overlay registrar stays decoupled.
   stashCompromiseReveal: (chromeId, reveal) => stashCompromiseReveal(chromeId, reveal),
   ackCompromiseReveal: (chromeId) => ackCompromiseReveal(chromeId),
+  // Squawk 0059: the post-mint page-refresh seam. The mint delegate above writes a
+  // durable access envelope, but the vault page refreshes ONLY off vault-lock-state —
+  // the handler re-broadcasts it on mint success (the ackCompromiseReveal idiom; chrome
+  // is inert on the duplicate state). A narrow bound function, never main's internals.
+  broadcastVaultLockState: () => broadcastVaultLockState(),
   // M12 F4 Leg 2 (key-rotation): the vault-stepup sheet's RECOVERY-ROTATION delegate. Follows
   // the vaultUnlock pattern (VaultAuthError → { ok:false }) so a WRONG master-password step-up
-  // re-prompts and NOTHING is rotated; any other error propagates (the handler still dual-
-  // zeroizes). rotateRecovery returns the NEW one-time recovery-key display — forwarded to the
+  // re-prompts and NOTHING is rotated. Squawk 0058: 'busy' rides as a NON-SECRET reason —
+  // rotateRecovery is a manager-lock op with no entry gate, but its _writeManager hits the
+  // sinks' second wall (VaultBusyError) when a compromise rotation raises the re-key gate
+  // during the step-up scrypt derive — previously that rejection collapsed into the
+  // wrong-password copy. Other errors still propagate (the handler still dual-zeroizes).
+  // rotateRecovery returns the NEW one-time recovery-key display — forwarded to the
   // chrome vault-recovery-show sheet (never the invoke reply, never the page).
   vaultRotateRecovery: async (buf) => {
     try {
@@ -1845,13 +1863,17 @@ registerOverlayIpc({
       return { ok: true, recoveryKeyDisplay };
     } catch (e) {
       if (e instanceof vaultStoreModule.VaultAuthError) return { ok: false };
+      if (e instanceof vaultStoreModule.VaultBusyError) return { ok: false, reason: 'busy' };
       throw e;
     }
   },
   // M12 F4 Leg 3 (admin-key-provision): the vault-stepup sheet's ADMIN-KEY ROTATION/PROVISION
   // delegate. Follows the vaultUnlock pattern (VaultAuthError → { ok:false }) so a WRONG master-
-  // password step-up re-prompts and NOTHING is rotated; any other error propagates (the handler
-  // still dual-zeroizes). rotateAdminKey returns the NEW one-time admin private key — forwarded to
+  // password step-up re-prompts and NOTHING is rotated. Squawk 0058: 'busy' rides as a
+  // NON-SECRET reason — same second-wall reachability as vaultRotateRecovery (a compromise
+  // rotation's re-key gate rising during the step-up derive makes _writeManager throw
+  // VaultBusyError). Other errors still propagate (the handler still dual-zeroizes).
+  // rotateAdminKey returns the NEW one-time admin private key — forwarded to
   // the chrome vault-adminkey-show sheet (never the invoke reply, never the page).
   vaultRotateAdminKey: async (buf) => {
     try {
@@ -1859,12 +1881,16 @@ registerOverlayIpc({
       return { ok: true, adminPrivateKeyB64 };
     } catch (e) {
       if (e instanceof vaultStoreModule.VaultAuthError) return { ok: false };
+      if (e instanceof vaultStoreModule.VaultBusyError) return { ok: false, reason: 'busy' };
       throw e;
     }
   },
   // M12 F4 Leg 2 (key-rotation): the vault-change-master sheet's delegate. Follows the vaultUnlock
   // pattern (VaultAuthError → { ok:false }) so a WRONG old-password step-up re-prompts and NOTHING
-  // is written; any other error propagates (the handler still dual-zeroizes both buffers). Both
+  // is written. Squawk 0058: 'busy' rides as a NON-SECRET reason — same second-wall
+  // reachability as vaultRotateRecovery (a compromise rotation's re-key gate rising during
+  // either scrypt derive makes _writeManager throw VaultBusyError). Other errors still
+  // propagate (the handler still dual-zeroizes both buffers). Both
   // master passwords ride as zeroizable Buffers (changeMasterPassword accepts Buffer|string).
   vaultChangeMaster: async (oldBuf, newBuf) => {
     try {
@@ -1872,12 +1898,19 @@ registerOverlayIpc({
       return { ok: true };
     } catch (e) {
       if (e instanceof vaultStoreModule.VaultAuthError) return { ok: false };
+      if (e instanceof vaultStoreModule.VaultBusyError) return { ok: false, reason: 'busy' };
       throw e;
     }
   },
   // M12 F4 Leg 2 (key-rotation): the vault-recover sheet's delegate — the recover-after-forgotten-
   // master flow. Follows the vaultUnlock pattern (VaultAuthError → { ok:false }) so a WRONG recovery
-  // key re-prompts and NOTHING is written; any other error propagates (the handler still dual-
+  // key re-prompts and NOTHING is written. Squawk 0058: two more classes ride as NON-SECRET
+  // reasons — 'format' is a MALFORMED recovery display (a typo: parseRecoveryKey throws
+  // VaultFormatError on a bad character or wrong length — operator-reachable on every
+  // submit; renders as the wrong-key copy, the vaultCompromiseRecoverErrorCopy precedent)
+  // and 'busy' is the sinks' second wall (a compromise rotation's re-key gate rising during
+  // the new-master wrap derive makes _writeManager throw VaultBusyError). Other errors
+  // still propagate (the handler still dual-
   // zeroizes). The recovery secret is decoded as a STRING for parseRecoveryKey (the store contract);
   // the new master rides as a Buffer. On success the store installs the MRK (the user ends UNLOCKED)
   // — broadcast the lock-state so the page + chrome indicator move to unlocked.
@@ -1891,6 +1924,8 @@ registerOverlayIpc({
       return { ok: true };
     } catch (e) {
       if (e instanceof vaultStoreModule.VaultAuthError) return { ok: false };
+      if (e instanceof vaultStoreModule.VaultFormatError) return { ok: false, reason: 'format' };
+      if (e instanceof vaultStoreModule.VaultBusyError) return { ok: false, reason: 'busy' };
       throw e;
     }
   },
@@ -2205,7 +2240,11 @@ registerVaultIpc({
   getCompromiseReport: () => _compromiseReport,
   clearCompromiseReport: () => {
     _compromiseReport = null;
-  }
+  },
+  // Squawk 0059 (the mint symmetry): a successful access-key revoke re-broadcasts
+  // vault-lock-state so any OTHER window's open vault page re-lists its access keys
+  // (the revoking page already re-lists its own view). Narrow bound function.
+  broadcastVaultLockState: () => broadcastVaultLockState()
 });
 
 registerAppLifecycle({

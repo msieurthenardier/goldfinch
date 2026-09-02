@@ -161,7 +161,11 @@ const SEAM_COUNT = 36;
 // comment note — the minimum per-sheet renderer.js footprint (the vault-controller
 // owns all the flow wiring). Planned, deliberate bump per the leg's registry-join
 // deliverable; zero headroom, same policy as the Prettier re-base.
-const RENDERER_LINE_BUDGET = 1835;
+// +1 for the measureSlot dep line (squawk 0057, 2026-09-02): overlay-menus.js's
+// open() rides the chrome-measured #webviews slot rect so main can place the
+// sheet when the active tab is a viewless welcome record — the findTabByWcId
+// one-dep-line precedent; all rationale lives in overlay-menus.js.
+const RENDERER_LINE_BUDGET = 1836;
 
 // Bookmarks-bar line budget (squawk 0025, M15 debrief finding F25): bar/
 // overflow rendering, measurement, and dispatch business logic lives in

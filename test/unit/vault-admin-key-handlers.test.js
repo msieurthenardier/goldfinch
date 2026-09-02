@@ -110,6 +110,26 @@ test('rotate-admin: WRONG master → { ok:false }: no adminkey-show, sheet not c
   );
 });
 
+// Squawk 0058: the handler forwards the delegate's NON-SECRET failure reason ('busy' —
+// the sinks' second wall while a compromise rotation holds the re-key gate) so the sheet
+// renders the rotation-in-progress copy instead of the collapsed wrong-password copy.
+test('rotate-admin: refusal with reason "busy" → { ok:false, reason:"busy" } forwarded; no adminkey-show; array zeroed', async () => {
+  const vaultRotateAdminKey = async () => ({ ok: false, reason: 'busy' });
+  const { ipcMain, sheetSender, closeCalls, chromeSends } = baseHarness({ vaultRotateAdminKey }, 'vault-stepup');
+  const handler = ipcMain.handlers.get('menu-overlay:vault-rotate-admin');
+  const secret = new TextEncoder().encode('correct-master');
+
+  const res = await handler({ sender: sheetSender }, { token: 7, secret });
+
+  assert.deepEqual(res, { ok: false, reason: 'busy' }, 'the NON-SECRET reason rides the invoke reply');
+  assert.deepEqual(chromeSends, [], 'no adminkey-show on a busy refusal');
+  assert.deepEqual(closeCalls, [], 'sheet stays open to re-prompt');
+  assert.ok(
+    secret.every((b) => b === 0),
+    'incoming Uint8Array zeroized on refusal'
+  );
+});
+
 test('rotate-admin: wrong sender / stale token / non-Uint8Array → { ok:false }, delegate never called', async () => {
   let called = 0;
   const vaultRotateAdminKey = async () => {

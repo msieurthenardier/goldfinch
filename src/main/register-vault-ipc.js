@@ -82,6 +82,10 @@ function normalizeTotpForSave(item, unchangedSecrets) {
  * @param {(() => void)} [args.clearCompromiseReport]
  *        Drops the session-held report — the page card's dismiss affordance. Gated — offline
  *        tests that omit it skip `internal-vault-compromise-dismiss`.
+ * @param {(() => void)} [args.broadcastVaultLockState]
+ *        Squawk 0059: post-revoke page-refresh seam — re-broadcasts vault-lock-state after a
+ *        real access-key revoke so other windows' vault pages re-list. Optional (offline
+ *        tests omit it); absent, the revoke completes without a broadcast.
  */
 function registerVaultIpc({
   ipcMain,
@@ -91,7 +95,15 @@ function registerVaultIpc({
   vaultSaveBundle,
   vaultPickSavePath,
   getCompromiseReport,
-  clearCompromiseReport
+  clearCompromiseReport,
+  // Squawk 0059: the post-revoke page-refresh seam — main.js binds its
+  // broadcastVaultLockState so a successful access-key revoke re-broadcasts the
+  // (unchanged) lock state, which is the only channel OTHER windows' vault pages
+  // refresh off (the revoking page re-lists its own view; a second window would
+  // otherwise stay stale — the mint symmetry, see register-overlay-ipc.js).
+  // Chrome's handlers are inert on the duplicate state (M18 F2). Optional
+  // (offline tests omit it); a narrow bound function, never main's internals.
+  broadcastVaultLockState
 }) {
   // Page state: the manager-wide `global` vault followed by each persistent jar's
   // vault, as { vaultId, label }. When the store is UNLOCKED each row also carries
@@ -285,7 +297,12 @@ function registerVaultIpc({
     catchLocked((_event, payload) => {
       const { vaultId, keyId } = payload || {};
       const store = getVaultStore();
-      return { revoked: store.revokeAccessKey(store.resolveTarget(vaultId), keyId) };
+      const revoked = store.revokeAccessKey(store.resolveTarget(vaultId), keyId);
+      // Squawk 0059 (the mint symmetry): a REAL envelope deletion re-broadcasts
+      // vault-lock-state so any other window's open vault page re-lists its access
+      // keys. A stale keyId ({ revoked:false }) wrote nothing — no broadcast.
+      if (revoked) broadcastVaultLockState?.();
+      return { revoked };
     })
   );
 

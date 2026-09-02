@@ -199,3 +199,57 @@ test('menu models and chrome-to-sheet anchor conversion retain exact shapes', as
   assert.deepEqual(leftSheetAnchor(webviews, trigger), { alignLeft: 0, y: 0 });
   assert.deepEqual(rightSheetAnchor(webviews, trigger), { alignRight: 150, y: 0 });
 });
+
+// ---------------------------------------------------------------------------
+// Squawk 0057: every open rides the chrome-measured #webviews slot rect
+// (`slotBounds`) when a measurer is injected — main's viewless-welcome-tab
+// fallback for placing the sheet (a fresh-install window has no guest view to
+// measure, and the sheet otherwise opened at default zero bounds: the dead
+// kebab). Without the injection the payload keeps its historical shape.
+// ---------------------------------------------------------------------------
+
+test('open rides measureSlot() as slotBounds; absent measurer leaves the payload shape unchanged', async () => {
+  const { createOverlayMenus, fixedTriggerMenu } = await import('../../src/renderer/chrome/overlay-menus.js');
+  const makeBridge = (events) => ({
+    menuOverlayOpen: (payload) => events.push(payload),
+    menuOverlayClose: () => {},
+    onMenuOverlayActivated: () => {},
+    onMenuOverlayClosed: () => {}
+  });
+  const trigger = { setAttribute() {}, focus() {} };
+
+  const withMeasure = [];
+  const slot = { x: 0, y: 80, width: 1280, height: 720 };
+  createOverlayMenus({
+    bridge: makeBridge(withMeasure),
+    states: { kebab: fixedTriggerMenu(() => trigger) },
+    now: () => 0,
+    onActivated: () => {},
+    onClosed: () => {},
+    measureSlot: () => slot
+  }).open('kebab', [{ id: 'settings' }], { alignRight: 5, y: 0 }, 0);
+  assert.equal(withMeasure.length, 1);
+  assert.deepEqual(withMeasure[0].slotBounds, slot);
+  // The measurement is added AFTER the options spread — an options bag can
+  // never smuggle a stale or forged rect past the live measurer.
+  const forged = [];
+  createOverlayMenus({
+    bridge: makeBridge(forged),
+    states: { kebab: fixedTriggerMenu(() => trigger) },
+    now: () => 0,
+    onActivated: () => {},
+    onClosed: () => {},
+    measureSlot: () => slot
+  }).open('kebab', [], {}, 0, { slotBounds: { x: 1, y: 1, width: 1, height: 1 } });
+  assert.deepEqual(forged[0].slotBounds, slot);
+
+  const withoutMeasure = [];
+  createOverlayMenus({
+    bridge: makeBridge(withoutMeasure),
+    states: { kebab: fixedTriggerMenu(() => trigger) },
+    now: () => 0,
+    onActivated: () => {},
+    onClosed: () => {}
+  }).open('kebab', [{ id: 'settings' }], { alignRight: 5, y: 0 }, 0);
+  assert.equal('slotBounds' in withoutMeasure[0], false);
+});

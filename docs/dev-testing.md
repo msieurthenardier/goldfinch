@@ -41,6 +41,10 @@ AUTOMATION_DEV_MINT {"key":"<jarKey>","adminKey":"<adminKey|null>"}
   re-derivable. Every mint is therefore a **new** key: a static `.mcp.json` entry goes
   stale at the next mint, so agents attach via env-var + script (below), not static MCP
   client config (which also can't be re-registered mid-session).
+- After any `DEV_MINT` re-mint plus a `.mcp.json` update, a **live MCP client keeps its
+  session-start token** — it never re-reads the config mid-session, so a config edit alone
+  changes nothing and the client keeps 401ing ("requires re-authorization"). Reconnect the
+  server in the client session (`/mcp` in Claude Code) to pick up the new key.
 
 Export what the consumer needs:
 
@@ -71,6 +75,22 @@ loopback server (default `http://127.0.0.1:49707/mcp`) — it never spawns the a
 Tiers: a jar key drives only its own jar's tabs; the admin key adds chrome/window
 targeting and the app-level tools. Admin-tier scope and the still-refused-even-for-admin
 list: `mcp-automation.md` → *Dogfooding / dev key acquisition* and *Tool reference*.
+
+## Internal-page dev loop
+
+Two facts that bite every iteration on internal `goldfinch://` page code (e.g.
+`src/renderer/pages/vault.js`):
+
+- **Plain reload serves stale modules.** After editing an internal page's JS/CSS, both
+  `location.reload()` and the chrome Reload button re-serve the old module from the
+  renderer's memory cache (transferSize 0). **Close the tab and reopen it** — a fresh
+  renderer process refetches from disk. No app relaunch is needed for page-side changes.
+- **`openTab` refuses `goldfinch://` URLs by design** — the automation route passes no
+  trusted flag, so it returns `null` (a normal result, not an error; mechanism in
+  `mcp-automation.md`). To (re)open an internal page from automation, drive the chrome
+  target instead: `evaluate` the dogfooding seam on the chrome wcId (`getChromeTarget`,
+  admin tier) — `createTab('goldfinch://vault', null, { trusted: true })`, the same idiom
+  the chrome itself uses to open `goldfinch://settings`.
 
 ## a11y audit (`npm run a11y`)
 

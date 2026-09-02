@@ -1466,10 +1466,30 @@ import {
     }
   });
 
+  // Squawk 0058: mapped-reason → inline copy for the step-up sheet (the
+  // vaultCompromiseErrorCopy idiom). 'busy' is the store's re-key gate (a compromise
+  // rotation in progress — mode-independent); 'state' reaches only the mint mode (a jar
+  // whose vault file doesn't exist yet — no item ever saved into it). No reason (or an
+  // unmapped one) keeps the per-mode wrong-password copy — auth refusals arrive as a
+  // bare { ok:false }.
+  /** @param {'mint' | 'rotate-recovery' | 'rotate-admin'} mode
+   * @param {string | undefined} reason @returns {string} */
+  function vaultStepupErrorCopy(mode, reason) {
+    if (reason === 'busy') return 'A rotation is already in progress.';
+    if (reason === 'state' && mode === 'mint') {
+      return 'No vault for this jar yet — save an item into it first, then mint.';
+    }
+    return mode === 'rotate-recovery'
+      ? 'Wrong master password. The recovery key was not rotated.'
+      : mode === 'rotate-admin'
+        ? 'Wrong master password. The admin key was not rotated.'
+        : 'Wrong master password. Nothing was minted.';
+  }
+
   // Submit → the DEDICATED stepup-mint channel. Client-side: empty guard only (no confirm —
   // this is a re-auth). Encode to a Uint8Array (never a JS string on the wire), invoke with
-  // the stashed target, act on { ok }. The sheet-side copy is zeroized after the round-trip;
-  // main zeroizes its own Buffer copy + the transferred array (dual-zeroize).
+  // the stashed target, act on { ok, reason? }. The sheet-side copy is zeroized after the
+  // round-trip; main zeroizes its own Buffer copy + the transferred array (dual-zeroize).
   async function submitVaultStepup() {
     if (report.sent || report.token == null || vaultStepupBusy) return;
     const value = vaultStepup.input.value;
@@ -1509,12 +1529,9 @@ import {
       report.sent = true; // suppress the trailing dismissed; main closes + opens the one-time display.
       menuController.close(vaultStepupEntry);
     } else {
-      vaultStepup.error.textContent =
-        mode === 'rotate-recovery'
-          ? 'Wrong master password. The recovery key was not rotated.'
-          : mode === 'rotate-admin'
-            ? 'Wrong master password. The admin key was not rotated.'
-            : 'Wrong master password. Nothing was minted.';
+      // Squawk 0058: branch the copy on the forwarded NON-SECRET reason — a no-vault jar
+      // or a rotation-in-progress refusal is no longer misreported as a wrong password.
+      vaultStepup.error.textContent = vaultStepupErrorCopy(mode, res && res.reason);
       vaultStepup.input.value = '';
       vaultStepup.input.focus();
     }
@@ -1825,10 +1842,19 @@ import {
     }
   });
 
+  // Squawk 0058: mapped-reason → inline copy (the vaultCompromiseErrorCopy idiom). 'busy'
+  // is the store's re-key gate — a compromise rotation in progress; anything else (a bare
+  // auth refusal included) keeps the wrong-password copy.
+  /** @param {string | undefined} reason @returns {string} */
+  function vaultChangeMasterErrorCopy(reason) {
+    if (reason === 'busy') return 'A rotation is already in progress.';
+    return 'Wrong current master password. Nothing was changed.';
+  }
+
   // Submit → the DEDICATED change-master channel. Client-side: empty guards + confirm-MATCH check
   // (NO invoke on an empty field / mismatch). Encode BOTH secrets to Uint8Arrays (never a JS
-  // string on the wire), invoke, act on { ok }. The sheet-side copies are zeroized after the
-  // round-trip; main zeroizes its own Buffer copies + the transferred arrays (dual-zeroize).
+  // string on the wire), invoke, act on { ok, reason? }. The sheet-side copies are zeroized after
+  // the round-trip; main zeroizes its own Buffer copies + the transferred arrays (dual-zeroize).
   async function submitVaultChangeMaster() {
     if (report.sent || report.token == null || vaultChangeMasterBusy) return;
     const oldValue = vaultChangeMaster.oldInput.value;
@@ -1867,7 +1893,8 @@ import {
       report.sent = true; // suppress the trailing dismissed; main closes the sheet.
       menuController.close(vaultChangeMasterEntry);
     } else {
-      vaultChangeMaster.error.textContent = 'Wrong current master password. Nothing was changed.';
+      // Squawk 0058: a rotation-in-progress refusal is no longer misreported as a wrong password.
+      vaultChangeMaster.error.textContent = vaultChangeMasterErrorCopy(res && res.reason);
       vaultChangeMaster.oldInput.value = '';
       vaultChangeMaster.oldInput.focus();
     }
@@ -1939,10 +1966,20 @@ import {
     }
   });
 
+  // Squawk 0058: mapped-reason → inline copy (the vaultCompromiseRecoverErrorCopy idiom).
+  // 'busy' is the store's re-key gate — a compromise rotation in progress; 'format' (a
+  // MALFORMED recovery display — a typo'd character or wrong length) deliberately shares
+  // the wrong-key copy, which is truthful for it; a bare auth refusal keeps it too.
+  /** @param {string | undefined} reason @returns {string} */
+  function vaultRecoverErrorCopy(reason) {
+    if (reason === 'busy') return 'A rotation is already in progress.';
+    return 'Wrong recovery key. Nothing was changed.';
+  }
+
   // Submit → the DEDICATED recover channel. Client-side: empty guards + confirm-MATCH check.
-  // Encode BOTH secrets to Uint8Arrays (never a JS string on the wire), invoke, act on { ok }.
-  // The sheet-side copies are zeroized after the round-trip; main zeroizes its own Buffer copies
-  // + the transferred arrays (dual-zeroize).
+  // Encode BOTH secrets to Uint8Arrays (never a JS string on the wire), invoke, act on
+  // { ok, reason? }. The sheet-side copies are zeroized after the round-trip; main zeroizes its
+  // own Buffer copies + the transferred arrays (dual-zeroize).
   async function submitVaultRecover() {
     if (report.sent || report.token == null || vaultRecoverBusy) return;
     const recoveryValue = vaultRecover.recoveryInput.value;
@@ -1981,7 +2018,8 @@ import {
       report.sent = true; // suppress the trailing dismissed; main closes the sheet.
       menuController.close(vaultRecoverEntry);
     } else {
-      vaultRecover.error.textContent = 'Wrong recovery key. Nothing was changed.';
+      // Squawk 0058: a rotation-in-progress refusal is no longer misreported as a wrong key.
+      vaultRecover.error.textContent = vaultRecoverErrorCopy(res && res.reason);
       vaultRecover.recoveryInput.value = '';
       vaultRecover.recoveryInput.focus();
     }

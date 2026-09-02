@@ -22,6 +22,25 @@ const SHEET_DISMISS_REASONS = new Set(['escape', 'outside-click', 'blur']);
 // template unit suite cross-pins the two literals so they cannot drift.
 const CERT_PICK_PREFIX = 'cert:';
 
+// Squawk 0057: validate the chrome-supplied #webviews slot rect that rides the
+// menu-overlay:open payload (`slotBounds`, added by overlay-menus.js's open()).
+// Used ONLY when the window has no live active guest view to measure — a
+// fresh-install window whose sole tab is the viewless welcome record: without a
+// fallback the sheet keeps its default zero bounds and every menu (kebab,
+// container picker, site-info) opens invisible until the first page load syncs
+// guest bounds. The sender is the identity-checked chrome (the same authority
+// that already drives guest geometry via tab-set-bounds); this shape check is
+// defensive normalization, not a trust boundary. Rounding mirrors
+// register-tab-ipc.js's tab-set-bounds handler.
+/** @param {any} b @returns {{ x: number, y: number, width: number, height: number } | null} */
+function sanitizeSlotBounds(b) {
+  if (!b || typeof b !== 'object') return null;
+  const { x, y, width, height } = b;
+  if (![x, y, width, height].every((n) => typeof n === 'number' && Number.isFinite(n))) return null;
+  const rounded = { x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height) };
+  return rounded.width > 0 && rounded.height > 0 ? rounded : null;
+}
+
 /** @param {string} id @returns {number | null} */
 function parseCertPickIndex(id) {
   if (typeof id !== 'string' || !id.startsWith(CERT_PICK_PREFIX)) return null;
@@ -61,6 +80,15 @@ function registerOverlayIpc({
   vaultCompromiseRotate,
   stashCompromiseReveal,
   ackCompromiseReveal,
+  // Squawk 0059: the post-mint page-refresh seam. main.js binds its
+  // broadcastVaultLockState here so a successful step-up mint re-broadcasts the
+  // (unchanged) lock state — the ONLY channel the vault page refreshes off, so
+  // without it the jar's "Access keys" list stays stale until an unrelated
+  // re-render. Mirrors the compromise-completion idiom (ackCompromiseReveal's
+  // re-broadcast; chrome's handlers are inert on the duplicate state — verified
+  // in M18 F2). A narrow bound function, never main's internals; optional
+  // (offline overlay tests omit it).
+  broadcastVaultLockState,
   vaultRotateRecovery,
   vaultRotateAdminKey,
   vaultChangeMaster,
@@ -94,8 +122,22 @@ function registerOverlayIpc({
     const rec = registry.getWindowForChrome(event.sender);
     if (!rec || !rec.sheet) return;
     const activeEntry = rec.activeTabWcId != null ? rec.tabViews.get(rec.activeTabWcId) : null;
-    const bounds = activeEntry && !activeEntry.view.webContents.isDestroyed() ? activeEntry.view.getBounds() : null;
-    rec.sheet.openMenu(payload, { contentView: rec.win.contentView, win: rec.win, bounds });
+    // Live active-guest bounds stay authoritative when a guest exists; the
+    // chrome-measured slotBounds is the VIEWLESS-tab fallback only (squawk
+    // 0057 — see sanitizeSlotBounds above: without it, a fresh-install window
+    // whose only tab is the welcome record opened every menu at the sheet's
+    // default zero bounds, so the kebab appeared dead until first page load).
+    const guestBounds =
+      activeEntry && !activeEntry.view.webContents.isDestroyed() ? activeEntry.view.getBounds() : null;
+    const bounds = guestBounds || sanitizeSlotBounds(payload && payload.slotBounds);
+    // Strip the transport-only field — the sheet's init payload contract
+    // (menu-overlay-manager.js's MenuOpenPayload) is unchanged.
+    let menuPayload = payload;
+    if (payload && typeof payload === 'object' && 'slotBounds' in payload) {
+      menuPayload = { ...payload };
+      delete menuPayload.slotBounds;
+    }
+    rec.sheet.openMenu(menuPayload, { contentView: rec.win.contentView, win: rec.win, bounds });
   });
 
   ipcMain.on('menu-overlay:close', (event, payload) => {
@@ -297,6 +339,13 @@ function registerOverlayIpc({
       try {
         const res = await vaultMintAccessKey(buf, target); // { ok, secret?, keyId? }
         if (res && res.ok) {
+          // Squawk 0059: the mint just wrote a durable access envelope, but the vault
+          // page refreshes ONLY off vault-lock-state — re-broadcast it so an open vault
+          // page re-lists the jar's access keys immediately (the compromise-completion
+          // idiom; chrome treats the duplicate unlocked state as inert). Fired FIRST in
+          // the success branch — post-write, before any sheet/window handle is touched —
+          // so a window that died during the scrypt await can never skip the refresh.
+          broadcastVaultLockState?.();
           rec.sheet.closeMenuOverlay('activated', current.token);
           // The minted secret + keyId — main→chrome→sheet (channel-3 init carries the
           // model). Shown ONCE on the dismiss-locked vault-accesskey-show sheet.
@@ -306,7 +355,11 @@ function registerOverlayIpc({
           });
           return { ok: true };
         }
-        return { ok: false };
+        // Squawk 0058: forward the delegate's NON-SECRET failure reason (the vault-import
+        // idiom) so the sheet can branch its copy — 'state' (no vault for the jar yet) and
+        // 'busy' (a rotation in progress) instead of the collapsed wrong-password copy. A
+        // plain auth refusal keeps its bare { ok:false } shape (no reason key).
+        return res && res.reason ? { ok: false, reason: res.reason } : { ok: false };
       } finally {
         buf.fill(0);
         secret.fill?.(0);
@@ -405,7 +458,9 @@ function registerOverlayIpc({
           });
           return { ok: true };
         }
-        return { ok: false };
+        // Squawk 0058: forward the delegate's NON-SECRET failure reason ('busy' — the
+        // second-wall refusal during a compromise rotation) so the sheet's copy is truthful.
+        return res && res.reason ? { ok: false, reason: res.reason } : { ok: false };
       } finally {
         buf.fill(0);
         secret.fill?.(0);
@@ -443,7 +498,9 @@ function registerOverlayIpc({
           });
           return { ok: true };
         }
-        return { ok: false };
+        // Squawk 0058: forward the delegate's NON-SECRET failure reason ('busy' — the
+        // second-wall refusal during a compromise rotation) so the sheet's copy is truthful.
+        return res && res.reason ? { ok: false, reason: res.reason } : { ok: false };
       } finally {
         buf.fill(0);
         secret.fill?.(0);
@@ -472,12 +529,14 @@ function registerOverlayIpc({
       const oldBuf = Buffer.from(oldSecret);
       const newBuf = Buffer.from(newSecret);
       try {
-        const res = await vaultChangeMaster(oldBuf, newBuf); // { ok }
+        const res = await vaultChangeMaster(oldBuf, newBuf); // { ok, reason? }
         if (res && res.ok) {
           rec.sheet.closeMenuOverlay('activated', current.token);
           return { ok: true };
         }
-        return { ok: false };
+        // Squawk 0058: forward the delegate's NON-SECRET failure reason ('busy' — the
+        // second-wall refusal during a compromise rotation) so the sheet's copy is truthful.
+        return res && res.reason ? { ok: false, reason: res.reason } : { ok: false };
       } finally {
         oldBuf.fill(0);
         newBuf.fill(0);
@@ -508,12 +567,15 @@ function registerOverlayIpc({
       const recoveryBuf = Buffer.from(recoverySecret);
       const newBuf = Buffer.from(newSecret);
       try {
-        const res = await vaultRecover(recoveryBuf, newBuf); // { ok }
+        const res = await vaultRecover(recoveryBuf, newBuf); // { ok, reason? }
         if (res && res.ok) {
           rec.sheet.closeMenuOverlay('activated', current.token);
           return { ok: true };
         }
-        return { ok: false };
+        // Squawk 0058: forward the delegate's NON-SECRET failure reason ('format' — a
+        // malformed recovery display; 'busy' — the second-wall refusal during a compromise
+        // rotation) so the sheet can keep its copy truthful.
+        return res && res.reason ? { ok: false, reason: res.reason } : { ok: false };
       } finally {
         recoveryBuf.fill(0);
         newBuf.fill(0);
