@@ -63,7 +63,7 @@ workflow spanning store + jar registry + IPC/UI.
 
 ## Success Criteria
 
-- [ ] **Full sever, one action.** A single operator-initiated compromise-mode
+- [x] **Full sever, one action.** A single operator-initiated compromise-mode
       action re-keys the vault hierarchy such that afterward no previously
       issued or extracted key material — a prior recovery key, a prior admin
       private key, an extracted MRK, an extracted vault key, or any minted
@@ -80,12 +80,12 @@ workflow spanning store + jar registry + IPC/UI.
       on-disk tests (captured old material replayed against the rotated
       profile). *(Refined during Flight 1 alignment, 2026-09-01 — rulings
       R1, R5, R6, R7 in the flight log.)*
-- [ ] **Interruption-safe re-key.** Interrupting the compromise-mode action
+- [x] **Interruption-safe re-key.** Interrupting the compromise-mode action
       at any point (crash, kill, power loss) leaves the profile fully
       openable either entirely under the old key state or entirely under the
       new — never a mix, never a lockout. Verified by fault-injection tests
       over the write sequence.
-- [ ] **Compromise-mode surfacing.** The new one-time recovery key minted
+- [x] **Compromise-mode surfacing.** The new one-time recovery key minted
       by compromise mode is surfaced exactly once through a dismiss-locked
       sheet, with the profile held unlocked until the lockout-critical
       acknowledgment *(a single sheet, not the two-sheet chain — the admin
@@ -274,7 +274,7 @@ workflow spanning store + jar registry + IPC/UI.
       compromise-mode flow: flow feel, held-key/cancellation semantics,
       wording of the severing offer and revoked-key aftermath — before
       committing Flight 2/3 designs
-- [ ] Flight 2: Compromise-mode rotation — fresh MRK + fresh vault keys,
+- [x] Flight 2: Compromise-mode rotation (landed 2026-09-02) — fresh MRK + fresh vault keys,
       item re-encryption, access-key revocation, the journaled
       interruption-safe write sequence + load-time recovery, store-wide
       write exclusivity for the re-key's duration (the manager lock covers

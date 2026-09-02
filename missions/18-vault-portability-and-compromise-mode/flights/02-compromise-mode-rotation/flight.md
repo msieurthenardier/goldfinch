@@ -1,18 +1,18 @@
 # Flight: Compromise-Mode Rotation
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Vault Portability & Compromise Mode](../../mission.md)
 
 ## Contributing to Criteria
 
-- [ ] **Full sever, one action** (criterion 1) — the transactional re-key,
+- [x] **Full sever, one action** (criterion 1) — the transactional re-key,
       revocation reporting, required different-new-master
-- [ ] **Interruption-safe re-key** (criterion 2) — journal + load-time
+- [x] **Interruption-safe re-key** (criterion 2) — journal + load-time
       recovery, fault-injection verified
-- [ ] **Compromise-mode surfacing** (criterion 3) — single post-commit
+- [x] **Compromise-mode surfacing** (criterion 3) — single post-commit
       recovery sheet, hybrid witnessed behavior test
       (`compromise-mode-rotation`, drafted at planning)
-- [ ] **Docs tell the new truth** (criterion 9, compromise-mode half) —
+- [x] **Docs tell the new truth** (criterion 9, compromise-mode half) —
       threat-model "already-extracted MRK" bullet answered; rotation and
       manager-format docs updated
 
@@ -286,7 +286,7 @@ are operator-attested only.
 
 - [x] All open questions resolved (ruled at planning interview)
 - [x] Design decisions documented (DD1–DD9)
-- [ ] Prerequisites verified (dev-profile restore pending; probe at the
+- [x] Prerequisites verified (dev-profile restore pending; probe at the
       behavior/HAT leg)
 - [x] Validation approach defined (see Verification)
 - [x] Legs defined
@@ -312,7 +312,7 @@ the stubbed-sheet harness (`vault-rotation-handlers.test.js:19-56`).
 
 ### Checkpoints
 
-- [ ] CP1: Manager v2 + optional-admin + bundle-version compat lands —
+- [x] CP1: Manager v2 + optional-admin + bundle-version compat lands —
       all readers handle absence; v1 read-compat pinned. **Pinned tests
       this changes are inverted/renamed, never silently edited** (Flight
       1 debrief rule): `test/unit/vault-export-import.test.js:161` ("all
@@ -321,16 +321,16 @@ the stubbed-sheet harness (`vault-rotation-handlers.test.js:19-56`).
       the corrupt-manager exact-directory-listing assertion
       (`test/unit/vault-store.test.js:710`) wherever the journal can
       coexist
-- [ ] CP2: Transaction/journal layer lands — fault-injection suite
+- [x] CP2: Transaction/journal layer lands — fault-injection suite
       proves old-or-new-never-mixed at every kill point; recovery
       idempotent under double-crash; orphaned-temp sweep covered via
       constructed on-disk residue
-- [ ] CP3: Re-key op lands — full sever pinned by adversarial on-disk
+- [x] CP3: Re-key op lands — full sever pinned by adversarial on-disk
       tests; drain + gate races pinned including the mid-await
       interleaving; revocation report correct
-- [ ] CP4: Flow wiring lands — lock-state matrix tests green; suite,
+- [x] CP4: Flow wiring lands — lock-state matrix tests green; suite,
       typecheck, lint clean
-- [ ] CP5: Behavior test `compromise-mode-rotation` run (hybrid
+- [x] CP5: Behavior test `compromise-mode-rotation` run (hybrid
       witnessed) passes; guided HAT passed; docs updated
       (`docs/vault.md` rotation + threat model: the "already-extracted
       MRK" bullet gains its answer)
@@ -356,24 +356,24 @@ the stubbed-sheet harness (`vault-rotation-handlers.test.js:19-56`).
 > planned and created one at a time as work progresses. This list will
 > evolve based on discoveries during implementation.
 
-- [ ] `manager-v2-optional-admin` - Format v2 read/write + version/AAD
+- [x] `manager-v2-optional-admin` - Format v2 read/write + version/AAD
       rule + pairing rule, all admin-absence readers, export/import
       compat (relaxation + bundle manager-version field + adopt-at-
       bundle-version) (DD1, DD7), pinned-test inversions (CP1 list);
       HIGH risk (load path + format) — design review mandatory
-- [ ] `txn-journal-layer` - The journal-first staged-commit transaction
+- [x] `txn-journal-layer` - The journal-first staged-commit transaction
       primitive + load-time recovery + the drain/gate exclusivity
       machinery (DD2, DD3), fault-injection matrix incl. constructed
       residue states and the mid-await race pin; HIGH risk — design
       review mandatory (pre-split from the re-key op at design review's
       recommendation: the fault matrix is a leg's worth of work)
-- [ ] `compromise-rotate-op` - The `compromiseRotate` store op on top of
+- [x] `compromise-rotate-op` - The `compromiseRotate` store op on top of
       the transaction layer: credential branches + R7 enforcement (incl.
       reuse-case MRK zeroize), fresh MRK/vault keys, re-encryption,
       envelope drops, revocation report, post-commit `_installMrk`;
       adversarial on-disk suite (DD3, DD4 store half); HIGH risk —
       design review mandatory
-- [ ] `flow-wiring` - Page entry (both lock states) + confirm modal (R3
+- [x] `flow-wiring` - Page entry (both lock states) + confirm modal (R3
       copy) + compromise menuTypes and sheets (DD4 — new menuTypes join:
       the `menu-overlay.js` menuType→template map + JSDoc union
       (~:2382-2402), the `vault-controller.js` SHEET_STATES table
@@ -385,7 +385,7 @@ the stubbed-sheet harness (`vault-rotation-handlers.test.js:19-56`).
       completion card, main-side report state + `adminProvisioned` bit
       (DD6) + lock-state matrix tests + `docs/vault.md` updates;
       MED-HIGH risk
-- [ ] `behavior-spec-and-hat` *(HAT)* - Finalize + run the
+- [x] `behavior-spec-and-hat` *(HAT)* - Finalize + run the
       `compromise-mode-rotation` hybrid witnessed spec; guided HAT: a
       real rotation on the restored dev profile, operator at the
       controls (both entry states, reuse-rejection probe, negative
@@ -397,11 +397,11 @@ the stubbed-sheet harness (`vault-rotation-handlers.test.js:19-56`).
 
 ### Completion Checklist
 
-- [ ] All legs completed
-- [ ] Code merged
-- [ ] Tests passing (suite + typecheck + lint; fault-injection suite
+- [x] All legs completed
+- [ ] Code merged (PR #199 ready for review)
+- [x] Tests passing (suite + typecheck + lint; fault-injection suite
       included)
-- [ ] Documentation updated (`docs/vault.md`; CLAUDE.md only if commands
+- [x] Documentation updated (`docs/vault.md`; CLAUDE.md only if commands
       change)
 
 ### Verification

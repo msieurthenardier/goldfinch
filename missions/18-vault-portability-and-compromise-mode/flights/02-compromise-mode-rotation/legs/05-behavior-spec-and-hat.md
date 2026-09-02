@@ -1,6 +1,6 @@
 # Leg: Behavior Spec + HAT
 
-**Status**: ready
+**Status**: completed
 **Flight**: [Compromise-Mode Rotation](../flight.md)
 **Type**: interactive (HAT) — no autonomous implementation cycle
 
@@ -14,14 +14,14 @@ explicitly accepted by the operator with disposition recorded).
 
 ## Acceptance Criteria
 
-- [ ] AC1: Spec finalized (draft → active) with exact shipped strings and
+- [x] AC1: Spec finalized (draft → active) with exact shipped strings and
       observables; step table complete per the draft skeleton
-- [ ] AC2: `/behavior-test compromise-mode-rotation` passes (hybrid
+- [x] AC2: `/behavior-test compromise-mode-rotation` passes (hybrid
       witnessed; run log committed per ARTIFACTS.md)
-- [ ] AC3: Guided HAT passed — both entry lock states, reuse-rejection
+- [x] AC3: Guided HAT passed — both entry lock states, reuse-rejection
       probe, branch switch, single recovery reveal, completion card,
       negative replay of captured old material; operator satisfied
-- [ ] AC4: Any HAT fixes ride the inline protocol (fix-vs-feature gate;
+- [x] AC4: Any HAT fixes ride the inline protocol (fix-vs-feature gate;
       multi-surface fixes get a design-review pass)
 
 ## Session Steps

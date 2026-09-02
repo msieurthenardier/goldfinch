@@ -751,3 +751,21 @@ debrief rule), not at teardown.
   (3 tests, 4118/4118) incl. a real cross-hop end-to-end that would
   catch any genuine drop. Re-run recipe gains: the step-7 capture must
   precede any repeat rotation. Run-log addendum appended.
+- 2026-09-02 — **Behavior test run 2026-09-02-12-32-45: PASS, 7/7
+  judged checkpoints** (fresh crew, amended-spec protocol). Every run-1
+  inconclusive converted by evidence design (poll-until-false with
+  per-tick hashing; throwaway-rotation provisioning; focus/relay
+  discipline; triple-timestamped ack-gate); run-1's checkpoint-7 fail
+  re-witnessed clean with the overwrite failure mode hash-excluded.
+  Commit-before-surfacing pinned by 91 consecutive ticks of
+  rotated-disk + visible-sheet. Both entry states witnessed (fixture
+  card = unlocked, main card = locked). Guided HAT satisfied within the
+  witnessed run (operator performed every sheet flow across both
+  rotations, incl. verbatim reuse-rejection, dismiss-locked hold,
+  witnessed unlock with an attested wrong-entry rejection). Squawk 0059
+  logged (access-key list stale after mint — display refresh). Crew
+  apparatus notes updated with five new laws; spec updated with the
+  Validator's five refinements. Leg 5 → completed. **All legs complete;
+  flight → landed. Criteria 1/2/3 checked in the mission; criterion 9's
+  compromise half done (Flight 3 owns the rest). Open coverage carried
+  to Flight 3: on-script recovery-branch variant run.**
