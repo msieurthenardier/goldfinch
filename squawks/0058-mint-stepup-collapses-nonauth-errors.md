@@ -43,3 +43,14 @@ Mission 18 Flight 2 leg-5 fixture setup on an item-less fresh profile.
 ## Sign-Off
 
 *(recorded at completion)*
+
+## Scope Annotation (2026-09-02, Flight 2 debrief)
+
+The fix should **widen non-secret reason-forwarding to the sibling vault
+delegates**, not just the mint path: Flight 2's compromise delegate
+(`main.js` `vaultCompromiseRotate`) now maps `VaultPasswordReuseError` /
+`VaultFormatError` / `VaultBusyError` / `VaultStateError` into
+`{ok:false, reason}` — the precedent. Siblings still map only
+`VaultAuthError`, so e.g. a `VaultBusyError` during a rotation window
+renders as "Wrong master password" on the mint sheet — the same collapse
+class this squawk pins. One fix shape covers both.

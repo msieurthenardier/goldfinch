@@ -1,6 +1,6 @@
 # Flight: Compromise-Mode Rotation
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Vault Portability & Compromise Mode](../../mission.md)
 
 ## Contributing to Criteria
@@ -271,16 +271,16 @@ are operator-attested only.
 
 ### Prerequisites
 
-- [ ] Flight 1 completed (rulings R1–R9 final) — done 2026-09-01
-- [ ] Mission criteria 1/3/6 amendments committed — done at planning
-- [ ] Dev environment restored: the `goldfinch-dev` profile was wiped at
+- [x] Flight 1 completed (rulings R1–R9 final) — done 2026-09-01
+- [x] Mission criteria 1/3/6 amendments committed — done at planning
+- [x] Dev environment restored: the `goldfinch-dev` profile was wiped at
       Flight 1 teardown — before the behavior-test/HAT leg, relaunch with
       `DEV_MINT` **once** to mint fresh automation keys, update the
       standing MCP config, then relaunch without (per CLAUDE.md /
       docs/dev-testing.md)
-- [ ] Behavior-test apparatus probe (MCP admin attach + internal-page
+- [x] Behavior-test apparatus probe (MCP admin attach + internal-page
       capture) before the leg that runs the spec
-- [ ] Operator availability for the HAT leg
+- [x] Operator availability for the HAT leg
 
 ### Pre-Flight Checklist
 
