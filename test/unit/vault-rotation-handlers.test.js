@@ -116,6 +116,26 @@ test('rotate-recovery: WRONG master → { ok:false }: no recovery-show, sheet no
   );
 });
 
+// Squawk 0058: the handler forwards the delegate's NON-SECRET failure reason ('busy' —
+// the sinks' second wall while a compromise rotation holds the re-key gate) so the sheet
+// renders the rotation-in-progress copy instead of the collapsed wrong-password copy.
+test('rotate-recovery: refusal with reason "busy" → { ok:false, reason:"busy" } forwarded; no recovery-show; array zeroed', async () => {
+  const vaultRotateRecovery = async () => ({ ok: false, reason: 'busy' });
+  const { ipcMain, sheetSender, closeCalls, chromeSends } = baseHarness({ vaultRotateRecovery }, 'vault-stepup');
+  const handler = ipcMain.handlers.get('menu-overlay:vault-rotate-recovery');
+  const secret = new TextEncoder().encode('correct-master');
+
+  const res = await handler({ sender: sheetSender }, { token: 7, secret });
+
+  assert.deepEqual(res, { ok: false, reason: 'busy' }, 'the NON-SECRET reason rides the invoke reply');
+  assert.deepEqual(chromeSends, [], 'no recovery-show on a busy refusal');
+  assert.deepEqual(closeCalls, [], 'sheet stays open to re-prompt');
+  assert.ok(
+    secret.every((b) => b === 0),
+    'incoming Uint8Array zeroized on refusal'
+  );
+});
+
 test('rotate-recovery: wrong sender / stale token / non-Uint8Array → { ok:false }, delegate never called', async () => {
   let called = 0;
   const vaultRotateRecovery = async () => {
@@ -201,6 +221,22 @@ test('change-master: WRONG old password → { ok:false }: sheet not closed; both
   assert.ok(newSecret.every((b) => b === 0));
 });
 
+// Squawk 0058: 'busy' (second-wall refusal during a compromise rotation) is forwarded.
+test('change-master: refusal with reason "busy" → { ok:false, reason:"busy" } forwarded; sheet not closed; arrays zeroed', async () => {
+  const vaultChangeMaster = async () => ({ ok: false, reason: 'busy' });
+  const { ipcMain, sheetSender, closeCalls } = baseHarness({ vaultChangeMaster }, 'vault-change-master');
+  const handler = ipcMain.handlers.get('menu-overlay:vault-change-master');
+  const oldSecret = new TextEncoder().encode('correct-old');
+  const newSecret = new TextEncoder().encode('new-master');
+
+  const res = await handler({ sender: sheetSender }, { token: 7, oldSecret, newSecret });
+
+  assert.deepEqual(res, { ok: false, reason: 'busy' }, 'the NON-SECRET reason rides the invoke reply');
+  assert.deepEqual(closeCalls, [], 'sheet stays open to re-prompt');
+  assert.ok(oldSecret.every((b) => b === 0));
+  assert.ok(newSecret.every((b) => b === 0));
+});
+
 test('change-master: a missing/non-Uint8Array secret → { ok:false }, delegate never called', async () => {
   let called = 0;
   const vaultChangeMaster = async () => {
@@ -281,3 +317,23 @@ test('recover: WRONG recovery key → { ok:false }: sheet not closed; both array
   assert.ok(recoverySecret.every((b) => b === 0));
   assert.ok(newSecret.every((b) => b === 0));
 });
+
+// Squawk 0058: 'format' (a malformed recovery display — parseRecoveryKey's
+// VaultFormatError) and 'busy' (second-wall refusal during a compromise rotation) are
+// forwarded so the sheet keeps its copy truthful.
+for (const reason of ['format', 'busy']) {
+  test(`recover: refusal with reason '${reason}' → { ok:false, reason:'${reason}' } forwarded; sheet not closed; arrays zeroed`, async () => {
+    const vaultRecover = async () => ({ ok: false, reason });
+    const { ipcMain, sheetSender, closeCalls } = baseHarness({ vaultRecover }, 'vault-recover');
+    const handler = ipcMain.handlers.get('menu-overlay:vault-recover');
+    const recoverySecret = new TextEncoder().encode('ABCD-EFGH-IJKL-MNOP');
+    const newSecret = new TextEncoder().encode('new-master');
+
+    const res = await handler({ sender: sheetSender }, { token: 7, recoverySecret, newSecret });
+
+    assert.deepEqual(res, { ok: false, reason }, 'the NON-SECRET reason rides the invoke reply');
+    assert.deepEqual(closeCalls, [], 'sheet stays open to re-prompt');
+    assert.ok(recoverySecret.every((b) => b === 0));
+    assert.ok(newSecret.every((b) => b === 0));
+  });
+}

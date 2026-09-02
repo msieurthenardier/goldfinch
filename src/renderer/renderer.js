@@ -506,6 +506,7 @@ overlayMenuClient = createOverlayMenus({
   bridge: window.goldfinch,
   states: overlayMenus,
   now: () => performance.now(),
+  measureSlot: measureWebviewsSlotDIP, // squawk 0057 — sheet placement for a viewless welcome tab (rationale in overlay-menus.js)
   onActivated: (payload) => {
     if (!downloadsController.handleActivation(payload) && !vaultController.handleActivation(payload))
       dispatchOverlayActivation(payload);

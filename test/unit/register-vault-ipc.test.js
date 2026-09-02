@@ -75,13 +75,21 @@ function wire({ store = makeStore(), jarsList = [], getCompromiseReport, clearCo
 }
 
 // A harness wired to a REAL, set-up, unlocked vault store (FAST scrypt) — exercises
-// the CRUD handlers end-to-end through registerInternalHandler.
-async function realHarness() {
+// the CRUD handlers end-to-end through registerInternalHandler. The optional
+// broadcastVaultLockState passthrough is the squawk-0059 post-revoke refresh seam;
+// harnesses that omit it pin that the seam stays optional (the offline shape).
+async function realHarness({ broadcastVaultLockState } = {}) {
   const dir = tmpDir();
   const store = vs.load(dir, { scryptParams: FAST_SCRYPT, getAutoLockMinutes: () => 10, listJars: () => REAL_JARS });
   await store.setup({ masterPassword: MASTER });
   const ipcMain = makeFakeIpcMain();
-  registerVaultIpc({ ipcMain, registerInternalHandler, getVaultStore: () => store, jars: { list: () => REAL_JARS } });
+  registerVaultIpc({
+    ipcMain,
+    registerInternalHandler,
+    getVaultStore: () => store,
+    jars: { list: () => REAL_JARS },
+    broadcastVaultLockState
+  });
   return { dir, store, ipcMain };
 }
 
@@ -578,6 +586,49 @@ test('internal-vault-accesskey-revoke resolves the target through the store allo
       () => ipcMain.invoke('internal-vault-accesskey-revoke', vaultEvent(), { vaultId: 'burner-xyz', keyId: 'x' }),
       (err) => err instanceof Error && /unknown or non-persistent/.test(err.message)
     );
+  } finally {
+    rm(dir);
+  }
+});
+
+// Squawk 0059 (the mint symmetry): a REAL revoke re-broadcasts vault-lock-state so any
+// other window's open vault page re-lists its access keys — the page's only refresh
+// channel. Only an ACTUAL envelope deletion broadcasts: a stale keyId, a locked store,
+// and the read-only list channel all write nothing and broadcast nothing.
+test('internal-vault-accesskey-revoke re-broadcasts vault-lock-state EXACTLY once on a real revoke; stale keyId / locked / list broadcast nothing', async () => {
+  let broadcasts = 0;
+  const { dir, store, ipcMain } = await realHarness({
+    broadcastVaultLockState: () => {
+      broadcasts += 1;
+    }
+  });
+  try {
+    store.saveItem('work', { type: 'login', title: 'W', username: 'u', origin: 'https://w', password: 'PW' });
+    const { keyId } = await store.mintAccessKey('work', { masterPassword: MASTER });
+
+    // The read-only list never broadcasts.
+    ipcMain.invoke('internal-vault-accesskey-list', vaultEvent(), 'work');
+    assert.equal(broadcasts, 0, 'listing broadcasts nothing');
+
+    // A real deletion broadcasts exactly once.
+    assert.deepEqual(ipcMain.invoke('internal-vault-accesskey-revoke', vaultEvent(), { vaultId: 'work', keyId }), {
+      revoked: true
+    });
+    assert.equal(broadcasts, 1, 'vault-lock-state re-broadcast exactly once on a real revoke');
+
+    // A stale keyId wrote nothing — no broadcast.
+    assert.deepEqual(ipcMain.invoke('internal-vault-accesskey-revoke', vaultEvent(), { vaultId: 'work', keyId }), {
+      revoked: false
+    });
+    assert.equal(broadcasts, 1, 'no re-broadcast for a stale keyId');
+
+    // A locked store surfaces { locked: true } and broadcasts nothing here (the store's
+    // own onLock hook is the lock-transition broadcaster — not this seam).
+    store.lockNow();
+    assert.deepEqual(ipcMain.invoke('internal-vault-accesskey-revoke', vaultEvent(), { vaultId: 'work', keyId: 'x' }), {
+      locked: true
+    });
+    assert.equal(broadcasts, 1, 'no re-broadcast from the locked path');
   } finally {
     rm(dir);
   }
