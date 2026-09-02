@@ -8,7 +8,13 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { selectVaultView, vaultNavEntries, SETTINGS_ID, VAULTS_ID } = require('../../src/shared/vault-page-model.js');
+const {
+  selectVaultView,
+  compromiseCardRows,
+  vaultNavEntries,
+  SETTINGS_ID,
+  VAULTS_ID
+} = require('../../src/shared/vault-page-model.js');
 
 const rows = [
   { vaultId: 'global', label: 'Global' },
@@ -39,9 +45,102 @@ test('flags are strict === true (truthy-but-not-true does not unlock)', () => {
 });
 
 test('malformed / absent payload degrades to not-set-up with no vaults', () => {
-  assert.deepEqual(selectVaultView(), { mode: 'not-set-up', vaults: [] });
-  assert.deepEqual(selectVaultView(null), { mode: 'not-set-up', vaults: [] });
-  assert.deepEqual(selectVaultView({ setUp: true, unlocked: true }), { mode: 'unlocked', vaults: [] });
+  const empty = { mode: 'not-set-up', vaults: [], adminProvisioned: false, compromiseReport: null };
+  assert.deepEqual(selectVaultView(), empty);
+  assert.deepEqual(selectVaultView(null), empty);
+  assert.deepEqual(selectVaultView({ setUp: true, unlocked: true }), {
+    mode: 'unlocked',
+    vaults: [],
+    adminProvisioned: false,
+    compromiseReport: null
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M18 F2 L4 (flight DD1/DD6; R4/R8 — the lock-state matrix at the page-model
+// level, per design-review M4: vault.js has no DOM harness, so DOM placement /
+// copy pins are leg 5's behavior test; the MODEL half is pinned here).
+// ---------------------------------------------------------------------------
+
+test('R8 matrix: the compromise report rides BOTH the locked and unlocked views (the card renders wherever the page lands)', () => {
+  const report = { admin: true, vaultIds: ['global', 'personal'] };
+  for (const unlocked of [true, false]) {
+    const view = selectVaultView({ setUp: true, unlocked, vaults: rows, compromiseReport: report });
+    assert.equal(view.mode, unlocked ? 'unlocked' : 'locked');
+    assert.deepEqual(view.compromiseReport, report, `report carried while unlocked=${unlocked}`);
+  }
+});
+
+test('R4 matrix: adminProvisioned is carried in BOTH lock states (strict === true), and false when absent', () => {
+  for (const unlocked of [true, false]) {
+    assert.equal(selectVaultView({ setUp: true, unlocked, adminProvisioned: true }).adminProvisioned, true);
+    assert.equal(selectVaultView({ setUp: true, unlocked }).adminProvisioned, false);
+    assert.equal(selectVaultView({ setUp: true, unlocked, adminProvisioned: 1 }).adminProvisioned, false);
+  }
+});
+
+test('not-set-up drops both fields (a rotated profile is by definition set up)', () => {
+  const view = selectVaultView({
+    setUp: false,
+    unlocked: false,
+    adminProvisioned: true,
+    compromiseReport: { admin: true, vaultIds: ['x'] }
+  });
+  assert.equal(view.adminProvisioned, false);
+  assert.equal(view.compromiseReport, null);
+});
+
+test('the compromise report is normalized: malformed → null; vaultIds keeps non-empty strings only; admin is strict boolean', () => {
+  const base = { setUp: true, unlocked: true, vaults: rows };
+  assert.equal(selectVaultView({ ...base, compromiseReport: 'rotated' }).compromiseReport, null);
+  assert.equal(selectVaultView({ ...base, compromiseReport: ['x'] }).compromiseReport, null);
+  assert.deepEqual(selectVaultView({ ...base, compromiseReport: {} }).compromiseReport, {
+    admin: false,
+    vaultIds: []
+  });
+  assert.deepEqual(
+    selectVaultView({
+      ...base,
+      compromiseReport: { admin: 1, vaultIds: ['global', 7, null, '', 'work'] }
+    }).compromiseReport,
+    { admin: false, vaultIds: ['global', 'work'] }
+  );
+});
+
+// ---------------------------------------------------------------------------
+// compromiseCardRows — the "Everything rotated" card's revoked-keys row model,
+// extracted after behavior-test run 2026-09-02-02-22-01 (checkpoint 7). Leg 4
+// had reassigned the card's DOM pins to that behavior test, leaving NO unit
+// layer over the report → rendered-rows mapping; these pins close that gap.
+// ---------------------------------------------------------------------------
+
+test('compromiseCardRows: rotation WITH revocations — admin row first ("Admin key — Revoked"), then one row per revoked vault by display label, `global` handled', () => {
+  const vaults = [
+    { vaultId: 'global', label: 'Global' },
+    { vaultId: 'personal', label: 'Personal' }
+  ];
+  assert.deepEqual(compromiseCardRows({ admin: true, vaultIds: ['global', 'personal'] }, vaults), [
+    { label: 'Admin key', hint: '— Revoked' },
+    { label: 'Global', hint: '— Revoked' },
+    { label: 'Personal', hint: '— Revoked' }
+  ]);
+  // A revoked id with no matching vault row (e.g. an unregistered on-disk vault
+  // swept by the registry∪disk union) falls back to the raw id.
+  assert.deepEqual(compromiseCardRows({ admin: false, vaultIds: ['orphan'] }, vaults), [
+    { label: 'orphan', hint: '— Revoked' }
+  ]);
+});
+
+test('compromiseCardRows: rotation with NOTHING to revoke → zero rows (the card still renders — an empty list is the CORRECT state after a repeat rotation)', () => {
+  const vaults = [{ vaultId: 'global', label: 'Global' }];
+  assert.deepEqual(compromiseCardRows({ admin: false, vaultIds: [] }, vaults), []);
+  // Defensive halves: a malformed report or missing vault rows never throw.
+  assert.deepEqual(compromiseCardRows(null, vaults), []);
+  assert.deepEqual(compromiseCardRows({ admin: 1, vaultIds: 'global' }, vaults), []);
+  assert.deepEqual(compromiseCardRows({ admin: true, vaultIds: ['global'] }, undefined), [
+    { label: 'Admin key', hint: '— Revoked' },
+    { label: 'global', hint: '— Revoked' }
+  ]);
 });
 
 test('vault rows are normalized to { vaultId, label }; a missing label falls back to the id', () => {

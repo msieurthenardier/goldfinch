@@ -1,7 +1,7 @@
 // goldfinch://vault serves imports through an exact flat allowlist. These
 // specifiers intentionally describe serving paths rather than disk paths.
 // @ts-ignore — serving-path vs disk-path mismatch
-import { selectVaultView, vaultNavEntries } from './vault-page-model.js';
+import { selectVaultView, compromiseCardRows, vaultNavEntries } from './vault-page-model.js';
 import {
   MASK,
   EDITOR_LAYOUT,
@@ -868,12 +868,135 @@ function init() {
     return banner;
   }
 
+  // ── Compromise-mode rotation (M18 F2 L4; rulings R2/R3/R4/R8) ──
+
+  /**
+   * The compromise-mode ENTRY row (R2, R4 + amendment): a plain explainer line + the
+   * danger-styled "Rotate Everything…" button, rendered at the BOTTOM of the Settings
+   * flow in BOTH lock states (unlocked: bottom of Master-key management; locked: below
+   * the Auto-lock block). Opens the R3 confirm modal — NO secret is entered on this
+   * page; the credential entry lives on the chrome-owned compromise sheets.
+   * @returns {HTMLElement}
+   */
+  function buildCompromiseEntry() {
+    const wrap = el('div', 'vault-compromise-entry');
+    wrap.appendChild(el('p', 'vault-lede', 'Think a key or your master password leaked?'));
+    wrap.appendChild(button('Rotate Everything…', 'vault-btn danger', () => openCompromiseConfirmModal()));
+    return wrap;
+  }
+
+  /**
+   * The R3-ruled confirm modal (copy verbatim per the leg spec): title + lede + the
+   * "What happens next" steps + the consequence line + the understanding-checkbox
+   * gating a danger-styled Continue. Continue closes the modal and fires the BARE
+   * compromise trigger (page → main → chrome opens the vault-compromise sheet). The
+   * modal does not persist across the flow — the mid-op lock-state re-render would
+   * close it anyway (render() closes body-level modals), and pending state lives
+   * sheet-side ONLY (leg L1/L2).
+   */
+  function openCompromiseConfirmModal() {
+    const body = el('div', 'vault-modal-form');
+    body.appendChild(
+      el(
+        'p',
+        'vault-lede',
+        'This creates fresh keys for your vault and locks out anyone who may have your old ones. Everything you’ve saved is kept.'
+      )
+    );
+    body.appendChild(el('p', 'vault-compromise-steps-title', 'What happens next'));
+    const steps = el('ul', 'vault-compromise-steps');
+    for (const step of [
+      'Enter your current master password.',
+      'Choose a new master password.',
+      'Save the new recovery key — it’s shown once.'
+    ]) {
+      steps.appendChild(el('li', undefined, step));
+    }
+    body.appendChild(steps);
+    body.appendChild(
+      el(
+        'p',
+        'vault-compromise-consequence',
+        'Your admin key and all jar access keys will be revoked. You’ll create new ones afterward.'
+      )
+    );
+
+    const checkRow = el('label', 'vault-compromise-check-row');
+    const checkbox = /** @type {HTMLInputElement} */ (el('input'));
+    checkbox.type = 'checkbox';
+    checkRow.appendChild(checkbox);
+    checkRow.appendChild(el('span', undefined, 'I understand my old keys will stop working'));
+    body.appendChild(checkRow);
+
+    const handle = openModal({
+      title: 'Rotate everything',
+      body,
+      submitLabel: 'Continue',
+      danger: true,
+      submitEnabled: false,
+      onSubmit: () => {
+        handle.close();
+        Promise.resolve(bridge.requestCompromiseRotate()).catch(() => {});
+      }
+    });
+    checkbox.addEventListener('change', () => handle.setSubmitEnabled(checkbox.checked));
+  }
+
+  /**
+   * The R8-ruled persistent completion card ("Everything rotated"): body copy from the
+   * Flight 1 log's ruled card, a "Revoked keys" list with UNIFORM "Revoked" hints
+   * (R8 fix 1 — admin row first, then per-vault rows by display label; `'global'`
+   * renders with its display label), and a dismiss affordance clearing the main-side
+   * report. Rendered in BOTH view states regardless of entry lock state (R8 fix 2 —
+   * the flow ends unlocked; the card renders wherever the page lands). All text via
+   * textContent.
+   * @param {{ admin: boolean, vaultIds: string[] }} report
+   * @param {Array<{ vaultId: string, label: string }>} vaults
+   * @returns {HTMLElement}
+   */
+  function buildCompromiseCard(report, vaults) {
+    const card = el('div', 'vault-compromise-card');
+    card.setAttribute('role', 'status');
+    card.appendChild(el('h3', 'vault-compromise-card-title', 'Everything rotated'));
+    card.appendChild(
+      el(
+        'p',
+        'vault-lede',
+        'Fresh keys are in place, and your new recovery key was shown once on the secure prompt. Your old master password, recovery key, and admin key no longer work.'
+      )
+    );
+    card.appendChild(el('p', 'vault-compromise-card-subtitle', 'Revoked keys'));
+    const list = el('ul', 'vault-compromise-card-list');
+    // Row model extracted to vault-page-model.compromiseCardRows (unit-pinned after
+    // behavior-test run 2026-09-02-02-22-01): admin row first, display labels,
+    // uniform hint; an empty report correctly yields an empty list.
+    for (const row of compromiseCardRows(report, vaults)) {
+      const li = el('li');
+      li.appendChild(el('span', 'vault-compromise-card-key', row.label));
+      li.appendChild(el('span', 'vault-compromise-card-hint', row.hint));
+      list.appendChild(li);
+    }
+    card.appendChild(list);
+    card.appendChild(
+      button('Dismiss', 'vault-btn small', () => {
+        // Clear the session-held report main-side, then re-render off the fresh state
+        // (the dismiss channel broadcasts nothing — the page refreshes itself).
+        Promise.resolve(bridge.compromiseDismiss())
+          .then(() => refresh())
+          .catch(() => {});
+      })
+    );
+    return card;
+  }
+
   /**
    * The "Settings" section: manager-wide controls, state-gated. While UNLOCKED: Lock now +
-   * auto-lock + import + master-key management. While LOCKED: unlock/recover banner +
-   * auto-lock (settingsGet works without the MRK). Carries the reserved section id
-   * `vault-settings` (the nav's top entry jumps here).
-   * @param {{ mode: string, vaults: Array<{ vaultId: string, label: string }> }} view
+   * auto-lock + import + master-key management (with the compromise entry at its bottom).
+   * While LOCKED: unlock/recover banner + auto-lock (settingsGet works without the MRK) +
+   * the compromise entry below the Auto-lock block (R4 amendment). The persistent
+   * compromise completion card renders in BOTH states when a report is held (R8).
+   * Carries the reserved section id `vault-settings` (the nav's top entry jumps here).
+   * @param {{ mode: string, vaults: Array<{ vaultId: string, label: string }>, adminProvisioned: boolean, compromiseReport: ({ admin: boolean, vaultIds: string[] } | null) }} view
    * @returns {HTMLElement}
    */
   function buildSettingsSection(view) {
@@ -898,9 +1021,19 @@ function init() {
       // Import / Export — two buttons, each opening a page-level modal that selects the vault +
       // file location (import then hands off to the chrome-owned secret sheet; DD2/DD5).
       section.appendChild(buildImportExportSection(view.vaults));
-      // Master-key management — change master / rotate recovery / admin rotate-provision. Each
-      // routes to a chrome-owned sheet; NO master-equivalent secret here (DD5).
-      section.appendChild(buildMasterKeySection());
+      // The persistent "Everything rotated" card (R8) — above Master-key management,
+      // matching the ruled prototype placement.
+      if (view.compromiseReport) section.appendChild(buildCompromiseCard(view.compromiseReport, view.vaults));
+      // Master-key management — change master / rotate recovery / admin rotate-provision +
+      // the compromise entry at its bottom (R2). Each routes to a chrome-owned sheet; NO
+      // master-equivalent secret here (DD5).
+      section.appendChild(buildMasterKeySection(view));
+    } else {
+      // LOCKED (R4 + amendment): the compromise entry sits below the Auto-lock block —
+      // consistent bottom-of-Settings placement — preceded by the persistent card when a
+      // report is held (the card renders regardless of the lock state the page lands in).
+      if (view.compromiseReport) section.appendChild(buildCompromiseCard(view.compromiseReport, view.vaults));
+      section.appendChild(buildCompromiseEntry());
     }
     return section;
   }
@@ -1061,9 +1194,15 @@ function init() {
    * master-equivalent secret is entered or shown here — every secret entry + the one-time
    * recovery/admin displays live on the sheet (DD2/DD5). Export moved to the "Import / Export"
    * subsection (M12 F5 HAT, I14). `textContent`-only.
+   *
+   * M18 F2 L4: the admin kebab item's label renders the PROVISION state from the
+   * additive `adminProvisioned` vault-state bit (flight DD1 — a compromise rotation
+   * removes the admin provision; the same existing action doubles as the from-scratch
+   * provision), and the compromise-mode entry row (R2) sits at the section's bottom.
+   * @param {{ adminProvisioned: boolean }} view
    * @returns {HTMLElement}
    */
-  function buildMasterKeySection() {
+  function buildMasterKeySection(view) {
     const section = el('div', 'vault-subsection vault-masterkey-section');
     // The three operator-secret actions are folded into a kebab beside the heading to cut
     // page noise (operator, M12 F5 HAT) — each still routes page → main → chrome sheet; the
@@ -1090,7 +1229,10 @@ function init() {
             }
           },
           {
-            label: 'Provision / rotate admin key',
+            // Relabeled state, existing action (flight DD1): unprovisioned (fresh
+            // profile pre-provision, or post-compromise-rotation) reads as the
+            // from-scratch provision; provisioned keeps the dual wording.
+            label: view.adminProvisioned ? 'Provision / rotate admin key' : 'Provision admin key',
             onSelect: () => {
               Promise.resolve(bridge.requestRotateAdmin()).catch(() => {});
             }
@@ -1106,6 +1248,9 @@ function init() {
         'Change your master password, or rotate your recovery or admin key. You’ll confirm on a secure prompt — nothing secret is typed on this page.'
       )
     );
+    // The compromise-mode entry (R2): the ruled single visible affordance, at the
+    // bottom of Master-key management (the bottom of the unlocked Settings flow).
+    section.appendChild(buildCompromiseEntry());
     return section;
   }
 

@@ -486,6 +486,14 @@ async function main() {
         // chrome-side trigger — the audit hooks open them directly.
         { label: 'sheet:vault-change-master', open: 'openVaultChangeMasterOverlayForAudit()' },
         { label: 'sheet:vault-recover', open: 'openVaultRecoverOverlayForAudit()' },
+        // M18 F2 L4 (compromise-mode rotation, DD4/DD9): the two compromise credential
+        // sheets. vault-compromise is the master branch (current + new + confirm + the
+        // recovery switch link); vault-compromise-recover is the recovery branch
+        // (recovery key + new + confirm). Both dialog-style, Escape-dismissible, with a
+        // danger-styled "Rotate everything" submit and an aria-live pending note. Raise
+        // no chrome-side trigger — the audit hooks open them directly.
+        { label: 'sheet:vault-compromise', open: 'openVaultCompromiseOverlayForAudit()' },
+        { label: 'sheet:vault-compromise-recover', open: 'openVaultCompromiseRecoverOverlayForAudit()' },
         // M12 F4 Leg 3 (admin-key-provision, DD9): the one-time admin-key display. Read-only,
         // DISMISS-DISABLED (only its explicit acknowledge closes it); the master-password step-up
         // reuses vault-stepup (already covered above). Raises no chrome-side trigger — the audit hook

@@ -341,6 +341,16 @@ function registerBrowserIpc({
     chromeForTab(event.sender.id)?.send('vault-request-recover');
     return { ok: true };
   });
+  // M18 F2 L4 (compromise-mode rotation): the compromise-rotation trigger — a BARE
+  // trigger (no secret) fired by the vault page's confirm modal Continue, routing to
+  // the owning chrome, which opens the vault-compromise sheet (master branch; the
+  // sheet's own switch affordance reopens the recovery branch). Reachable from BOTH
+  // lock states (R4 — the sheet doubles as unlock on the locked path). Every secret
+  // + the one-time recovery display live on chrome-owned sheets, never this channel.
+  registerInternalHandler(ipcMain, 'internal-vault-request-compromise', (event) => {
+    chromeForTab(event.sender.id)?.send('vault-request-compromise');
+    return { ok: true };
+  });
 
   ipcMain.on('guest-media-list', (event, mediaList) => {
     const wcId = event.sender.id;

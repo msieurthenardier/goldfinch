@@ -665,3 +665,37 @@ THE FULL SPEC:
 
 Signal `[READY]` now.
 ```
+
+- **Vault-page click targets (upgrades the coordinates law)**: the vault
+  page scrolls *smoothly* — `getBoundingClientRect` after a bare
+  `scrollTo(0,0)` reads mid-animation coordinates and a `click` result of
+  `ok:true` is never evidence the click hit anything. Recipe:
+  `scrollTo({behavior:'instant'})` → loop until `scrollY===0` → double-rAF
+  → rect → verify in-viewport → click — see
+  `tests/behavior/compromise-mode-rotation/runs/2026-09-02-12-32-45.md`
+  (Executor closing).
+- **Poll-until-false + per-tick file hashing** is the load-bearing pattern
+  for any operator-paced sheet flow with disk consequences: ~2s ticks of
+  `enumerateWindows` + stat/sha256 of every relevant file, started BEFORE
+  the operator's first action, terminating only on the sheetVisible
+  true→false transition (explicit recorded safety cap, never a silent
+  sample cutoff); mirror every hash to a second location at capture time.
+  Single-shot samples around operator sheet work are near worthless — see
+  both compromise-mode-rotation runs (2026-09-02).
+- **The vault page does not live-update access-key lists** after a mint —
+  judge access-key presence from disk envelopes (`envelopes[].keyId`),
+  never from an already-rendered page (observed twice, run
+  2026-09-02-12-32-45; squawk 0059).
+- **Completion-card reports can be content-identical across rotations**
+  (last-rotation-wins) — card text cannot prove WHICH rotation's report is
+  rendered; the per-tick hash timeline showing no intervening rotation is
+  the disambiguator. Bank card captures within seconds of the ack — see
+  run 2026-09-02-02-22-01's checkpoint-7 reclassification and run
+  2026-09-02-12-32-45's checkpoint 7.
+- **Old-material provisioning via throwaway rotation**: a pre-run
+  throwaway rotation's reveal is a genuine prior-generation credential;
+  pair every keyed negative probe with an own-generation positive control
+  (live-fails + snapshot-succeeds) — the decisive pattern for sever
+  claims. The vault store's Electron-free `load()` runs `recover()`
+  (write-capable in principle): bracket any live-profile harness run with
+  before/after hash verification.

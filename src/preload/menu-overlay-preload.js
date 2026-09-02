@@ -81,6 +81,16 @@ contextBridge.exposeInMainWorld('menuOverlay', {
   // `newSecret` are Uint8Arrays (the confirm check is renderer-side), NEVER sendActivated. Returns
   // { ok }; false re-prompts (wrong recovery key), true closes it (the store installs the MRK).
   recoverMaster: (payload) => ipcRenderer.invoke('menu-overlay:vault-recover', payload),
+  // M18 F2 L4 (compromise-mode rotation): the vault-compromise sheet's TWO-SECRET channel —
+  // `oldSecret` + `newSecret` are Uint8Arrays (the confirm check is renderer-side), NEVER
+  // sendActivated. Returns { ok, reason? }; ok:false re-prompts with the ruled inline copy per the
+  // non-secret reason ('reuse'|'auth'|'busy'|…); ok:true closes it (main then opens the
+  // dismiss-locked recovery-show sheet with the new one-time key — never this invoke reply).
+  compromiseRotate: (payload) => ipcRenderer.invoke('menu-overlay:vault-compromise', payload),
+  // M18 F2 L4: the vault-compromise-recover sheet's TWO-SECRET channel — the compromise flow's
+  // recovery branch (`recoverySecret` + `newSecret`, Uint8Arrays). Same { ok, reason? } contract
+  // as compromiseRotate above.
+  compromiseRotateRecover: (payload) => ipcRenderer.invoke('menu-overlay:vault-compromise-recover', payload),
   // M12 F3 Leg 4: the recovery-show Copy — main owns the OS clipboard (string-only, the
   // chrome-clipboard-write precedent); a one-way send, sender-validated main-side.
   copyText: (text) => ipcRenderer.send('menu-overlay:copy-text', { text }),

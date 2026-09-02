@@ -115,6 +115,24 @@ interface MenuOverlayBridge {
     recoverySecret: Uint8Array;
     newSecret: Uint8Array;
   }): Promise<{ ok: boolean }>;
+  /** sheet → main: the DEDICATED compromise-mode rotation channel (M18 F2 L4), master
+   * branch. Current + new master passwords ride as Uint8Arrays (confirm check is
+   * renderer-side). Returns { ok, reason? }; false re-prompts with the ruled inline copy
+   * per the non-secret reason, true closes it (main opens the dismiss-locked
+   * recovery-show sheet — the one-time key never rides this reply). */
+  compromiseRotate(payload: {
+    token: number;
+    oldSecret: Uint8Array;
+    newSecret: Uint8Array;
+  }): Promise<{ ok: boolean; reason?: string }>;
+  /** sheet → main: the compromise flow's RECOVERY branch (M18 F2 L4). The recovery key +
+   * new master password ride as Uint8Arrays. Same { ok, reason? } contract as
+   * compromiseRotate. */
+  compromiseRotateRecover(payload: {
+    token: number;
+    recoverySecret: Uint8Array;
+    newSecret: Uint8Array;
+  }): Promise<{ ok: boolean; reason?: string }>;
   /** sheet → main: copy a string to the OS clipboard (M12 F3 Leg 4 recovery-show Copy).
    * One-way; sender-validated main-side. */
   copyText(text: string): void;

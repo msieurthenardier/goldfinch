@@ -54,7 +54,7 @@ function createWindowFactory(deps) {
     getHistoryRecorder,
     faviconFetcher,
     popupRegistry,
-    clearPendingAdoptAdminKey,
+    releaseVaultHoldsForWindow,
     defer,
     logger
   } = deps;
@@ -254,13 +254,19 @@ function createWindowFactory(deps) {
       // head, not queued challenges (load-bearing; unit-pinned). Every native
       // login callback is answered before any view teardown runs.
       authChallenges?.cancelForWindow(record);
-      // M17 F4 L3 (AC4): drop any pending fresh-adopt admin key held for THIS
-      // window and clear the store's idle-autolock suppression. The recovery-show
-      // sheet is torn down just below without an ack, so the ack-driven cleanup
-      // (AC3) never runs for it. Keyed by the window's chrome id (still resolvable
-      // during 'close', before registry.remove on 'closed'); a no-op when the
-      // window held nothing pending.
-      clearPendingAdoptAdminKey?.(chromeForAttachment(win)?.id);
+      // M17 F4 L3 (AC4), re-modeled M18 F2 L4 (flight DD5): drop any pending
+      // fresh-adopt admin key held for THIS window and release ALL of this
+      // window's holds on the refcounted autolock-suppression holder. The
+      // recovery-show sheet is torn down just below without an ack, so the
+      // ack-driven cleanup never runs for it. The holder un-suppresses only when
+      // NO window holds anything pending — another window's live dismiss-locked
+      // reveal keeps suppression up (the DD5 cross-flow hazard this migration
+      // closes). A pending COMPROMISE reveal survives the window (H2
+      // hold-and-resurface — only its hold is released; the reveal re-keys and
+      // re-holds at the next chrome boot). Keyed by the window's chrome id (still
+      // resolvable during 'close', before registry.remove on 'closed'); a no-op
+      // when the window held nothing pending.
+      releaseVaultHoldsForWindow?.(chromeForAttachment(win)?.id);
       // M14 F2 L1 (DD1f): popups close WITH their owner window — after the
       // window-wide auth cancel above (unit-pinned to stay first), before any
       // sheet/overlay teardown. closeAllForRecord itself runs the DD1f order

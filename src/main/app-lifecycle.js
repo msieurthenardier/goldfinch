@@ -68,6 +68,11 @@ function registerAppLifecycle({
   buildSessionSnapshot,
   appDb,
   authChallenges,
+  // M18 F2 L4 (H2 resurface): optional hook fired after a chrome's
+  // window-boot-config invoke is served (queued sends flushed, subscriptions
+  // provably live) — main re-keys any orphaned pending compromise reveal to
+  // the freshly booted window there. Optional: offline harnesses omit it.
+  onChromeBooted,
   getAllWindows,
   argv,
   env,
@@ -151,6 +156,11 @@ function registerAppLifecycle({
       const [channel, payload] = buildMessage();
       chrome.send(channel, payload);
     }
+    // M18 F2 L4 (H2 resurface): the chrome document's subscriptions are provably
+    // live here (this invoke is issued from module tail code, past every onVault*
+    // registration), so this is the earliest safe point to re-open an orphaned
+    // pending compromise reveal's recovery-show sheet on the new window.
+    onChromeBooted?.(rec);
     return rec.restoreTabs ? { bootTab: false, restoreTabs: rec.restoreTabs } : { bootTab: !rec.noBootTab };
   });
   ipcMain.on('app-quit', () => app.quit());

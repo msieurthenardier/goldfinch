@@ -275,77 +275,98 @@ test('absent popupRegistry dep is tolerated at window close (optional-chained)',
 });
 
 // ---------------------------------------------------------------------------
-// M17 F4 L3 (AC4, squawk 0051) — pending fresh-adopt admin-key window-teardown
-// cleanup. main.js itself cannot be require()'d under node:test (see
-// test/helpers/source-scan.js's "NO TEST IN THIS REPO LOADS main.js"), so these
-// tests exercise the window-factory close-handler wiring against a fake
-// `clearPendingAdoptAdminKey` delegate that models main.js's real
-// `clearAdoptAdminKeyForWindow` contract byte-for-byte: delete the chrome id's
-// entry from the pending Map, and clear the store's `_suspendAutoLock`
-// suppression once the map is empty (main.js:856-864).
+// M17 F4 L3 (AC4, squawk 0051), RE-MODELED M18 F2 L4 (flight DD5) — window-close
+// release of the window's vault suppression HOLDS. main.js itself cannot be
+// require()'d under node:test (see test/helpers/source-scan.js's "NO TEST IN
+// THIS REPO LOADS main.js"), so these tests exercise the window-factory
+// close-handler wiring against a fake `releaseVaultHoldsForWindow` delegate
+// modeling main.js's real contract — now built over the REAL refcounted
+// suppression holder (src/main/vault/autolock-suppression.js), NOT the retired
+// per-flow `size === 0` boolean discipline: drop this window's pending adopt
+// admin-key entry and release ALL of this window's holds; the store flag is
+// holders > 0, so suppression stays up while ANY other window (either flow —
+// adopt or compromise) still holds a pending reveal.
 // ---------------------------------------------------------------------------
 
-function pendingAdoptAdminKeyFake(initialEntries) {
-  const pending = new Map(initialEntries);
-  const store = { suspendAutoLock: true };
+const { createSuppressionHolder } = require('../../src/main/vault/autolock-suppression');
+
+function vaultHoldsFake(initialHolds) {
+  // The store's setAutoLockSuspended flag, driven by the REAL holder.
+  const store = { suspendAutoLock: false };
+  const holder = createSuppressionHolder({
+    setSuspended: (on) => {
+      store.suspendAutoLock = on;
+    }
+  });
+  const pendingAdoptKeys = new Map();
+  for (const [chromeId, reason, adoptKey] of initialHolds) {
+    holder.acquire(chromeId, reason);
+    if (adoptKey !== undefined) pendingAdoptKeys.set(chromeId, adoptKey);
+  }
   const calls = [];
-  const clearPendingAdoptAdminKey = (chromeId) => {
+  // Models main.js's releaseVaultHoldsForWindow byte-for-byte.
+  const releaseVaultHoldsForWindow = (chromeId) => {
     calls.push(chromeId);
-    if (chromeId == null || !pending.has(chromeId)) return;
-    pending.delete(chromeId);
-    if (pending.size === 0) store.suspendAutoLock = false;
+    if (chromeId == null) return;
+    pendingAdoptKeys.delete(chromeId);
+    holder.releaseWindow(chromeId);
   };
-  return { pending, store, calls, clearPendingAdoptAdminKey };
+  return { holder, store, pendingAdoptKeys, calls, releaseVaultHoldsForWindow };
 }
 
-test('window close clears the pending adopt admin key for the resolved chrome id and clears autolock suspension', () => {
-  const fake = pendingAdoptAdminKeyFake([[900, 'admin-key-b64']]);
+test("window close releases the resolved chrome id's holds on the holder and un-suppresses once nothing remains held", () => {
+  const fake = vaultHoldsFake([[900, 'adopt', 'admin-key-b64']]);
+  assert.equal(fake.store.suspendAutoLock, true, 'precondition: the adopt hold suspends autolock');
   const h = createHarness({
-    clearPendingAdoptAdminKey: fake.clearPendingAdoptAdminKey,
+    releaseVaultHoldsForWindow: fake.releaseVaultHoldsForWindow,
     chromeForAttachment: (win) => (win ? { id: 900 } : null)
   });
   const rec = h.factory.createWindow();
   rec.win.emit('close');
 
   assert.deepEqual(fake.calls, [900], 'called with the resolved chrome id');
-  assert.equal(fake.pending.has(900), false, 'the pending admin-key entry is removed');
-  assert.equal(fake.pending.size, 0, 'the pending map is emptied');
-  assert.equal(fake.store.suspendAutoLock, false, '_suspendAutoLock is cleared once nothing remains pending');
+  assert.equal(fake.pendingAdoptKeys.has(900), false, 'the pending admin-key entry is removed');
+  assert.equal(fake.holder.count(), 0, "the window's holds are released");
+  assert.equal(fake.store.suspendAutoLock, false, 'holders > 0 is the flag — zero holders un-suspends');
 });
 
-test('window close leaves autolock suspended while another window still has a pending adopt admin key', () => {
-  const fake = pendingAdoptAdminKeyFake([
-    [900, 'this-window-key'],
-    [901, 'other-window-key']
+test("window close leaves autolock suspended while another window holds a pending reveal — EITHER flow's (the DD5 cross-flow pin)", () => {
+  // Window 900 holds an adopt reveal; window 901 holds a COMPROMISE reveal. Closing
+  // 900 releases only 900's hold — under the retired two-boolean discipline this is
+  // exactly the case where whichever flow emptied first would have un-suppressed
+  // while 901's dismiss-locked one-time display was still on screen.
+  const fake = vaultHoldsFake([
+    [900, 'adopt', 'this-window-key'],
+    [901, 'compromise']
   ]);
   const h = createHarness({
-    clearPendingAdoptAdminKey: fake.clearPendingAdoptAdminKey,
+    releaseVaultHoldsForWindow: fake.releaseVaultHoldsForWindow,
     chromeForAttachment: (win) => (win ? { id: 900 } : null)
   });
   const rec = h.factory.createWindow();
   rec.win.emit('close');
 
   assert.deepEqual(fake.calls, [900]);
-  assert.equal(fake.pending.has(900), false, "this window's entry is removed");
-  assert.equal(fake.pending.has(901), true, "another window's pending entry is untouched");
-  assert.equal(fake.store.suspendAutoLock, true, 'suspension stays while another window still holds a pending key');
+  assert.equal(fake.pendingAdoptKeys.has(900), false, "this window's adopt entry is removed");
+  assert.equal(fake.holder.isHeld(901, 'compromise'), true, "the other window's compromise hold is untouched");
+  assert.equal(fake.store.suspendAutoLock, true, "suspension stays while another window's reveal is pending");
 });
 
-test('window close calls clearPendingAdoptAdminKey with undefined when the window resolves no chrome (no-op, per the real contract)', () => {
-  const fake = pendingAdoptAdminKeyFake([[900, 'admin-key-b64']]);
+test('window close calls releaseVaultHoldsForWindow with undefined when the window resolves no chrome (no-op, per the real contract)', () => {
+  const fake = vaultHoldsFake([[900, 'adopt', 'admin-key-b64']]);
   const h = createHarness({
-    clearPendingAdoptAdminKey: fake.clearPendingAdoptAdminKey,
+    releaseVaultHoldsForWindow: fake.releaseVaultHoldsForWindow,
     chromeForAttachment: () => null
   });
   const rec = h.factory.createWindow();
   rec.win.emit('close');
 
   assert.deepEqual(fake.calls, [undefined]);
-  assert.equal(fake.pending.size, 1, 'an unrelated window close never touches a pending entry it does not own');
+  assert.equal(fake.pendingAdoptKeys.size, 1, 'an unrelated window close never touches a hold it does not own');
   assert.equal(fake.store.suspendAutoLock, true);
 });
 
-test('absent clearPendingAdoptAdminKey dep is tolerated at window close (optional-chained)', () => {
+test('absent releaseVaultHoldsForWindow dep is tolerated at window close (optional-chained)', () => {
   const h = createHarness({ chromeForAttachment: (win) => (win ? { id: 900 } : null) });
   const rec = h.factory.createWindow();
   assert.doesNotThrow(() => rec.win.emit('close'));

@@ -105,6 +105,28 @@ test('internal sender: rotate-recovery / change-master / recover each forward th
   ]);
 });
 
+// ---------------------------------------------------------------------------
+// Compromise-mode rotation trigger (M18 F2 L4) — a BARE cross-renderer trigger,
+// origin-gated, forwarding vault-request-compromise to the owning chrome (which
+// opens the vault-compromise sheet; reachable from BOTH lock states, R4).
+// ---------------------------------------------------------------------------
+
+test('internal sender: request-compromise is registered and forwards its DISTINCT bare trigger', () => {
+  const { wrapped, sends } = makeCapturingHarness();
+  assert.equal(wrapped.has('internal-vault-request-compromise'), true);
+  assert.deepEqual(wrapped.get('internal-vault-request-compromise')(internalEvent(5)), { ok: true });
+  assert.deepEqual(sends, [['vault-request-compromise', undefined]]);
+});
+
+test('non-internal sender is REJECTED for the compromise trigger (no forward)', () => {
+  const { wrapped, sends } = makeCapturingHarness();
+  assert.throws(
+    () => wrapped.get('internal-vault-request-compromise')(webEvent(9)),
+    /forbidden: non-internal sender for internal-vault-request-compromise/
+  );
+  assert.deepEqual(sends, []);
+});
+
 test('non-internal sender is REJECTED for each rotation/recover trigger (no forward)', () => {
   const { wrapped, sends } = makeCapturingHarness();
   for (const ch of [

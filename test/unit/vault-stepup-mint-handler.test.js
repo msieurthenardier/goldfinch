@@ -11,8 +11,12 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const os = require('node:os');
+const path = require('node:path');
+const fs = require('node:fs');
 
 const { registerOverlayIpc } = require('../../src/main/register-overlay-ipc');
+const vaultStoreModule = require('../../src/main/vault/vault-store');
 
 function makeIpc() {
   const handlers = new Map();
@@ -177,4 +181,147 @@ test('a non-Uint8Array secret → { ok:false }', async () => {
   const res = await handler({ sender: sheetSender }, { token: 7, secret: 'hunter2' /* string */, target: 'work' });
   assert.deepEqual(res, { ok: false });
   assert.equal(captured.called, 0);
+});
+
+// ---------------------------------------------------------------------------
+// REAL-STORE flow shape (M18 F2 grounding anomaly, 2026-09-01)
+// ---------------------------------------------------------------------------
+// The harness above stubs vaultMintAccessKey with a FAKE that only ever models
+// { ok:false } (a mapped VaultAuthError) or a caller-chosen throw — which is
+// exactly why this suite stayed green while the live app showed "Wrong master
+// password" to an operator typing the CORRECT password. The real failure class
+// was never modeled: on a fresh profile a jar's `.gfvault` file does not exist
+// until the first credential is saved into that jar (lazy creation), so the
+// REAL delegate chain (main.js vaultMintAccessKey → store.mintAccessKey) gets
+// past the step-up unwrap (the password IS correct) and then throws
+// VaultStateError('no vault for "<jar>" — save an item first'). That is a
+// REJECTED invoke, not { ok:false } — and menu-overlay.js's submitVaultStepup
+// catch collapses EVERY rejection into the same 'Wrong master password.
+// Nothing was minted.' copy. Pre-existing M12 F3 Leg 5 behavior (reproduced
+// byte-identical at the pre-flight commit), surfaced by the operator's fresh
+// dev profile — logged for a squawk, NOT fixed in this flight.
+//
+// These tests drive the REAL registered handler + the main.js delegate shape
+// (verbatim: VaultAuthError → { ok:false }, everything else propagates) over a
+// REAL VaultStore, pinning all three real-flow outcomes so the auth/state
+// discrimination cannot regress silently again.
+
+// Memory-cheap scrypt for fast round-trips (the vault-store.test.js idiom).
+const FAST_SCRYPT = { algo: 'scrypt', N: 2 ** 12, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
+const MASTER = 'correct horse battery staple';
+
+async function makeRealStoreHarness() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gf-mint-real-'));
+  const store = vaultStoreModule.load(dir, {
+    scryptParams: FAST_SCRYPT,
+    getAutoLockMinutes: () => 10,
+    listJars: () => [{ id: 'work' }, { id: 'personal' }]
+  });
+  await store.setup({ masterPassword: MASTER });
+
+  // The main.js delegate, verbatim shape: ONLY VaultAuthError maps to
+  // { ok:false }; every other failure class (VaultStateError included)
+  // propagates and REJECTS the invoke.
+  const vaultMintAccessKey = async (buf, target) => {
+    try {
+      const { secret, keyId } = await store.mintAccessKey(target, { masterPassword: buf });
+      return { ok: true, secret, keyId };
+    } catch (e) {
+      if (e instanceof vaultStoreModule.VaultAuthError) return { ok: false };
+      throw e;
+    }
+  };
+
+  const ipcMain = makeIpc();
+  const closeCalls = [];
+  const chromeSends = [];
+  const sheetSender = { isDestroyed: () => false };
+  const win = { id: 1 };
+  const sheet = {
+    getView: () => ({ webContents: sheetSender }),
+    // The REAL open shape: the chrome opens menuType 'vault-stepup' (mint mode)
+    // for the page's mint request — pinned here so a future menuType predicate
+    // on this channel must admit it.
+    getCurrentMenu: () => ({ token: 7, menuType: 'vault-stepup' }),
+    closeMenuOverlay: (reason, token) => closeCalls.push([reason, token])
+  };
+  const rec = { sheet, win };
+  registerOverlayIpc({
+    ipcMain,
+    registry: { records: () => [rec], getWindowForChrome: () => null },
+    chromeForAttachment: (w) =>
+      w === win ? { send: (channel, payload) => chromeSends.push([channel, payload]) } : null,
+    chromeForTab: () => null,
+    sanitizeActivatedValue: () => undefined,
+    vaultMintAccessKey
+  });
+  return {
+    dir,
+    store,
+    handler: ipcMain.handlers.get('menu-overlay:vault-stepup-mint'),
+    sheetSender,
+    closeCalls,
+    chromeSends
+  };
+}
+
+test('REAL store: jar WITH a vault file — correct password mints { ok:true } (the M18 F2 gated wrapper + version threading are sound)', async () => {
+  const h = await makeRealStoreHarness();
+  try {
+    // First credential save lazily creates work.gfvault — the state the mint UI assumes.
+    h.store.saveItem('work', { type: 'login', title: 'x', origin: 'https://x.test', username: 'u', password: 'p' });
+    const res = await h.handler(
+      { sender: h.sheetSender },
+      { token: 7, secret: new TextEncoder().encode(MASTER), target: 'work' }
+    );
+    assert.deepEqual(res, { ok: true });
+    assert.deepEqual(h.closeCalls, [['activated', 7]]);
+    assert.equal(h.chromeSends.length, 1);
+    assert.equal(h.chromeSends[0][0], 'vault-accesskey-show');
+    assert.equal(typeof h.chromeSends[0][1].secret, 'string');
+    assert.equal(typeof h.chromeSends[0][1].keyId, 'string');
+  } finally {
+    fs.rmSync(h.dir, { recursive: true, force: true });
+  }
+});
+
+test('REAL store: jar with NO vault file (fresh profile) — a CORRECT password REJECTS with VaultStateError, which the sheet renders as the wrong-password copy (grounding anomaly 2026-09-01; pre-existing, squawked)', async () => {
+  const h = await makeRealStoreHarness();
+  try {
+    // No item ever saved into 'personal' → no personal.gfvault (lazy creation).
+    // The operator's exact live state: setUp, unlocked, jar listed, count 0.
+    await assert.rejects(
+      h.handler({ sender: h.sheetSender }, { token: 7, secret: new TextEncoder().encode(MASTER), target: 'personal' }),
+      (err) => {
+        // The password was CORRECT — the step-up unwrap succeeded — yet the op
+        // fails with a non-auth STATE error. menu-overlay.js's submitVaultStepup
+        // catch turns this rejection into { ok:false } and shows 'Wrong master
+        // password. Nothing was minted.' — the misleading copy the operator saw.
+        assert.equal(err instanceof vaultStoreModule.VaultStateError, true);
+        assert.match(err.message, /no vault for "personal"/);
+        assert.match(err.message, /save an item first/);
+        return true;
+      }
+    );
+    assert.deepEqual(h.closeCalls, [], 'sheet not closed — it re-prompts with the (wrong) copy');
+    assert.deepEqual(h.chromeSends, [], 'nothing minted, no accesskey-show');
+  } finally {
+    fs.rmSync(h.dir, { recursive: true, force: true });
+  }
+});
+
+test('REAL store: a genuinely WRONG password → { ok:false } (VaultAuthError mapped) — indistinguishable sheet-side from the no-vault rejection above', async () => {
+  const h = await makeRealStoreHarness();
+  try {
+    h.store.saveItem('work', { type: 'login', title: 'x', origin: 'https://x.test', username: 'u', password: 'p' });
+    const res = await h.handler(
+      { sender: h.sheetSender },
+      { token: 7, secret: new TextEncoder().encode('not the master password'), target: 'work' }
+    );
+    assert.deepEqual(res, { ok: false });
+    assert.deepEqual(h.closeCalls, []);
+    assert.deepEqual(h.chromeSends, []);
+  } finally {
+    fs.rmSync(h.dir, { recursive: true, force: true });
+  }
 });

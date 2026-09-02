@@ -399,6 +399,10 @@ contextBridge.exposeInMainWorld('goldfinch', {
   onVaultRequestRotateRecovery: (cb) => ipcRenderer.on('vault-request-rotate-recovery', () => cb()),
   onVaultRequestChangeMaster: (cb) => ipcRenderer.on('vault-request-change-master', () => cb()),
   onVaultRequestRecover: (cb) => ipcRenderer.on('vault-request-recover', () => cb()),
+  // Compromise-mode rotation trigger (M18 F2 L4). A BARE trigger (no secret) → the chrome
+  // opens the vault-compromise sheet (master branch; its switch affordance reopens the
+  // recovery branch). The one-time recovery key reuses onVaultRecoveryShow (post-commit).
+  onVaultRequestCompromise: (cb) => ipcRenderer.on('vault-request-compromise', () => cb()),
   // Admin-key provision/rotate cross-renderer triggers (M12 F4 Leg 3 admin-key-provision, DD4).
   // onVaultRequestRotateAdmin is a BARE trigger (no secret) → the chrome opens the vault-stepup
   // sheet in mode 'rotate-admin'. onVaultAdminKeyShow carries the NEW { adminPrivateKey } (main →

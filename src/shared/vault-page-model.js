@@ -18,7 +18,8 @@
 
 /**
  * @typedef {{ vaultId: string, label: string, count?: number }} VaultRow
- * @typedef {{ mode: 'not-set-up' | 'locked' | 'unlocked', vaults: VaultRow[] }} VaultView
+ * @typedef {{ admin: boolean, vaultIds: string[] }} CompromiseReport
+ * @typedef {{ mode: 'not-set-up' | 'locked' | 'unlocked', vaults: VaultRow[], adminProvisioned: boolean, compromiseReport: CompromiseReport | null }} VaultView
  * @typedef {{ id: string, kind: 'global' | 'jar', label: string, count?: number, color?: string|null }} VaultChildEntry
  * @typedef {(
  *   { id: string, kind: 'settings', label: string } |
@@ -42,7 +43,16 @@ const VAULTS_ID = 'vaults';
  * vault row is normalized to a `{ vaultId, label }` string pair (a missing label
  * falls back to the id) so the page always renders text via `textContent`.
  *
- * @param {{ setUp?: unknown, unlocked?: unknown, vaults?: unknown }} [state]
+ * M18 F2 L4 (flight DD1/DD6): the view also carries `adminProvisioned` (drives
+ * the Master-key section's provision state; false unless the payload says true)
+ * and the normalized `compromiseReport` behind the persistent "Everything
+ * rotated" card. The report rides BOTH the locked and unlocked views (R8: the
+ * card renders regardless of the lock state the page lands in) and is dropped —
+ * along with adminProvisioned — for 'not-set-up' (a rotated profile is by
+ * definition set up). A malformed report normalizes to null; vaultIds keeps
+ * string entries only (textContent-safe).
+ *
+ * @param {{ setUp?: unknown, unlocked?: unknown, vaults?: unknown, adminProvisioned?: unknown, compromiseReport?: unknown }} [state]
  * @returns {VaultView}
  */
 function selectVaultView(state) {
@@ -61,9 +71,61 @@ function selectVaultView(state) {
     });
   }
 
-  if (!setUp) return { mode: 'not-set-up', vaults: [] };
-  if (!unlocked) return { mode: 'locked', vaults };
-  return { mode: 'unlocked', vaults };
+  const adminProvisioned = s.adminProvisioned === true;
+  /** @type {CompromiseReport | null} */
+  let compromiseReport = null;
+  const rawReport = s.compromiseReport;
+  if (rawReport && typeof rawReport === 'object' && !Array.isArray(rawReport)) {
+    const r = /** @type {{ admin?: unknown, vaultIds?: unknown }} */ (rawReport);
+    compromiseReport = {
+      admin: r.admin === true,
+      vaultIds: Array.isArray(r.vaultIds) ? r.vaultIds.filter((id) => typeof id === 'string' && id) : []
+    };
+  }
+
+  if (!setUp) return { mode: 'not-set-up', vaults: [], adminProvisioned: false, compromiseReport: null };
+  if (!unlocked) return { mode: 'locked', vaults, adminProvisioned, compromiseReport };
+  return { mode: 'unlocked', vaults, adminProvisioned, compromiseReport };
+}
+
+/**
+ * Build the "Everything rotated" card's revoked-keys ROW MODEL (M18 F2 L4, R8) —
+ * extracted from the page's inline card builder after behavior-test run
+ * 2026-09-02-02-22-01 so the row rendering is unit-pinnable (the vault-page-model
+ * extraction precedent; leg 4 had reassigned the card's DOM pins to the behavior
+ * test, leaving NO unit layer over this mapping). Pure: report + vault rows in,
+ * display rows out.
+ *
+ * Order and labels are the R8 ruling: the admin row FIRST ("Admin key"), then one
+ * row per revoked vault in report order, each by its display label from the state's
+ * vault rows — `'global'` resolves to its display label like any other id, and an
+ * id with no matching row falls back to the raw id (textContent-safe either way).
+ * Every row carries the UNIFORM "— Revoked" hint. A rotation with nothing to
+ * revoke ({ admin: false, vaultIds: [] } — e.g. a repeat rotation on an
+ * already-severed profile) correctly yields ZERO rows: the card still renders
+ * (the report is non-null), with an empty list.
+ *
+ * @param {{ admin?: unknown, vaultIds?: unknown } | null | undefined} report
+ * @param {Array<{ vaultId: string, label: string }>} [vaults]
+ * @returns {Array<{ label: string, hint: string }>}
+ */
+function compromiseCardRows(report, vaults) {
+  /** @type {Map<string, string>} */
+  const labelById = new Map();
+  for (const v of Array.isArray(vaults) ? vaults : []) {
+    if (v && typeof v === 'object' && typeof v.vaultId === 'string' && v.vaultId) {
+      labelById.set(v.vaultId, typeof v.label === 'string' && v.label ? v.label : v.vaultId);
+    }
+  }
+  /** @type {Array<{ label: string, hint: string }>} */
+  const rows = [];
+  const r = report && typeof report === 'object' ? report : {};
+  if (r.admin === true) rows.push({ label: 'Admin key', hint: '— Revoked' });
+  for (const vaultId of Array.isArray(r.vaultIds) ? r.vaultIds : []) {
+    if (typeof vaultId !== 'string' || !vaultId) continue;
+    rows.push({ label: labelById.get(vaultId) || vaultId, hint: '— Revoked' });
+  }
+  return rows;
 }
 
 /**
@@ -112,4 +174,4 @@ function vaultNavEntries(vaults, jars) {
   ];
 }
 
-export { selectVaultView, vaultNavEntries, SETTINGS_ID, VAULTS_ID };
+export { selectVaultView, compromiseCardRows, vaultNavEntries, SETTINGS_ID, VAULTS_ID };

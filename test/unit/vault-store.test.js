@@ -695,7 +695,12 @@ test('a listJars() entry with id `global` cannot reach the manager-wide global v
 // Corrupt files surface loudly (never quarantined)
 // ---------------------------------------------------------------------------
 
-test('a corrupt manager.json throws at load and is never quarantined', async () => {
+// M18 F2 Leg 2: re-modeled from the exact-directory-listing pin (`readdirSync
+// === ['manager.json']`) to a no-UNEXPECTED-files pin — load-time transaction
+// recovery may transiently create/remove journal files in `vaults/`, but the
+// POST-recovery state must still contain nothing beyond the expected vault
+// files (here: exactly the corrupt manager, untouched).
+test('a corrupt manager.json throws at load, is never quarantined, and no unexpected files appear', async () => {
   const dir = tmpDir();
   try {
     fs.mkdirSync(path.join(dir, 'vaults'), { recursive: true });
@@ -706,8 +711,12 @@ test('a corrupt manager.json throws at load and is never quarantined', async () 
       (e) => e instanceof vs.VaultFormatError
     );
 
-    // The file is untouched — no rename / .bak / recreate.
-    assert.deepEqual(fs.readdirSync(path.join(dir, 'vaults')), ['manager.json']);
+    // The file is untouched — no rename / .bak / recreate — and nothing else
+    // (journal, staged, temp, quarantine files) remains in vaults/.
+    const expected = new Set(['manager.json']);
+    const unexpected = fs.readdirSync(path.join(dir, 'vaults')).filter((n) => !expected.has(n));
+    assert.deepEqual(unexpected, [], 'no unexpected files in vaults/ after a failed load');
+    assert.ok(fs.existsSync(managerPath(dir)), 'the corrupt manager.json is still present');
     assert.equal(fs.readFileSync(managerPath(dir), 'utf8'), '{{ not json');
   } finally {
     rm(dir);

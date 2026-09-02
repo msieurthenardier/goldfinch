@@ -75,6 +75,13 @@ function normalizeTotpForSave(item, unchangedSecrets) {
  *        the page Export modal can choose a location up front, then bind source→path at submit.
  *        Only needs Electron `dialog`. Gated — offline tests that omit it skip
  *        `internal-vault-pick-save-path`.
+ * @param {(() => ({ admin: boolean, vaultIds: string[] } | null))} [args.getCompromiseReport]
+ *        Session-held compromise-mode revocation report accessor (M18 F2 L4, flight DD6) — the
+ *        page's persistent "Everything rotated" card renders from it. Optional: absent (offline
+ *        harnesses) the state read reports `compromiseReport: null`.
+ * @param {(() => void)} [args.clearCompromiseReport]
+ *        Drops the session-held report — the page card's dismiss affordance. Gated — offline
+ *        tests that omit it skip `internal-vault-compromise-dismiss`.
  */
 function registerVaultIpc({
   ipcMain,
@@ -82,7 +89,9 @@ function registerVaultIpc({
   getVaultStore,
   jars,
   vaultSaveBundle,
-  vaultPickSavePath
+  vaultPickSavePath,
+  getCompromiseReport,
+  clearCompromiseReport
 }) {
   // Page state: the manager-wide `global` vault followed by each persistent jar's
   // vault, as { vaultId, label }. When the store is UNLOCKED each row also carries
@@ -109,7 +118,29 @@ function registerVaultIpc({
         }
       }
     }
-    return { setUp: store.isSetUp(), unlocked, vaults };
+    const setUp = store.isSetUp();
+    // M18 F2 L4 (flight DD1/DD6): two additive NON-SECRET fields. `adminProvisioned`
+    // (derived from the plaintext admin PUBLIC key — readable locked) drives the
+    // Master-key section's provision state; false pre-setup, and try/caught so a
+    // corrupt manager degrades to false rather than making this read throw (this
+    // handler has always been non-throwing). `compromiseReport` is the session-held
+    // revocation report behind the persistent "Everything rotated" card — null when
+    // no rotation happened this session (or the accessor isn't wired).
+    let adminProvisioned = false;
+    if (setUp) {
+      try {
+        adminProvisioned = store.adminPublicKey() !== null;
+      } catch {
+        // leave false — non-throwing.
+      }
+    }
+    return {
+      setUp,
+      unlocked,
+      vaults,
+      adminProvisioned,
+      compromiseReport: getCompromiseReport ? getCompromiseReport() : null
+    };
   });
 
   // Explicit global LOCK (M12 F5 HAT batch 1, I6). The vault page's "Lock now" button
@@ -122,6 +153,19 @@ function registerVaultIpc({
     getVaultStore().lockNow();
     return { ok: true };
   });
+
+  // Compromise-report DISMISS (M18 F2 L4, flight DD6). The page card's dismiss
+  // affordance — clones the internal-vault-lock bare-IPC idiom above: an
+  // origin-gated internal handler that mutates main-side state and returns
+  // { ok: true }, carrying NO secret in either direction and broadcasting
+  // nothing (the page refreshes itself after the invoke resolves). Gated on the
+  // clearCompromiseReport injection (offline tests omit it).
+  if (clearCompromiseReport) {
+    registerInternalHandler(ipcMain, 'internal-vault-compromise-dismiss', () => {
+      clearCompromiseReport();
+      return { ok: true };
+    });
+  }
 
   // Per-jar vault-file presence (M12 F4 Leg 6). Answers "does THIS jar have a
   // `.gfvault` file" so the jars page's Delete confirm can decide whether to surface

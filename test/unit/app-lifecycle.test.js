@@ -33,7 +33,8 @@ function makeHarness({
   platform = 'linux',
   dev = false,
   automationEnabled = false,
-  hygieneMarker = null
+  hygieneMarker = null,
+  onChromeBooted = undefined
 } = {}) {
   const events = [];
   const appListeners = new Map();
@@ -82,6 +83,9 @@ function makeHarness({
       on: (channel, fn) => ipcListeners.set(channel, fn)
     },
     sessionRuntime: { onSessionCreated: () => events.push('session-created') },
+    // M18 F2 L4 (H2 resurface): optional post-boot-config hook — passed through so
+    // the boot-config test pins its placement (after the queued-send flush).
+    onChromeBooted,
     initProfileAndStores: () => events.push('init-stores'),
     profileStores: { jars: { getDefault: () => ({ id: 'personal' }) } },
     historyStore: {
@@ -513,6 +517,33 @@ test('restore topology and boot-config keep saved tabs and flush queued chrome s
   });
   assert.equal(rec.bootConfigServed, true);
   assert.deepEqual(sent, [['adopt-tab', { wcId: 7 }]]);
+});
+
+test('window-boot-config fires the optional onChromeBooted hook AFTER the queued-send flush, with the booted record (M18 F2 L4 H2 resurface)', async () => {
+  const booted = [];
+  const h = makeHarness({
+    restore: { windows: [{ tabs: [{ url: 'https://example.com' }] }] },
+    onChromeBooted: (rec) => booted.push({ rec, flushedFirst: rec.pendingChromeSends.length === 0 })
+  });
+  await h.lifecycle.ready;
+  const sent = [];
+  const rec = {
+    bootConfigServed: false,
+    noBootTab: true,
+    restoreTabs: null,
+    pendingChromeSends: [() => ['adopt-tab', { wcId: 7 }]],
+    chromeView: { webContents: { isDestroyed: () => false, send: (...args) => sent.push(args) } }
+  };
+  h.setBootRecord(rec);
+  h.handlers.get('window-boot-config')({ sender: {} });
+  assert.equal(booted.length, 1, 'the hook fired exactly once');
+  assert.equal(booted[0].rec, rec, 'the hook receives the booted record');
+  assert.equal(booted[0].flushedFirst, true, 'queued chrome sends were flushed BEFORE the hook');
+  // And a harness with NO hook still serves boot-config (optional-chained).
+  const bare = makeHarness({ restore: { windows: [{ tabs: [] }] } });
+  await bare.lifecycle.ready;
+  bare.setBootRecord({ ...rec, pendingChromeSends: [] });
+  assert.doesNotThrow(() => bare.handlers.get('window-boot-config')({ sender: {} }));
 });
 
 test('quit path snapshots and flushes before MCP stop, then closes stores at will-quit', async () => {

@@ -588,6 +588,69 @@ body {
   color: transparent;
 }
 
+/* ---------- vault-compromise + vault-compromise-recover templates (M18 F2 L4,
+   flight DD4) ---------- Both mirror vault-change-master / vault-recover (multi-field
+   dialog card) with the compromise lede, a danger-styled "Rotate everything" submit,
+   an aria-live PENDING note for the op's latency, and (master branch) the link-styled
+   recovery switch. Reuse the .new-container-* / .text-btn card chrome. */
+#sheet-vault-compromise,
+#sheet-vault-compromise-recover {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.vault-compromise-heading {
+  font-weight: 600;
+  font-size: 14px;
+}
+.vault-compromise-lede {
+  font-size: 12px;
+  opacity: 0.8;
+  margin: 0;
+}
+.vault-compromise-error {
+  font-size: 12px;
+  color: #ff6b6b;
+  min-height: 15px; /* reserve the line so the card doesn't jump on first error */
+  line-height: 15px;
+}
+.vault-compromise-error:empty {
+  color: transparent;
+}
+.vault-compromise-pending {
+  font-size: 12px;
+  opacity: 0.8;
+  min-height: 15px; /* reserve the line so the card doesn't jump when pending shows */
+  line-height: 15px;
+}
+/* The recovery-branch switch — a link-styled text button under the credential fields. */
+.vault-compromise-switch {
+  align-self: flex-start;
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 12px;
+  text-decoration: underline;
+  opacity: 0.85;
+}
+.vault-compromise-switch:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+/* Danger-styled primary submit (the destructive whole-hierarchy re-key) — red over the
+   gold primary, mirroring the vault page's .vault-btn.danger idiom. */
+.text-btn.primary.danger {
+  background: #b3362f;
+  border-color: #b3362f;
+  color: #fff;
+}
+.text-btn.primary.danger:hover {
+  background: #c9463e;
+}
+
 .vault-accesskey-inner {
   max-width: 480px; /* fit the one-line minted secret (HAT) */
 }

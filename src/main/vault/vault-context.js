@@ -61,7 +61,7 @@ function originOf(url) {
  *   openAllWithAdminKey: (privB64: string) => Map<string, Buffer>,
  *   readVaultItems: (vaultId: string, key: Buffer) => any[],
  *   accessEnvelopeExists: (vaultId: string, keyId: string) => boolean,
- *   adminPublicKey: () => string,
+ *   adminPublicKey: () => string | null,
  * }} vaultStore  the STATELESS vault-store methods (no MRK / no singleton).
  * @property {(arg: { wcId: number, credential: any }) => any} fillDelegate  the
  *   main→preload fill effect (Leg 4 injects the real one; Leg 3 tests inject a fake).

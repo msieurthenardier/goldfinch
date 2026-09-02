@@ -1027,3 +1027,89 @@ textarea.vault-input {
   color: var(--fg);
   font-size: 13px;
 }
+
+/* ── Compromise-mode rotation (M18 F2 L4; R2/R3/R8) ── */
+
+/* The entry row (R2/R4 amendment): a plain explainer + the danger "Rotate Everything…"
+   button, at the bottom of the Settings flow in both lock states. */
+.vault-compromise-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+  align-items: flex-start;
+}
+.vault-compromise-entry .vault-lede {
+  margin: 0;
+}
+
+/* R3 confirm-modal body bits: the "What happens next" steps + the consequence line +
+   the understanding-checkbox row gating the danger Continue. */
+.vault-compromise-steps-title {
+  margin: 0;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--fg);
+}
+.vault-compromise-steps {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--fg);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.vault-compromise-consequence {
+  margin: 0;
+  color: var(--fg);
+  font-size: 13px;
+}
+.vault-compromise-check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--fg);
+  cursor: pointer;
+}
+
+/* The persistent completion card (R8): green title, ruled body copy, the uniform
+   "Revoked" rows (admin first, then per-vault by display label), and Dismiss. */
+.vault-compromise-card {
+  border: 1px solid var(--ok);
+  border-radius: 8px;
+  background: var(--bg-2);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+}
+.vault-compromise-card-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ok);
+}
+.vault-compromise-card .vault-lede {
+  margin: 0;
+}
+.vault-compromise-card-subtitle {
+  margin: 0;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--fg);
+}
+.vault-compromise-card-list {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.vault-compromise-card-key {
+  font-weight: 600;
+  color: var(--fg);
+}
+.vault-compromise-card-hint {
+  margin-left: 6px;
+  color: var(--fg-dim);
+}
