@@ -705,3 +705,49 @@ debrief rule), not at teardown.
   (clean abort, zero disk mutation — design question for the debrief:
   should security-critical sheets survive focus loss?); run log
   committed at tests/behavior/compromise-mode-rotation/runs/.
+  - **Root cause (checkpoint 7), diagnosed 2026-09-02:** NOT a wiring
+    drop. The report chain (store `compromiseRotate` return → main
+    delegate/stash → `internal-vault-state` → `selectVaultView` → card
+    rows) carries `{ admin, vaultIds }` intact at every hop — proven by
+    composing the REAL modules end-to-end (real store rotation, real
+    `registerOverlayIpc` handler, real `registerVaultIpc` surface, real
+    page model), which produced the populated report on first try
+    against the shipped code. The empty card the run captured was the
+    CORRECT report of the operator's off-script repeat rotation: disk
+    forensics show `manager.json` committed at 02:47:11Z — 85s after
+    the witnessed rotation's 02:45:46.00Z commit — so the recovery-
+    branch repeat rotation (nothing left to revoke) had already
+    overwritten the session-held report (DD6 last-rotation-wins; the
+    spec itself rules an empty list correct after a repeat rotation)
+    before the step-7 capture ran. The step-7 evidence postdated the
+    very deviation the run logged. Live corroboration: the still-
+    running session's state carries `{ admin: false, vaultIds: [] }`,
+    exactly the repeat rotation's report, and the card renders it
+    faithfully. Why the leg-4 suites couldn't adjudicate this: the
+    handler suite stubbed the rotate delegate with a CANNED `revoked`
+    and surfaced the report into a harness-local variable, so the shape
+    was asserted per-hop but never DERIVED across hops — and the card's
+    report→rows mapping had NO unit layer at all (its DOM pins were
+    reassigned to the behavior test). Fix (page-side only, no behavior
+    change, no relaunch needed): extracted the card's revoked-keys row
+    model to `vault-page-model.compromiseCardRows` (the pure-module
+    precedent) and pinned BOTH truths — populated rows (admin row
+    first, display labels, `global` resolved) and the correct
+    zero-row empty state — plus a new real-store end-to-end suite
+    (`vault-compromise-report-surface.test.js`) that would catch any
+    genuine cross-hop drop/misshape. Battery: 4118/4118 (4115 + 3
+    new), typecheck/lint/format:check clean. Re-witness note for the
+    HAT: the populated-card checkpoint needs a fresh first rotation on
+    a re-provisioned profile, and the capture must precede any repeat
+    rotation — pin capture-vs-rotation ordering in the re-run recipe.
+- 2026-09-02 — **Checkpoint-7 FAIL reclassified (FD, on disk forensics):
+  NOT a product defect.** manager.json mtime 02:47:11Z proves the
+  operator's off-script recovery-branch rotation preceded the step-7
+  capture; its correct empty report overwrote the witnessed rotation's
+  (DD6 last-rotation-wins), and the card faithfully rendered it. The
+  Validator's verdict was right on the evidence given; the populated-card
+  claim is now UNWITNESSED, not failed. Shipped anyway (the right
+  outcome): the card row model extracted pure + the missing unit layer
+  (3 tests, 4118/4118) incl. a real cross-hop end-to-end that would
+  catch any genuine drop. Re-run recipe gains: the step-7 capture must
+  precede any repeat rotation. Run-log addendum appended.

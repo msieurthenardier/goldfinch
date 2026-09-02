@@ -1,7 +1,7 @@
 // goldfinch://vault serves imports through an exact flat allowlist. These
 // specifiers intentionally describe serving paths rather than disk paths.
 // @ts-ignore — serving-path vs disk-path mismatch
-import { selectVaultView, vaultNavEntries } from './vault-page-model.js';
+import { selectVaultView, compromiseCardRows, vaultNavEntries } from './vault-page-model.js';
 import {
   MASK,
   EDITOR_LAYOUT,
@@ -955,7 +955,6 @@ function init() {
    * @returns {HTMLElement}
    */
   function buildCompromiseCard(report, vaults) {
-    const labelById = new Map(vaults.map((v) => [v.vaultId, v.label]));
     const card = el('div', 'vault-compromise-card');
     card.setAttribute('role', 'status');
     card.appendChild(el('h3', 'vault-compromise-card-title', 'Everything rotated'));
@@ -968,14 +967,15 @@ function init() {
     );
     card.appendChild(el('p', 'vault-compromise-card-subtitle', 'Revoked keys'));
     const list = el('ul', 'vault-compromise-card-list');
-    const addRow = (/** @type {string} */ label) => {
+    // Row model extracted to vault-page-model.compromiseCardRows (unit-pinned after
+    // behavior-test run 2026-09-02-02-22-01): admin row first, display labels,
+    // uniform hint; an empty report correctly yields an empty list.
+    for (const row of compromiseCardRows(report, vaults)) {
       const li = el('li');
-      li.appendChild(el('span', 'vault-compromise-card-key', label));
-      li.appendChild(el('span', 'vault-compromise-card-hint', '— Revoked'));
+      li.appendChild(el('span', 'vault-compromise-card-key', row.label));
+      li.appendChild(el('span', 'vault-compromise-card-hint', row.hint));
       list.appendChild(li);
-    };
-    if (report.admin) addRow('Admin key');
-    for (const vaultId of report.vaultIds) addRow(labelById.get(vaultId) || vaultId);
+    }
     card.appendChild(list);
     card.appendChild(
       button('Dismiss', 'vault-btn small', () => {
