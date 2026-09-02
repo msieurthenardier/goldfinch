@@ -688,3 +688,20 @@ debrief rule), not at teardown.
     fixture must SAVE AN ITEM into a jar before minting its access key.
   - **Battery:** 4115/4115 (4112 + 3 new), typecheck/lint/format:check
     clean.
+- 2026-09-02 — **Behavior test run 2026-09-02-02-22-01: FAIL** (3 pass /
+  1 fail / 3 inconclusive). The one product defect: **the completion
+  card's revoked-keys list renders empty** despite real revocations
+  (admin pair + Personal's access key demonstrably severed on disk) — a
+  leg-4 surfacing bug on exactly the layer whose DOM pins were
+  reassigned to this test. Grounding for the leg: fixed before the leg
+  lands. The three inconclusives are run-protocol evidence gaps
+  (blur-closed sheet split the reuse sequence; poll self-terminated
+  before the commit-vs-ack window; step-8's old-recovery/master probes
+  were never provisionable) — the Validator's closing carries the full
+  re-run recipe. Bonus witnessed coverage: the operator's spontaneous
+  third rotation exercised the RECOVERY branch incl. its test-unwrap
+  reuse rejection. Anomalies at occurrence: evidence-dir wipe (origin
+  unresolved, survivable); credential sheet dismisses on window blur
+  (clean abort, zero disk mutation — design question for the debrief:
+  should security-critical sheets survive focus loss?); run log
+  committed at tests/behavior/compromise-mode-rotation/runs/.

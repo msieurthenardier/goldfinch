@@ -3,7 +3,7 @@
 **Slug**: `compromise-mode-rotation`
 **Status**: active
 **Created**: 2026-09-01
-**Last Run**: never
+**Last Run**: 2026-09-02-02-22-01
 
 > Finalized 2026-09-01 against the shipped Flight 2 surfaces (leg-4
 > handoff). This is a **hybrid witnessed** test (mission constraint): the
