@@ -599,3 +599,92 @@ debrief rule), not at teardown.
   `compromise` in the list; prettier clean), leg 3/4 AC checkboxes
   ticked. Legs 1–4 → `completed`. Committing the flight and opening the
   draft PR; leg 5 (behavior test + HAT) remains.
+
+## Anomalies (continued)
+
+- 2026-09-01 — **Apparatus token not re-read mid-session (standing M17
+  risk, realized).** Leg-5 setup: dev profile restored, fresh keys
+  minted (DEV_MINT once), `.mcp.json` updated, app relaunched clean —
+  but the live session's MCP client holds its session-start token and
+  reports "requires re-authorization"; it does not re-read the updated
+  config on reconnect. Remedy: operator reconnects the server (`/mcp`).
+  Key-capture files scrubbed after use. This is a methodology-level
+  apparatus note for the flight debrief.
+
+## Flight Director Notes (continued)
+
+- 2026-09-01 — Flight committed (af95fb1) after [HANDOFF:confirmed];
+  branch pushed; **draft PR #199** open with the leg checklist. Legs
+  1–4 `completed`. Leg 5 `behavior-spec-and-hat` designed (interactive,
+  lightweight per HAT protocol; risk tier n/a — no autonomous
+  implementation). Awaiting operator: MCP re-auth + session.
+  legs_completed: 4 of 5.
+- 2026-09-01 — Operator reconnected the MCP server (/mcp) — apparatus
+  live on the fresh keys. Mid-flight squawk logged and deferred:
+  **0057** (welcome-surface kebab unclickable until set+navigate) —
+  out of this flight's charter, routine, holding pen per protocol.
+- 2026-09-01 — **ANOMALY (grounding, in-flight path): access-key mint
+  fails with "wrong master password" despite a correct password**
+  (operator, live dev app, fresh v1 profile, post-af95fb1 build), and
+  the settings page's automation-key mint buttons render disabled.
+  Blocks the leg-5 sever fixture → grounding defect, fixed before the
+  flight continues. Suspects: leg-4's menuType predicate on destructive
+  overlay channels (a non-auth rejection mapped to the wrong-password
+  copy), leg-2's mint gating wrapper, leg-1 version threading.
+  Developer spawned to reproduce at unit level and diagnose both
+  symptoms; settings-buttons issue to be classified in-flight vs
+  pre-existing (squawk if pre-existing).
+- 2026-09-01 — **ROOT CAUSE (both symptoms): pre-existing, NOT
+  flight-caused — no source change; squawk both.** All three suspects
+  cleared by direct reproduction against the real store and the real
+  registered handler:
+  - **Symptom 1 (mint → "wrong master password" with the correct
+    password).** A jar's `.gfvault` is created LAZILY on the first
+    credential save into that jar; on the operator's fresh profile both
+    jars carry zero items (verified live: `hasVault('personal'/'work')`
+    → `present:false`, counts 0). The mint step-up therefore succeeds
+    (the password IS correct), then `_mintAccessKey` throws
+    `VaultStateError('no vault for "<jar>" — save an item first')`
+    (`src/main/vault/vault-store.js:2315-2317`). The main delegate maps
+    ONLY `VaultAuthError` to `{ ok:false }` (`src/main/main.js:1786-1794`),
+    so the invoke REJECTS — and the sheet's `submitVaultStepup` catch
+    collapses every rejection into `{ ok:false }` → 'Wrong master
+    password. Nothing was minted.' (`src/renderer/menu-overlay.js:1498-1500`,
+    `:1511-1517`). Byte-identical behavior reproduced at the pre-flight
+    commit (2c5c144) — M12 F3 Leg 5 vintage, surfaced now only because
+    the fixture profile is item-less. Leg-4's menuType predicates exist
+    only on the two NEW compromise channels (the stepup-mint channel has
+    none); leg-2's gated wrapper and leg-1's version threading both pass
+    a real-store mint round-trip (v1 doc, correct password → `{ok:true}`).
+  - **Symptom 2 (settings-page automation mint buttons disabled).**
+    The DD9 gate (M12-era Flight 8): `mintBtn.disabled =
+    !automationEnabled` / `adminMintBtn.disabled = !automationEnabled`
+    (`src/renderer/pages/settings.js:987`, `:1024`) off the PERSISTED
+    `automationEnabled` setting — verified live `false` on the fresh dev
+    profile (the dev MCP works regardless because DEV_MINT keys bypass
+    the toggle, which gates GENERATION only). settings.js is untouched
+    by this flight. By-design gate; at most a UX papercut (no inline
+    "enable automation first" hint) → squawk candidate, not fixed here.
+  - **What changed:** no `src/` changes. Three REAL-STORE regression
+    tests added to `test/unit/vault-stepup-mint-handler.test.js`
+    (real `registerOverlayIpc` handler + the verbatim main.js delegate
+    shape + a real `VaultStore`) pinning all three real-flow outcomes:
+    vault-file-present mint `{ok:true}` (proves the flight's wrapper/
+    version threading sound), the no-vault-file CORRECT-password
+    REJECTION (the operator's exact state — with a comment naming the
+    sheet-side collapse and the pending squawk), and the genuine
+    wrong-password `{ok:false}`. The prior harness missed the symptom
+    because its FAKE delegate only ever modeled `{ok:false}` or a
+    generic throw — the real store's non-auth failure class against a
+    fresh item-less profile was never constructed, and no unit drives
+    the renderer's catch-collapse.
+  - **Squawks to log:** (1) mint against an item-less jar surfaces
+    `VaultStateError` as the wrong-password copy — forward a non-secret
+    reason (the vault-import channel's HIGH-1/MEDIUM-4 precedent) or
+    disable/annotate the jar-row mint affordance when `hasVault` is
+    false; needs a small copy/UX ruling, out of this flight's charter.
+    (2, optional) settings-page mint buttons carry no hint that the
+    automation toggle gates them. Fixture note for leg 5: the sever
+    fixture must SAVE AN ITEM into a jar before minting its access key.
+  - **Battery:** 4115/4115 (4112 + 3 new), typecheck/lint/format:check
+    clean.

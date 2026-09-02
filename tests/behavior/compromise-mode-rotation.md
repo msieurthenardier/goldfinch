@@ -1,18 +1,24 @@
 # Behavior Test: Compromise-Mode Rotation — Full Sever and Surfacing
 
 **Slug**: `compromise-mode-rotation`
-**Status**: draft
+**Status**: active
 **Created**: 2026-09-01
 **Last Run**: never
 
-> **DRAFT — authored at Mission 18 Flight 2 planning.** Step details are
-> finalized during the flight's behavior-spec leg once the implemented
-> surfaces exist; the key observables, apparatus split, and step skeleton
-> below are the planning-time contract. This is a **hybrid witnessed**
-> test (mission constraint): the vault sheets are excluded from automation
-> by design, so every sheet step is performed and attested by the
-> **operator**; the Executor drives only page surfaces and reads only
-> automation-visible observables.
+> Finalized 2026-09-01 against the shipped Flight 2 surfaces (leg-4
+> handoff). This is a **hybrid witnessed** test (mission constraint): the
+> vault sheets are excluded from automation by design, so every sheet
+> step is performed and attested by the **operator**; the Executor drives
+> only page surfaces and reads only automation-visible observables
+> (`sheetVisible`, page DOM, on-disk state). Shipped surface facts: entry
+> row "Think a key or your master password leaked?" + danger button
+> "Rotate Everything…" (both lock states, bottom of Settings); confirm
+> modal per ruling R3; ONE combined credential sheet (menuType
+> `vault-compromise`: current + new + confirm, switch link "Use your
+> recovery key instead" → `vault-compromise-recover`); recovery reveal
+> rides `vault-recovery-show` with `replacing: true`; completion card
+> "Everything rotated" (uniform "Revoked" rows); dismiss channel
+> `internal-vault-compromise-dismiss`.
 
 ## Intent
 
@@ -61,7 +67,7 @@ where F4's debrief showed stubs go stale.
 | 1 | (Setup) Verify preconditions; snapshot `manager.json` + one jar `.gfvault`; record minted access-key secret. | (empty) |
 | 2 | Executor: read vault page DOM (locked AND unlocked states). | Entry row present in both states at the bottom of Settings ("Think a key or your master password leaked?" + "Rotate Everything…") — lock-state matrix half 1. |
 | 3 | Executor: click "Rotate Everything…", read modal DOM. | Confirm modal matches ruled copy (R3): lede, three steps, "Your admin key and all jar access keys will be revoked…", checkbox gating Continue. |
-| 4 | Operator: check the box, Continue; complete the credential sheet (current password + new password + confirm; reuse of old password first). | Operator attests: reuse rejected inline ("must be different"); different password accepted. Executor observes `sheetVisible` true during the step. |
+| 4 | Operator: check the box, Continue; on the single combined credential sheet enter current password + new password + confirm — trying the OLD password as "new" first. | Operator attests: reuse rejected inline ("Your new master password must be different from your old one."), sheet stays open; then a different new password is accepted and the sheet enters its pending state. Executor observes `sheetVisible` true throughout. |
 | 5 | (Wait point) | Within timeout: `sheetVisible` transitions to the recovery-show sheet; **filesystem shows the rotation committed** (manager rewritten — `version: 2`, new envelope set, no admin slot; every `.gfvault` mrk envelope + item ciphertext changed) BEFORE the operator acks — commit-before-surfacing. |
 | 6 | Operator: read + acknowledge the dismiss-locked recovery sheet (records the new key for step 8). | Operator attests: single sheet (no admin sheet follows), dismiss-locked, key shown once. Profile remained unlocked throughout (no unlock sheet reappears). |
 | 7 | Executor: read the page. | "Everything rotated" completion card present with admin-key row ("Revoked") + per-jar rows — regardless of the lock state the flow was entered from (both-entry variant run). |
