@@ -968,6 +968,14 @@ templates, and `RENDERER_LINE_BUDGET` are all untouched by this leg).
   is carried to the flight debrief as a maintenance note. Legs 1-3 →
   `completed`; committing, then merging origin/main (squawk 0062) and
   re-running gates before the draft PR.
+- 2026-09-02: Legs 1-3 committed (3bdfbfb, 57 files); origin/main
+  merged (a8dfb0c — squawk 0062); all gates green on the merged tree
+  (4252 pass / lint / format / typecheck clean); branch pushed; draft
+  PR #204 opened with legs 1-3 checked, 4-5 pending operator. Flight
+  holds `in-flight` awaiting the interactive legs: `guided-hat-restore`
+  (leg 4) and `witnessed-runs` (leg 5) — both need the operator and
+  the dev-profile fixture prerequisite (multi-jar profile + keys per
+  docs/dev-testing.md).
 
 ---
 
