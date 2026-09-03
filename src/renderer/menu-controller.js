@@ -125,10 +125,17 @@ document.addEventListener('pointerdown', (e) => {
 // Page/webview clicks (a separate web-contents the chrome document can't see) and
 // app-switch both fire window blur → close any open menu (DD1, spike-confirmed).
 // EXCEPT a non-dismissible entry (vault-recovery-show, DD5) — window-blur must not close
-// it (app switch would otherwise lose the unrecoverable one-time key).
+// it (app switch would otherwise lose the unrecoverable one-time key). ALSO except a
+// survives-blur entry (M18 F3 L1, DD8) — vault credential sheets retain their
+// half-entered state through window blur/refocus (operator ruling: the
+// copy-paste-from-another-secrets-manager scenario). A separate, independent axis from
+// `dismissible` — reusing it would leak blur-survival to non-vault sheets — so it gets
+// its own guard here. Only THIS listener changes; the pointerdown outside-click guard
+// above stays `dismissible`-only (outside-click was never part of the DD8 ruling).
 window.addEventListener('blur', () => {
   const cur = menuController.current;
   if (cur && cur.dismissible === false) return;
+  if (cur && cur.survivesBlur === true) return;
   menuController.closeAll();
 });
 

@@ -64,14 +64,20 @@ const { originMatches } = require('../../shared/origin-match');
 
 // The manager document format id + version (vault-store OWNS this format).
 //
-// TWO versions are READABLE (M18 F2 Leg 1 / DD1):
-//   - v1: all three `mrk` slots (master/recovery/admin) + `adminPublicKeyB64`
-//     required — the original format, validated exactly as before.
-//   - v2: `mrk.master` + `mrk.recovery` required; the ADMIN PAIR (`mrk.admin` +
-//     `adminPublicKeyB64`) may be deliberately ABSENT (unprovisioned/revoked) —
-//     but always present TOGETHER or absent TOGETHER (a lone seal is unopenable;
-//     a lone pubkey corrupts export and fools revalidate) — one without the
-//     other is malformed-present → VaultFormatError.
+// TWO versions are READABLE (M18 F2 Leg 1 / DD1; v1 relaxed M18 F3 Leg 2 /
+// ruling 10):
+//   - v1 and v2: `mrk.master` + `mrk.recovery` required; the ADMIN PAIR
+//     (`mrk.admin` + `adminPublicKeyB64`) may be deliberately ABSENT
+//     (unprovisioned/revoked, or a no-admin fresh adopt) — but always present
+//     TOGETHER or absent TOGETHER (a lone seal is unopenable; a lone pubkey
+//     corrupts export and fools revalidate) — one without the other is
+//     malformed-present → VaultFormatError. v1 originally REQUIRED the pair
+//     (every profile `setup()` ever writes it); the relaxation costs nothing
+//     for those profiles and is what makes a no-admin adopt of a
+//     v1-effective bundle legal (Flight 3's multi-vault portability) — a
+//     slot-deletion tamper on a v1 manager now degrades to the no-admin
+//     STATE instead of a loud format error; envelope integrity itself stays
+//     GCM/AAD-protected regardless.
 // MANAGER_VERSION stays 1: `setup()` still WRITES v1 (v2 writers are the
 // compromise rotation / Flight 3's adopt — later legs). Every manager-envelope
 // wrap/unwrap site passes the DOCUMENT'S stated version (never the constant), and
@@ -93,6 +99,16 @@ const READABLE_MANAGER_VERSIONS = new Set([MANAGER_VERSION, MANAGER_VERSION_V2])
 // OWNS this format independently of the gfmanager / gfvault version spaces.
 const BUNDLE_FORMAT = 'gfvault-bundle';
 const BUNDLE_VERSION = 1;
+// The whole-profile, multi-vault bundle format (M18 F3 Leg 2 / DD1 ruling 2):
+// `{ format, version: 2, managerVersion, kdf, mrk:{master,recovery,admin?},
+// adminPublicKeyB64?, vaults: [{ sourceId, jarMeta?, vault }] }` — every jar
+// entry's `jarMeta` ({name,color}) rides as CIPHERTEXT (see `encryptJarMeta`/
+// `decryptJarMeta` below), keyed off the bundle MRK. `exportVault`/`importVault`
+// (single-vault, BUNDLE_VERSION) are UNCHANGED this leg; `exportProfile`/
+// `restoreProfile` are the new v2 entry points. `restoreProfile` additionally
+// ACCEPTS a v1 bundle (normalized to a one-row v2 shape internally — ruling 9);
+// `importVault`'s own gate stays v1-only — it never learns v2 exists.
+const BUNDLE_VERSION_V2 = 2;
 
 // The item types this store recognizes. vault-crypto treats items as opaque
 // JSON; the schema is validated HERE.
@@ -196,6 +212,17 @@ class VaultCollisionError extends VaultStateError {
  * @property {(handle: any) => void} [clearTimeout]  idle-timer clear (default global).
  * @property {() => number} [now]  clock (default Date.now) — item timestamps.
  * @property {any} [scryptParams]  master-KDF params (default production SCRYPT_PARAMS).
+ * @property {(name: string, color: string) => { id: string, name: string, color: string, partition: string, retentionDays: number }} [createJar]
+ *   create a persistent jar (`jars.js`'s `add`) — injected so this module stays
+ *   jars.js-free (Electron-free discipline); consumed by `restoreProfile`'s
+ *   `'new'` directive (M18 F3 Leg 2 / DD3 ruling 4). Wiring the real `jars.add`
+ *   is main.js's job (Leg 3) — unit tests inject a fake.
+ * @property {(id: string) => boolean} [verifyJarPersisted]  read-back confirmation
+ *   that a jar id landed durably (`jars.js`'s `verifyPersisted`) — required
+ *   alongside `createJar` for the create-then-verify step a `'new'` directive
+ *   runs before writing its vault (DD3 ruling 4: `jars.add`'s `save()` is
+ *   fail-soft, so an unverified create could land a vault under a jar that
+ *   evaporates on restart).
  */
 
 // ---------------------------------------------------------------------------
@@ -212,6 +239,83 @@ class VaultCollisionError extends VaultStateError {
  */
 function mrkEnvelopeAad(version) {
   return Buffer.from(`gfvault/mrk-env/v${version}`, 'utf8');
+}
+
+// ---------------------------------------------------------------------------
+// jarMeta — the bundle v2 encrypted jar identity (M18 F3 Leg 2 / DD1 ruling 2).
+// A jar's PORTABLE identity (`{ name, color }` — everything else on the jar
+// record is destination-local) rides in the bundle as ciphertext keyed off the
+// bundle MRK, via the EXPORTED generic primitives (`deriveHkdfKey` +
+// `wrapVaultKey`/`unwrapVaultKey`, `vault-crypto.js`) — no new crypto surface,
+// mirroring the `mrkEnvelopeAad` local-helper idiom above. `restoreProfile`
+// itself never reads jarMeta (cycle-1 review question 3, ruled): it consumes
+// the explicit `mapping[].newJar.{name,color}` the mapping step supplies;
+// `decryptJarMeta` is exported for THAT (leg 3's) pre-mapping label step.
+// ---------------------------------------------------------------------------
+
+const JARMETA_SALT_BYTES = 16;
+// Domain-separation label for the jarMeta wrapping-key HKDF derive — distinct
+// from every vault-crypto internal HKDF info string (recovery/access/admin),
+// so a jarMeta key can never collide with an envelope wrapping key even though
+// both derive from key material an attacker might control (the bundle MRK is
+// never attacker-controlled, but domain separation is cheap and correct).
+const JARMETA_HKDF_INFO = Buffer.from('gfvault-bundle/jarMeta', 'utf8');
+
+/**
+ * AAD for a jarMeta envelope: binds the bundle context + the vault's sourceId
+ * (the `mrkEnvelopeAad` idiom) — a jarMeta envelope spliced onto a DIFFERENT
+ * bundle vault entry fails GCM authentication rather than silently relabeling.
+ * @param {string} sourceId
+ * @returns {Buffer}
+ */
+function jarMetaAad(sourceId) {
+  return Buffer.from(`gfvault-bundle/jarMeta/${sourceId}`, 'utf8');
+}
+
+/**
+ * Encrypt a jar's portable identity for the bundle. Ruling 2's requirement:
+ * NOTHING human-readable about a jar may appear in a bundle before the bundle
+ * secret is entered — a byte-scan of the serialized bundle must find no name
+ * or color string.
+ * @param {Buffer} mrk  the LIVE bundle/profile MRK.
+ * @param {string} sourceId
+ * @param {{ name: string, color: string }} meta
+ * @returns {{ salt: string, iv: string, ct: string, tag: string }}
+ */
+function encryptJarMeta(mrk, sourceId, meta) {
+  const salt = crypto.randomBytes(JARMETA_SALT_BYTES);
+  const key = vc.deriveHkdfKey(mrk, salt, JARMETA_HKDF_INFO);
+  const blob = vc.wrapVaultKey(Buffer.from(JSON.stringify(meta), 'utf8'), key, jarMetaAad(sourceId));
+  return { salt: salt.toString('base64'), ...blob };
+}
+
+/**
+ * Decrypt a bundle vault entry's jarMeta (leg 3's pre-mapping label step — NOT
+ * called by `restoreProfile`, ruling 2's split). A tampered envelope (wrong
+ * bundle MRK, altered ciphertext, or an AAD mismatch from a spliced sourceId)
+ * fails GCM authentication LOUDLY — never a silent unnamed jar (the "lone
+ * jarMeta tamper" edge case).
+ * @param {Buffer} mrk  the LIVE bundle MRK (already authenticated by the bundle secret).
+ * @param {string} sourceId
+ * @param {{ salt: string, iv: string, ct: string, tag: string }} envelope
+ * @returns {{ name: string, color: string }}
+ */
+function decryptJarMeta(mrk, sourceId, envelope) {
+  if (!envelope || typeof envelope !== 'object' || typeof envelope.salt !== 'string') {
+    throw new vc.VaultFormatError('vault-store: jarMeta envelope missing salt');
+  }
+  const key = vc.deriveHkdfKey(mrk, Buffer.from(envelope.salt, 'base64'), JARMETA_HKDF_INFO);
+  const plain = vc.unwrapVaultKey(envelope, key, jarMetaAad(sourceId));
+  let meta;
+  try {
+    meta = JSON.parse(plain.toString('utf8'));
+  } catch {
+    throw new vc.VaultFormatError('vault-store: jarMeta did not decrypt to valid JSON');
+  }
+  if (!meta || typeof meta !== 'object' || typeof meta.name !== 'string' || typeof meta.color !== 'string') {
+    throw new vc.VaultFormatError('vault-store: jarMeta has an invalid shape');
+  }
+  return meta;
 }
 
 /**
@@ -363,6 +467,198 @@ function validateImportedItems(items) {
 }
 
 // ---------------------------------------------------------------------------
+// Shared bundle-envelope validation (M18 F3 Leg 2 — extracted so `_importVault`
+// (v1-only gate) and `restoreProfile` ({1,2} gate, via `normalizeRestoreBundle`
+// below) cannot drift on what "a well-formed bundle envelope" means). Runs
+// AFTER the format/version gate (each caller owns its own — `_importVault`
+// stays v1-only, DD9/ruling 9). Validates the mrk envelope set (master +
+// recovery required, admin optional-but-paired — mirrors `_readManager`'s
+// relaxed rule) and the bounded KDF schema; resolves the bundle's EFFECTIVE
+// managerVersion (absent ⇒ 1 — every pre-M18-F2 bundle).
+// ---------------------------------------------------------------------------
+
+/**
+ * @param {{ managerVersion?: any, mrk: any, adminPublicKeyB64?: any, kdf: any }} bundle
+ * @returns {number} the resolved effective managerVersion.
+ */
+function validateBundleEnvelope(bundle) {
+  let managerVersion = 1;
+  if (bundle.managerVersion !== undefined) {
+    if (!READABLE_MANAGER_VERSIONS.has(bundle.managerVersion)) {
+      throw new vc.VaultFormatError(`vault-store: unsupported bundle managerVersion "${bundle.managerVersion}"`);
+    }
+    managerVersion = bundle.managerVersion;
+  }
+  if (!bundle.mrk || typeof bundle.mrk !== 'object') {
+    throw new vc.VaultFormatError('vault-store: bundle missing mrk envelope set');
+  }
+  for (const slot of ['master', 'recovery']) {
+    if (!isEnvelopeShaped(bundle.mrk[slot])) {
+      throw new vc.VaultFormatError(`vault-store: malformed bundle mrk.${slot} envelope`);
+    }
+  }
+  // Admin pair is tolerated ABSENT — present together or absent together, a
+  // lone field is malformed (mirrors `_readManager`'s optional-but-paired rule).
+  const bundleHasAdminSeal = bundle.mrk.admin !== undefined;
+  const bundleHasAdminPub = bundle.adminPublicKeyB64 !== undefined;
+  if (bundleHasAdminSeal !== bundleHasAdminPub) {
+    throw new vc.VaultFormatError(
+      'vault-store: bundle mrk.admin and adminPublicKeyB64 must be present together or absent together'
+    );
+  }
+  if (bundleHasAdminSeal) {
+    if (!isEnvelopeShaped(bundle.mrk.admin)) {
+      throw new vc.VaultFormatError('vault-store: malformed bundle mrk.admin envelope');
+    }
+    if (typeof bundle.adminPublicKeyB64 !== 'string') {
+      throw new vc.VaultFormatError('vault-store: bundle missing adminPublicKeyB64');
+    }
+  }
+  // Bounded scrypt-param schema (finding 4, shared): reject absent fields AND
+  // resource-exhausting values BEFORE bundle.kdf is used to derive the unwrap
+  // key or persisted on adopt.
+  validateImportedKdf(bundle.kdf);
+  return managerVersion;
+}
+
+// ---------------------------------------------------------------------------
+// restoreProfile's v1/v2 normalization (M18 F3 Leg 2 / DD1 ruling 9). A v1
+// bundle is the "one-row case" of the same flow: its single `sourceVaultId` +
+// `vault` become a one-entry `vaults` array with no jarMeta. Runs BEFORE
+// `validateBundleEnvelope` (format/version-specific shape first, then the
+// shared envelope rules). Never mutates the input bundle.
+// ---------------------------------------------------------------------------
+
+/**
+ * @param {any} bundle
+ * @returns {{ managerVersion?: any, kdf: any, mrk: any, adminPublicKeyB64?: any,
+ *   vaults: Array<{ sourceId: string, jarMeta?: any, vault: any }> }}
+ */
+function normalizeRestoreBundle(bundle) {
+  if (!bundle || typeof bundle !== 'object' || Array.isArray(bundle)) {
+    throw new VaultStateError('vault-store: restore bundle must be an object');
+  }
+  if (bundle.format !== BUNDLE_FORMAT) {
+    throw new vc.VaultFormatError(`vault-store: unknown bundle format "${bundle.format}"`);
+  }
+  if (bundle.version === BUNDLE_VERSION) {
+    if (typeof bundle.sourceVaultId !== 'string' || bundle.sourceVaultId.length === 0) {
+      throw new vc.VaultFormatError('vault-store: v1 bundle missing sourceVaultId');
+    }
+    if (bundle.vault === undefined) {
+      throw new vc.VaultFormatError('vault-store: v1 bundle missing its vault document');
+    }
+    return {
+      managerVersion: bundle.managerVersion,
+      kdf: bundle.kdf,
+      mrk: bundle.mrk,
+      adminPublicKeyB64: bundle.adminPublicKeyB64,
+      vaults: [{ sourceId: bundle.sourceVaultId, vault: bundle.vault }]
+    };
+  }
+  if (bundle.version === BUNDLE_VERSION_V2) {
+    if (!Array.isArray(bundle.vaults)) {
+      throw new vc.VaultFormatError('vault-store: v2 bundle missing vaults array');
+    }
+    const seen = new Set();
+    for (const entry of bundle.vaults) {
+      if (!entry || typeof entry !== 'object' || typeof entry.sourceId !== 'string' || entry.sourceId.length === 0) {
+        throw new vc.VaultFormatError('vault-store: v2 bundle vault entry missing sourceId');
+      }
+      if (seen.has(entry.sourceId)) {
+        throw new vc.VaultFormatError(`vault-store: v2 bundle has a duplicate sourceId "${entry.sourceId}"`);
+      }
+      seen.add(entry.sourceId);
+      if (entry.vault === undefined) {
+        throw new vc.VaultFormatError(`vault-store: v2 bundle vault "${entry.sourceId}" missing its vault document`);
+      }
+    }
+    return {
+      managerVersion: bundle.managerVersion,
+      kdf: bundle.kdf,
+      mrk: bundle.mrk,
+      adminPublicKeyB64: bundle.adminPublicKeyB64,
+      vaults: bundle.vaults.map((/** @type {any} */ e) => ({
+        sourceId: e.sourceId,
+        jarMeta: e.jarMeta,
+        vault: e.vault
+      }))
+    };
+  }
+  throw new vc.VaultFormatError(`vault-store: unsupported bundle version "${bundle.version}"`);
+}
+
+// ---------------------------------------------------------------------------
+// Merge (DD4 / M18 F3 Leg 2 ruling 6): id identity, keep-both on divergence,
+// no picker. A generic structural deep-equal (items are flat JSON records —
+// string/number/boolean fields, no nesting beyond that) decides "identical
+// content"; a diverged id lands as a COPY under a FRESH id with its display
+// `title` suffixed ' (imported)' — every item type's non-secret display field
+// is `title` (vault-item-schema.js), so one suffix site covers all three.
+// ---------------------------------------------------------------------------
+
+/**
+ * @param {any} a
+ * @param {any} b
+ * @returns {boolean}
+ */
+function deepValueEqual(a, b) {
+  if (a === b) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a)) {
+    return a.length === b.length && a.every((v, i) => deepValueEqual(v, b[i]));
+  }
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  return aKeys.every((k) => Object.prototype.hasOwnProperty.call(b, k) && deepValueEqual(a[k], b[k]));
+}
+
+/**
+ * Merge `incoming` decrypted items into a destination vault's decrypted
+ * `existing` items. Non-interactive; zero data loss (every pre-merge
+ * destination item survives, whether untouched, confirmed-identical, or —
+ * on divergence — joined by a marked copy of the incoming version).
+ * @param {VaultItem[]} existing
+ * @param {VaultItem[]} incoming
+ * @returns {{ items: VaultItem[], mergeReport: { imported: number, skippedIdentical: number, conflictCopies: number } }}
+ */
+function mergeVaultItems(existing, incoming) {
+  const byId = new Map(existing.map((it) => [it.id, it]));
+  const merged = existing.slice();
+  let imported = 0;
+  let skippedIdentical = 0;
+  let conflictCopies = 0;
+  for (const item of incoming) {
+    const current = byId.get(item.id);
+    if (current === undefined) {
+      merged.push(item);
+      byId.set(item.id, item);
+      imported++;
+      continue;
+    }
+    if (deepValueEqual(current, item)) {
+      skippedIdentical++;
+      continue;
+    }
+    // Diverged: land as a copy under a FRESH id — the destination's original
+    // (same-id) item is untouched; different ids always coexist by construction.
+    // `title` is every type's non-secret display field (vault-item-schema.js) but
+    // not part of the base VaultItem typedef — read/write it through `any`.
+    const itemAny = /** @type {any} */ (item);
+    const copy = {
+      ...item,
+      id: crypto.randomBytes(8).toString('hex'),
+      title: typeof itemAny.title === 'string' ? `${itemAny.title} (imported)` : itemAny.title
+    };
+    merged.push(copy);
+    conflictCopies++;
+  }
+  return { items: merged, mergeReport: { imported, skippedIdentical, conflictCopies } };
+}
+
+// ---------------------------------------------------------------------------
 // The store
 // ---------------------------------------------------------------------------
 
@@ -387,6 +683,14 @@ class VaultStore {
     this._clearTimeout = deps.clearTimeout ?? clearTimeout;
     this._now = deps.now ?? Date.now;
     this.scryptParams = deps.scryptParams ?? vc.SCRYPT_PARAMS;
+    // M18 F3 Leg 2: injected jars.js surface for `restoreProfile`'s 'new'
+    // directive (create-then-verify, DD3 ruling 4) — keeps this module
+    // jars.js-free. `_createJar` stays null when not injected (a 'new'
+    // directive without it throws a clear VaultStateError rather than a
+    // TypeError); `_verifyJarPersisted` defaults to a hard "not verified" so a
+    // misconfigured store never LOOKS like a successful create.
+    this._createJar = typeof deps.createJar === 'function' ? deps.createJar : null;
+    this._verifyJarPersisted = typeof deps.verifyJarPersisted === 'function' ? deps.verifyJarPersisted : () => false;
 
     // Unlock state — held ONLY in memory as Buffers.
     /** @type {Buffer | null} */
@@ -418,11 +722,15 @@ class VaultStore {
     this._managerLock = Promise.resolve();
 
     // M18 F2 Leg 2 (DD3): write-exclusivity machinery for the compromise
-    // rotation. `_rekeyInProgress` is the store-wide re-key gate — the eight
-    // gated ops refuse at ENTRY (VaultBusyError) while it is up, and the write
-    // sinks (`_writeManager` / `_writeVault`) re-check it as a SECOND WALL so a
-    // mutator that awaited past its entry check can never persist a
-    // pre-rotation document. `_inFlightOps` counts gated ops currently
+    // rotation. `_rekeyInProgress` is the store-wide re-key gate — ELEVEN gated
+    // ops (M18 F3 Leg 2 / DD10 ruling 8 added `exportProfile` + `restoreProfile`
+    // to the original eight; M18 F3 Leg 3 added `previewRestoreBundle` — a
+    // preview writes nothing, but must not let an operator START a multi-step
+    // import while a compromise rotation is rewriting the profile) refuse at
+    // ENTRY (VaultBusyError) while it is up,
+    // and the write sinks (`_writeManager` / `_writeVault`) re-check it as a
+    // SECOND WALL so a mutator that awaited past its entry check can never
+    // persist a pre-rotation document. `_inFlightOps` counts gated ops currently
     // executing (each holds it for its FULL duration, released in `finally`);
     // `_acquireRekeyGate` raises the gate then DRAINS — awaits the counter
     // reaching zero — before its caller may write. The four `_withManagerLock`
@@ -434,6 +742,14 @@ class VaultStore {
     this._inFlightOps = 0;
     /** @type {Array<() => void>} */
     this._drainWaiters = [];
+
+    // M18 F3 Leg 2 (DD3 ruling 7): `restoreProfile`'s SINGLE-FLIGHT guard — an
+    // INSTANCE field (the `_rekeyInProgress` pattern), never module-scope,
+    // which would leak across the many per-test store instances `vs.load()`
+    // creates. This is IN ADDITION to the re-key gate above, which is a
+    // COUNTER (`_inFlightOps`), not a mutex — it does not serialize two
+    // concurrent `restoreProfile` calls against EACH OTHER.
+    this._restoreInFlight = false;
 
     // M18 F2 Leg 2 (DD2): idempotent transaction recovery runs on EVERY store
     // construction — between path setup above and the load-loudly manager
@@ -508,8 +824,10 @@ class VaultStore {
     if (!doc.mrk || typeof doc.mrk !== 'object') {
       throw new vc.VaultFormatError('manager.json: missing mrk envelope set');
     }
-    // master + recovery are required at EVERY version; the admin slot's rules are
-    // version-dependent (M18 F2 Leg 1 / DD1 — see the format comment above).
+    // master + recovery are required at EVERY version; the admin slot follows
+    // the SAME optional-but-paired rule at EVERY version (M18 F2 Leg 1 / DD1,
+    // relaxed from v1-required M18 F3 Leg 2 / ruling 10 — see the format
+    // comment above).
     for (const slot of ['master', 'recovery']) {
       if (!isEnvelopeShaped(doc.mrk[slot])) {
         throw new vc.VaultFormatError(`manager.json: malformed mrk.${slot} envelope`);
@@ -517,22 +835,14 @@ class VaultStore {
     }
     const hasAdminSeal = doc.mrk.admin !== undefined;
     const hasAdminPub = doc.adminPublicKeyB64 !== undefined;
-    if (doc.version === 1) {
-      // v1 rules unchanged: the admin pair is REQUIRED (absence is malformed).
-      if (typeof doc.adminPublicKeyB64 !== 'string') {
-        throw new vc.VaultFormatError('manager.json: missing adminPublicKeyB64');
-      }
-      if (!isEnvelopeShaped(doc.mrk.admin)) {
-        throw new vc.VaultFormatError('manager.json: malformed mrk.admin envelope');
-      }
-    } else if (hasAdminSeal !== hasAdminPub) {
-      // v2 pairing rule: present TOGETHER or absent TOGETHER — a lone field is
-      // malformed-present, never a deliberate absence.
+    if (hasAdminSeal !== hasAdminPub) {
+      // Present TOGETHER or absent TOGETHER — a lone field is malformed-present,
+      // never a deliberate absence.
       throw new vc.VaultFormatError(
         'manager.json: mrk.admin and adminPublicKeyB64 must be present together or absent together'
       );
     } else if (hasAdminSeal) {
-      // v2 with-admin: the pair is validated exactly as v1.
+      // With-admin: the pair is validated identically at v1 and v2.
       if (typeof doc.adminPublicKeyB64 !== 'string') {
         throw new vc.VaultFormatError('manager.json: missing adminPublicKeyB64');
       }
@@ -1098,9 +1408,11 @@ class VaultStore {
       stepUpMrk.fill(0); // zeroize the transient step-up buffer after the re-unwrap.
       this._assertMrkGeneration(gen); // finding 3: never seal a zeroized/replaced MRK to the new admin key.
       const admin = vc.generateAdminKeypair();
-      // On a no-admin v2 manager this IS the from-scratch provision (M18 F2 Leg 1 /
-      // DD1): both fields are written together below, and the document's version is
-      // preserved — the seal is wrapped at that same version (AAD homogeneity).
+      // On a no-admin manager (v1 or v2 — M18 F3 Leg 2 / ruling 10 relaxed v1 to the
+      // same optional-but-paired rule) this IS the from-scratch provision (M18 F2
+      // Leg 1 / DD1): both fields are written together below, and the document's
+      // version is preserved — the seal is wrapped at that same version (AAD
+      // homogeneity).
       manager.mrk.admin = vc.sealToAdmin(mrk, admin.publicKey, { version: manager.version });
       manager.adminPublicKeyB64 = admin.publicKeyB64; // BOTH — a stale pubkey mismatches the seal + corrupts export.
       this._writeManager(manager);
@@ -1498,6 +1810,113 @@ class VaultStore {
   }
 
   /**
+   * Build a v2 portable bundle for the WHOLE profile (M18 F3 Leg 2 / DD1 ruling
+   * 2): the global vault plus every JAR vault that EXISTS on disk (a lazy,
+   * never-saved jar vault is simply absent — the `vaults` array names exactly
+   * what was carried), each jar entry's identity (`{name,color}`) riding as an
+   * ENCRYPTED `jarMeta` envelope (`encryptJarMeta` above) so nothing
+   * human-readable about a jar appears before the bundle secret is entered.
+   * GATED + the same unlock-window POLICY as `exportVault` (ruling 8 / DD10).
+   * NO write, NO password argument (every input is already on disk).
+   * @returns {{ format: string, version: number, managerVersion: number, kdf: any,
+   *   mrk: { master: any, recovery: any, admin?: any }, adminPublicKeyB64?: string,
+   *   vaults: Array<{ sourceId: string, jarMeta?: any, vault: any }> }}
+   */
+  exportProfile() {
+    const releaseOp = this._enterGatedOp();
+    try {
+      return this._exportProfile();
+    } finally {
+      releaseOp();
+    }
+  }
+
+  /**
+   * @returns {ReturnType<VaultStore['exportProfile']>}
+   */
+  _exportProfile() {
+    const mrk = this._requireMrk(); // POLICY: export is an unlock-window op (mirrors _exportVault).
+    const m = this._readManager();
+    const hasAdmin = m.mrk.admin !== undefined;
+    const jars = this.listJars().filter((j) => j.id !== GLOBAL_ID);
+    const sourceIds = [GLOBAL_ID, ...jars.map((j) => j.id)];
+    const jarById = new Map(jars.map((j) => [j.id, j]));
+    /** @type {Array<{ sourceId: string, jarMeta?: any, vault: any }>} */
+    const vaults = [];
+    for (const sourceId of sourceIds) {
+      const doc = this._readVault(sourceId);
+      if (doc === null) continue; // lazy vault — absent by design.
+      /** @type {{ sourceId: string, jarMeta?: any, vault: any }} */
+      const entry = { sourceId, vault: doc };
+      if (sourceId !== GLOBAL_ID) {
+        const jar = /** @type {{ id: string, name: string, color: string }} */ (jarById.get(sourceId));
+        entry.jarMeta = encryptJarMeta(mrk, sourceId, { name: jar.name, color: jar.color });
+      }
+      vaults.push(entry);
+    }
+    return {
+      format: BUNDLE_FORMAT,
+      version: BUNDLE_VERSION_V2,
+      managerVersion: m.version,
+      kdf: m.kdf,
+      mrk: {
+        master: m.mrk.master,
+        recovery: m.mrk.recovery,
+        ...(hasAdmin ? { admin: m.mrk.admin } : {})
+      },
+      ...(hasAdmin ? { adminPublicKeyB64: m.adminPublicKeyB64 } : {}),
+      vaults
+    };
+  }
+
+  /**
+   * Shared fresh-adopt core (M18 F3 Leg 2 / ruling 1) — the SINGLE place a
+   * fresh adopt mints its rotated recovery key and writes manager.json, used
+   * by BOTH `_importVault`'s fresh branch and `restoreProfile`'s fresh branch
+   * so DD6's no-admin-mint change lands once for both callers. CALLER
+   * CONTRACT: every vault this adopt carries must already be WRITTEN to disk
+   * (ruling 4's vault-before-manager invariant — call this only after the
+   * caller's own vault write(s) land).
+   *
+   * Writes manager.json at the bundle's EFFECTIVE managerVersion with the
+   * DONOR master envelope retained VERBATIM (DD4 residual — the source master
+   * password keeps unlocking the adopted profile) and a FRESH recovery
+   * envelope minted under the live `mrk` — NO admin fields, legal at EITHER
+   * manager version (ruling 10's optional-but-paired relaxation is what makes
+   * a no-admin v1 write legal) — then installs the MRK (profile ends
+   * UNLOCKED, `onUnlock` fires).
+   *
+   * mrk OWNERSHIP HAND-OFF (cycle-1 review, load-bearing): `_installMrk`
+   * (`:967-985` area) takes ownership of the SAME buffer passed in as `mrk`.
+   * A callee's reassignment of its own parameter binding does NOT propagate
+   * to the CALLER's local variable, so this function SIGNALS installation via
+   * the returned `installed: true` rather than mutating anything of the
+   * caller's. EVERY caller MUST null its own local `mrk` binding when it sees
+   * that signal — otherwise the caller's own `finally` will zeroize the
+   * buffer this function just installed as `this.mrk` (the exact defect class
+   * `_importVault`'s pre-existing `mrk = null` guard exists to avoid).
+   * @param {{ mrk: Buffer, managerVersion: number, kdf: any, masterEnvelope: any }} args
+   * @returns {{ installed: true, recoveryKeyDisplay: string }}
+   */
+  _adoptManagerCore({ mrk, managerVersion, kdf, masterEnvelope }) {
+    const rec = vc.generateRecoveryKey();
+    const recoveryEnv = vc.wrapRecovery(mrk, rec.material, { version: managerVersion });
+    rec.material.fill(0); // operator-held via `display` from here — drop the buffer (the setup idiom).
+    this._writeManager({
+      format: MANAGER_FORMAT,
+      version: managerVersion,
+      kdf,
+      mrk: {
+        master: masterEnvelope, // DONOR master envelope RETAINED verbatim (DD4).
+        recovery: recoveryEnv // NEW — the donor recovery envelope is discarded.
+        // NO admin fields (DD6) — legal at both manager versions (ruling 10).
+      }
+    });
+    this._installMrk(mrk); // leaves UNLOCKED, fires onUnlock; takes ownership of `mrk`.
+    return { installed: true, recoveryKeyDisplay: rec.display };
+  }
+
+  /**
    * Import a portable bundle (flight DD1 — Option A). Validates the bundle, then does
    * ALL crypto BEFORE ANY write (a wrong secret throws VaultAuthError here → nothing is
    * written / installed). The source MASTER PASSWORD (a Buffer) OR the source RECOVERY
@@ -1509,24 +1928,26 @@ class VaultStore {
    *    transient recovery material is zeroized in a finally (mirrors unlockWithRecovery).
    * Then unwrap the vault key from the bundle vault's `mrk` envelope + decrypt its items.
    *
-   * FRESH profile (`!isSetUp()`): ADOPT the bundle's manager — write the vault file FIRST
+   * FRESH profile (`!isSetUp()`): ADOPT the bundle's manager via the SHARED
+   * `_adoptManagerCore` (M18 F3 Leg 2 / ruling 1) — write the vault file FIRST
    * (to GLOBAL_ID, the only target resolvable on a jar-less fresh profile — review [MED]:
    * vault-before-manager so a failure never flips isSetUp() true without a vault), then
-   * `manager.json` from the bundle (all three mrk slots + kdf + adminPublicKeyB64), then
-   * `_installMrk` (leaves the profile UNLOCKED, fires onUnlock — analogous to setup). The
-   * source master password / recovery key unlock this profile on restart. The installed
-   * MRK is RETAINED (never zeroized).
+   * `manager.json` from the bundle (master + recovery — NO admin fields, M18 F3 Leg 2 /
+   * DD6), then `_installMrk` (leaves the profile UNLOCKED, fires onUnlock — analogous to
+   * setup). The source master password / recovery key unlock this profile on restart. The
+   * installed MRK is RETAINED (never zeroized).
    *
    * EXISTING profile (set up + unlocked): re-key the (source) vault key under the
    * DESTINATION MRK (`this.mrk`) at the allowlist-resolved destination target; refuse a
    * collision unless `overwrite`; evict the destination's cached key (a stale cached key
    * GCM-fails against the new ciphertext); zeroize the transient bundle MRK + vault key.
    * @param {any} bundle
-   * On a FRESH adopt the return also carries the two force-rotated one-time secrets
-   * (`recoveryKeyDisplay`, `adminPrivateKeyB64`) for the surfacing leg; the EXISTING-profile
-   * return omits them (M17 F4 Leg 2 / DD2).
+   * On a FRESH adopt the return also carries the force-rotated one-time recovery key
+   * (`recoveryKeyDisplay`) for the surfacing leg — NO `adminPrivateKeyB64` (DD6, M18 F3
+   * Leg 2: adopt no longer mints an admin keypair at all); the EXISTING-profile return
+   * omits `recoveryKeyDisplay` too (M17 F4 Leg 2 / DD2).
    * @param {{ destinationTarget?: string, secret: Buffer, secretKind?: 'master'|'recovery', overwrite?: boolean }} opts
-   * @returns {Promise<{ imported: true, fresh: boolean, vaultId: string, recoveryKeyDisplay?: string, adminPrivateKeyB64?: string }>}
+   * @returns {Promise<{ imported: true, fresh: boolean, vaultId: string, recoveryKeyDisplay?: string }>}
    */
   async importVault(bundle, opts = /** @type {any} */ ({})) {
     // GATED (M18 F2 Leg 2 / DD3): import awaits scrypt mid-op, so it holds the
@@ -1544,7 +1965,7 @@ class VaultStore {
   /**
    * @param {any} bundle
    * @param {{ destinationTarget?: string, secret: Buffer, secretKind?: 'master'|'recovery', overwrite?: boolean }} opts
-   * @returns {Promise<{ imported: true, fresh: boolean, vaultId: string, recoveryKeyDisplay?: string, adminPrivateKeyB64?: string }>}
+   * @returns {Promise<{ imported: true, fresh: boolean, vaultId: string, recoveryKeyDisplay?: string }>}
    */
   async _importVault(bundle, opts) {
     const { destinationTarget, secret, secretKind, overwrite } = opts;
@@ -1563,44 +1984,11 @@ class VaultStore {
     // (every pre-change bundle), else it must be a readable manager version. The
     // bundle's mrk envelopes are AAD-bound to it, so both unwrap sites below pass it —
     // without this, a v2-source bundle would fail unwrap with a misleading
-    // "wrong secret" GCM error.
-    let managerVersion = 1;
-    if (bundle.managerVersion !== undefined) {
-      if (!READABLE_MANAGER_VERSIONS.has(bundle.managerVersion)) {
-        throw new vc.VaultFormatError(`vault-store: unsupported bundle managerVersion "${bundle.managerVersion}"`);
-      }
-      managerVersion = bundle.managerVersion;
-    }
-    if (!bundle.mrk || typeof bundle.mrk !== 'object') {
-      throw new vc.VaultFormatError('vault-store: bundle missing mrk envelope set');
-    }
-    // master + recovery are required; the admin pair (mrk.admin + adminPublicKeyB64)
-    // is tolerated ABSENT — present together or absent together, a lone field is
-    // malformed (DD7 relaxation, mirroring _readManager's v2 pairing rule).
-    for (const slot of ['master', 'recovery']) {
-      if (!isEnvelopeShaped(bundle.mrk[slot])) {
-        throw new vc.VaultFormatError(`vault-store: malformed bundle mrk.${slot} envelope`);
-      }
-    }
-    const bundleHasAdminSeal = bundle.mrk.admin !== undefined;
-    const bundleHasAdminPub = bundle.adminPublicKeyB64 !== undefined;
-    if (bundleHasAdminSeal !== bundleHasAdminPub) {
-      throw new vc.VaultFormatError(
-        'vault-store: bundle mrk.admin and adminPublicKeyB64 must be present together or absent together'
-      );
-    }
-    if (bundleHasAdminSeal) {
-      if (!isEnvelopeShaped(bundle.mrk.admin)) {
-        throw new vc.VaultFormatError('vault-store: malformed bundle mrk.admin envelope');
-      }
-      if (typeof bundle.adminPublicKeyB64 !== 'string') {
-        throw new vc.VaultFormatError('vault-store: bundle missing adminPublicKeyB64');
-      }
-    }
-    // Bounded scrypt-param schema (finding 4): reject absent fields (they silently
-    // collapse to Node's weak scrypt defaults) AND resource-exhausting values —
-    // BEFORE bundle.kdf is used to derive the unwrap key or persisted on adopt.
-    validateImportedKdf(bundle.kdf);
+    // "wrong secret" GCM error. The mrk-envelope-shape + admin-pairing + bounded-KDF
+    // checks are the SHARED `validateBundleEnvelope` helper (M18 F3 Leg 2) — restoreProfile
+    // ({1,2} gate) runs the identical rules; this call site keeps importVault's OWN
+    // v1-only format/version gate above (ruling 9 — importVault never learns v2).
+    const managerVersion = validateBundleEnvelope(bundle);
     if (!Buffer.isBuffer(secret)) {
       throw new VaultStateError('vault-store: import secret must be a Buffer');
     }
@@ -1645,50 +2033,36 @@ class VaultStore {
 
       if (!this.isSetUp()) {
         // FRESH profile: adopt the bundle's manager. Vault FIRST (to GLOBAL_ID — the sole
-        // target resolvable on a jar-less fresh profile), then manager.json, then install.
+        // target resolvable on a jar-less fresh profile), then manager.json, then install —
+        // via the SHARED adopt core (M18 F3 Leg 2 / ruling 1), so `restoreProfile`'s fresh
+        // branch and this one stop minting admin at the same commit (DD6).
         this._writeVaultForKey(GLOBAL_ID, vaultKey, mrk, items);
 
-        // M17 F4 Leg 2 / DD2: FORCE ROTATION of the one-time recovery key and the admin
-        // keypair inline under the ALREADY-LIVE `mrk` (unwrapped above from the donor secret),
-        // so neither donor envelope survives in the adopted manager.json — the donor operator
-        // can never unlock or admin-open this adopted profile. Minted exactly as setup() does
-        // (no master-password step-up: a recovery-kind adopt has no password, and the live MRK
-        // already authenticates the wrap). The two new one-time secrets are RETURNED so the
-        // surfacing leg (Leg 3) can reveal them. The donor MASTER envelope is intentionally
-        // RETAINED (DD4 residual — documented in Leg 4, not severed here).
-        // M18 F2 Leg 1 / DD7: the adopted manager is written at the BUNDLE'S effective
-        // manager version, and the minted envelopes are wrapped at that SAME version —
-        // the donor master envelope is retained verbatim (AAD-bound to the source
-        // version), so wrapping the minted slots at any other version would create
-        // exactly the mixed-version document DD1 forbids (validates at boot, fails
-        // AAD on every master unlock).
-        const rec = vc.generateRecoveryKey();
-        const recoveryEnv = vc.wrapRecovery(mrk, rec.material, { version: managerVersion });
-        rec.material.fill(0); // the recovery is now operator-held via `display` — drop the buffer (mirrors setup).
-        // Adopt still mints a fresh admin pair TODAY — a no-admin bundle simply adopts
-        // as with-admin. The adopt admin-minting removal is Flight 3 (DD8), not here.
-        const admin = vc.generateAdminKeypair();
-        const adminEnv = vc.sealToAdmin(mrk, admin.publicKey, { version: managerVersion });
-
-        this._writeManager({
-          format: MANAGER_FORMAT,
-          version: managerVersion,
+        // M17 F4 Leg 2 / DD2: FORCE ROTATION of the one-time recovery key inline under the
+        // ALREADY-LIVE `mrk` (unwrapped above from the donor secret), so the donor recovery
+        // envelope does not survive in the adopted manager.json — the donor operator can
+        // never recovery-open this adopted profile. Minted exactly as setup() does (no
+        // master-password step-up: a recovery-kind adopt has no password, and the live MRK
+        // already authenticates the wrap). The new one-time recovery key is RETURNED so the
+        // surfacing leg (Leg 3) can reveal it. The donor MASTER envelope is intentionally
+        // RETAINED (DD4 residual — documented in Leg 4, not severed here). M18 F3 Leg 2 /
+        // DD6: adopt no longer mints an admin keypair at all — `_adoptManagerCore` writes
+        // NO admin fields, legal at the bundle's effective managerVersion under ruling 10's
+        // relaxation (a v1-effective adopt is the mission's default-state scenario).
+        const adopted = this._adoptManagerCore({
+          mrk,
+          managerVersion,
           kdf: bundle.kdf,
-          adminPublicKeyB64: admin.publicKeyB64, // NEW — the donor pubkey is discarded.
-          mrk: {
-            master: bundle.mrk.master, // DONOR master envelope RETAINED (DD4).
-            recovery: recoveryEnv, // NEW — the donor recovery envelope is discarded.
-            admin: adminEnv // NEW — the donor admin seal is discarded.
-          }
+          masterEnvelope: bundle.mrk.master
         });
-        this._installMrk(mrk); // leaves UNLOCKED, fires onUnlock; takes ownership of `mrk`.
-        mrk = null; // INSTALLED — do NOT zeroize in the finally.
+        if (adopted.installed) {
+          mrk = null; // ruling 1 hand-off — the core took ownership; do NOT zeroize below.
+        }
         return {
           imported: true,
           fresh: true,
           vaultId: GLOBAL_ID,
-          recoveryKeyDisplay: rec.display,
-          adminPrivateKeyB64: admin.privateKeyB64
+          recoveryKeyDisplay: adopted.recoveryKeyDisplay
         };
       }
 
@@ -1712,6 +2086,380 @@ class VaultStore {
     } finally {
       if (mrk) mrk.fill(0); // transient bundle MRK (existing path / any pre-install throw).
       if (vaultKey) vaultKey.fill(0); // transient vault key (both paths).
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Multi-vault restore (M18 F3 Leg 2 / flight DD1-DD4, DD10)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Validate a restore's per-sourceId directive mapping against the bundle's
+   * vault list — STRUCTURAL legality — entirely BEFORE any crypto or write
+   * (the loud, pre-write edge cases: an unknown sourceId in the mapping, a
+   * bundle vault with no mapping entry — "every row demands an explicit
+   * directive"). Ruling 3's fresh-profile restriction ("only 'new'/'skip'/
+   * global→global on a fresh profile") falls out of `_resolveTarget` itself —
+   * a truly fresh profile's `listJars()` is empty, so no non-global
+   * destination resolves — WITHOUT an extra fresh-specific gate here, which
+   * would otherwise make the adopt-rerun residue recovery path (ruling 4: a
+   * failed fresh adopt's created-but-unadopted jars stay mappable as
+   * 'existing' destinations on rerun, while `isSetUp()` is still false)
+   * unreachable. Touches neither disk nor crypto.
+   * @param {Array<{ sourceId: string }>} vaults
+   * @param {any} mapping
+   * @returns {void}
+   */
+  _validateRestoreMapping(vaults, mapping) {
+    if (!mapping || typeof mapping !== 'object' || Array.isArray(mapping)) {
+      throw new VaultStateError('vault-store: restore mapping must be an object');
+    }
+    const bundleIds = new Set(vaults.map((v) => v.sourceId));
+    for (const key of Object.keys(mapping)) {
+      if (!bundleIds.has(key)) {
+        throw new VaultStateError(`vault-store: restore mapping references unknown sourceId "${key}"`);
+      }
+    }
+    for (const { sourceId } of vaults) {
+      const directive = mapping[sourceId];
+      if (!directive || typeof directive !== 'object') {
+        throw new VaultStateError(`vault-store: restore mapping is missing a directive for "${sourceId}"`);
+      }
+      if (directive.directive !== 'existing' && directive.directive !== 'new' && directive.directive !== 'skip') {
+        throw new VaultStateError(`vault-store: restore mapping has an invalid directive for "${sourceId}"`);
+      }
+      if (directive.directive === 'new') {
+        const nj = directive.newJar;
+        if (!nj || typeof nj !== 'object' || typeof nj.name !== 'string' || typeof nj.color !== 'string') {
+          throw new VaultStateError(
+            `vault-store: restore mapping's 'new' directive for "${sourceId}" needs a valid newJar`
+          );
+        }
+      }
+      if (directive.directive === 'existing') {
+        if (typeof directive.destination !== 'string' || directive.destination.length === 0) {
+          throw new VaultStateError(
+            `vault-store: restore mapping's 'existing' directive for "${sourceId}" needs a destination`
+          );
+        }
+        // Resolve NOW (loud, pre-write) — an unknown/burner/non-existent jar id refuses
+        // the WHOLE restore rather than surfacing per-vault mid-write. This is ALSO
+        // ruling 3's fresh-profile enforcement: a truly fresh profile's listJars() is
+        // empty, so `_resolveTarget` naturally admits only 'global' — no separate
+        // fresh-specific gate is needed. Deliberately NOT gated further on `fresh`
+        // (cycle-2 correction): the adopt-rerun residue edge case (ruling 4) leaves
+        // created-but-unadopted jars in the registry while `isSetUp()` is still
+        // false, and the documented recovery path is mapping a rerun's directives
+        // onto exactly those residue jars via 'existing' — a hard fresh-profile ban
+        // here would make that recovery path unreachable.
+        this._resolveTarget(directive.destination);
+      }
+      if (directive.mode !== undefined && directive.mode !== 'replace' && directive.mode !== 'merge') {
+        throw new VaultStateError(`vault-store: restore mapping has an invalid mode for "${sourceId}"`);
+      }
+    }
+  }
+
+  /**
+   * Restore a whole-profile bundle (v1 or v2 — ruling 9 normalizes v1 to the
+   * one-row v2 shape) with an explicit per-vault directive mapping (DD2/DD3).
+   * SINGLE-FLIGHT guarded (ruling 7) in addition to the re-key gate (ruling 8).
+   * @param {any} bundle
+   * @param {{ secret: Buffer, secretKind?: 'master'|'recovery', mapping: any }} opts
+   * @returns {Promise<{ fresh: boolean, results: Array<{ sourceId: string,
+   *   outcome: 'landed'|'skipped'|'collision-refused'|'failed', destination?: string,
+   *   mergeReport?: { imported: number, skippedIdentical: number, conflictCopies: number } }>,
+   *   generation: { completedAt: number, nonce: string }, recoveryKeyDisplay?: string }>}
+   */
+  async restoreProfile(bundle, opts = /** @type {any} */ ({})) {
+    // Single-flight guard (DD3 ruling 7) — ADDITIONAL to the re-key gate below,
+    // which is a COUNTER (`_inFlightOps`, `:759-773` area) and does not
+    // serialize two restores against EACH OTHER. An INSTANCE field (never
+    // module-scope — the `_rekeyInProgress` idiom, since the unit suite
+    // constructs many store instances via `vs.load()`).
+    if (this._restoreInFlight) {
+      throw new VaultBusyError('vault-store: a restore is already in progress');
+    }
+    this._restoreInFlight = true;
+    // GATED (DD10 ruling 8): restoreProfile awaits scrypt mid-op, so it holds
+    // the in-flight counter for its full duration exactly as importVault does.
+    const releaseOp = this._enterGatedOp();
+    try {
+      return await this._restoreProfile(bundle, opts);
+    } finally {
+      releaseOp();
+      this._restoreInFlight = false; // released on success AND on throw.
+    }
+  }
+
+  /**
+   * @param {any} bundle
+   * @param {{ secret: Buffer, secretKind?: 'master'|'recovery', mapping: any }} opts
+   * @returns {ReturnType<VaultStore['restoreProfile']>}
+   */
+  async _restoreProfile(bundle, opts) {
+    const { secret, secretKind, mapping } = opts;
+
+    // ---- validate the bundle shape (v1/v2 normalization, ruling 9) + the shared
+    // envelope rules (ruling 9's {1,2} gate — restoreProfile, unlike importVault,
+    // learns v2) — loud, pre-write, pre-crypto. ----
+    const normalized = normalizeRestoreBundle(bundle);
+    const managerVersion = validateBundleEnvelope(normalized);
+    if (!Buffer.isBuffer(secret)) {
+      throw new VaultStateError('vault-store: restore secret must be a Buffer');
+    }
+    const kind = secretKind === 'recovery' ? 'recovery' : 'master';
+    const fresh = !this.isSetUp();
+
+    // ---- validate the mapping against the bundle's vault list (structural +
+    // fresh-profile legality) — still before any crypto or write. ----
+    this._validateRestoreMapping(normalized.vaults, mapping);
+
+    // Parse + shape-check every embedded .gfvault doc up front (loud, pre-write —
+    // mirrors _importVault's single parseVault call, done here for every entry).
+    const parsedVaults = normalized.vaults.map((entry) => {
+      const doc = vc.parseVault(typeof entry.vault === 'string' ? entry.vault : JSON.stringify(entry.vault));
+      const mrkEnv = doc.envelopes.find((/** @type {any} */ e) => e.keyId === 'mrk');
+      if (!mrkEnv) {
+        throw new vc.VaultFormatError(`vault-store: bundle vault "${entry.sourceId}" missing mrk envelope`);
+      }
+      return { sourceId: entry.sourceId, doc, mrkEnv };
+    });
+
+    if (!fresh) {
+      this._requireMrk(); // destination must be unlocked (mirrors importVault's existing-profile check).
+    }
+
+    // ---- bundle-secret crypto (before any write) ----
+    let mrk;
+    if (kind === 'recovery') {
+      const material = vc.parseRecoveryKey(secret.toString('utf8'));
+      try {
+        mrk = vc.unwrapRecovery(normalized.mrk.recovery, material, { version: managerVersion });
+      } finally {
+        material.fill(0); // zeroize the transient recovery material (mirrors unlockWithRecovery).
+      }
+    } else {
+      mrk = await vc.unwrapMaster(normalized.mrk.master, secret, { version: managerVersion, params: normalized.kdf });
+    }
+
+    /** @type {Array<{ sourceId: string, outcome: 'landed'|'skipped'|'collision-refused'|'failed',
+     *   destination?: string, mergeReport?: { imported: number, skippedIdentical: number, conflictCopies: number } }>} */
+    const results = [];
+    let anyFailed = false;
+    try {
+      for (const { sourceId, doc, mrkEnv } of parsedVaults) {
+        const directive = mapping[sourceId];
+        if (directive.directive === 'skip') {
+          results.push({ sourceId, outcome: 'skipped' });
+          continue;
+        }
+
+        let destId;
+        if (directive.directive === 'new') {
+          // DD3 (a): create THEN verify — jars.add's save() is fail-soft, so an
+          // unverified create could land a vault under a jar that evaporates on
+          // restart. A failed verify → outcome 'failed', NO vault write, NO
+          // rollback attempt (the in-memory jar stays until restart; rerun recovers).
+          if (this._createJar === null) {
+            throw new VaultStateError('vault-store: jar creation is not configured on this store');
+          }
+          const created = this._createJar(directive.newJar.name, directive.newJar.color);
+          const verified = this._verifyJarPersisted(created.id);
+          if (!verified) {
+            results.push({ sourceId, outcome: 'failed' });
+            anyFailed = true;
+            break; // per-vault atomicity + rerun (ruling 4) — stop; later entries untouched.
+          }
+          destId = created.id;
+        } else {
+          destId = this._resolveTarget(directive.destination);
+        }
+
+        const destExists = fs.existsSync(this._vaultPath(destId));
+        if (destExists && !directive.mode) {
+          results.push({ sourceId, outcome: 'collision-refused', destination: destId });
+          continue;
+        }
+
+        let vaultKey = null;
+        try {
+          // Ruling 11: at most ONE bundle vault key live at a time — unwrap → write →
+          // zeroize in this per-iteration finally (stricter than changeMasterPassword's
+          // collect-array, which that op needs for its batch-then-one-txn shape; this
+          // loop writes each vault immediately, so there is nothing to batch).
+          vaultKey = vc.unwrapVaultKey(mrkEnv, mrk, mrkEnvelopeAad(doc.version));
+          const items = validateImportedItems(vc.decryptItems(doc.items, vaultKey));
+
+          /** @type {{ imported: number, skippedIdentical: number, conflictCopies: number } | undefined} */
+          let mergeReport;
+          if (destExists && directive.mode === 'merge') {
+            // Merge requires decrypting the DESTINATION vault under ITS OWN key
+            // (guaranteed reachable — fresh can never reach here, destExists is
+            // always false before any vault is written).
+            const destDoc = this._readVault(destId);
+            const destKey = this._vaultKeyFromDoc(destId, destDoc);
+            const destItems = /** @type {VaultItem[]} */ (vc.decryptItems(destDoc.items, destKey));
+            const merge = mergeVaultItems(destItems, items);
+            this._writeVault(destId, {
+              kdf: destDoc.kdf,
+              envelopes: destDoc.envelopes,
+              items: vc.encryptItems(merge.items, destKey)
+            });
+            mergeReport = merge.mergeReport;
+          } else {
+            // Fresh write (no destination vault) OR an explicit whole-vault replace —
+            // this bundle vault's OWN key, wrapped under the profile's LIVE mrk (fresh:
+            // the bundle mrk itself, which becomes the profile's new MRK; existing:
+            // this.mrk, exactly as importVault's existing-profile branch).
+            const wrappingMrk = fresh ? mrk : this._requireMrk();
+            this._writeVaultForKey(destId, vaultKey, wrappingMrk, items);
+            if (!fresh) {
+              // Evict the destination's cached key — a stale cached key GCM-fails
+              // against the new ciphertext (mirrors importVault's existing-profile path).
+              this.vaultKeys.get(destId)?.fill(0);
+              this.vaultKeys.delete(destId);
+            }
+          }
+          results.push({
+            sourceId,
+            outcome: 'landed',
+            destination: destId,
+            ...(mergeReport ? { mergeReport } : {})
+          });
+        } finally {
+          if (vaultKey) vaultKey.fill(0);
+        }
+      }
+
+      /** @type {string | undefined} */
+      let recoveryKeyDisplay;
+      if (fresh && !anyFailed) {
+        // Vault-before-manager (ruling 4): adopt ONLY after the whole loop, and ONLY
+        // when nothing failed — a mid-list failure leaves vaults+jars on disk but NO
+        // manager, so isSetUp() stays false and a rerun re-adopts over the residue.
+        const adopted = this._adoptManagerCore({
+          mrk,
+          managerVersion,
+          kdf: normalized.kdf,
+          masterEnvelope: normalized.mrk.master
+        });
+        if (adopted.installed) {
+          mrk = null; // ruling 1 hand-off — do NOT zeroize below.
+        }
+        recoveryKeyDisplay = adopted.recoveryKeyDisplay;
+      }
+
+      // Generation-identity field (DD3 / the flight's evidence-cheapening item):
+      // timestamp + crypto-random nonce, so two consecutive restores of the same
+      // bundle are distinguishable.
+      const generation = { completedAt: this._now(), nonce: crypto.randomBytes(16).toString('hex') };
+      return {
+        fresh,
+        results,
+        generation,
+        ...(recoveryKeyDisplay !== undefined ? { recoveryKeyDisplay } : {})
+      };
+    } finally {
+      // The bundle mrk: zeroized here UNLESS the adopt core installed it (ruling 1's
+      // hand-off nulls the local binding on that signal, above).
+      if (mrk) mrk.fill(0);
+    }
+  }
+
+  /**
+   * Preview a restore bundle's SECRET step (M18 F3 Leg 3 / DD2 ruling 2, cycle-1
+   * mechanism correction): verify the bundle secret unwraps the mrk (auth), then
+   * return NON-SECRET per-vault labels for the page's mapping step — never any key
+   * material, never a decrypted item.
+   *
+   * Item counts cannot come from ciphertext shape (`doc.items` is one AES-GCM blob) —
+   * this is decrypt-then-discard, the `listItemsMeta` precedent (fully decrypt +
+   * project a non-secret whitelist). Runs `validateImportedItems` on EVERY bundle
+   * vault's decrypted plaintext (cycle-2 HIGH): a malformed-plaintext vault must fail
+   * HERE, at the secret step where nothing is written — never mid-commit after
+   * earlier vaults already landed. jarMeta (present for jar vaults only) is decrypted
+   * via `decryptJarMeta` for display; a tamper there fails loudly (that helper's own
+   * contract), never a silent unnamed jar.
+   *
+   * Gated via `_enterGatedOp` — NOT for `exportVault`'s local-read rationale (preview
+   * touches no local vault state) but so an operator cannot START a multi-step import
+   * while a compromise rotation is rewriting the profile. NOT single-flight-guarded
+   * (that guard belongs to `restoreProfile`, which writes) — a preview never mutates.
+   * @param {any} bundle
+   * @param {{ secret: Buffer, secretKind?: 'master'|'recovery' }} opts
+   * @returns {Promise<{ labels: Array<{ sourceId: string, jarMeta: { name: string, color: string } | null, itemCount: number }> }>}
+   */
+  async previewRestoreBundle(bundle, opts = /** @type {any} */ ({})) {
+    const releaseOp = this._enterGatedOp();
+    try {
+      return await this._previewRestoreBundle(bundle, opts);
+    } finally {
+      releaseOp();
+    }
+  }
+
+  /**
+   * @param {any} bundle
+   * @param {{ secret: Buffer, secretKind?: 'master'|'recovery' }} opts
+   * @returns {ReturnType<VaultStore['previewRestoreBundle']>}
+   */
+  async _previewRestoreBundle(bundle, opts) {
+    const { secret, secretKind } = opts;
+    const normalized = normalizeRestoreBundle(bundle);
+    const managerVersion = validateBundleEnvelope(normalized);
+    if (!Buffer.isBuffer(secret)) {
+      throw new VaultStateError('vault-store: preview secret must be a Buffer');
+    }
+    const kind = secretKind === 'recovery' ? 'recovery' : 'master';
+
+    // Parse + shape-check every embedded .gfvault doc up front (mirrors _restoreProfile).
+    const parsedVaults = normalized.vaults.map((entry) => {
+      const doc = vc.parseVault(typeof entry.vault === 'string' ? entry.vault : JSON.stringify(entry.vault));
+      const mrkEnv = doc.envelopes.find((/** @type {any} */ e) => e.keyId === 'mrk');
+      if (!mrkEnv) {
+        throw new vc.VaultFormatError(`vault-store: bundle vault "${entry.sourceId}" missing mrk envelope`);
+      }
+      return { sourceId: entry.sourceId, jarMeta: entry.jarMeta, doc, mrkEnv };
+    });
+
+    // ---- bundle-secret crypto (auth) ----
+    let mrk;
+    if (kind === 'recovery') {
+      const material = vc.parseRecoveryKey(secret.toString('utf8'));
+      try {
+        mrk = vc.unwrapRecovery(normalized.mrk.recovery, material, { version: managerVersion });
+      } finally {
+        material.fill(0); // zeroize the transient recovery material (mirrors restoreProfile).
+      }
+    } else {
+      mrk = await vc.unwrapMaster(normalized.mrk.master, secret, { version: managerVersion, params: normalized.kdf });
+    }
+
+    try {
+      const labels = [];
+      for (const { sourceId, jarMeta, doc, mrkEnv } of parsedVaults) {
+        let vaultKey = null;
+        try {
+          // Ruling 11's per-iteration discipline: at most one bundle vault key live at a time.
+          vaultKey = vc.unwrapVaultKey(mrkEnv, mrk, mrkEnvelopeAad(doc.version));
+          const items = validateImportedItems(vc.decryptItems(doc.items, vaultKey));
+          labels.push({
+            sourceId,
+            jarMeta: jarMeta !== undefined ? decryptJarMeta(mrk, sourceId, jarMeta) : null,
+            itemCount: items.length
+          });
+          // The decrypted item objects themselves are dropped by scope here (JS strings, not
+          // zeroizable — the accepted listItemsMeta posture; ruling 2's "decrypt-then-discard").
+        } finally {
+          if (vaultKey) vaultKey.fill(0);
+        }
+      }
+      return { labels };
+    } finally {
+      // Preview never installs anything — the bundle mrk is ALWAYS zeroized here (unlike
+      // restoreProfile's finally, which honors the adopt hand-off).
+      mrk.fill(0);
     }
   }
 
@@ -2533,6 +3281,8 @@ module.exports = {
   // id + version without re-typing the literals.
   BUNDLE_FORMAT,
   BUNDLE_VERSION,
+  // The whole-profile, multi-vault bundle version (M18 F3 Leg 2 / DD1 ruling 2).
+  BUNDLE_VERSION_V2,
   // Re-exported (M12 F3 DD8) so the reserved-id cross-module test can assert this
   // store's global sentinel ∈ jars' reserved ids without re-typing the literal.
   GLOBAL_ID,
@@ -2555,5 +3305,9 @@ module.exports = {
   // Import hardening validators (PR#112 finding 4) — exported so the bounded KDF
   // schema and the decrypted-item-array guard are unit-tested directly.
   validateImportedKdf,
-  validateImportedItems
+  validateImportedItems,
+  // M18 F3 Leg 2 (DD1 ruling 2): the bundle v2 jarMeta decrypt helper — leg 3's
+  // pre-mapping label step consumes this directly; unit-tested here (including
+  // the tamper → loud auth/format error case).
+  decryptJarMeta
 };

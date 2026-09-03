@@ -295,6 +295,12 @@ interface GoldfinchBridge {
      * (the locked-vault unlock-to-save prompt), so the loading page's focus steal must
      * neither close it (sheet-side) nor keep its keystrokes (main re-grabs focus). */
     keepFocus?: boolean;
+    /** M18 F3 L1 (DD8): true opts the menu OUT of the blur-CLOSE reason — main's
+     * closeMenuOverlay ignores 'blur' (and only 'blur') for it, and the sheet's own
+     * window-blur listener does too. Set ONLY by the shared chrome-side funnel
+     * (overlay-menus.js's open(), against the vault-blur-survival.js allowlist) — never
+     * hand-set at an individual vault-controller.js call site. */
+    survivesBlur?: boolean;
   }): void;
   /** Channel 2: programmatic close — reason allowlisted main-side ('toggle' | 'superseded' |
    * 'escape' | 'blur' | 'navigation' | 'input-empty' | 'activated'). */
@@ -700,13 +706,20 @@ interface GoldfinchInternalBridge {
    * Each row carries a metadata-only item `count` when UNLOCKED (omitted when locked);
    * never a secret. M18 F2 L4 adds `adminProvisioned` (the Master-key section's
    * provision state) and `compromiseReport` (the session-held compromise-rotation
-   * revocation report behind the persistent "Everything rotated" card; null when none). */
+   * revocation report behind the persistent "Everything rotated" card; null when none).
+   * M18 F3 L3 adds `severOffer` (DD7's post-fresh-adopt sever card route; null when no
+   * offer is pending). */
   vaultState(): Promise<{
     setUp: boolean;
     unlocked: boolean;
     vaults: Array<{ vaultId: string; label: string; count?: number }>;
     adminProvisioned?: boolean;
-    compromiseReport?: { admin: boolean; vaultIds: string[] } | null;
+    compromiseReport?: {
+      admin: boolean;
+      vaultIds: string[];
+      generation?: { completedAt: number; nonce: string };
+    } | null;
+    severOffer?: { route: 'change-master' | 'recover' } | null;
   }>;
   /** Metadata-only item list for one vault (no secret, ever) — { items } or { locked }. */
   vaultList(vaultId: string): Promise<{ items?: Array<VaultItemMeta>; locked?: boolean }>;
@@ -750,38 +763,76 @@ interface GoldfinchInternalBridge {
   vaultAccessKeyRevoke(payload: { vaultId: string; keyId: string }): Promise<{ revoked?: boolean; locked?: boolean }>;
   /** Request the chrome-owned access-key MINT sheet (vault-stepup) scoped to `target`. */
   requestMint(target: string): Promise<{ ok: boolean }>;
-  // Portable export / import (M12 F4 Leg 1 / DD1 — Option A; page-modal split M12 F5 HAT, I14).
-  // Export is fully main-side (build + write); the page Export modal picks a location via
-  // pickSavePath then binds source→path via exportVault(target, savePath), while the jars offer
-  // calls exportVault(target) with no path. Import: pickImportFile opens + holds the bundle,
-  // beginImportUnlock opens the chrome-owned secret sheet, clearPendingImport drops the held
-  // bundle on dismiss. NO secret crosses any of these channels.
-  /** Export a vault to a portable bundle file. With `savePath` main writes directly (the page
-   * modal); without one main runs the save dialog (the jars offer). { ok, path }, { canceled },
-   * or { locked }. */
+  // Portable export / RESTORE (M12 F4 Leg 1 / DD1 — Option A; page-modal split M12 F5 HAT, I14;
+  // unified whole-profile restore M18 F3 Leg 3 / DD2). Export is fully main-side (build + write);
+  // the page Export modal picks a location via pickSavePath then binds it via exportProfile(savePath)
+  // (whole-profile, DD1 ruling 7), while the jars delete-first offer calls exportVault(target) (single
+  // vault, untouched). Restore: pickImportFile opens + holds { bundle, handle } (NO destination —
+  // ruling 1), beginImportUnlock opens the chrome-owned secret sheet (a PREVIEW), fetchImportLabels
+  // pulls the verified labels after onVaultImportLabelsReady fires, commitImport sends the mapping
+  // and returns the outcomes, clearPendingImport drops the held record on dismiss (at ANY step),
+  // severDismiss clears DD7's sever card. NO secret crosses any of these channels.
+  /** Export a single vault to a portable bundle file (the jars page's delete-first offer). With
+   * `savePath` main writes directly (the page modal); without one main runs the save dialog.
+   * { ok, path }, { canceled }, or { locked }. */
   exportVault(
     target: string,
     savePath?: string
   ): Promise<{ ok?: boolean; path?: string; canceled?: boolean; locked?: boolean; error?: string; reason?: string }>;
+  /** Export the WHOLE PROFILE (M18 F3 L3 / DD1 ruling 7) — the vault page's Export modal's ONLY
+   * export path. { ok, path, carried }, { canceled }, or { locked }. */
+  exportProfile(savePath?: string): Promise<{
+    ok?: boolean;
+    path?: string;
+    carried?: string[];
+    canceled?: boolean;
+    locked?: boolean;
+    error?: string;
+    reason?: string;
+  }>;
   /** Pick a save location for an export bundle — save dialog in main ONLY (no write). { path } or
    * { canceled }. */
   pickSavePath(target: string): Promise<{ path?: string; canceled?: boolean }>;
   /** Does this jar have a saved `.gfvault` file? (M12 F4 Leg 6.) Lets the jars page's Delete
    * confirm surface the export-first offer only for a vault-bearing jar. */
   hasVault(vaultId: string): Promise<{ present: boolean }>;
-  /** Pick a bundle file for a destination target: open + read + HOLD the bundle main-side (no sheet
-   * opened). { ok, path }, { canceled }, or { error }. The page re-picks if the destination changes
-   * (H1). */
-  pickImportFile(
-    destinationTarget: string
-  ): Promise<{ ok?: boolean; path?: string; importHandle?: string; canceled?: boolean; error?: string }>;
-  /** Open the chrome-owned vault-import-unlock secret sheet for the held bundle (Import modal
-   * Continue). Bare trigger — no secret; the payload is `{ overwrite, handle }` (the Replace-existing
-   * checkbox + the pickImportFile importHandle, PR#112 finding 5), bound onto the held record main-side. { ok }. */
-  beginImportUnlock(overwrite?: boolean, handle?: string): Promise<{ ok: boolean }>;
-  /** Drop the held import bundle (L1) on Import modal dismiss after a pick. Pass the pickImportFile
-   * importHandle so only this window's transaction is dropped (finding 5). Always safe. { ok }. */
+  /** Pick a bundle file: open + read + HOLD { bundle, handle } main-side (no sheet opened, no
+   * destination — ruling 1). { ok, path, importHandle }, { canceled }, or { error }. */
+  pickImportFile(): Promise<{ ok?: boolean; path?: string; importHandle?: string; canceled?: boolean; error?: string }>;
+  /** Open the chrome-owned vault-import-unlock secret sheet for the held bundle (a PREVIEW — no
+   * write). Fully bare trigger — no payload at all. { ok }. */
+  beginImportUnlock(): Promise<{ ok: boolean }>;
+  /** Drop the held import record — at ANY step (pick, or post-secret the mapping step). Pass the
+   * pickImportFile importHandle so only this window's transaction is dropped (finding 5). Always
+   * safe. { ok }. */
   clearPendingImport(handle?: string): Promise<{ ok: boolean }>;
+  /** The page's window-scoped labels fetch (DD2 ruling 3(c)) — call after onVaultImportLabelsReady.
+   * A NON-SECRET { handle, labels } projection, or null when nothing is held past the secret step. */
+  fetchImportLabels(): Promise<{
+    handle: string;
+    labels: Array<{ sourceId: string; jarMeta: { name: string; color: string } | null; itemCount: number }>;
+  } | null>;
+  /** Commit the multi-vault restore with the operator's per-vault mapping (DD2 ruling 3(e)).
+   * { ok:true, fresh, results, generation } on success, or a non-secret { ok:false, reason }. */
+  commitImport(payload: { handle: string; mapping: any }): Promise<{
+    ok: boolean;
+    fresh?: boolean;
+    results?: Array<{
+      sourceId: string;
+      outcome: 'landed' | 'skipped' | 'collision-refused' | 'failed';
+      destination?: string;
+      mergeReport?: { imported: number; skippedIdentical: number; conflictCopies: number };
+    }>;
+    generation?: { completedAt: number; nonce: string };
+    reason?: string;
+  }>;
+  /** Subscribe to the labels-ready notification (no payload) — call fetchImportLabels on receipt.
+   * Returns a numeric handle for offVaultImportLabelsReady. */
+  onVaultImportLabelsReady(cb: () => void): number;
+  /** Unsubscribe the labels-ready listener registered under handle h. */
+  offVaultImportLabelsReady(h: number): void;
+  /** Dismiss the DD7 post-fresh-adopt sever offer card. No secret; { ok }. */
+  severDismiss(): Promise<{ ok: boolean }>;
   // Key rotation / recover (M12 F4 Leg 2 / DD3). Bare triggers — main opens the chrome-owned
   // sheet that collects the secret(s); NO secret crosses these channels or the page DOM.
   /** Request the recovery-key ROTATION sheet (reuses vault-stepup for a master-pw step-up). */
@@ -846,6 +897,11 @@ interface MenuEntry {
    * blur dismissal (vault-recovery-show — the one-time recovery key is unrecoverable).
    * Undefined/true keeps the default dismiss behavior. */
   dismissible?: boolean;
+  /** M18 F3 L1 (DD8): true opts the entry OUT of window-blur dismissal ONLY (never
+   * outside-click/escape) — the vault credential sheets on the blur-survival allowlist
+   * (src/shared/vault-blur-survival.js). Parallel to `dismissible`, never reused for a
+   * different behavior. Undefined/false keeps the default close-on-blur behavior. */
+  survivesBlur?: boolean;
 }
 
 /**

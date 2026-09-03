@@ -68,15 +68,21 @@ Everything lives under `userData/vaults/`:
   The only plaintext of consequence is `adminPublicKeyB64` (a *public* key). All three MRK
   wraps are ciphertext.
 
-  **Manager version 2 (M18): the admin fields are optional.** A `version: 2` manager may
-  omit `mrk.admin` and `adminPublicKeyB64` entirely — an unprovisioned (or
-  compromise-revoked) admin slot is a deliberate state, not corruption. When present they
-  are validated exactly as in v1, and they are present *together* or absent *together* (a
-  lone seal or lone public key is malformed → `VaultFormatError`). v1 managers (all three
-  slots required) remain readable unchanged. Manager envelopes bind the *document's* stated
-  version in their AAD, and a document's envelopes are always homogeneous: v2 is written
-  only by operations that rewrite the full envelope set (compromise-mode rotation today);
-  single-slot rotations preserve the document's existing version.
+  **The admin fields are optional at BOTH versions (M18 F2 Leg 1 for v2; relaxed to v1
+  M18 F3 Leg 2).** A manager document may omit `mrk.admin` and `adminPublicKeyB64`
+  entirely — an unprovisioned (or compromise-revoked, or never-minted-on-adopt) admin
+  slot is a deliberate state, not corruption. When present they are validated identically
+  at both versions, and they are present *together* or absent *together* (a lone seal or
+  lone public key is malformed → `VaultFormatError`). v1 originally required the pair
+  (every profile `setup()` writes it, so no legitimately-created v1 profile changes
+  behavior); the relaxation is what makes a no-admin fresh adopt of a v1-effective bundle
+  legal — see Portability below. The trade-off, accepted: a slot-deletion tamper on a v1
+  manager now degrades to the no-admin *state* instead of a loud format error; envelope
+  integrity itself stays GCM/AAD-protected regardless. Manager envelopes bind the
+  *document's* stated version in their AAD, and a document's envelopes are always
+  homogeneous: v2 is written only by operations that rewrite the full envelope set
+  (compromise-mode rotation, and a bundle-driven fresh adopt whose bundle happens to be
+  v2-effective); single-slot rotations preserve the document's existing version.
 
 - **`<vaultId>.gfvault`** — one per vault (`global.gfvault`, then `<jarId>.gfvault` created
   lazily on the first credential save into that jar). Format id `gfvault`, version 1, owned
@@ -198,6 +204,28 @@ business logic and no privileged APIs; it renders a model and runs the APG keybo
   window-blur do not close them — only an explicit "acknowledge" does (the value is
   unrecoverable, so an accidental dismiss must not lose it). On close the reference is dropped
   and the DOM text is scrubbed; a model-replace never re-emits a stale key.
+- **Credential sheets survive window blur (M18 F3 L1, operator ruling).** Every sheet that
+  takes a TYPED secret — `vault-unlock`, `vault-set`, `vault-stepup`, `vault-import` (opened
+  as `vault-import-unlock`), `vault-change-master`, `vault-recover`, `vault-compromise`, and
+  `vault-compromise-recover` — keeps its half-entered field state through a window
+  blur/refocus (app switch), so a value copy-pasted from another secrets manager isn't lost
+  mid-paste. **Accepted trade-off: half-typed secret material persists in a blurred window
+  until the operator submits, explicitly dismisses (Escape/Cancel/backdrop, where permitted),
+  locks the vault, or closes the window** — those four still close every credential sheet
+  exactly as before; only the incidental window-blur close is suppressed. Membership is a
+  single shared allowlist (`src/shared/vault-blur-survival.js`), applied once at the chrome-side
+  open funnel (`src/renderer/chrome/overlay-menus.js`) — never decided per call site. The
+  dismiss-locked one-time-key displays above and the no-typed-secret `vault-capture` /
+  `vault-picker` sheets are **not** part of this axis (the show sheets are already
+  blur-immune via `dismissible: false`; the metadata-only sheets have nothing to protect).
+- **Close on vault lock.** Locking the vault (manual, or the idle autolock timer) closes any
+  open allowlisted credential sheet — the conservative answer once half-typed secrets can
+  outlive an app switch: the operator walked away, so wiping in-progress new-master material
+  is safer than leaving it live in a backgrounded window. **`vault-unlock` is exempt** —
+  locking is its own precondition, not its invalidation, so a lock broadcast never closes the
+  prompt the operator needs in order to unlock. `vault-recover` and `vault-compromise-recover`
+  (both reachable from a locked vault) close like every other allowlisted sheet; the flow
+  simply reopens from the locked state.
 - **Sequential dismiss-locked one-time sheets (M17 F4 L3).** Opening a second sheet
   immediately after a dismiss-locked one-time sheet is NOT safe: `menu-overlay-manager.js`'s
   `openMenu` treats any open-while-open as a model-replace and fires `'superseded'` on the
@@ -347,43 +375,145 @@ refuse non-login items, and the documented "never card data" guarantee in
 
 ## Portability
 
-`exportVault(target)` builds a self-contained, portable **bundle** (format
-`gfvault-bundle`, version 1 — the mission's "Option A"). It requires the manager unlocked as
-a policy choice (every input is already on disk) and takes **no password**. The bundle
-carries, all as ciphertext:
+Two generations of the export/import surface coexist. `exportVault(target)` /
+`importVault(bundle, opts)` are the original **single-vault** ops (bundle format
+`gfvault-bundle`, version 1 — the mission's "Option A"); `exportProfile()` /
+`restoreProfile(bundle, opts)` (M18 F3, Multi-Vault Portability) are the **whole-profile,
+multi-vault** ops (bundle version 2) layered on the same format id and the same adopt
+core. `restoreProfile` also accepts a v1 bundle, normalizing it internally to a one-row
+v2 shape — the "one-row case" of the same flow.
+
+**`exportVault`/`exportProfile`** both require the manager unlocked as a policy choice
+(every input is already on disk) and take **no password**. Everything carried is
+ciphertext:
 
 - the manager's MRK envelopes — `master` and `recovery` always; the `admin` envelope +
   the admin **public** key (`adminPublicKeyB64`) only when an admin key is provisioned
-  (a v2 no-admin manager, e.g. after a compromise-mode rotation, exports without them),
+  (a no-admin manager, e.g. after a compromise-mode rotation or a no-admin adopt, exports
+  without them),
 - the KDF params,
 - the source manager's stated version (`managerVersion`; absent ⇒ 1 in old bundles) — the
   envelopes are AAD-bound to it, so import unwraps at the bundle's stated version,
-- the target `.gfvault` document (its `mrk` envelope + item ciphertext).
+- `exportVault`: the target `.gfvault` document (its `mrk` envelope + item ciphertext).
+  `exportProfile`: an array of `{ sourceId, jarMeta?, vault }` entries — the global vault
+  plus every jar vault that **exists on disk** (a lazily-never-saved jar vault is simply
+  absent; the array itself names what was carried). Each jar entry's portable identity
+  (`{ name, color }` — everything else on the jar record is destination-local) rides as
+  **encrypted** `jarMeta`, keyed off the bundle MRK via the same generic wrap primitives
+  the MRK envelopes use (`deriveHkdfKey` + `wrapVaultKey`, AAD-bound to the bundle context
+  + the vault's `sourceId`) — nothing human-readable about a jar appears before the bundle
+  secret is entered. `decryptJarMeta` is the paired reader (a tampered envelope fails GCM
+  authentication loudly, never a silent unnamed jar); `restoreProfile` itself never reads
+  jarMeta — the caller's explicit mapping step supplies `newJar.{name,color}` instead.
 
 No plaintext secret ever enters the bundle. Carrying the MRK envelope set preserves
 recovery-key (and, when provisioned, admin) portability on the far side.
 
-`importVault(bundle, opts)` does all crypto **before any write** (a wrong secret throws and
-writes/installs nothing). The source **master password** (a Buffer) or the source **recovery
-key** (a base32 display string) opens the bundle:
+Both import paths do all crypto **before any write** (a wrong secret throws and
+writes/installs nothing). The source **master password** (a Buffer) or the source
+**recovery key** (a base32 display string) opens the bundle:
 
 - **Fresh profile** (`!isSetUp()`): **adopt** the bundle's manager, but not verbatim — a
-  fresh adopt **forces a recovery + admin rotation** before the profile is usable. Write the
-  vault file first (to `global`, the only target resolvable on a jar-less fresh profile, so a
-  failure never flips `isSetUp()` true without a vault); then, still under the bundle's live
-  MRK, mint a fresh recovery key and a fresh admin keypair and write **those** envelopes
-  (`mrk.recovery`, `mrk.admin`, and `adminPublicKeyB64`) into the adopted `manager.json`
-  instead of the donor's — so the donor retains **neither** the recovery key **nor** the
-  admin private key into the adopted vault. The donor's `mrk.master` envelope is carried over
-  unchanged (see the master-residual note under Rotation & recovery and the threat model), so
-  the source **master password** still unlocks the adopted profile on restart — but the
-  source **recovery key is rotated away** and no longer opens it. Finally install the MRK
-  (leaving the profile unlocked). The two new one-time keys are surfaced **once**, recovery
-  first and admin only after the recovery key is acknowledged, and the profile stays unlocked
-  until that lockout-critical recovery key is acknowledged.
+  fresh adopt **forces a recovery rotation** before the profile is usable, and **mints no
+  admin key at all** (the adopt-no-admin change; both `importVault`'s fresh branch and
+  `restoreProfile`'s fresh branch route through the same shared adopt core, so they stop
+  minting admin at the same commit). Every carried vault is written first (`restoreProfile`:
+  in per-vault directive order; `importVault`: to `global`, the only target resolvable on a
+  jar-less fresh profile) — so a failure never flips `isSetUp()` true without at least the
+  vaults that landed; then, still under the bundle's live MRK, mint a fresh recovery key and
+  write **that** envelope (`mrk.recovery`) into the adopted `manager.json` instead of the
+  donor's, with **no** `mrk.admin` and **no** `adminPublicKeyB64` at all — so the donor
+  retains neither the recovery key nor any admin access into the adopted vault, and the
+  adopted profile simply has no admin key to retain or discard, ever. The donor's
+  `mrk.master` envelope is carried over unchanged (see the master-residual note under
+  Rotation & recovery and the threat model), so the source **master password** still
+  unlocks the adopted profile on restart — but the source **recovery key is rotated away**
+  and no longer opens it. This is legal at **either** manager version the bundle carries
+  (v1's admin-optional relaxation above is what makes a no-admin v1-effective adopt valid —
+  the mission's default, never-rotated-profile scenario). Finally install the MRK (leaving
+  the profile unlocked). The new one-time recovery key is the only secret the adopt result
+  surfaces; the profile stays unlocked until it is acknowledged.
 - **Existing profile** (set up + unlocked): **re-key** the source vault key under the
   destination profile's own MRK at the resolved destination target; a collision is refused
-  unless `overwrite`. The transient bundle MRK and vault key are zeroized.
+  unless `overwrite` (`importVault`) or an explicit `mode: 'replace'`/`'merge'` directive
+  (`restoreProfile`). The transient bundle MRK and vault key are zeroized — `restoreProfile`
+  holds at most ONE bundle vault key live at a time across its per-vault loop (stricter than
+  `changeMasterPassword`'s collect-then-zeroize-in-one-`finally` shape, which needs to hold
+  every rotated key at once for its batch-then-one-write shape; this loop writes each vault
+  immediately, so there is nothing to batch).
+
+`restoreProfile` additionally: takes an explicit per-`sourceId` directive
+(`'existing' | 'new' | 'skip'`, with `mode: 'replace' | 'merge'` on a collision) — every
+bundle vault demands one, loudly, before any write; commits **per-vault atomically** (DD3),
+so a mid-list failure (today: a `'new'` directive whose jar registration doesn't durably
+verify) leaves earlier vaults landed and later ones untouched, with the manager left absent
+on a fresh profile so a rerun re-adopts over the residue; **merges non-interactively** on
+id identity (same id + identical content skips; same id + differing content lands the
+incoming item as a marked copy under a fresh id; different ids always coexist — zero data
+loss, no picker); is guarded by an **instance-level single-flight lock** in addition to the
+usual gate, since two concurrent restores are not otherwise mutually exclusive; and returns
+an ordered per-vault result plus a **generation** field (`{ completedAt, nonce }`) that
+distinguishes one restore's evidence from another's.
+
+### The restore workflow (multi-vault, M18 F3 Leg 3)
+
+The vault page exposes **one** workflow behind both its entry points (the not-set-up page's
+"Import a vault bundle" and the Settings section's "Import…") — five steps, each holding no
+more state than it needs:
+
+1. **Pick.** The page runs the open dialog (main-side), reads + parses the bundle, and HOLDS
+   `{ bundle, handle }` main-side, keyed by the owning window's chrome id. No destination is
+   picked here — that decision moves entirely to step 3.
+2. **Secret.** Continue opens the chrome-owned `vault-import-unlock` sheet, which runs a store
+   **preview** — the master password or recovery key, verified by unwrapping the bundle MRK,
+   with per-vault item counts and jar names/colors decrypted (decrypt-then-discard: nothing is
+   written, no destination is resolved). A malformed *plaintext* bundle (GCM-authentic
+   ciphertext whose decrypted content fails validation) is refused **here**, before any
+   destination exists to write to. On success the sheet closes and the page is notified
+   (`vault-import-labels-ready`, no payload); the page then fetches its own window's labels —
+   `{ sourceId, jarMeta, itemCount }` per bundle vault, never a secret or the ciphertext.
+3. **Mapping.** The page renders one row per bundle vault: skip / create a new jar (name+color
+   prefilled from the label) / use an existing vault, with an explicit Replace-or-Merge choice
+   once a real destination collision is confirmed. Every row demands an explicit directive
+   before Commit enables. The verified secret is held (Buffer, main-side) for up to **five
+   minutes** past the secret step — a bounded safety-drop timer (the `vault-human.js`
+   captured-credential precedent) — so the operator can read labels and decide without being
+   rushed, but a bundle secret never lingers indefinitely; if it expires, Commit gets a loud
+   "start over" refusal and the whole flow re-enters from Pick (no partial write, ever).
+4. **Commit.** The page sends `{ handle, mapping }`; main consumes the held record (the
+   verified secret + the operator's directives), runs `restoreProfile`, zeroizes the secret,
+   and returns the per-vault outcomes + the generation field. A fresh adopt's one-time
+   recovery key is shown on the dismiss-locked `vault-recovery-show` sheet — stashed
+   main-side *before* that sheet is opened, so the reveal survives even if the window dies
+   mid-send (the same window-death-safe stash/ack/resurface machinery compromise-mode
+   rotation uses; adopt's recovery reveal now rides that SAME store, distinguished only by an
+   internal reason tag — there is no separate admin-key reveal chain any more, because a
+   fresh adopt no longer mints an admin key at all, see Portability above).
+5. **Sever offer.** Every fresh adopt additionally surfaces a dismissible session card on the
+   vault page: "The previous owner's master password still opens this profile — set your own?"
+   (see the threat-model bullet below). Its action reuses the existing change-master or
+   recover flow (whichever the adopt's `secretKind` and the current lock state make
+   reachable) — no new sheet, no new store operation.
+
+**Held-bundle lifetime.** The held record (and any verified secret it carries) is dropped on:
+vault lock (manual or idle — autolock is never suppressed for a held bundle), the owning
+window's close, the vault page's own `pagehide` (best-effort — the safety-drop timer above is
+the authoritative bound, not this), the safety-drop timer's expiry, an explicit cancel/dismiss
+at either the pick or the mapping step, and a successful commit. Re-entering the secret always
+fully resumes the flow from Pick — unlike a one-time reveal, nothing about a held bundle is
+ever unrecoverable.
+
+**A lock-state broadcast closes the mapping modal in every window it reaches** (the shipped
+autolock-mid-modal invariant — every vault-page modal closes on every `vault-lock-state` push,
+without exception, so no stale modal can ever survive a security event). A *forced* close this
+way does **not** drop the held record (only the lifetime matrix's own paths, above, do) — the
+page instead offers a cheap "Resume restore" affordance that re-enters the mapping step from
+the still-held record, with no secret re-entry. An explicit Cancel, by contrast, drops the
+record and the affordance disappears with it.
+
+**Export** (`exportProfile`, the vault page's Export modal) is now whole-profile only — one
+bundle, one secret, no per-vault source picker. The jars page's delete-time "Export this vault
+first" offer is the one intentional caller still using the single-vault `exportVault`.
 
 ## Rotation & recovery
 
@@ -439,13 +569,15 @@ progress") — retry after it completes.
   set the new master password and can mint a fresh recovery key from it (Master-key
   management → Rotate recovery key).
 
-**Fresh-profile adopt forces these two rotations up front.** Adopting a bundle onto a fresh
-profile (see Portability) does the recovery-key and admin-keypair rotation **inline under the
-live bundle MRK** — no master-password step-up, since the live MRK already authenticates the
-wrap — so the donor cannot retain recovery or admin access into the adopted vault. It does
-**not** rotate the donor's master envelope: severing the donor's master password is a
-`changeMasterPassword` (or a full compromise-mode rotation) the adopter runs afterward,
-not part of adopt.
+**Fresh-profile adopt forces this recovery-key rotation up front and mints no admin key at
+all.** Adopting a bundle onto a fresh profile (see Portability) mints a fresh recovery key
+**inline under the live bundle MRK** — no master-password step-up, since the live MRK
+already authenticates the wrap — so the donor cannot retain recovery access into the
+adopted vault; the adopted manager carries no admin provision whatsoever (no admin
+keypair is minted on adopt, donor or otherwise — the adopt-no-admin change), so there is
+nothing for the donor's admin key to retain either. It does **not** rotate the donor's
+master envelope: severing the donor's master password is a `changeMasterPassword` (or a
+full compromise-mode rotation) the adopter runs afterward, not part of adopt.
 
 ## Lifecycle
 
@@ -534,12 +666,31 @@ no plaintext key and adding no fourth recovery route.
   the old keys; and an app-quit while the one-time recovery-key reveal is still pending
   loses that display (accepted residual, not a lockout — the operator knows the new
   master password and can re-mint a recovery key from it).
-- **The donor's master password after a fresh-profile adopt.** A fresh adopt rotates the
-  recovery key and admin key away from the donor, but it does **not** rotate the donor's
-  master envelope — the donor's master password still unwraps the adopted vault's MRK. Fully
-  severing the donor is a master-password change (`changeMasterPassword`) — or, for the
-  suspected-compromise case, a full compromise-mode rotation — run by the adopter
-  afterward; adopt does not perform it.
+- **The donor's master password after a fresh-profile adopt — alive until sever, dead
+  after (M18 F3 Leg 3, DD7).** A fresh adopt rotates the recovery key away from the donor
+  (and, per the no-admin-mint change above, never mints an admin key for the adopted profile
+  at all), but it does **not** rotate the donor's master envelope — **the donor's master
+  password stays LIVE and keeps unwrapping the adopted vault's MRK until the operator
+  explicitly severs it.** This is a genuine, real capability the donor retains, not a
+  theoretical one: anyone who still holds that master password can unlock the adopted
+  profile, indefinitely, with no additional signal to the adopter. Every fresh adopt
+  therefore surfaces a dismissible session card on the vault page naming exactly what it
+  severs ("The previous owner's master password still opens this profile — set your own?").
+  The card's action reuses an EXISTING flow that already carries a real step-up — a
+  master-kind adopt (while unlocked) routes to `changeMasterPassword` (the operator
+  re-enters the donor password they already know, as its own step-up); a recovery-kind
+  adopt, or any kind while locked, routes to `recoverMasterPassword` (the just-rotated
+  recovery key IS the step-up) — no new sheet, no new store operation, and no
+  cryptographic mutation happens without one of those two real proofs. The moment either
+  flow completes, the donor's master password is **dead**: `changeMasterPassword` /
+  `recoverMasterPassword` both replace the master envelope outright. Declining the offer
+  (Dismiss) leaves the profile fully usable — the risk is accepted, not blocking. The offer
+  itself is non-secret, in-memory session state (the same idiom as the compromise-mode
+  report card above) — it gates nothing cryptographic and is gone after a relaunch or an
+  explicit dismiss, at which point the donor's master password is simply, silently, still
+  alive, exactly as before this leg. Full severing is also always reachable directly
+  (`changeMasterPassword` from the rotation section) — or, for the suspected-compromise
+  case, a full compromise-mode rotation — without ever seeing the offer card.
 
 **The admin key — break-glass / multi-vault.** The X25519 admin key is the intended path for
 opening every vault at once (multi-vault automation, operator break-glass). Handing the admin

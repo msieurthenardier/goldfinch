@@ -208,7 +208,12 @@ machinery removed (Flight 2 DD8, implemented here).** Fresh adopt stops
 minting an admin pair (`vault-store.js:1668-1669` — the comment
 pre-names this flight); the adopted manager carries no admin provision
 (v2 optional-admin, DD1/F2 — `_readManager`'s no-admin validation
-verified already-shipped at design review), and the adopt result loses
+verified already-shipped at design review **for v2 only**; leg-2
+design review found v1 managers still REQUIRE the admin pair, and v1
+is the default never-rotated state — leg 2 ruling 10 relaxes the v1
+branch to the same optional-but-paired rule, the only shape compatible
+with retaining the version-AAD-bound donor master envelope on a
+recovery-kind adopt), and the adopt result loses
 `adminPrivateKeyB64`. The surfacing chain collapses to the single
 dismiss-locked `vault-recovery-show` sheet riding the refcounted
 suppression holder, **and the adopt reveal joins the stash-then-
@@ -323,15 +328,17 @@ future specs (existing spec preconditions updated when next touched).
 
 **DD9 — Main.js glue extraction lands before the new delegates
 (Flight 2 debrief rec 1, remainder).** The error-class→reason ladder
-(nine inline sites: `main.js:1119`, `:1757`, `:1798`, `:1834`, `:1865`,
-`:1883`, `:1900`, `:1926`) is extracted into a mapper module beside
+(eight inline sites — count corrected at leg-1 design review, which
+grepped all of `src/main/` and confirmed no others: `main.js:1119`,
+`:1757`, `:1798`, `:1834`, `:1865`, `:1883`, `:1900`, `:1926`) is
+extracted into a mapper module beside
 `pending-compromise-reveals.js`, and `resurfaceCompromiseReveal`'s
 composition (`main.js:934`) into a testable unit; the transcribed
 copies in `vault-compromise-report-surface.test.js:90-92`,
 `vault-stepup-mint-handler.test.js:284-286`, and
 `vault-unlock-handler.test.js:86` are deleted in favor of importing the
 real module. Flight 3's restore/sever delegates are then written **on**
-the extracted mapper — never as a tenth transcription site.
+the extracted mapper — never as a ninth transcription site.
 
 **DD10 — Restore joins the gated ops.** The multi-vault restore entry
 point takes `_enterGatedOp()` exactly as `importVault` does
@@ -430,18 +437,21 @@ not after the fact.
 
 ### Checkpoints
 
-- [ ] CP1: Substrate lands — mapper + resurface extraction with
+- [x] CP1: Substrate lands — mapper + resurface extraction with
       transcriptions deleted; blur contract flipped and pinned; suite
       green
-- [ ] CP2: Store lands — v2 export/import both directions (v1 still
+- [x] CP2: Store lands — v2 export/import both directions (v1 still
       accepted), multi-vault restore with per-vault outcomes +
-      mergeReport, adopt-no-admin (six inversions done), ninth gated op
-      pinned, adversarial replay green (donor recovery key dead
-      post-adopt; donor master alive un-severed, dead post-sever)
-- [ ] CP3: Workflow lands — mapping flow end-to-end against the dev
-      profile, held-bundle lifetime matrix pinned (lock/close/cancel/
-      commit/quit), sever card + op with the discrimination guard,
-      chain machinery deleted with 0051 adopt pins retired
+      mergeReport, adopt-no-admin (six inversions done), gated-op
+      membership pinned (count landed at eleven — export/preview/
+      restore all gated), adversarial replay green (donor recovery
+      key dead post-adopt; donor master alive un-severed, dead
+      post-sever)
+- [x] CP3: Workflow lands — mapping flow wired end-to-end, held-bundle
+      lifetime matrix pinned (lock/close/pagehide/timer/cancel/
+      commit), sever card routing via the existing ops with the
+      discrimination guard, chain machinery deleted with 0051 adopt
+      pins retired
 - [ ] CP4: Guided HAT satisfied — operator walked export → wipe →
       adopt-with-mapping → transplant → sever offer; fixes landed via
       the HAT protocol
@@ -473,23 +483,23 @@ not after the fact.
 > **Note:** These are tentative suggestions, not commitments. Legs are
 > planned and created one at a time as work progresses.
 
-- [ ] `substrate-prep` — DD9 glue extraction (mapper module +
+- [x] `substrate-prep` — DD9 glue extraction (mapper module +
       resurface composition, transcriptions deleted) + DD8 blur
       contract (new blur-survival axis threaded through BOTH main and
       renderer guard sites, vault-menuType allowlist, pins + assumption
-      sweep) + any renderer.js budget bump named per DD11; MED-HIGH
-      risk (security-surface behavior change) — design review mandatory
-- [ ] `bundle-v2-store` — DD1 bundle v2 export/import, DD3 multi-vault
+      sweep, close-on-lock added) + any renderer.js budget bump named
+      per DD11; MED-HIGH risk — design review ran (2 cycles)
+- [x] `bundle-v2-store` — DD1 bundle v2 export/import, DD3 multi-vault
       restore op with per-vault outcomes + jar creation/reconciliation
       + generation-identity field, DD4 merge, DD6 store half
-      (adopt-no-admin + inversions), DD10 ninth gated op; HIGH risk —
-      design review mandatory
-- [ ] `restore-workflow-wiring` — DD2 IPC reshape + mapping modal (O4
+      (adopt-no-admin + inversions + v1-manager relaxation), DD10
+      gated-op membership; HIGH risk — design review ran (2 cycles)
+- [x] `restore-workflow-wiring` — DD2 IPC reshape + mapping modal (O4
       baseline), DD5 held-bundle lifetime, DD6 wiring half (single
       sheet + adopt-reveal stash/resurface, chain deletion, 0051
       retirement), DD7 sever card routing to the existing flows, DD11
       budget/lockstep/focus-refresh accounting; HIGH risk — design
-      review mandatory
+      review ran (2 cycles)
 - [ ] `guided-hat-restore` *(interactive)* — operator-guided walk:
       whole-profile export, wipe, fresh adopt with mapping (existing
       jar + new jar + skip), selective transplant with Replace and

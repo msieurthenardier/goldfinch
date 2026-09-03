@@ -19,7 +19,8 @@
 /**
  * @typedef {{ vaultId: string, label: string, count?: number }} VaultRow
  * @typedef {{ admin: boolean, vaultIds: string[] }} CompromiseReport
- * @typedef {{ mode: 'not-set-up' | 'locked' | 'unlocked', vaults: VaultRow[], adminProvisioned: boolean, compromiseReport: CompromiseReport | null }} VaultView
+ * @typedef {{ route: 'change-master' | 'recover' }} SeverOffer
+ * @typedef {{ mode: 'not-set-up' | 'locked' | 'unlocked', vaults: VaultRow[], adminProvisioned: boolean, compromiseReport: CompromiseReport | null, severOffer: SeverOffer | null }} VaultView
  * @typedef {{ id: string, kind: 'global' | 'jar', label: string, count?: number, color?: string|null }} VaultChildEntry
  * @typedef {(
  *   { id: string, kind: 'settings', label: string } |
@@ -52,7 +53,13 @@ const VAULTS_ID = 'vaults';
  * definition set up). A malformed report normalizes to null; vaultIds keeps
  * string entries only (textContent-safe).
  *
- * @param {{ setUp?: unknown, unlocked?: unknown, vaults?: unknown, adminProvisioned?: unknown, compromiseReport?: unknown }} [state]
+ * M18 F3 L3 (DD7): the view also carries `severOffer` (the post-fresh-adopt sever
+ * card's route — 'change-master' | 'recover') — normalized the same defensive way as
+ * `compromiseReport`, rides BOTH the locked and unlocked views (the offer's route
+ * flips live with lock state; the edge case: "Sever card while locked: card persists,
+ * route flips to recover"), and is dropped for 'not-set-up' alongside the report.
+ *
+ * @param {{ setUp?: unknown, unlocked?: unknown, vaults?: unknown, adminProvisioned?: unknown, compromiseReport?: unknown, severOffer?: unknown }} [state]
  * @returns {VaultView}
  */
 function selectVaultView(state) {
@@ -83,9 +90,19 @@ function selectVaultView(state) {
     };
   }
 
-  if (!setUp) return { mode: 'not-set-up', vaults: [], adminProvisioned: false, compromiseReport: null };
-  if (!unlocked) return { mode: 'locked', vaults, adminProvisioned, compromiseReport };
-  return { mode: 'unlocked', vaults, adminProvisioned, compromiseReport };
+  /** @type {SeverOffer | null} */
+  let severOffer = null;
+  const rawOffer = s.severOffer;
+  if (rawOffer && typeof rawOffer === 'object' && !Array.isArray(rawOffer)) {
+    const o = /** @type {{ route?: unknown }} */ (rawOffer);
+    if (o.route === 'change-master' || o.route === 'recover') severOffer = { route: o.route };
+  }
+
+  if (!setUp) {
+    return { mode: 'not-set-up', vaults: [], adminProvisioned: false, compromiseReport: null, severOffer: null };
+  }
+  if (!unlocked) return { mode: 'locked', vaults, adminProvisioned, compromiseReport, severOffer };
+  return { mode: 'unlocked', vaults, adminProvisioned, compromiseReport, severOffer };
 }
 
 /**

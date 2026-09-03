@@ -208,7 +208,8 @@ test('AC2: a v2 NO-admin manager unlocks by master + recovery; admin paths fail 
 });
 
 // ---------------------------------------------------------------------------
-// AC3 — malformed-present, v1 rules unchanged, unknown versions
+// AC3 — malformed-present at every version (v1 RELAXED M18 F3 Leg 2 / ruling
+// 10 to the same optional-but-paired rule as v2), unknown versions
 // ---------------------------------------------------------------------------
 
 test('AC3: a LONE admin field on v2 (either one) is malformed-present → VaultFormatError at read', async () => {
@@ -241,16 +242,59 @@ test('AC3: a LONE admin field on v2 (either one) is malformed-present → VaultF
   }
 });
 
-test('AC3: an ABSENT admin pair on v1 is still malformed (v1 rules unchanged) → VaultFormatError', async () => {
+test('AC3 (INVERTED, M18 F3 Leg 2 / ruling 10): a v1 NO-admin manager now VALIDATES and unlocks by master + recovery; admin paths fail with the exact ruled VaultStateError; adminPublicKey() is null — the v1 twin of AC2', async () => {
   const dir = tmpDir();
   try {
-    await writeManagerFixture(dir, { version: 1, withAdmin: false });
-    assert.throws(
-      () => makeStore(dir),
-      (e) => e instanceof vs.VaultFormatError
-    );
+    const fx = await writeManagerFixture(dir, { version: 1, withAdmin: false });
+    const store = makeStore(dir); // absence is now a DELIBERATE state at v1 too — load accepts it.
+
+    await store.unlock(MASTER);
+    assert.equal(store.isUnlocked(), true, 'master unlocks a no-admin v1 manager');
+    assert.equal(store.listItems('global')[0].password, 'hunter2');
+
+    store.lockNow();
+    store.unlockWithRecovery(fx.recoveryDisplay);
+    assert.equal(store.isUnlocked(), true, 'recovery unlocks a no-admin v1 manager');
+
+    // The ruled, discriminable no-admin refusal — NOT VaultFormatError, NOT a GCM error.
+    const someAdminPriv = vc.generateAdminKeypair().privateKeyB64;
+    assert.throws(() => store.unlockWithAdmin(someAdminPriv), isNoAdminError);
+    assert.throws(() => store.openAllWithAdminKey(someAdminPriv), isNoAdminError);
+    assert.equal(store.isUnlocked(), true, 'the no-admin refusal never disturbs lock state');
+
+    // null, COERCED — the raw doc field would read back undefined.
+    assert.equal(store.adminPublicKey(), null);
+    assert.notEqual(store.adminPublicKey(), undefined);
   } finally {
     rm(dir);
+  }
+});
+
+test('AC3: a LONE admin field on v1 (either one) is STILL malformed-present → VaultFormatError (the relaxation only legalizes BOTH-absent)', async () => {
+  for (const lone of ['seal-only', 'pub-only']) {
+    const dir = tmpDir();
+    try {
+      const withAdminDir = tmpDir();
+      try {
+        await writeManagerFixture(withAdminDir, { version: 1, withAdmin: true });
+        const doc = readManager(withAdminDir);
+        if (lone === 'seal-only') delete doc.adminPublicKeyB64;
+        else delete doc.mrk.admin;
+        fs.mkdirSync(path.join(dir, 'vaults'), { recursive: true });
+        fs.writeFileSync(managerPath(dir), JSON.stringify(doc), 'utf8');
+
+        assert.throws(
+          () => makeStore(dir),
+          (e) => e instanceof vs.VaultFormatError && /together/.test(e.message),
+          `${lone}: a lone admin field is malformed-present at v1 too`
+        );
+        assert.deepEqual(readManager(dir), doc);
+      } finally {
+        rm(withAdminDir);
+      }
+    } finally {
+      rm(dir);
+    }
   }
 });
 
@@ -506,7 +550,7 @@ test('AC5: export from a WITH-admin v1 manager is unchanged apart from managerVe
   }
 });
 
-test('AC5: a no-admin v2 bundle FRESH-adopts — on-disk version equals the bundle managerVersion, every mrk slot unwraps at the doc version, donor master unlocks after restart', async () => {
+test('AC5 (REWORKED, M18 F3 Leg 2 / DD6 — no admin mint): a no-admin v2 bundle FRESH-adopts — on-disk version equals the bundle managerVersion, master+recovery unwrap at the doc version, donor master unlocks after restart, admin STATE error not GCM error', async () => {
   const srcDir = tmpDir();
   const freshDir = tmpDir();
   try {
@@ -524,30 +568,27 @@ test('AC5: a no-admin v2 bundle FRESH-adopts — on-disk version equals the bund
     });
     assert.equal(res.fresh, true);
     assert.equal(store.isUnlocked(), true, 'fresh adopt leaves the profile unlocked');
+    assert.equal('adminPrivateKeyB64' in res, false, 'adopt no longer mints an admin key at all (DD6)');
 
     // On-disk version === the bundle's managerVersion (the AC5 probe).
     const m = readManager(freshDir);
     assert.equal(m.version, bundle.managerVersion, 'adopted manager written at the bundle managerVersion');
     assert.equal(m.version, 2);
 
-    // Adopt still mints a fresh admin pair TODAY (Flight 3 removes that) — the
-    // no-admin bundle simply adopts as WITH-admin, both fields present.
-    assert.ok(m.mrk.admin && typeof m.mrk.admin.ct === 'string', 'adopt minted an admin seal');
-    assert.equal(typeof m.adminPublicKeyB64, 'string', 'adopt minted an admin pubkey');
+    // DD6: adopt no longer mints an admin pair — the no-admin bundle adopts as
+    // no-admin too, valid under the SAME optional-but-paired rule (ruling 10).
+    assert.equal('admin' in m.mrk, false, 'no admin seal written (DD6)');
+    assert.equal('adminPublicKeyB64' in m, false, 'no admin pubkey written (DD6)');
 
-    // AAD HOMOGENEITY: every mrk slot unwraps at the DOC'S stated version, via
-    // vault-crypto directly (master = the retained donor envelope; recovery/admin =
-    // the adopt-minted ones, opened with the RETURNED one-time secrets).
+    // AAD HOMOGENEITY: master + recovery both unwrap at the DOC'S stated version, via
+    // vault-crypto directly (master = the retained donor envelope; recovery = the
+    // adopt-minted one, opened with the RETURNED one-time secret).
     const donorMrk = await vc.unwrapMaster(m.mrk.master, MASTER, { version: m.version, params: m.kdf });
     donorMrk.fill(0);
     const recMaterial = vc.parseRecoveryKey(res.recoveryKeyDisplay);
     const recMrk = vc.unwrapRecovery(m.mrk.recovery, recMaterial, { version: m.version });
     recMaterial.fill(0);
     recMrk.fill(0);
-    const admMrk = vc.openAdminSeal(m.mrk.admin, vc.importAdminPrivateKey(res.adminPrivateKeyB64), {
-      version: m.version
-    });
-    admMrk.fill(0);
 
     // RESTART-shaped reload: a fresh store over the adopted dir reads the v2 doc and
     // the DONOR master password unlocks (AAD-correct retained envelope).
@@ -555,13 +596,12 @@ test('AC5: a no-admin v2 bundle FRESH-adopts — on-disk version equals the bund
     await reloaded.unlock(MASTER);
     assert.equal(reloaded.isUnlocked(), true, 'donor master unlocks after restart');
     assert.equal(reloaded.listItems('global')[0].password, 'hunter2');
-    // The returned one-time secrets work through the store surface too.
+    // The returned one-time secret works through the store surface too.
     reloaded.lockNow();
     reloaded.unlockWithRecovery(res.recoveryKeyDisplay);
     assert.equal(reloaded.isUnlocked(), true);
-    const opened = reloaded.openAllWithAdminKey(res.adminPrivateKeyB64);
-    assert.ok(opened.has('global'));
-    for (const k of opened.values()) k.fill(0);
+    // Admin probe fails with the no-admin STATE error, never a GCM auth error.
+    assert.throws(() => reloaded.openAllWithAdminKey(vc.generateAdminKeypair().privateKeyB64), isNoAdminError);
   } finally {
     rm(srcDir);
     rm(freshDir);
@@ -598,7 +638,7 @@ test('AC5: a no-admin v2 bundle EXISTING-profile-imports into a set-up profile (
   }
 });
 
-test('AC5: a WITH-admin v2 bundle fresh-adopts with the admin pair riding at version 2 (homogeneity; donor admin discarded, donor recovery discarded)', async () => {
+test('AC5 (REWORKED, M18 F3 Leg 2 / DD6 — no admin mint): a WITH-admin v2 bundle STILL fresh-adopts as NO-admin (the donor admin pair is discarded, not carried over); donor admin + recovery both rejected', async () => {
   const srcDir = tmpDir();
   const freshDir = tmpDir();
   try {
@@ -615,25 +655,21 @@ test('AC5: a WITH-admin v2 bundle fresh-adopts with the admin pair riding at ver
       secret: Buffer.from(MASTER, 'utf8'),
       secretKind: 'master'
     });
+    assert.equal('adminPrivateKeyB64' in res, false, "adopt discards the WITH-admin bundle's admin pair too (DD6)");
     const m = readManager(freshDir);
     assert.equal(m.version, 2, 'adopted at the bundle managerVersion');
+    assert.equal('admin' in m.mrk, false, "the donor bundle's admin pair is NOT carried over — DD6 is unconditional");
+    assert.equal('adminPublicKeyB64' in m, false, 'no admin pubkey written (DD6)');
 
-    // The minted admin seal is AAD-bound at the doc version (2) — unwrap directly.
-    const admMrk = vc.openAdminSeal(m.mrk.admin, vc.importAdminPrivateKey(res.adminPrivateKeyB64), {
-      version: m.version
-    });
-    admMrk.fill(0);
-    // Force-rotation still applies: the DONOR admin key and recovery are rejected.
-    assert.throws(
-      () => store.openAllWithAdminKey(fx.admin.privateKeyB64),
-      (e) => e instanceof vs.VaultAuthError
-    );
+    // Force-rotation still applies to recovery; the DONOR recovery is rejected; the
+    // donor admin key fails with the no-admin STATE error (no seal exists to open).
+    assert.throws(() => store.openAllWithAdminKey(fx.admin.privateKeyB64), isNoAdminError);
     store.lockNow();
     assert.throws(
       () => store.unlockWithRecovery(fx.recoveryDisplay),
       (e) => e instanceof vs.VaultAuthError
     );
-    // Donor master + the returned secrets all open the adopted v2 profile.
+    // Donor master + the returned recovery secret both open the adopted v2 profile.
     await store.unlock(MASTER);
     assert.equal(store.listItems('global')[0].password, 'hunter2');
     store.lockNow();

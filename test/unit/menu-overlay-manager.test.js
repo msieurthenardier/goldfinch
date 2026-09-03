@@ -491,6 +491,10 @@ test('focusChrome runs for escape/activated/input-empty only (reason-resolved ma
     mgr.closeMenuOverlay(reason);
     assert.equal(focusChromeCalls, 1, `focusChrome ran for '${reason}'`);
   }
+  // M18 F3 L1 (DD8): 'vault-lock' joins this list — opened on 'vault-set' (a lock-closeable
+  // credential menuType; 'vault-unlock' is exempt from the reason entirely and 'kebab' is
+  // outside the allowlist, so either would make the close itself a no-op and this loop
+  // would trivially — and wrongly — "pass" without ever exercising the branch).
   for (const reason of [
     'blur',
     'toggle',
@@ -499,12 +503,14 @@ test('focusChrome runs for escape/activated/input-empty only (reason-resolved ma
     'tab-switch',
     'tab-hide',
     'tab-close',
-    'teardown'
+    'teardown',
+    'vault-lock'
   ]) {
     setupProto();
     readySheet();
-    mgr.openMenu(payloadFor(1));
+    mgr.openMenu(payloadFor(1, 'vault-set'));
     mgr.closeMenuOverlay(reason);
+    assert.equal(mgr.isMenuOpen(), false, `'${reason}' must actually close the menu (or this pin is vacuous)`);
     assert.equal(focusChromeCalls, 0, `focusChrome must NOT run for '${reason}'`);
   }
 });
@@ -536,6 +542,9 @@ test('the DD5 hook receives EVERY close reason (the tab-lifecycle skip lives in 
     if (reason === 'tab-switch' || reason === 'tab-hide' || reason === 'tab-close') return;
     restores++; // stands in for `if (isFindOverlayActive(activeTabWcId)) showFindOverlay()`
   };
+  // M18 F3 L1 (DD8): 'vault-lock' joins this list — opened on 'vault-set' (a
+  // lock-closeable credential menuType), same reasoning as the focusChrome loop above:
+  // 'kebab' would scope the close out entirely and never reach the hook.
   const allReasons = [
     'escape',
     'outside-click',
@@ -546,7 +555,8 @@ test('the DD5 hook receives EVERY close reason (the tab-lifecycle skip lives in 
     'tab-switch',
     'tab-hide',
     'tab-close',
-    'teardown'
+    'teardown',
+    'vault-lock'
   ];
   for (const reason of allReasons) {
     cv = makeFakeContentView();
@@ -562,7 +572,7 @@ test('the DD5 hook receives EVERY close reason (the tab-lifecycle skip lives in 
     });
     m.ensureView();
     createdViews[0].webContents.emit('did-finish-load');
-    m.openMenu(payloadFor(1));
+    m.openMenu(payloadFor(1, 'vault-set'));
     m.closeMenuOverlay(reason);
   }
   assert.deepEqual(reasonsSeen, allReasons, 'hook invoked with every reason');
@@ -1102,4 +1112,168 @@ test('reassertFocus tolerates a destroyed sheet webContents', () => {
   createdViews[0].webContents.markDestroyed();
   assert.doesNotThrow(() => mgr.reassertFocus());
   assert.equal(mgr.reassertFocus(), false);
+});
+
+// ---------------------------------------------------------------------------
+// M18 F3 L1 (DD8): the blur-survival axis. A menu opened with `survivesBlur: true`
+// ignores window-blur (reason 'blur') — and ONLY that reason; every other close still
+// applies. Independent of `dismissible`/`keepFocus` — main trusts the chrome-sent flag
+// with no menuType validation (the payload originates in the trusted chrome document).
+// ---------------------------------------------------------------------------
+
+function survivesBlurPayload(token, menuType = 'vault-unlock') {
+  return { ...payloadFor(token, menuType), survivesBlur: true };
+}
+
+test('a survives-blur menu ignores reason "blur" — the menu stays open', () => {
+  setupProto();
+  readySheet();
+  mgr.openMenu(survivesBlurPayload(1));
+  mgr.closeMenuOverlay('blur');
+  assert.equal(mgr.isMenuOpen(), true, 'blur is ignored for a survives-blur menu');
+  assert.equal(closes().length, 0, 'no channel-7 close emitted');
+});
+
+test('a survives-blur menu still closes normally on every OTHER reason', () => {
+  for (const reason of [
+    'escape',
+    'outside-click',
+    'activated',
+    'toggle',
+    'superseded',
+    'tab-switch',
+    'tab-hide',
+    'tab-close',
+    'teardown'
+  ]) {
+    setupProto();
+    readySheet();
+    mgr.openMenu(survivesBlurPayload(1));
+    mgr.closeMenuOverlay(reason);
+    assert.equal(mgr.isMenuOpen(), false, `survives-blur must still close on '${reason}'`);
+  }
+});
+
+test('a NON-flagged menu still blur-closes exactly as before (no regression)', () => {
+  setupProto();
+  readySheet();
+  mgr.openMenu(payloadFor(1, 'vault-unlock')); // no survivesBlur field at all
+  mgr.closeMenuOverlay('blur');
+  assert.equal(mgr.isMenuOpen(), false, 'an ordinary menu still blur-closes');
+  assert.equal(closes().length, 1);
+});
+
+test('survivesBlur does not leak into the next menu (model-replace resets the flag, mirrors keepFocus)', () => {
+  setupProto();
+  readySheet();
+  mgr.openMenu(survivesBlurPayload(1));
+  mgr.openMenu(payloadFor(2, 'kebab')); // ordinary menu replaces it, no survivesBlur
+  mgr.closeMenuOverlay('blur');
+  assert.equal(mgr.isMenuOpen(), false, 'the replacing menu did not opt in — blur closes it normally');
+});
+
+test('survivesBlur resets on close (a later stray report finds nothing to ignore)', () => {
+  setupProto();
+  readySheet();
+  mgr.openMenu(survivesBlurPayload(1));
+  mgr.closeMenuOverlay('escape'); // a normal dismiss, unrelated to blur
+  mgr.openMenu(payloadFor(2, 'kebab')); // a fresh, non-opted-in menu
+  mgr.closeMenuOverlay('blur');
+  assert.equal(mgr.isMenuOpen(), false, 'the fresh menu blur-closes — no leaked flag from the prior session');
+});
+
+test('survivesBlur and dismissible are independent axes: escape/outside-click still close a survives-blur menu', () => {
+  setupProto();
+  readySheet();
+  mgr.openMenu(survivesBlurPayload(1));
+  mgr.closeMenuOverlay('escape');
+  assert.equal(mgr.isMenuOpen(), false, 'escape is unaffected by survivesBlur — only blur is exempted');
+});
+
+// ---------------------------------------------------------------------------
+// M18 F3 L1 (DD8): close-on-lock. `closeMenuOverlay('vault-lock', …)` is a HARD reason
+// (bypasses the DD5 dismissible guard) but SCOPED to the credential allowlist minus
+// 'vault-unlock' (closesOnVaultLock, src/shared/vault-blur-survival.js) — main's
+// per-window fan-out calls it unconditionally, so the scoping lives entirely here.
+// ---------------------------------------------------------------------------
+
+test('vault-lock closes an allowlisted, non-unlock credential menu (e.g. vault-set)', () => {
+  setupProto();
+  readySheet();
+  mgr.openMenu(payloadFor(1, 'vault-set'));
+  mgr.closeMenuOverlay('vault-lock');
+  assert.equal(mgr.isMenuOpen(), false);
+  assert.deepEqual(closes()[0][1], { menuType: 'vault-set', reason: 'vault-lock', token: 1 });
+});
+
+test('vault-lock closes EVERY allowlisted menuType except vault-unlock', () => {
+  for (const menuType of [
+    'vault-set',
+    'vault-stepup',
+    'vault-import-unlock',
+    'vault-change-master',
+    'vault-recover',
+    'vault-compromise',
+    'vault-compromise-recover'
+  ]) {
+    setupProto();
+    readySheet();
+    mgr.openMenu(payloadFor(1, menuType));
+    mgr.closeMenuOverlay('vault-lock');
+    assert.equal(mgr.isMenuOpen(), false, `vault-lock must close '${menuType}'`);
+  }
+});
+
+test('vault-lock is a no-op for vault-unlock — locking is its precondition, not its invalidation', () => {
+  setupProto();
+  readySheet();
+  mgr.openMenu(payloadFor(1, 'vault-unlock'));
+  mgr.closeMenuOverlay('vault-lock');
+  assert.equal(mgr.isMenuOpen(), true, 'vault-unlock stays open through a lock broadcast');
+  assert.equal(closes().length, 0);
+});
+
+test('vault-lock is a no-op for a non-credential menu (kebab) — never force-closes an unrelated open menu', () => {
+  setupProto();
+  readySheet();
+  mgr.openMenu(payloadFor(1, 'kebab'));
+  mgr.closeMenuOverlay('vault-lock');
+  assert.equal(mgr.isMenuOpen(), true);
+  assert.equal(closes().length, 0);
+});
+
+test('vault-lock is a no-op for a dismiss-locked show sheet (vault-recovery-show) — the one-time key is unrecoverable and lock does not invalidate it', () => {
+  setupProto();
+  readySheet();
+  mgr.openMenu({ ...payloadFor(1, 'vault-recovery-show'), dismissible: false });
+  mgr.closeMenuOverlay('vault-lock');
+  assert.equal(mgr.isMenuOpen(), true);
+  assert.equal(closes().length, 0);
+});
+
+test('vault-lock ignores dismissible entirely — it is a HARD reason for an allowlisted menu', () => {
+  setupProto();
+  readySheet();
+  // dismissible:false is never actually set on a real credential-allowlist open, but pin
+  // that vault-lock would still close one if it were — the bypass is deliberate.
+  mgr.openMenu({ ...payloadFor(1, 'vault-recover'), dismissible: false });
+  mgr.closeMenuOverlay('vault-lock');
+  assert.equal(mgr.isMenuOpen(), false, 'vault-lock closes regardless of the dismissible flag');
+});
+
+test('vault-lock is idempotent when no menu is open at all (the per-window unconditional fan-out is safe)', () => {
+  setupProto();
+  readySheet();
+  assert.doesNotThrow(() => mgr.closeMenuOverlay('vault-lock'));
+  assert.equal(closes().length, 0);
+});
+
+test('vault-lock and survives-blur compose: an allowlisted menu still closes on vault-lock even though it survives blur', () => {
+  setupProto();
+  readySheet();
+  mgr.openMenu(survivesBlurPayload(1, 'vault-recover'));
+  mgr.closeMenuOverlay('blur');
+  assert.equal(mgr.isMenuOpen(), true, 'blur is still ignored');
+  mgr.closeMenuOverlay('vault-lock');
+  assert.equal(mgr.isMenuOpen(), false, 'vault-lock still closes it');
 });

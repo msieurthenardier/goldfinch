@@ -129,6 +129,7 @@ export function createSheetReport(bridge) {
  *   menu?: any,
  *   items?: () => any[],
  *   dismissible?: boolean,
+ *   survivesBlur?: boolean,
  *   focusReturn?: () => void,
  *   onOpen?: (startIndex?: number) => void,
  *   onClose?: () => void,
@@ -157,6 +158,10 @@ export function createSheetEntry(opts) {
   };
   if (opts.items) entry.items = opts.items;
   if (opts.dismissible !== undefined) entry.dismissible = opts.dismissible;
+  // M18 F3 L1 (DD8): same opt-in shape as dismissible above — read by menu-controller.js's
+  // window-blur listener. Every current call site that sets it passes `survivesBlur: true`
+  // (the vault-credential entries); omitted entirely by every non-vault sheet.
+  if (opts.survivesBlur !== undefined) entry.survivesBlur = opts.survivesBlur;
   return register(entry);
 }
 

@@ -681,16 +681,21 @@ if (INTERNAL_ORIGINS.has(location.origin)) {
      * minted secret is shown on the chrome-owned vault-accesskey-show sheet, never the page. */
     requestMint: (target) => ipcRenderer.invoke('internal-vault-request-mint', target),
 
-    // Portable export / import (M12 Flight 4, Leg 1 / DD1 — Option A; page-modal split M12 F5 HAT,
-    // I14). Export is fully main-side: the handler builds the ciphertext-only bundle from the store
-    // + writes the file — the bundle never crosses to the page (the sandboxed page can't write files
-    // anyway). The page's Export modal picks a save location up front via pickSavePath (save dialog
-    // in main, no write) then binds source→path at submit via exportVault(target, savePath); the
-    // jars delete-first offer calls exportVault(target) with no path (main runs the dialog). Import
-    // is a page-modal flow: pickImportFile opens + holds the bundle for a destination (main-side
-    // dialog + read + hold), then beginImportUnlock opens the chrome-owned vault-import-unlock sheet
-    // for the secret; clearPendingImport drops the held bundle on modal dismiss. NO secret ever
-    // crosses any of these channels.
+    // Portable export / RESTORE (M12 Flight 4, Leg 1 / DD1 — Option A; page-modal split M12 F5 HAT,
+    // I14; unified whole-profile RESTORE workflow M18 F3 Leg 3 / DD2). Export is fully main-side:
+    // the handler builds the ciphertext-only bundle from the store + writes the file — the bundle
+    // never crosses to the page (the sandboxed page can't write files anyway). The page's Export
+    // modal picks a save location up front via pickSavePath (save dialog in main, no write) then
+    // binds source→path at submit via exportVault(target, savePath) (the jars delete-first offer's
+    // single-vault caller) or exportProfile(savePath) (the vault page's whole-profile Export modal,
+    // DD1 ruling 7). Restore is a page-modal flow: pickImportFile opens + holds { bundle, handle }
+    // (main-side dialog + read + hold — NO destination, ruling 1), then beginImportUnlock opens the
+    // chrome-owned vault-import-unlock sheet for the secret (a PREVIEW — no write); on success the
+    // page is notified (onVaultImportLabelsReady, no payload) and fetches its own record's labels
+    // via fetchImportLabels; commitImport sends the operator's per-vault mapping and returns the
+    // outcomes; clearPendingImport drops the held record at ANY step (pick or, post-secret, mapping)
+    // on dismiss; severDismiss clears the DD7 post-adopt sever offer card. NO secret ever crosses
+    // any of these channels.
 
     /**
      * Export a vault to a portable bundle file. With an optional pre-chosen `savePath` main writes
@@ -704,10 +709,21 @@ if (INTERNAL_ORIGINS.has(location.origin)) {
     exportVault: (target, savePath) => ipcRenderer.invoke('internal-vault-export', target, savePath),
 
     /**
+     * Export the WHOLE PROFILE — every vault this profile has (M18 F3 L3 / DD1 ruling 7). The
+     * vault page's Export modal's ONLY export path now (the per-vault source select is retired
+     * from that modal); the jars page's delete-time single-vault offer keeps using exportVault
+     * above. Resolves { ok, path, carried } (carried = the source ids actually landed — lazy jars
+     * absent by design), { canceled }, or the structured { locked: true }.
+     * @param {string} [savePath]  a pre-chosen destination path (from pickSavePath).
+     * @returns {Promise<{ ok?: boolean, path?: string, carried?: string[], canceled?: boolean, locked?: boolean }>}
+     */
+    exportProfile: (savePath) => ipcRenderer.invoke('internal-vault-export-profile', savePath),
+
+    /**
      * Pick a save location for an export bundle — runs the save dialog in main ONLY (no build, no
      * write). The page Export modal calls this to choose a location up front, then passes the path
-     * to exportVault at submit. Resolves { path } or { canceled }.
-     * @param {string} target  `'global'` or a persistent jar id (seeds the default filename).
+     * to exportVault/exportProfile at submit. Resolves { path } or { canceled }.
+     * @param {string} target  `'global'`, a persistent jar id, or `'profile'` (seeds the default filename).
      * @returns {Promise<{ path?: string, canceled?: boolean }>}
      */
     pickSavePath: (target) => ipcRenderer.invoke('internal-vault-pick-save-path', target),
@@ -722,40 +738,78 @@ if (INTERNAL_ORIGINS.has(location.origin)) {
     hasVault: (vaultId) => ipcRenderer.invoke('internal-vault-has', vaultId),
 
     /**
-     * Pick a bundle file for an import DESTINATION: main runs the open dialog, reads + parses the
-     * bundle (ciphertext), and HOLDS { bundle, destinationTarget } main-side — it does NOT open the
-     * secret sheet (that is beginImportUnlock, on submit). Resolves { ok, path } (held for the shown
-     * destination), { canceled } (dialog dismissed), or { error } (unreadable). The page must
-     * re-pick if the destination changes after a successful pick (H1: the held target is bound here).
-     * On { ok } the result carries an opaque `importHandle` (PR#112 finding 5) the page echoes on
-     * the mutating steps below — a per-transaction guard atop the per-window record keying.
-     * @param {string} destinationTarget  `'global'` or a persistent jar id.
+     * Pick a bundle file: main runs the open dialog, reads + parses the bundle (ciphertext), and
+     * HOLDS { bundle, handle } main-side (M18 F3 L3 / DD2 ruling 1 — NO destination; the whole
+     * destination/mode decision moves to the commit-time mapping step) — it does NOT open the
+     * secret sheet (that is beginImportUnlock, on submit). Resolves { ok, path, importHandle }
+     * (held), { canceled } (dialog dismissed), or { error } (unreadable). The opaque `importHandle`
+     * (PR#112 finding 5) is echoed by the page on the mutating steps below — a per-transaction
+     * guard atop the per-window record keying.
      * @returns {Promise<{ ok?: boolean, path?: string, importHandle?: string, canceled?: boolean, error?: string }>}
      */
-    pickImportFile: (destinationTarget) => ipcRenderer.invoke('internal-vault-pick-import-file', destinationTarget),
+    pickImportFile: () => ipcRenderer.invoke('internal-vault-pick-import-file'),
 
     /**
-     * Open the chrome-owned vault-import-unlock secret sheet for the held bundle (consumed there
-     * with the sheet's secret). Call on the Import modal's Continue submit, AFTER a successful
-     * pickImportFile. A BARE trigger — NO secret crosses here; the payload is `{ overwrite, handle }`:
-     * `overwrite` is the "Replace existing vault" checkbox's FINAL state (M12 F5 HAT tail), `handle`
-     * is the opaque token from pickImportFile (finding 5). Main binds them onto the held import record
-     * before the sheet opens. Resolves { ok }.
-     * @param {boolean} [overwrite]  replace an existing vault at the destination (checkbox state).
-     * @param {string} [handle]  the importHandle from pickImportFile.
+     * Open the chrome-owned vault-import-unlock secret sheet for the held bundle (a PREVIEW there —
+     * no write, no destination). Call on the pick modal's Continue submit, AFTER a successful
+     * pickImportFile. A fully BARE trigger — NO secret, NO payload at all (M18 F3 L3 / DD2: the
+     * destination/mode decision moved entirely to the commit-time mapping step). Resolves { ok }.
      * @returns {Promise<{ ok: boolean }>}
      */
-    beginImportUnlock: (overwrite, handle) =>
-      ipcRenderer.invoke('internal-vault-begin-import-unlock', { overwrite: overwrite === true, handle }),
+    beginImportUnlock: () => ipcRenderer.invoke('internal-vault-begin-import-unlock'),
 
     /**
-     * Drop the held import bundle (L1). Call on the Import modal's Cancel / Escape / backdrop
-     * dismiss AFTER a pick so an abandoned bundle never lingers. Always safe to call. Pass the
+     * Drop the held import record — at ANY step (the pick modal's Cancel, or — post-secret — the
+     * mapping modal's Cancel; DD5's explicit-cancel row). Always safe to call. Pass the
      * pickImportFile `importHandle` (finding 5) so only THIS transaction's record is dropped.
      * @param {string} [handle]  the importHandle from pickImportFile.
      * @returns {Promise<{ ok: boolean }>}
      */
     clearPendingImport: (handle) => ipcRenderer.invoke('internal-vault-clear-pending-import', handle),
+
+    /**
+     * The page's window-scoped labels fetch (M18 F3 L3 / DD2 ruling 3(c)). Call after receiving
+     * onVaultImportLabelsReady. Resolves a NON-SECRET `{ handle, labels }` projection of this
+     * window's held record, or `null` when nothing is held past the secret step (the page must
+     * treat null as a strict no-op — never assume the event implies its own record).
+     * @returns {Promise<{ handle: string, labels: Array<{ sourceId: string, jarMeta: { name: string, color: string } | null, itemCount: number }> } | null>}
+     */
+    fetchImportLabels: () => ipcRenderer.invoke('internal-vault-import-labels'),
+
+    /**
+     * Commit the multi-vault restore with the operator's per-vault mapping (M18 F3 L3 / DD2
+     * ruling 3(e)). `handle` must match the record's current handle (echoed from
+     * pickImportFile/fetchImportLabels) — a stale/dropped record refuses loudly, never a partial
+     * write. Resolves `{ ok:true, fresh, results, generation }` on success or a non-secret
+     * `{ ok:false, reason }` refusal.
+     * @param {{ handle: string, mapping: any }} payload
+     * @returns {Promise<{ ok: boolean, fresh?: boolean, results?: any[], generation?: any, reason?: string }>}
+     */
+    commitImport: ({ handle, mapping }) => ipcRenderer.invoke('internal-vault-import-commit', { handle, mapping }),
+
+    /**
+     * Subscribe to the labels-ready notification (M18 F3 L3 / DD2 ruling 3(c)) — a chrome→page
+     * send with NO payload, following the vault-lock-state bridge idiom. On receipt, call
+     * fetchImportLabels to pull this window's own record. Returns a numeric handle for
+     * offVaultImportLabelsReady.
+     * @param {() => void} cb
+     * @returns {number}
+     */
+    onVaultImportLabelsReady: (cb) => on('vault-import-labels-ready', cb),
+
+    /**
+     * Unsubscribe the labels-ready listener registered under handle h. Call from a pagehide
+     * handler to prevent accumulation across reloads.
+     * @param {number} h
+     */
+    offVaultImportLabelsReady: (h) => off(h),
+
+    /**
+     * Dismiss the DD7 post-fresh-adopt sever offer card. Carries no secret; the page re-fetches
+     * its state after the invoke resolves. Resolves { ok: true }.
+     * @returns {Promise<{ ok: boolean }>}
+     */
+    severDismiss: () => ipcRenderer.invoke('internal-vault-sever-dismiss'),
 
     // Key rotation / recover (M12 Flight 4, Leg 2 / DD3). All three are BARE cross-renderer
     // triggers: main opens the chrome-owned sheet that collects the secret(s) — NO secret ever

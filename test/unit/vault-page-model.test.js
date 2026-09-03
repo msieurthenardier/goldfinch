@@ -45,15 +45,55 @@ test('flags are strict === true (truthy-but-not-true does not unlock)', () => {
 });
 
 test('malformed / absent payload degrades to not-set-up with no vaults', () => {
-  const empty = { mode: 'not-set-up', vaults: [], adminProvisioned: false, compromiseReport: null };
+  const empty = { mode: 'not-set-up', vaults: [], adminProvisioned: false, compromiseReport: null, severOffer: null };
   assert.deepEqual(selectVaultView(), empty);
   assert.deepEqual(selectVaultView(null), empty);
   assert.deepEqual(selectVaultView({ setUp: true, unlocked: true }), {
     mode: 'unlocked',
     vaults: [],
     adminProvisioned: false,
-    compromiseReport: null
+    compromiseReport: null,
+    severOffer: null
   });
+});
+
+// ---------------------------------------------------------------------------
+// M18 F3 L3 (DD7): severOffer — the same defensive-normalization + lock-state
+// matrix discipline as compromiseReport above.
+// ---------------------------------------------------------------------------
+
+test('DD7 matrix: severOffer rides BOTH the locked and unlocked views (the card persists; route flips live with lock state)', () => {
+  for (const unlocked of [true, false]) {
+    const view = selectVaultView({
+      setUp: true,
+      unlocked,
+      vaults: rows,
+      severOffer: { route: unlocked ? 'change-master' : 'recover' }
+    });
+    assert.equal(view.mode, unlocked ? 'unlocked' : 'locked');
+    assert.deepEqual(view.severOffer, { route: unlocked ? 'change-master' : 'recover' });
+  }
+});
+
+test('not-set-up drops severOffer too (a fresh-adopted profile is by definition set up)', () => {
+  const view = selectVaultView({
+    setUp: false,
+    unlocked: false,
+    severOffer: { route: 'recover' }
+  });
+  assert.equal(view.severOffer, null);
+});
+
+test('severOffer is normalized: malformed/absent → null; only the two valid route literals are admitted', () => {
+  const base = { setUp: true, unlocked: true, vaults: rows };
+  assert.equal(selectVaultView(base).severOffer, null);
+  assert.equal(selectVaultView({ ...base, severOffer: 'recover' }).severOffer, null, 'a bare string is not an object');
+  assert.equal(selectVaultView({ ...base, severOffer: [] }).severOffer, null, 'an array is not admitted');
+  assert.equal(selectVaultView({ ...base, severOffer: { route: 'bogus' } }).severOffer, null, 'an invalid route');
+  assert.deepEqual(selectVaultView({ ...base, severOffer: { route: 'change-master' } }).severOffer, {
+    route: 'change-master'
+  });
+  assert.deepEqual(selectVaultView({ ...base, severOffer: { route: 'recover' } }).severOffer, { route: 'recover' });
 });
 
 // ---------------------------------------------------------------------------

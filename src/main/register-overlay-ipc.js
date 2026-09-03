@@ -61,30 +61,29 @@ function registerOverlayIpc({
   vaultCaptureSave,
   vaultSetup,
   vaultMintAccessKey,
-  vaultImport,
-  // M17 F4 L3 (AC2/AC3): fresh-adopt one-time-secret surfacing seam. `stashAdoptAdminKey`
-  // holds the rotated admin private key for a window (and suspends idle autolock) after the
-  // recovery key is shown; `takeAdoptAdminKey` consumes it on the recovery-show ack (clearing
-  // suppression) so the adminkey-show sheet opens SECOND, never clobbering the recovery sheet.
-  // Optional (offline overlay tests omit them) — the fresh-adopt branch only fires when present.
-  stashAdoptAdminKey,
-  takeAdoptAdminKey,
+  // M12 F4 Leg 1 (export-import); RESHAPED M18 F3 Leg 3 / DD2 ruling 2: PREVIEWS the held
+  // bundle's secret (no write, no destination) — the destination/mapping decision moves to
+  // the page's commit-time invoke (register-browser-ipc.js). Optional (offline overlay tests
+  // omit it) — the handler below is gated on its presence.
+  vaultImportPreview,
   // M18 F2 L4 (compromise-mode rotation): the compromise sheets' delegate + surfacing
   // seams. `vaultCompromiseRotate` runs the store op and maps the five ruled error
   // classes to non-secret reasons; `stashCompromiseReveal` stashes the one-time
   // recovery key + revocation report main-side AND acquires the refcounted autolock-
-  // suppression hold (H2 — called BEFORE any sheet interaction); `ackCompromiseReveal`
-  // consumes a window's pending compromise marker on the recovery-show ack (H1 —
-  // only-if-present, exact-pair release) and fires the completion broadcast. All
-  // optional (offline overlay tests omit them).
+  // suppression hold (H2 — called BEFORE any sheet interaction); `ackVaultReveal`
+  // (GENERALIZED M18 F3 L3 / DD6 ruling 5 — the SOLE recovery-show ack path now; the
+  // old adopt-only admin-key chain is deleted, not duplicated) consumes a window's
+  // pending reveal marker — compromise OR adopt — on the recovery-show ack (H1 —
+  // only-if-present, exact-pair release) and fires the completion broadcast for
+  // EITHER flow. All optional (offline overlay tests omit them).
   vaultCompromiseRotate,
   stashCompromiseReveal,
-  ackCompromiseReveal,
+  ackVaultReveal,
   // Squawk 0059: the post-mint page-refresh seam. main.js binds its
   // broadcastVaultLockState here so a successful step-up mint re-broadcasts the
   // (unchanged) lock state — the ONLY channel the vault page refreshes off, so
   // without it the jar's "Access keys" list stays stale until an unrelated
-  // re-render. Mirrors the compromise-completion idiom (ackCompromiseReveal's
+  // re-render. Mirrors the compromise-completion idiom (ackVaultReveal's
   // re-broadcast; chrome's handlers are inert on the duplicate state — verified
   // in M18 F2). A narrow bound function, never main's internals; optional
   // (offline overlay tests omit it).
@@ -168,32 +167,20 @@ function registerOverlayIpc({
       if (certIndex != null) certSelectFromSheet(rec, certIndex);
     }
     rec.sheet.closeMenuOverlay('activated', token);
-    // M17 F4 L3 (AC3): the fresh-adopt surfacing chain. The dismiss-locked
-    // vault-recovery-show sheet closes ONLY through this activated path; on that
-    // ack, if a pending adopt admin key is held for this window, open the SECOND
-    // one-time sheet (vault-adminkey-show) — sequentially, so it never supersedes
-    // the recovery sheet before it is read. `takeAdoptAdminKey` drops the pending
-    // record AND clears the autolock suppression (AC4). A recovery-show with no
-    // pending admin key (setup / rotate-recovery) returns undefined here → no send,
-    // fully unaffected. The token === current.token guard above already blocks a
+    // M17 F4 L3 (AC3); COLLAPSED M18 F3 L3 / DD6 ruling 5: the dismiss-locked
+    // vault-recovery-show sheet closes ONLY through this activated path. The OLD
+    // two-sheet admin-key chain (a second `vault-adminkey-show` sheet, opened only
+    // after this ack) is GONE — adopt no longer mints an admin pair, so its
+    // recovery-key reveal IS the whole one-time-secret chain now, and it joins the
+    // SAME generalized reveal store the compromise flow already used (M18 F2 L4
+    // design-review H1). `ackVaultReveal` consumes THIS window's pending reveal
+    // marker — compromise OR adopt, whichever (if either) is present — releasing
+    // exactly its `(chromeId, reason)` hold, then fires the completion broadcast for
+    // that flow. Setup / rotate-recovery acks reach it and no-op (no marker was ever
+    // stashed for those). The token === current.token guard above already blocks a
     // stale double-fire.
     if (current.menuType === 'vault-recovery-show') {
-      const chrome = chromeForAttachment(rec.win);
-      const adminPrivateKey = takeAdoptAdminKey?.(chrome?.id);
-      if (adminPrivateKey !== undefined) {
-        chrome?.send('vault-adminkey-show', { adminPrivateKey });
-      } else {
-        // M18 F2 L4 (design-review H1): the ack's cross-flow discrimination. The
-        // adopt marker is checked FIRST, the compromise marker second (Q2 ruling:
-        // both-on-one-window is unreachable — a dismiss-locked sheet blocks the
-        // page — but the fixed order makes even the impossible state
-        // deterministic). The delegate consumes THIS window's compromise marker
-        // ONLY if present — releasing exactly the (chromeId, 'compromise') hold,
-        // never "any hold for this window" — then fires the completion broadcast
-        // (re-broadcast vault-lock-state; the page refreshes off it). Setup /
-        // rotate-recovery acks reach it and no-op, exactly like the adopt branch.
-        ackCompromiseReveal?.(chrome?.id);
-      }
+      ackVaultReveal?.(chromeForAttachment(rec.win)?.id);
     }
     const out = { menuType: current.menuType, id };
     const cleanValue = sanitizeActivatedValue(value);
@@ -367,17 +354,21 @@ function registerOverlayIpc({
     });
   }
 
-  // M12 F4 Leg 1 (export-import): the vault-import-unlock sheet's secret channel, mirroring
+  // M12 F4 Leg 1 (export-import); RESHAPED M18 F3 Leg 3 / DD2 rulings 2/3(c): the
+  // vault-import-unlock sheet's secret channel now PREVIEWS the held bundle, mirroring
   // menu-overlay:vault-stepup-mint BYTE-FOR-BYTE (sender identity + open-token + `secret
   // instanceof Uint8Array` + Buffer.from copy + DUAL-ZEROIZE in finally). The payload adds the
-  // NON-SECRET `secretKind` (master | recovery); the destination target + the bundle are held
-  // MAIN-SIDE by the vaultImport delegate (never on this sheet, never on the page). The
-  // vaultImport delegate (main.js) follows the vaultUnlock pattern: a WRONG secret →
-  // VaultAuthError → { ok:false } and NOTHING is written (importVault does all crypto before
-  // any write). On success we close the sheet ('activated'); the fresh-profile adopt leaves the
-  // store unlocked (its onUnlock broadcasts the lock-state, moving the page to unlocked).
-  // Gated on the vaultImport injection so offline overlay tests never register it.
-  if (vaultImport) {
+  // NON-SECRET `secretKind` (master | recovery); the bundle is held MAIN-SIDE by the
+  // vaultImportPreview delegate (never on this sheet, never on the page) — NO destination is
+  // resolved here (DD2: that moved to the commit-time mapping step). The delegate (main.js)
+  // follows the vaultUnlock pattern: a WRONG secret → VaultAuthError → { ok:false } and
+  // NOTHING is stashed (the preview does all crypto, no write). On success we close the sheet
+  // ('activated') and notify the page — a bare `vault-import-labels-ready` send, NO payload
+  // (the page then invokes a window-scoped fetch for its own record's labels + handle,
+  // Labels-ready transport note: the send is profile-wide via no fan-out here, targeted to
+  // THIS window's chrome only). Gated on the vaultImportPreview injection so offline overlay
+  // tests never register it.
+  if (vaultImportPreview) {
     ipcMain.handle('menu-overlay:vault-import', async (event, payload) => {
       const rec = recordForSheetSender(event.sender);
       if (!rec || !rec.sheet) return { ok: false };
@@ -388,34 +379,22 @@ function registerOverlayIpc({
       const kind = secretKind === 'recovery' ? 'recovery' : 'master';
       const buf = Buffer.from(secret);
       try {
-        // PR#112 finding 5: consume THIS window's held import record. The secret sheet is its OWN
-        // overlay webContents (distinct from the chrome), so we key by the window's CHROME contents
-        // id — chromeForAttachment(rec.win) — which is the SAME object the page's pick step keyed
-        // under (chromeForTab(pageTabId)). A window can only ever import its own picked bundle.
+        // PR#112 finding 5: THIS window's held record. The secret sheet is its OWN overlay
+        // webContents (distinct from the chrome), so we key by the window's CHROME contents id
+        // — chromeForAttachment(rec.win) — which is the SAME object the page's pick step keyed
+        // under (chromeForTab(pageTabId)). A window can only ever preview its own picked bundle.
         const chrome = chromeForAttachment(rec.win);
         const chromeId = chrome?.id;
-        const res = await vaultImport(chromeId, buf, kind); // { ok, fresh?, recoveryKeyDisplay?, adminPrivateKeyB64?, reason? }
+        const res = await vaultImportPreview(chromeId, buf, kind); // { ok, reason? }
         if (res && res.ok) {
           rec.sheet.closeMenuOverlay('activated', current.token);
-          // M17 F4 L3 (AC2): a FRESH adopt rotated the recovery key + admin keypair inline
-          // (Leg 2) and returned both one-time secrets. Show the recovery key FIRST on its
-          // dismiss-locked sheet (mirrors rotate-recovery's send, `replacing:true`), and stash
-          // the admin private key for this window — which also suspends idle autolock (AC4).
-          // The adminkey-show sheet opens only AFTER the recovery-show ack (AC3, the activated
-          // handler), so the two dismiss-locked sheets never clobber each other. The invoke
-          // reply stays { ok:true } with NO secret material. Existing-profile adopt
-          // (res.fresh !== true) is UNCHANGED — no sends, no stash.
-          if (res.fresh === true) {
-            stashAdoptAdminKey?.(chromeId, res.adminPrivateKeyB64);
-            chrome?.send('vault-recovery-show', { recoveryKey: res.recoveryKeyDisplay, replacing: true });
-          }
+          // DD2 ruling 3(c): a targeted, payload-FREE notification — the page fetches its own
+          // record's labels via a window-scoped invoke rather than trusting an inline payload.
+          chrome?.send('vault-import-labels-ready');
           return { ok: true };
         }
-        // M12 F5 HAT tail (review HIGH-1 / MEDIUM-4): forward the NON-SECRET failure reason so the
-        // sheet can distinguish a destination collision ('collision') from a wrong secret. The
-        // delegate already converted the coded collision from a throw to a return, so the finally
-        // dual-zeroize runs uniformly on every path. A plain wrong-secret refusal keeps its bare
-        // { ok:false } shape (no reason key).
+        // Forward the NON-SECRET failure reason (format/busy/state) so the sheet can branch its
+        // copy. A plain wrong-secret refusal keeps its bare { ok:false } shape (no reason key).
         return res && res.reason ? { ok: false, reason: res.reason } : { ok: false };
       } finally {
         buf.fill(0);

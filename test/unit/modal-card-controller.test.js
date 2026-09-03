@@ -223,6 +223,16 @@ test('createSheetEntry: items + dismissible pass through only when supplied', ()
   assert.equal('dismissible' in plain.entry, false, 'no dismissible key when not supplied');
 });
 
+test('createSheetEntry: survivesBlur passes through only when supplied (M18 F3 L1, DD8)', () => {
+  const document = createDocument();
+  const withOpt = makeSheetHarness(document, { survivesBlur: true });
+  assert.equal(withOpt.entry.survivesBlur, true, 'survivesBlur forwarded (the 8 vault-credential entries)');
+  // A plain sheet — and every non-vault sheet — omits it entirely; menu-controller.js's
+  // window-blur guard checks `=== true`, so an absent key behaves exactly as before.
+  const plain = makeSheetHarness(document);
+  assert.equal('survivesBlur' in plain.entry, false, 'no survivesBlur key when not supplied');
+});
+
 test('createSheetEntry: the factory never touches lastStimulus (it reports via the injected fn only)', () => {
   const document = createDocument();
   // A report object whose lastStimulus setter would flip a flag if the factory wrote it.

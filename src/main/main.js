@@ -62,6 +62,21 @@ const vaultStoreModule = require('./vault/vault-store');
 // direct fs.writeFileSync — the Export modal honors a typed path, so main must gate it (no
 // write-anywhere primitive). Electron-free / unit-tested.
 const { validateExportPath } = require('./vault/export-path');
+// M18 F3 L1 (DD9): the extracted error-class -> reason mapper — the single source of
+// truth every vault sheet delegate's catch routes through (main.js no longer transcribes
+// the ladder inline). See the module for why each per-delegate config is shaped as it is.
+const {
+  mapVaultSheetError,
+  VAULT_IMPORT_PREVIEW_CONFIG,
+  VAULT_RESTORE_COMMIT_CONFIG,
+  VAULT_UNLOCK_CONFIG,
+  VAULT_MINT_ACCESS_KEY_CONFIG,
+  VAULT_COMPROMISE_ROTATE_CONFIG,
+  VAULT_ROTATE_RECOVERY_CONFIG,
+  VAULT_ROTATE_ADMIN_KEY_CONFIG,
+  VAULT_CHANGE_MASTER_CONFIG,
+  VAULT_RECOVER_CONFIG
+} = require('./vault/vault-sheet-errors');
 // M12 F2 Leg 3 (pick-and-fill): the Electron-free human fill orchestration — the
 // reachable-items picker read + the origin/scope-rechecked human fill that hands
 // the credential to F1's fill delegate (in main only; the password never returns
@@ -756,17 +771,50 @@ async function grabWindow(windowId) {
 // uses its stateless read methods; F2 (M12) additionally drives the STATEFUL
 // human unlock() through it (DD4/DD10) and wires onLock/onUnlock so every lock-
 // state transition — human unlock, idle auto-lock — broadcasts to every chrome.
+// M18 F3 L1 (DD8 close-on-lock): on vault lock (manual `vaultLockNow()` OR the idle
+// autolock timer — vault-store.js:624's `this.lockNow()`, which never routes through
+// `vaultLockNow()`), close every window's open ALLOWLISTED vault credential sheet.
+// Design review found NOTHING did this before: `vaultLockNow()` → broadcastVaultLockState()
+// is broadcast-only, and credential sheets hold no autolock-suppression hold, so the idle
+// timer could fire under an open sheet — DD8's blur-survival ruling raises the stakes
+// (half-typed secrets now also outlive an app switch), so this leg adds the close.
+// Fan out via registry.records() → rec.sheet and call closeMenuOverlay('vault-lock')
+// UNCONDITIONALLY per window: closeMenuOverlay is idempotent (a no-op with no menu open)
+// AND scopes the 'vault-lock' reason itself to the credential allowlist minus
+// vault-unlock (menu-overlay-manager.js, closesOnVaultLock) — so an open non-vault menu
+// (kebab, downloads, …), a dismiss-locked show sheet, or an open vault-unlock prompt is
+// never force-closed by this call. `rec.sheet` is nulled during window-close teardown
+// (window-factory.js), hence the optional-chaining guard.
+function closeVaultCredentialSheetsOnLock() {
+  for (const rec of registry.records()) {
+    rec.sheet?.closeMenuOverlay('vault-lock');
+  }
+}
+
 let _vaultStore = null;
 function getVaultStore() {
   if (_vaultStore === null) {
     _vaultStore = vaultStoreModule.load(app.getPath('userData'), {
       listJars: () => jars.list(),
       getAutoLockMinutes: () => settings.get('vaultAutoLockMinutes'),
+      // M18 F3 Leg 3 (DD3 ruling 4): restoreProfile's 'new' directive create-then-verify
+      // step — injected so vault-store.js stays jars.js-free (Electron-free discipline).
+      createJar: (name, color) => jars.add(name, color),
+      verifyJarPersisted: (id) => jars.verifyPersisted(id),
       // DD10: single source of truth = the store's MRK-present state, pushed on
       // every transition. onUnlock fires from _installMrk (all three unlock
       // paths); onLock fires from lockNow + the idle timer. Both are guarded
       // inside the store, so a broadcast throw can never reject unlock()/lockNow().
-      onLock: () => broadcastVaultLockState(),
+      // DD8 (M18 F3 L1): close the allowlisted credential sheets FIRST, then broadcast —
+      // the sheet closes before the chrome indicator / vault page settle into the new
+      // locked state, never after. M18 F3 L3 (DD5 ruling 4): also drop EVERY held
+      // multi-vault import record — the safety-drop matrix's lock row (manual AND idle,
+      // since both route through this one onLock hook).
+      onLock: () => {
+        _pendingVaultImports.dropAll();
+        closeVaultCredentialSheetsOnLock();
+        broadcastVaultLockState();
+      },
       onUnlock: () => broadcastVaultLockState()
     });
   }
@@ -801,31 +849,29 @@ function broadcastVaultLockState() {
   }
 }
 
-// Portable vault IMPORT held state (M12 F4 Leg 1 export-import, DD1/DD2). The import is a
-// two-surface flow: the vault page picks a destination + triggers the file open (main-side
-// dialog + read), then the chrome-owned vault-import-unlock sheet collects the secret. The
-// bundle (ciphertext) + the destination target are held HERE between those two steps — never
-// on the page, never on the sheet — and consumed by the `menu-overlay:vault-import` handler's
-// `vaultImport` delegate.
+// Portable vault RESTORE held state (M12 F4 Leg 1 export-import, DD1/DD2; re-modeled M18 F3
+// Leg 3 / DD2). The restore is a multi-step flow: the vault page picks a bundle file
+// (main-side dialog + read), the chrome-owned vault-import-unlock sheet PREVIEWS the secret
+// (a store preview op — no write, no destination binding), and the page's mapping modal
+// collects a per-vault directive before the operator commits. The bundle (ciphertext), and
+// later the verified secret + non-secret labels, are held HERE across all of that — never on
+// the page, never on the sheet.
 //
 // PER-OWNING-WINDOW (PR#112 finding 5): previously ONE process-global record, so in a
-// multi-window session window A's pick could be overwritten by window B, and A's Continue /
-// secret submit / overwrite-flag / cancel then acted on B's record — a cross-window
-// destination/overwrite confusion. The record is now keyed by the OWNING CHROME webContents
-// id (the common identity of both the page tab — via chromeForTab(tabId) — and the secret
-// sheet, which renders IN that chrome). Every step (pick, bind-overwrite, forward, clear,
-// consume) resolves ONLY its own window's record, so windows can never touch each other's
-// import. Each record also carries an opaque `handle` minted at pick; the page echoes it on
-// the mutating steps (finding 5), a per-transaction guard against a stale record within one
-// window. The sheet submit is additionally bound by the sheet's existing open-token.
+// multi-window session window A's pick could be overwritten by window B. The record is keyed
+// by the OWNING CHROME webContents id (the common identity of both the page tab — via
+// chromeForTab(tabId) — and the secret sheet, which renders IN that chrome). Every step
+// resolves ONLY its own window's record, so windows can never touch each other's import. Each
+// record also carries an opaque `handle` minted at pick; the page echoes it on the mutating
+// steps (finding 5), a per-transaction guard against a stale record within one window.
 // The window-scoped held-import store (extracted + unit-tested in vault/pending-imports.js).
 const { createPendingImportStore } = require('./vault/pending-imports');
-const _pendingVaultImports = createPendingImportStore(() => crypto.randomUUID());
+const _pendingVaultImports = createPendingImportStore({ mintHandle: () => crypto.randomUUID() });
 
 // M18 F2 L4 (flight DD5): the ONE refcounted idle-autolock suppression holder —
 // the single authority over the store's `setAutoLockSuspended` flag (flag =
 // holders > 0, a holder being a distinct `(chromeId, reason)` pair). Both
-// one-time-reveal flows — the fresh-adopt admin-key chain ('adopt') and the
+// one-time-reveal flows — the fresh-adopt recovery reveal ('adopt') and the
 // compromise-mode recovery reveal ('compromise') — acquire/release through it,
 // so neither flow's teardown can un-suppress while the other still has a live
 // dismiss-locked reveal (the pre-migration two-independent-`size===0`-checks
@@ -836,58 +882,35 @@ const _autolockSuppression = createSuppressionHolder({
   setSuspended: (on) => getVaultStore().setAutoLockSuspended(on)
 });
 
-// M17 F4 L3 (AC2-AC4): the pending fresh-adopt ADMIN key store — the SECOND of the
-// two one-time secrets a fresh adopt rotates (the first, the recovery key, is shown
-// immediately; the admin key waits until the recovery-show sheet is acknowledged so
-// the two dismiss-locked sheets never clobber each other). Held main-side, keyed by
-// the owning CHROME contents id (the same keying idiom as _pendingVaultImports), only
-// between the recovery-show open and its ack. `adminPrivateKeyB64` is a JS string —
-// immutable, NOT fill(0)-zeroizable — consistent with the other one-time secrets
-// (recovery display, mint secret); dwell is minimized (dropped on the recovery-show
-// ack in AC3, or on window teardown). Suppression halves MIGRATED to the refcounted
-// holder above (M18 F2 L4, DD5): stashing ACQUIRES the window's 'adopt' hold (the
-// lockout-window guard, AC4); taking / clearing it RELEASES exactly that hold.
-const _pendingAdoptAdminKeys = new Map(); // chromeId(number) -> adminPrivateKeyB64(string)
-
-// Stash the fresh-adopt admin key for a window and SUSPEND idle autolock (AC2/AC4).
-function stashAdoptAdminKey(chromeId, adminPrivateKeyB64) {
-  if (chromeId == null) return;
-  _pendingAdoptAdminKeys.set(chromeId, adminPrivateKeyB64);
-  _autolockSuppression.acquire(chromeId, 'adopt');
-}
-
-// Consume + drop a window's pending admin key (AC3). Returns the key, or undefined
-// when none is held (setup / rotate-recovery recovery-show acks fall through here as
-// a no-op). Releases exactly this window's 'adopt' hold — the holder un-suppresses
-// only once NO window holds anything (adopt or compromise) pending.
-function takeAdoptAdminKey(chromeId) {
-  if (chromeId == null || !_pendingAdoptAdminKeys.has(chromeId)) return undefined;
-  const adminPrivateKeyB64 = _pendingAdoptAdminKeys.get(chromeId);
-  _pendingAdoptAdminKeys.delete(chromeId);
-  _autolockSuppression.release(chromeId, 'adopt');
-  return adminPrivateKeyB64;
-}
-
-// Window-teardown cleanup (M17 F4 L3 AC4, generalized by M18 F2 L4 DD5): drop any
-// pending admin key held for a closing window (its recovery-show sheet is torn down
-// without an ack, so the ack-driven cleanup never runs) and release ALL of that
-// window's suppression holds. A pending COMPROMISE reveal deliberately survives the
-// window (H2 hold-and-resurface): only its hold is released here; the reveal itself
-// re-surfaces — re-keyed and re-held — on the next chrome boot. No-op store-wise
-// when the window held nothing (the holder pushes only on 0↔>0 transitions), so an
-// unrelated close never force-constructs the store.
+// Window-teardown cleanup (M17 F4 L3 AC4, generalized by M18 F2 L4 DD5; M18 F3 L3 DD5
+// ruling 4 added the held-import drop — the recon leak this leg closes): drop this window's
+// held multi-vault import record (secret zeroized, if held) and release ALL of that window's
+// suppression holds. A pending COMPROMISE or ADOPT reveal deliberately survives the window
+// (H2 hold-and-resurface): only its hold is released here; the reveal itself re-surfaces —
+// re-keyed and re-held — on the next chrome boot. No-op store-wise when the window held
+// nothing (the holder pushes only on 0↔>0 transitions), so an unrelated close never
+// force-constructs the store.
 function releaseVaultHoldsForWindow(chromeId) {
   if (chromeId == null) return;
-  _pendingAdoptAdminKeys.delete(chromeId);
+  _pendingVaultImports.clear(chromeId);
   _autolockSuppression.releaseWindow(chromeId);
 }
 
-// M18 F2 L4 (design-review H1/H2): the per-window pending compromise reveals — the
-// one-time recovery key stashed at op resolution BEFORE any sheet interaction, keyed
-// by the owning chrome id, consumed on the recovery-show ack, re-keyed to a freshly
-// booted window when the original died mid-op. Wired onto the suppression holder so
-// stash/ack/rekey move the 'compromise' hold atomically with the record.
-const { createCompromiseRevealStore } = require('./vault/pending-compromise-reveals');
+// M18 F2 L4 (design-review H1/H2): the per-window pending vault-credential reveals — the
+// one-time recovery key stashed at op resolution BEFORE any sheet interaction, keyed by the
+// owning chrome id, consumed on the recovery-show ack, re-keyed to a freshly booted window
+// when the original died mid-op. GENERALIZED (M18 F3 L3 / DD6 ruling 5) to also carry the
+// fresh-adopt reveal (reason 'adopt') — adopt no longer mints an admin pair, so its recovery
+// key IS its whole one-time-secret surfacing chain now; the old two-sheet admin-key chain
+// (`_pendingAdoptAdminKeys` + stash/take + the ack-chained `vault-adminkey-show` send) is
+// DELETED, not duplicated. Wired onto the suppression holder so stash/ack/rekey move the
+// per-reason hold atomically with the record.
+const { createCompromiseRevealStore, COMPROMISE_REASON, ADOPT_REASON } = require('./vault/pending-compromise-reveals');
+const { computeSeverOfferRoute } = require('./vault/sever-offer');
+// M18 F3 L1 (DD9): the H2 resurface composition, extracted — see the module for the
+// full rationale. main.js's own resurfaceCompromiseReveal(rec) below keeps only the
+// Electron plumbing (chrome webContents resolution + liveChromeIds + the send binding).
+const { resurfaceCompromiseReveal: resurfaceOneCompromiseReveal } = require('./vault/resurface-compromise-reveal');
 const _compromiseReveals = createCompromiseRevealStore(_autolockSuppression);
 
 // M18 F2 L4 (flight DD6): the compromise-mode revocation report — held main-side in
@@ -896,8 +919,37 @@ const _compromiseReveals = createCompromiseRevealStore(_autolockSuppression);
 // rotated" card survives reloads and re-renders. Set at op resolution (the card
 // renders from it on the next state fetch regardless of whether the completion
 // broadcast ever fired); cleared on operator dismissal or app relaunch.
-/** @type {{ admin: boolean, vaultIds: string[] } | null} */
+/** @type {{ admin: boolean, vaultIds: string[], generation: { completedAt: number, nonce: string } } | null} */
 let _compromiseReport = null;
+
+// M18 F3 L3 (DD7 ruling 6): mint a fresh generation-identity pair — the SAME
+// `{ completedAt, nonce }` shape `restoreProfile`'s own result carries (leg 2) — for
+// the two main-side session-state stash sites below. Minted HERE, never via a
+// vault-store touch: the restore result's own generation is a distinct value.
+function mintGeneration() {
+  return { completedAt: Date.now(), nonce: crypto.randomBytes(16).toString('hex') };
+}
+
+// M18 F3 L3 (DD7): the post-fresh-adopt sever offer — plain in-memory session state
+// (the `_compromiseReport` idiom: survives page reloads, clears on operator dismiss or
+// relaunch; `manager.json` stays crypto-only). Set on EVERY fresh adopt (the restore
+// commit handler); cleared on explicit dismiss and on a successful change-master /
+// recover completion (ruling 6's success hooks). The offer is non-secret display state
+// only — it gates nothing cryptographic.
+/** @type {{ secretKind: 'master'|'recovery', generation: { completedAt: number, nonce: string } } | null} */
+let _severOffer = null;
+
+// The page's state projection route (DD7) — the (secretKind × lock-state) truth table itself
+// is the extracted, unit-tested `computeSeverOfferRoute` (vault/sever-offer.js); this wrapper
+// owns only reading the session-held offer + the CURRENT lock state. Returns null when no
+// offer is pending.
+/** @returns {{ route: 'change-master' | 'recover' } | null} */
+function severOfferRoute() {
+  if (!_severOffer) return null;
+  const unlocked = getVaultStore().isUnlocked();
+  const route = computeSeverOfferRoute(_severOffer.secretKind, unlocked);
+  return { route };
+}
 
 // Stash the pending compromise reveal + report at op resolution (H2: this runs
 // BEFORE any sheet interaction — the stash + hold must be durable-in-memory before
@@ -906,31 +958,34 @@ function stashCompromiseReveal(chromeId, { recoveryKey, revoked }) {
   _compromiseReport = revoked
     ? {
         admin: revoked.admin === true,
-        vaultIds: Array.isArray(revoked.vaultIds) ? revoked.vaultIds.filter((id) => typeof id === 'string') : []
+        vaultIds: Array.isArray(revoked.vaultIds) ? revoked.vaultIds.filter((id) => typeof id === 'string') : [],
+        generation: mintGeneration()
       }
-    : { admin: false, vaultIds: [] };
-  _compromiseReveals.stash(chromeId, recoveryKey);
+    : { admin: false, vaultIds: [], generation: mintGeneration() };
+  _compromiseReveals.stash(chromeId, recoveryKey, COMPROMISE_REASON);
 }
 
-// The recovery-show ack's compromise branch (H1): consume THIS window's pending
-// compromise reveal if present — releasing exactly the (chromeId, 'compromise')
-// hold — then fire the completion broadcast (design-review M3: re-broadcast
-// vault-lock-state; the page refreshes off that channel, and chrome's handlers
-// treat the duplicate unlocked state as inert). A window with no compromise
-// marker (setup / rotate-recovery / adopt acks) is a strict no-op: no broadcast.
-function ackCompromiseReveal(chromeId) {
+// The recovery-show ack (H1, GENERALIZED M18 F3 L3 / DD6 ruling 5 — the old two-sheet
+// admin-key chain's separate ack branch is gone; this is now the SOLE ack path): consume
+// THIS window's pending reveal if present — releasing exactly the (chromeId, reason)
+// hold — then fire the completion broadcast for EITHER flow (design-review M3 for
+// compromise; ruling 5 for adopt — a fresh adopt also ends unlocked, so re-broadcasting
+// vault-lock-state is equally correct there; chrome's handlers treat the duplicate state
+// as inert). A window with no pending marker (setup / rotate-recovery acks) is a strict
+// no-op: no broadcast.
+function ackVaultReveal(chromeId) {
   if (!_compromiseReveals.ack(chromeId)) return false;
   broadcastVaultLockState();
   return true;
 }
 
-// H2 resurface: on a chrome boot, re-key any ORPHANED pending compromise reveal
-// (its owning window is gone) to the freshly booted window and re-open the
-// dismiss-locked recovery-show sheet there. The recovery-show display needs no
-// unlock, so this works whatever the lock state. At most one reveal can be
-// orphaned in practice (the store's busy gate serializes rotations), but the
-// scan is written over the full set anyway. An app-quit with a reveal still
-// pending loses it — the accepted, documented residual (docs/vault.md).
+// H2 resurface: on a chrome boot, re-key any ORPHANED pending reveal — compromise OR
+// adopt (M18 F3 L3 / DD6 ruling 5) — (its owning window is gone) to the freshly booted
+// window and re-open the dismiss-locked recovery-show sheet there. The recovery-show
+// display needs no unlock, so this works whatever the lock state. At most one reveal can
+// be orphaned in practice (the store's busy gate serializes rotations/restores), but the
+// scan is written over the full set anyway. An app-quit with a reveal still pending
+// loses it — the accepted, documented residual (docs/vault.md).
 function resurfaceCompromiseReveal(rec) {
   const chrome = rec && rec.chromeView ? rec.chromeView.webContents : null;
   if (!chrome || chrome.isDestroyed()) return;
@@ -939,12 +994,12 @@ function resurfaceCompromiseReveal(rec) {
     const cc = r.chromeView && r.chromeView.webContents;
     if (cc && !cc.isDestroyed()) liveChromeIds.add(cc.id);
   }
-  for (const staleId of _compromiseReveals.chromeIds()) {
-    if (liveChromeIds.has(staleId)) continue;
-    const reveal = _compromiseReveals.rekey(staleId, chrome.id);
-    if (reveal) chrome.send('vault-recovery-show', { recoveryKey: reveal.recoveryKey, replacing: true });
-    break;
-  }
+  resurfaceOneCompromiseReveal({
+    chromeId: chrome.id,
+    liveChromeIds,
+    reveals: _compromiseReveals,
+    send: (payload) => chrome.send('vault-recovery-show', payload)
+  });
 }
 
 // Pick a save location for an export bundle — runs the save dialog ONLY (no build, no write).
@@ -1012,16 +1067,13 @@ async function vaultSaveBundleToFile(bundle, savePath) {
   return { ok: true, path: filePath };
 }
 
-// Open a bundle file (main-side dialog + read + JSON parse) and HOLD { bundle, destinationTarget }
-// for the sheet's secret step. Returns { ok, path } | { canceled } | { error } (never throws into
-// the internal handler). The chosen `path` is echoed back so the page's Import modal can display it
-// and gate its Continue button on a successful pick FOR the shown destination (H1: the page
-// re-picks if the destination changes). The destination target is validated as a non-empty string;
-// the bundle's deeper crypto validation happens in importVault at unlock time (loud there).
-async function vaultImportBeginFromFile(destinationTarget, chromeId) {
-  if (typeof destinationTarget !== 'string' || destinationTarget.length === 0) {
-    return { error: 'bad-target' };
-  }
+// Open a bundle file (main-side dialog + read + JSON parse) and HOLD { bundle, handle } for
+// the sheet's secret step (M18 F3 Leg 3 / DD2 ruling 1 — destination is NO LONGER bound at
+// pick; the whole destination/mode decision moves to the COMMIT-time mapping step, downstream
+// of the secret). Returns { ok, path, importHandle } | { canceled } | { error } (never throws
+// into the internal handler). The bundle's deeper crypto validation happens at the preview
+// step (loud there).
+async function vaultImportBeginFromFile(chromeId) {
   // No resolvable owning window → refuse (finding 5): a record must belong to a window.
   if (typeof chromeId !== 'number') return { error: 'no-window' };
   const { canceled, filePaths } = await dialog.showOpenDialog({
@@ -1045,81 +1097,118 @@ async function vaultImportBeginFromFile(destinationTarget, chromeId) {
   } catch {
     return { error: 'unreadable' };
   }
-  // overwrite starts FALSE; it is bound at the modal's Continue step from the "Replace existing
-  // vault" checkbox (setPendingVaultImportOverwrite), never here at file-pick time (review MEDIUM-3).
-  // The store mints + returns the opaque handle (finding 5); keyed by the OWNING CHROME id so no
-  // other window can see or mutate this record.
-  const handle = _pendingVaultImports.hold(chromeId, { bundle, destinationTarget });
+  // The store mints + returns the opaque handle (finding 5); keyed by the OWNING CHROME id so
+  // no other window can see or mutate this record. A re-pick in the same window replaces (and
+  // safely drops/zeroizes) any prior record — including a secret-bearing one (DD5 matrix).
+  const handle = _pendingVaultImports.hold(chromeId, { bundle });
   return { ok: true, path: filePaths[0], importHandle: handle };
 }
 
-// Bind the import's `overwrite` from the modal's "Replace existing vault" checkbox FINAL state, at
-// the Continue step (not at file-pick). Called by the internal-vault-begin-import-unlock forward
-// just before the chrome sheet opens (M12 F5 HAT tail, review MEDIUM-3). Scoped to THIS window's
-// record (finding 5) and matched against the opaque handle when one is supplied — a no-op when the
-// window holds no record or the handle mismatches. Coerced to a strict boolean — overwrite DESTROYS
-// a vault, so only an explicit true enables it.
-function setPendingVaultImportOverwrite(chromeId, overwrite, handle) {
-  _pendingVaultImports.setOverwrite(chromeId, overwrite === true, handle);
-}
-
-// Clear THIS window's held import record (L1, finding 5). The page's Import modal calls this on
-// Cancel / Escape / backdrop-dismiss AFTER a successful file pick so a bundle held for an abandoned
-// modal never lingers. Scoped to the owning window (and its handle when supplied) so one window can
-// never clear another's transaction. Always safe to call (a no-op when this window holds nothing).
-function clearPendingVaultImport(chromeId, handle) {
+// Drop THIS window's held record for ANY reason (DD5's ONE drop helper): explicit
+// cancel/dismiss at the pick step OR (post-secret) the mapping step, zeroizing the secret
+// when held. Scoped to the owning window (and its handle when supplied) so one window can
+// never drop another's transaction. Always safe to call (a no-op when this window holds
+// nothing). `why` is a documentation tag only (every drop path behaves identically — DD5
+// ruling 4's design is ONE helper, not reason-branched behavior).
+function dropPendingVaultImport(chromeId, _why, handle) {
   _pendingVaultImports.clear(chromeId, handle);
 }
 
-// The `menu-overlay:vault-import` delegate: consume THIS window's held { bundle, destinationTarget }
-// (finding 5 — keyed by the owning chrome id, so a window can only ever import its OWN picked bundle)
-// and run importVault with the sheet's secret Buffer + secretKind. Follows the vaultUnlock pattern
-// (VaultAuthError → { ok:false } so a wrong secret re-prompts the sheet, nothing written); other
-// errors propagate (the handler still dual-zeroizes). On success the record is consumed and the
-// lock-state is broadcast (the fresh-profile adopt already fires onUnlock; the existing-profile
-// re-key nudges the page to re-render its now-populated vault).
-async function vaultImportFromSheet(chromeId, buf, secretKind) {
-  // Peek (don't consume yet): a wrong secret must leave THIS window's record intact so the sheet
-  // re-prompts without forcing a re-pick — the record is consumed only on a successful import.
+// The page's explicit cancel/dismiss — kept as its own name for the internal-handler call
+// site's clarity (an alias of dropPendingVaultImport with the 'cancel' tag).
+function clearPendingVaultImport(chromeId, handle) {
+  dropPendingVaultImport(chromeId, 'cancel', handle);
+}
+
+// The `menu-overlay:vault-import` delegate (M18 F3 Leg 3 / DD2 ruling 2/3(c) — the reshaped
+// `vaultImportFromSheet`): PREVIEW the held bundle's secret via the store's decrypt-then-
+// discard op — no write, no destination resolved. On success, stash an INDEPENDENT COPY of
+// the verified secret + the store's non-secret labels onto THIS window's held record (arming
+// the DD5 safety-drop timer) — a copy, because the overlay handler's own dual-zeroize wipes
+// its `buf` right after this delegate returns, and the held record needs a buffer that
+// survives that wipe for the later commit (ruling 1: "one extra scrypt derive at commit —
+// accepted"). Neither the labels nor the secret ride this invoke's reply: the page is
+// notified separately (labels-ready, no payload) and fetches its own record's labels via a
+// window-scoped invoke.
+async function vaultImportPreviewFromSheet(chromeId, buf, secretKind) {
+  // Peek (don't consume): a wrong secret must leave THIS window's record intact so the sheet
+  // re-prompts without forcing a re-pick.
   const pending = _pendingVaultImports.peek(chromeId);
   if (!pending) return { ok: false };
   try {
-    // M17 F4 L3 AC1: capture the store return. A FRESH adopt (Leg 2) rotates the
-    // recovery key + admin keypair inline and returns the two one-time secrets
-    // ({ imported, fresh:true, recoveryKeyDisplay, adminPrivateKeyB64 }); an
-    // existing-profile adopt returns { imported, fresh:false } (no secrets). Map
-    // imported→ok and pass fresh + the two secrets through so the overlay handler
-    // can surface them on the dismiss-locked one-time sheets (NEVER in this invoke
-    // reply, NEVER in any page DOM — mirrors rotate-recovery / rotate-admin).
-    const res = await getVaultStore().importVault(pending.bundle, {
-      destinationTarget: pending.destinationTarget,
-      secret: buf,
-      secretKind,
-      // Bound at Continue from the "Replace existing vault" checkbox (review MEDIUM-3). overwrite
-      // gates ONLY the :846 destination-collision, downstream of ALL crypto — a wrong secret still
-      // throws VaultAuthError before any write, so overwrite can never bypass secret entry (DD5).
-      overwrite: pending.overwrite === true
-    });
-    _pendingVaultImports.clear(chromeId); // consume on success only.
-    broadcastVaultLockState();
-    if (res && res.fresh === true) {
-      return {
-        ok: true,
-        fresh: true,
-        recoveryKeyDisplay: res.recoveryKeyDisplay,
-        adminPrivateKeyB64: res.adminPrivateKeyB64
-      };
-    }
-    return { ok: true, fresh: false };
+    const { labels } = await getVaultStore().previewRestoreBundle(pending.bundle, { secret: buf, secretKind });
+    _pendingVaultImports.stashSecret(chromeId, { secret: Buffer.from(buf), secretKind, labels }, pending.handle);
+    return { ok: true };
   } catch (e) {
-    // Wrong secret → { ok:false } (the sheet re-prompts, nothing written). A CODED collision → a
-    // distinguishable { reason:'collision' } so the sheet shows a truthful "already exists" message
-    // instead of "check the secret" (review HIGH-1 / MEDIUM-4). Converting the collision from a
-    // throw to a return keeps the overlay handler's dual-zeroize uniform. Other errors propagate.
-    if (e instanceof vaultStoreModule.VaultAuthError) return { ok: false };
-    if (e instanceof vaultStoreModule.VaultCollisionError) return { ok: false, reason: 'collision' };
+    // A wrong secret → { ok:false } (the sheet re-prompts, nothing stashed). Other admitted
+    // classes ride as non-secret reasons; unknowns propagate (the handler still dual-zeroizes).
+    // M18 F3 L3 (DD9): routed through the extracted mapper — VAULT_IMPORT_PREVIEW_CONFIG.
+    const mapped = mapVaultSheetError(e, VAULT_IMPORT_PREVIEW_CONFIG);
+    if (mapped !== null) return mapped;
     throw e;
   }
+}
+
+// The page's window-scoped labels fetch (DD2 ruling 3(c)): a NON-SECRET projection —
+// { handle, labels } — of THIS window's held record, or null when nothing is held past the
+// secret step (no record, a record still awaiting its secret, or the record was dropped
+// meanwhile — lock, timer, window-close). The page treats null as a strict no-op, never
+// assuming the labels-ready event implies its own record.
+function vaultImportFetchLabels(chromeId) {
+  return _pendingVaultImports.peekLabels(chromeId);
+}
+
+// The multi-vault restore COMMIT (M18 F3 Leg 3 / DD2 ruling 3(e)): consume THIS window's held
+// record — requiring an EXACT handle match against a record that has already passed the
+// secret step (a bare pick, a stale/dropped record, or a mismatched handle all refuse loudly,
+// never a partial write — the "start over" edge case) — run restoreProfile with the
+// operator's mapping, and always zeroize the held secret. On a FRESH adopt: stash the reveal
+// (H2 ordering — BEFORE the sheet send) under the ADOPT reason, surface the sever offer
+// (DD7), and open the dismiss-locked recovery-show sheet. Returns the per-vault outcomes +
+// generation on success, or a non-secret `{ ok:false, reason }` refusal.
+async function vaultImportCommit(chromeId, handle, mapping) {
+  const peeked = _pendingVaultImports.peek(chromeId);
+  if (!peeked || peeked.handle !== handle || peeked.secret === undefined) {
+    // Never consume a record that doesn't match — a stale commit for a superseded handle
+    // (a re-pick replaced it meanwhile) must leave the NEW live record untouched.
+    return { ok: false, reason: 'state' };
+  }
+  const pending = /** @type {any} */ (_pendingVaultImports.take(chromeId));
+  try {
+    const res = await getVaultStore().restoreProfile(pending.bundle, {
+      secret: pending.secret,
+      secretKind: pending.secretKind,
+      mapping
+    });
+    broadcastVaultLockState();
+    if (res.fresh) {
+      const secretKind = pending.secretKind === 'recovery' ? 'recovery' : 'master';
+      _severOffer = { secretKind, generation: mintGeneration() };
+      // H2 ordering (DD6 ruling 5): stash the reveal BEFORE the sheet send — durable
+      // in memory before touching a possibly-dead chrome handle.
+      _compromiseReveals.stash(chromeId, res.recoveryKeyDisplay, ADOPT_REASON);
+      webContents.fromId(chromeId)?.send('vault-recovery-show', {
+        recoveryKey: res.recoveryKeyDisplay,
+        replacing: true
+      });
+    }
+    return { ok: true, fresh: res.fresh, results: res.results, generation: res.generation };
+  } catch (e) {
+    // M18 F3 L3 (DD9/DD10): routed through the extracted mapper — VAULT_RESTORE_COMMIT_CONFIG
+    // ('busy'/'state' reasons; unknowns propagate — the handler still zeroizes below).
+    const mapped = mapVaultSheetError(e, VAULT_RESTORE_COMMIT_CONFIG);
+    if (mapped !== null) return mapped;
+    throw e;
+  } finally {
+    // restoreProfile never retains the caller's secret argument beyond the call — safe (and
+    // required, ruling 3(e): "zeroizes the secret") to zeroize once it has settled either way.
+    pending.secret.fill(0);
+  }
+}
+
+// DD7: dismiss the post-adopt sever offer — display-state plumbing, not a secret channel.
+function vaultImportSeverDismiss() {
+  _severOffer = null;
 }
 
 // M12 F2 Leg 3 (pick-and-fill): the human fill orchestration, memoized like the
@@ -1645,16 +1734,20 @@ const { rerollSeed } = registerBrowserIpc({
   // Vault lock state for the in-field icon glyph (returned by the vault-eligible query so the
   // decorative lock icon can seed open/closed). Non-secret boolean; the chrome indicator shows it.
   isVaultUnlocked: () => getVaultStore().isUnlocked(),
-  // M12 F4 Leg 1 (export-import): the import request's main-side file step (open dialog + read +
-  // hold). Gated — offline register-browser-ipc tests omit it. M12 F5 HAT (I14): the pick-file
-  // step is now SPLIT from the sheet forward — pickImportFile does dialog+read+hold and returns
-  // { ok, path }; beginImportUnlock forwards the bare vault-request-import; clearPendingImport
-  // drops the held record on modal dismiss (L1).
+  // M12 F4 Leg 1 (export-import); RESHAPED M18 F3 Leg 3 / DD2: the restore request's main-side
+  // file step (open dialog + read + hold — { bundle, handle} ONLY, no destination). Gated —
+  // offline register-browser-ipc tests omit it. pickImportFile does dialog+read+hold and
+  // returns { ok, path, importHandle }; beginImportUnlock forwards the bare vault-request-import
+  // (destination/mode moved entirely to the commit-time mapping step — no overwrite binding
+  // here anymore); clearPendingImport drops the held record on modal dismiss (DD5 matrix).
   vaultImportBegin: vaultImportBeginFromFile,
   clearPendingVaultImport,
-  // M12 F5 HAT tail (review MEDIUM-3): bind the import `overwrite` from the modal's Replace
-  // checkbox at the Continue step (the internal-vault-begin-import-unlock forward), never at pick.
-  setPendingVaultImportOverwrite,
+  // M18 F3 Leg 3 (DD2 ruling 3(c)/3(e), DD7): the mapping-step seams — the page's window-scoped
+  // labels fetch, the commit (mapping → per-vault outcomes + generation), and the sever-offer
+  // dismiss. Gated — offline register-browser-ipc tests omit them.
+  vaultImportFetchLabels,
+  vaultImportCommit,
+  vaultImportSeverDismiss,
   // M12 F5 HAT batch 1 (I8): pop the NATIVE fill-icon context menu (Menu.popup) over the owning
   // window — never a guest-DOM menu. Gated — offline register-browser-ipc tests omit it.
   popupVaultIconMenu,
@@ -1754,7 +1847,11 @@ registerOverlayIpc({
       await getVaultStore().unlock(buf);
       return true;
     } catch (e) {
-      if (e instanceof vaultStoreModule.VaultAuthError) return false;
+      // M18 F3 L1 (DD9): routed through the extracted mapper — VAULT_UNLOCK_CONFIG maps a
+      // wrong password to the bare boolean `false` (this delegate's IPC surface is
+      // unchanged by the extraction — AC pins it).
+      const mapped = mapVaultSheetError(e, VAULT_UNLOCK_CONFIG);
+      if (mapped !== null) return mapped;
       throw e;
     }
   },
@@ -1795,25 +1892,19 @@ registerOverlayIpc({
       const { secret, keyId } = await getVaultStore().mintAccessKey(target, { masterPassword: buf });
       return { ok: true, secret, keyId };
     } catch (e) {
-      if (e instanceof vaultStoreModule.VaultAuthError) return { ok: false };
-      if (e instanceof vaultStoreModule.VaultStateError) return { ok: false, reason: 'state' };
-      if (e instanceof vaultStoreModule.VaultBusyError) return { ok: false, reason: 'busy' };
+      // M18 F3 L1 (DD9): routed through the extracted mapper — VAULT_MINT_ACCESS_KEY_CONFIG.
+      const mapped = mapVaultSheetError(e, VAULT_MINT_ACCESS_KEY_CONFIG);
+      if (mapped !== null) return mapped;
       throw e;
     }
   },
-  // M12 F4 Leg 1 (export-import): the vault-import-unlock sheet's secret delegate. Follows the
-  // vaultUnlock pattern (VaultAuthError → { ok:false }) so a wrong secret re-prompts and nothing
-  // is written; the held { bundle, destinationTarget } is consumed here. The handler owns the
-  // Buffer copy + dual-zeroize; this delegate only runs the store op.
-  vaultImport: (chromeId, buf, secretKind) => vaultImportFromSheet(chromeId, buf, secretKind),
-  // M17 F4 L3 (AC2/AC3): the fresh-adopt one-time-secret surfacing seam. On a fresh
-  // adopt the handler stashes the rotated admin private key (which also suspends idle
-  // autolock — the lockout-window guard) and shows the recovery key first; the
-  // recovery-show ack then takes the stashed key (clearing suppression) to open the
-  // adminkey-show sheet. Both are narrow bound functions (never getVaultStore itself)
-  // so the electron-free overlay registrar stays store-decoupled.
-  stashAdoptAdminKey: (chromeId, adminPrivateKeyB64) => stashAdoptAdminKey(chromeId, adminPrivateKeyB64),
-  takeAdoptAdminKey: (chromeId) => takeAdoptAdminKey(chromeId),
+  // M12 F4 Leg 1 (export-import); RESHAPED M18 F3 Leg 3 / DD2 ruling 2: the
+  // vault-import-unlock sheet's secret delegate now PREVIEWS the held bundle (no write, no
+  // destination) — follows the vaultUnlock pattern (VaultAuthError → { ok:false }) so a wrong
+  // secret re-prompts and nothing is stashed. The handler owns the Buffer copy + dual-
+  // zeroize; this delegate runs the store preview op and stashes its own independent secret
+  // copy + the non-secret labels onto the held record for the later commit.
+  vaultImportPreview: (chromeId, buf, secretKind) => vaultImportPreviewFromSheet(chromeId, buf, secretKind),
   // M18 F2 L4: the compromise-mode rotation delegate. Maps the leg-3 error classes to
   // NON-SECRET reasons so the sheet renders the ruled inline copy — deliberately WIDER
   // than the VaultAuthError-only sibling delegates (the op has five ruled failure
@@ -1831,21 +1922,23 @@ registerOverlayIpc({
       const res = await getVaultStore().compromiseRotate(args);
       return { ok: true, recoveryKey: res.recoveryKey, revoked: res.revoked };
     } catch (e) {
-      if (e instanceof vaultStoreModule.VaultPasswordReuseError) return { ok: false, reason: 'reuse' };
-      if (e instanceof vaultStoreModule.VaultAuthError) return { ok: false, reason: 'auth' };
-      if (e instanceof vaultStoreModule.VaultFormatError) return { ok: false, reason: 'format' };
-      if (e instanceof vaultStoreModule.VaultBusyError) return { ok: false, reason: 'busy' };
-      if (e instanceof vaultStoreModule.VaultStateError) return { ok: false, reason: 'state' };
+      // M18 F3 L1 (DD9): routed through the extracted mapper — VAULT_COMPROMISE_ROTATE_CONFIG
+      // (the widest config: five ruled classes, and the only one whose auth failure renders
+      // WITH a reason).
+      const mapped = mapVaultSheetError(e, VAULT_COMPROMISE_ROTATE_CONFIG);
+      if (mapped !== null) return mapped;
       throw e;
     }
   },
-  // M18 F2 L4 (H2/H1): the compromise surfacing seams — narrow bound functions (never
-  // the stores themselves) so the Electron-free overlay registrar stays decoupled.
+  // M18 F2 L4 (H2/H1); GENERALIZED M18 F3 L3 / DD6 ruling 5 — ackVaultReveal is now the
+  // SOLE recovery-show ack path (the old adopt-only admin-key chain is deleted, not
+  // duplicated): narrow bound functions (never the stores themselves) so the Electron-free
+  // overlay registrar stays decoupled.
   stashCompromiseReveal: (chromeId, reveal) => stashCompromiseReveal(chromeId, reveal),
-  ackCompromiseReveal: (chromeId) => ackCompromiseReveal(chromeId),
+  ackVaultReveal: (chromeId) => ackVaultReveal(chromeId),
   // Squawk 0059: the post-mint page-refresh seam. The mint delegate above writes a
   // durable access envelope, but the vault page refreshes ONLY off vault-lock-state —
-  // the handler re-broadcasts it on mint success (the ackCompromiseReveal idiom; chrome
+  // the handler re-broadcasts it on mint success (the ackVaultReveal idiom; chrome
   // is inert on the duplicate state). A narrow bound function, never main's internals.
   broadcastVaultLockState: () => broadcastVaultLockState(),
   // M12 F4 Leg 2 (key-rotation): the vault-stepup sheet's RECOVERY-ROTATION delegate. Follows
@@ -1862,8 +1955,9 @@ registerOverlayIpc({
       const recoveryKeyDisplay = await getVaultStore().rotateRecovery({ masterPassword: buf });
       return { ok: true, recoveryKeyDisplay };
     } catch (e) {
-      if (e instanceof vaultStoreModule.VaultAuthError) return { ok: false };
-      if (e instanceof vaultStoreModule.VaultBusyError) return { ok: false, reason: 'busy' };
+      // M18 F3 L1 (DD9): routed through the extracted mapper — VAULT_ROTATE_RECOVERY_CONFIG.
+      const mapped = mapVaultSheetError(e, VAULT_ROTATE_RECOVERY_CONFIG);
+      if (mapped !== null) return mapped;
       throw e;
     }
   },
@@ -1880,8 +1974,9 @@ registerOverlayIpc({
       const adminPrivateKeyB64 = await getVaultStore().rotateAdminKey({ masterPassword: buf });
       return { ok: true, adminPrivateKeyB64 };
     } catch (e) {
-      if (e instanceof vaultStoreModule.VaultAuthError) return { ok: false };
-      if (e instanceof vaultStoreModule.VaultBusyError) return { ok: false, reason: 'busy' };
+      // M18 F3 L1 (DD9): routed through the extracted mapper — VAULT_ROTATE_ADMIN_KEY_CONFIG.
+      const mapped = mapVaultSheetError(e, VAULT_ROTATE_ADMIN_KEY_CONFIG);
+      if (mapped !== null) return mapped;
       throw e;
     }
   },
@@ -1892,13 +1987,21 @@ registerOverlayIpc({
   // either scrypt derive makes _writeManager throw VaultBusyError). Other errors still
   // propagate (the handler still dual-zeroizes both buffers). Both
   // master passwords ride as zeroizable Buffers (changeMasterPassword accepts Buffer|string).
+  // M18 F3 L3 (DD7 ruling 6): a successful change-master is one of the sever offer's two
+  // completion hooks — clear it (the donor password is superseded by this operator's own).
+  // Squawk-0059 inert-duplicate idiom: unlike vaultRecover below this delegate broadcast NOTHING
+  // today, so another window's sever card would linger stale — re-broadcast the (unchanged)
+  // lock-state so every window's card clears.
   vaultChangeMaster: async (oldBuf, newBuf) => {
     try {
       await getVaultStore().changeMasterPassword({ oldMasterPassword: oldBuf, newMasterPassword: newBuf });
+      _severOffer = null;
+      broadcastVaultLockState();
       return { ok: true };
     } catch (e) {
-      if (e instanceof vaultStoreModule.VaultAuthError) return { ok: false };
-      if (e instanceof vaultStoreModule.VaultBusyError) return { ok: false, reason: 'busy' };
+      // M18 F3 L1 (DD9): routed through the extracted mapper — VAULT_CHANGE_MASTER_CONFIG.
+      const mapped = mapVaultSheetError(e, VAULT_CHANGE_MASTER_CONFIG);
+      if (mapped !== null) return mapped;
       throw e;
     }
   },
@@ -1914,18 +2017,22 @@ registerOverlayIpc({
   // zeroizes). The recovery secret is decoded as a STRING for parseRecoveryKey (the store contract);
   // the new master rides as a Buffer. On success the store installs the MRK (the user ends UNLOCKED)
   // — broadcast the lock-state so the page + chrome indicator move to unlocked.
+  // M18 F3 L3 (DD7 ruling 6): a successful recover is the sever offer's OTHER completion
+  // hook — clear it (the donor recovery key was the step-up; the profile is fully the
+  // operator's own now). vaultRecover already broadcasts the lock-state below.
   vaultRecover: async (recoveryBuf, newBuf) => {
     try {
       await getVaultStore().recoverMasterPassword({
         recoveryDisplay: recoveryBuf.toString('utf8'),
         newMasterPassword: newBuf
       });
+      _severOffer = null;
       broadcastVaultLockState();
       return { ok: true };
     } catch (e) {
-      if (e instanceof vaultStoreModule.VaultAuthError) return { ok: false };
-      if (e instanceof vaultStoreModule.VaultFormatError) return { ok: false, reason: 'format' };
-      if (e instanceof vaultStoreModule.VaultBusyError) return { ok: false, reason: 'busy' };
+      // M18 F3 L1 (DD9): routed through the extracted mapper — VAULT_RECOVER_CONFIG.
+      const mapped = mapVaultSheetError(e, VAULT_RECOVER_CONFIG);
+      if (mapped !== null) return mapped;
       throw e;
     }
   },
@@ -2241,6 +2348,10 @@ registerVaultIpc({
   clearCompromiseReport: () => {
     _compromiseReport = null;
   },
+  // M18 F3 L3 (DD7): the post-fresh-adopt sever offer projection — read by
+  // internal-vault-state (the page's sever card); the offer's own dismiss lives on the
+  // pick/labels/commit trio in register-browser-ipc.js (vaultImportSeverDismiss).
+  getSeverOffer: () => severOfferRoute(),
   // Squawk 0059 (the mint symmetry): a successful access-key revoke re-broadcasts
   // vault-lock-state so any OTHER window's open vault page re-lists its access keys
   // (the revoking page already re-lists its own view). Narrow bound function.
