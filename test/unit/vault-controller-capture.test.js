@@ -160,7 +160,17 @@ test('every unlock-prompt close that reaches the chrome drops the held credentia
   // stale-token close never reaches here (overlay-menus.js drops it) — what does reach
   // here is a supersede by an unrelated menu, where the prompt is gone and the held
   // password should not linger.
-  for (const reason of ['escape', 'outside-click', 'blur', 'activated', 'tab-close', 'superseded']) {
+  //
+  // M18 F3 L1 (DD8), rename-not-silent-edit: 'blur' and 'vault-lock' are now SAFETY-NET
+  // pins rather than production-reachable paths for vault-unlock specifically —
+  // vault-unlock is IN the blur-survival allowlist (main's closeMenuOverlay ignores
+  // reason 'blur' for it, so the sheet's own close handler here never sees it fire in
+  // production) and is EXEMPT from the new close-on-lock reason (locking is its
+  // precondition, not its invalidation, so main never sends 'vault-lock' for it either).
+  // handleClosed itself is reason-agnostic by design, so both assertions stay as
+  // defensive pins against a future regression re-wiring either path, rather than being
+  // silently dropped.
+  for (const reason of ['escape', 'outside-click', 'blur', 'vault-lock', 'activated', 'tab-close', 'superseded']) {
     const h = harness({ unlocked: false });
     offerLocked(h);
     h.controller.handleClosed({ menuType: 'vault-unlock', reason });

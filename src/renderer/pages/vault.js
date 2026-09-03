@@ -80,6 +80,13 @@ function init() {
   /** @type {Array<{ id?: unknown, color?: unknown }>} */
   let jarRows = [];
 
+  // The last rendered view's vault list (M18 F3 L3) — the mapping modal's "existing"
+  // destination options when opened directly from the labels-ready listener (which has no
+  // other route to the current vault list). Empty on a fresh (not-set-up) profile, exactly
+  // matching DD2 ruling 3's fresh-profile destination legality (new-jar/skip/global→global).
+  /** @type {Array<{ vaultId: string, label: string }>} */
+  let lastViewVaults = [];
+
   /**
    * Create an element with a className and text set via textContent (never
    * innerHTML — see the SECURITY note above).
@@ -374,6 +381,18 @@ function init() {
   let pendingNotice = null;
 
   /**
+   * The window's held multi-vault import record, re-fetched on every refresh() (M18 F3 L3 / DD2
+   * ruling 3(c), DD5 edge case "Labels-ready fan-out"). SERVER-AUTHORITATIVE — this is a display
+   * cache only, never the source of truth: a `null` here after a lock/timer/cancel drop correctly
+   * hides the resume affordance, and a stale non-null value can't itself cause a wrong commit
+   * (commitImport's own handle match is the real guard). Powers the "Resume restore" banner
+   * (ruling 9) — the mapping modal itself is opened directly by the labels-ready listener below
+   * on first arrival; this cache exists for the RE-entry path after a forced modal close.
+   * @type {{ handle: string, labels: Array<{ sourceId: string, jarMeta: { name: string, color: string } | null, itemCount: number }> } | null}
+   */
+  let pendingImportRecord = null;
+
+  /**
    * Open the single page-level modal. `body` is the caller-built content (selects, file-pick
    * controls); the shell adds the title, a status line (role="status"), and a Cancel/Submit
    * actions row. The Submit button starts disabled unless `submitEnabled` is true. Returns a handle
@@ -505,27 +524,29 @@ function init() {
   }
 
   /**
-   * The Export modal (M12 F5 HAT, I14; file-uploader row + validated pasteable path M12 F5 HAT
-   * tail). Body: a SOURCE-vault select, then a file-uploader ROW — a text input showing the save
-   * path + an open-folder icon button that runs `pickSavePath` (main-side save dialog ONLY, no
-   * write) and populates the field. The field is EDITABLE/PASTEABLE (operator ask — the path looks
-   * like a real uploader); the actual write is gated MAIN-SIDE by validateExportPath (canonical
-   * extension + existing writable parent, not a directory), so a typed path can never be a
-   * write-anywhere primitive (review HIGH-2). Export (submit) is DISABLED until the field is
-   * non-empty. Submit runs `exportVault(target, savePath)` fully main-side (ciphertext-only bundle;
-   * never transits the page). L2: a { locked } (idle-lock race) closes the modal, refreshes, and
-   * surfaces a brief notice; an invalid-path / write error shows on the status line — none is
-   * silently swallowed. { ok } closes the modal.
-   * @param {Array<{ vaultId: string, label: string }>} vaults
+   * The whole-profile Export modal (M18 F3 L3 / DD1 ruling 7 — REPLACES the old per-vault
+   * source select entirely; the jars page's delete-time single-vault export offer is the one
+   * intentional retained `exportVault` caller, untouched — `jars-section-controller.js:638`).
+   * Body: a file-uploader ROW — a text input showing the save path + an open-folder icon
+   * button that runs `pickSavePath('profile')` (main-side save dialog ONLY, no write) and
+   * populates the field. The field is EDITABLE/PASTEABLE (operator ask); the actual write is
+   * gated MAIN-SIDE (canonical extension + existing writable parent), so a typed path can
+   * never be a write-anywhere primitive. Export is DISABLED until the field is non-empty.
+   * Submit runs `exportProfile(savePath)` fully main-side (ciphertext-only bundle; never
+   * transits the page); the result states which vaults were carried (lazy jars absent by
+   * design). A { locked } (idle-lock race) closes the modal, refreshes, and surfaces a brief
+   * notice; an invalid-path / write error shows on the status line — none is silently
+   * swallowed.
    */
-  function openExportModal(vaults) {
+  function openExportProfileModal() {
     const body = el('div', 'vault-modal-form');
-
-    const field = el('label', 'vault-settings-field');
-    field.appendChild(el('span', 'vault-settings-label', 'Vault'));
-    const select = buildVaultSelect(vaults, 'Export source vault');
-    field.appendChild(select);
-    body.appendChild(field);
+    body.appendChild(
+      el(
+        'p',
+        'vault-lede',
+        'Export every vault in this profile — the global vault and every jar that has one — into a single encrypted file.'
+      )
+    );
 
     // File-uploader row: a pasteable path input + an open-folder icon button (native save dialog).
     const fileRow = el('div', 'vault-modal-file-row');
@@ -540,7 +561,7 @@ function init() {
     fileRow.appendChild(pathInput);
     fileRow.appendChild(
       iconButton('folder', 'Choose a save location', () => {
-        Promise.resolve(bridge.pickSavePath(select.value))
+        Promise.resolve(bridge.pickSavePath('profile'))
           .then((res) => {
             if (res && res.path) {
               pathInput.value = res.path;
@@ -554,7 +575,7 @@ function init() {
     body.appendChild(fileRow);
 
     const handle = openModal({
-      title: 'Export a vault',
+      title: 'Export this profile',
       body,
       submitLabel: 'Export',
       submitEnabled: false,
@@ -563,7 +584,7 @@ function init() {
         if (!savePath) return;
         handle.setSubmitEnabled(false);
         handle.setStatus('Exporting…');
-        Promise.resolve(bridge.exportVault(select.value, savePath))
+        Promise.resolve(bridge.exportProfile(savePath))
           .then((res) => {
             if (res && res.locked) {
               pendingNotice = 'The manager locked — export canceled. Unlock and try again.';
@@ -572,7 +593,10 @@ function init() {
               return;
             }
             if (res && res.ok) {
+              const carried = Array.isArray(res.carried) ? res.carried.length : 0;
+              pendingNotice = `Exported ${carried} vault${carried === 1 ? '' : 's'}.`;
               handle.close();
+              refresh();
               return;
             }
             if (res && res.error === 'invalid-path') {
@@ -587,11 +611,11 @@ function init() {
               handle.setSubmitEnabled(true);
               return;
             }
-            handle.setStatus('Could not export the vault.');
+            handle.setStatus('Could not export the profile.');
             handle.setSubmitEnabled(true);
           })
           .catch(() => {
-            handle.setStatus('Could not export the vault.');
+            handle.setStatus('Could not export the profile.');
             handle.setSubmitEnabled(true);
           });
       }
@@ -599,74 +623,41 @@ function init() {
   }
 
   /**
-   * The Import modal (M12 F5 HAT, I14; file-uploader row + Replace-existing confirm M12 F5 HAT
-   * tail). Body: a DESTINATION-vault select, a file-uploader ROW (a READ-ONLY path field showing
-   * the dialog-picked path + an open-folder icon button), and a Replace-existing affordance shown
-   * ONLY when the destination already holds a vault.
+   * The restore PICK modal (M18 F3 L3 / DD2 — the UNIFIED workflow: both entry points —
+   * Settings' "Import…" and the not-set-up page's "Import a vault bundle" — open THIS SAME
+   * flow now; the old `fresh`-split single modal converges here). Body: a file-uploader ROW
+   * (a READ-ONLY path field + an open-folder icon button) — NO destination is picked here
+   * (ruling 1: destination binding moves entirely to the COMMIT-time mapping step). NO secret
+   * is entered here either: Continue runs `beginImportUnlock()` (a fully bare trigger — no
+   * payload at all), handing off to the chrome-owned vault-import-unlock sheet, which
+   * PREVIEWS the bundle secret (master password OR recovery key) and, on success, notifies
+   * the page (labels-ready) to open the mapping modal.
    *
-   * The bundle READ stays DIALOG-BOUND: the folder button runs `pickImportFile(destination)` — main
-   * opens + reads + HOLDS the bundle for that destination (main reads filePaths[0]) and returns
-   * { ok, path } | { canceled } | { error }. The path field is READ-ONLY (it only DISPLAYS the
-   * dialog path) so a typed/pasted path can never drive main's read — no arbitrary-read oracle
-   * (review HIGH-2/3). NO secret is entered here: Continue runs `beginImportUnlock(overwrite)`,
-   * forwarding to the chrome-owned vault-import-unlock sheet where the held bundle is consumed with
-   * the source master password / recovery key (DD2/DD5).
+   * The bundle READ stays DIALOG-BOUND: the folder button runs `pickImportFile()` — main opens
+   * + reads + HOLDS the bundle (main reads filePaths[0]); the page never gets an arbitrary-read
+   * oracle. On dismiss (Cancel / Escape / backdrop) after a pick, drop the held bundle via
+   * clearPendingImport so an abandoned pick never lingers (DD5's explicit-cancel row).
    *
-   * REPLACE-EXISTING (review HIGH-1 / MEDIUM-3): on open + on every destination change we probe
-   * `hasVault(dest)`. When the destination already holds a vault, importing REPLACES (destroys) it,
-   * so a REQUIRED "Replace the existing vault" checkbox appears and Continue stays disabled until it
-   * is checked. No checkbox is shown for an empty destination. `overwrite` is bound at the Continue
-   * step from the checkbox's FINAL state — never silently, never at file-pick.
-   *
-   * H1: the held _pendingVaultImport.destinationTarget is bound at pick time. A destination change
-   * AFTER a successful pick invalidates it — clear the path, drop the held bundle
-   * (clearPendingImport), reset the Replace checkbox, disable Continue, re-probe, force a re-pick.
-   *
-   * L1: on dismiss (Cancel / Escape / backdrop) after a pick, drop the held bundle via
-   * clearPendingImport so an abandoned import never lingers.
-   *
-   * FRESH-PROFILE MODE (M12 F5 HAT, hat-fresh-profile-import): when `opts.fresh` is true the
-   * modal is opened from the NOT-SET-UP page to reach the store's fresh-adopt branch
-   * (vault-store.js:823-841) — the marquee cross-machine restore. On a fresh profile there is NO
-   * destination vault (view.vaults is empty) and the fresh branch IGNORES the destination (writes
-   * GLOBAL_ID unconditionally — no collision, no overwrite). So fresh mode OMITS the destination
-   * select, the hasVault probe, AND the Replace checkbox; it shows a restore-oriented lede and
-   * threads the fixed GLOBAL_ID target into pickImportFile (vaultImportBeginFromFile's guard needs a
-   * non-empty string; the fresh branch discards it) with overwrite=false. The read stays
-   * dialog-bound and NO secret enters the page — Continue hands off to the SAME chrome-owned
-   * vault-import-unlock sheet, which already offers the master-password OR recovery-key choice
-   * (DD2/DD5). On a successful adopt the store leaves the profile set-up + UNLOCKED and broadcasts
-   * the lock-state, so the existing onVaultLockState → refresh path re-renders not-set-up → unlocked
-   * (no extra page wiring here). Default (opts omitted / fresh falsy) = today's set-up behavior.
-   * @param {Array<{ vaultId: string, label: string }>} vaults  Destination options (empty when fresh).
+   * `opts.fresh` only changes the lede copy — a not-set-up profile has no destination select to
+   * omit post-DD2 (there never is one here anymore), so fresh and set-up modes share the exact
+   * same body shape.
    * @param {{ fresh?: boolean }} [opts]
    */
-  function openImportModal(vaults, opts) {
+  function openImportPickModal(opts) {
     const fresh = !!(opts && opts.fresh);
     let picked = false;
     let importHandle = null; // opaque per-transaction token from pickImportFile (PR#112 finding 5)
-    let collision = false; // the current destination already holds a vault (never in fresh mode)
-    let replaceConfirmed = false; // the "Replace the existing vault" checkbox state (unused in fresh mode)
     const body = el('div', 'vault-modal-form');
 
-    // Fresh mode: a restore lede in place of a destination select — there is no destination on a
-    // not-set-up profile and the fresh-adopt branch ignores the target entirely.
-    if (fresh) {
-      body.appendChild(
-        el(
-          'p',
-          'vault-lede',
-          'Restore a vault exported from another device. You’ll enter its master password or recovery key on a secure prompt.'
-        )
-      );
-    }
-
-    // Destination-vault select — set-up profiles only (a fresh profile has no destination vault).
-    const field = el('label', 'vault-settings-field');
-    field.appendChild(el('span', 'vault-settings-label', 'Vault'));
-    const select = buildVaultSelect(vaults, 'Import destination vault');
-    field.appendChild(select);
-    if (!fresh) body.appendChild(field);
+    body.appendChild(
+      el(
+        'p',
+        'vault-lede',
+        fresh
+          ? 'Restore vaults exported from another device. You’ll enter the source master password or recovery key on a secure prompt, then choose where each vault lands.'
+          : 'Import vaults from a portable bundle exported from another device or profile. You’ll enter the source master password or recovery key on a secure prompt, then choose where each vault lands.'
+      )
+    );
 
     // File-uploader row: a READ-ONLY path field (dialog-picked path, display only) + folder button.
     const fileRow = el('div', 'vault-modal-file-row');
@@ -679,115 +670,328 @@ function init() {
     fileRow.appendChild(iconButton('folder', 'Choose a bundle file', pickFile));
     body.appendChild(fileRow);
 
-    // Replace-existing confirmation — set-up profiles only; shown ONLY when the destination already
-    // holds a vault. A fresh profile never collides, so the affordance is omitted entirely.
-    const replaceRow = el('div', 'vault-modal-replace-row');
-    replaceRow.hidden = true;
-    replaceRow.appendChild(
-      el(
-        'p',
-        'vault-modal-warn',
-        'A vault already exists here — importing will REPLACE it, permanently destroying the current vault.'
-      )
-    );
-    const replaceLabel = el('label', 'vault-modal-replace-label');
-    const replaceCheckbox = /** @type {HTMLInputElement} */ (el('input'));
-    replaceCheckbox.type = 'checkbox';
-    replaceLabel.appendChild(replaceCheckbox);
-    replaceLabel.appendChild(el('span', undefined, 'Replace the existing vault'));
-    replaceRow.appendChild(replaceLabel);
-    if (!fresh) body.appendChild(replaceRow);
-
-    function updateContinueEnabled() {
-      handle.setSubmitEnabled(picked && (!collision || replaceConfirmed));
-    }
-
-    replaceCheckbox.addEventListener('change', () => {
-      replaceConfirmed = replaceCheckbox.checked;
-      updateContinueEnabled();
-    });
-
-    // Probe whether a destination already holds a vault → show/hide the Replace affordance.
-    function probeCollision(dest) {
-      return Promise.resolve(bridge.hasVault(dest))
-        .then((r) => {
-          collision = !!(r && r.present);
-          replaceRow.hidden = !collision;
-          if (!collision) {
-            replaceConfirmed = false;
-            replaceCheckbox.checked = false;
-          }
-          updateContinueEnabled();
-        })
-        .catch(() => {});
-    }
-
-    // The target threaded into pickImportFile. Fresh mode has no select and the fresh branch
-    // discards the target, but vaultImportBeginFromFile's guard needs a non-empty string → GLOBAL_ID.
-    function pickTarget() {
-      return fresh ? GLOBAL_VAULT_ID : select.value;
-    }
-
     function pickFile() {
-      Promise.resolve(bridge.pickImportFile(pickTarget()))
+      Promise.resolve(bridge.pickImportFile())
         .then((res) => {
           if (res && res.ok) {
             picked = true;
             importHandle = res.importHandle || null; // finding 5: bind this transaction's token.
             pathInput.value = res.path || '';
             handle.setStatus('');
-            updateContinueEnabled();
+            handle.setSubmitEnabled(true);
           } else if (res && res.error) {
             picked = false;
             importHandle = null;
             pathInput.value = '';
             handle.setStatus('Could not read that bundle file.');
-            updateContinueEnabled();
+            handle.setSubmitEnabled(false);
           }
           // { canceled } → do nothing (keep any prior pick).
         })
         .catch(() => {});
     }
 
-    // H1: a destination change after a successful pick invalidates the held bundle; always re-probe
-    // the new destination's collision state and reset the Replace checkbox. (Set-up mode only — the
-    // fresh modal has no destination select.)
-    if (!fresh) {
-      select.addEventListener('change', () => {
-        replaceConfirmed = false;
-        replaceCheckbox.checked = false;
-        if (picked) {
-          picked = false;
-          pathInput.value = '';
-          handle.setStatus('');
-          Promise.resolve(bridge.clearPendingImport(importHandle)).catch(() => {});
-          importHandle = null;
-        }
-        probeCollision(select.value);
-      });
-    }
-
     const handle = openModal({
-      title: 'Import a vault',
+      title: fresh ? 'Restore a profile' : 'Import a vault bundle',
       body,
       submitLabel: 'Continue',
       submitEnabled: false,
       onSubmit: () => {
-        if (!picked || (collision && !replaceConfirmed)) return;
-        // Bind overwrite from the checkbox FINAL state at Continue (review MEDIUM-3). Fresh mode
-        // never collides → overwrite is always false (replaceConfirmed stays false).
-        Promise.resolve(bridge.beginImportUnlock(replaceConfirmed, importHandle)).catch(() => {});
+        if (!picked) return;
+        Promise.resolve(bridge.beginImportUnlock()).catch(() => {});
         handle.close();
       },
       onCancel: () => {
-        // L1: drop any held bundle when the operator dismisses the modal.
+        // DD5 matrix: drop any held bundle when the operator dismisses the pick modal.
         if (picked) Promise.resolve(bridge.clearPendingImport(importHandle)).catch(() => {});
       }
     });
+  }
 
-    // Initial probe for the default-selected destination (set-up mode only — no destination or
-    // collision on a fresh profile).
-    if (!fresh) probeCollision(select.value);
+  /**
+   * Append an `<option value=text>` to a `<select>` — `textContent`-only.
+   * @param {HTMLSelectElement} select
+   * @param {string} value
+   * @param {string} text
+   */
+  function appendOption(select, value, text) {
+    const opt = /** @type {HTMLOptionElement} */ (el('option', undefined, text));
+    opt.value = value;
+    select.appendChild(opt);
+  }
+
+  /**
+   * The mapping modal (M18 F3 L3 / DD2 ruling 3(d), the Flight 1 O4 baseline): one row per
+   * bundle vault, EACH REQUIRING an explicit directive before Commit enables (a disabled
+   * placeholder "Choose…" option — nothing is pre-selected). Per row: Skip / Create a new jar
+   * (jar-sourced rows only; prefilled name+color from the label) / Use an existing vault — the
+   * destination sub-picker REUSES `buildVaultSelect` (the retiring single-select flows'
+   * builder, per the leg's "never leave it orphaned" note). Choosing an existing destination
+   * probes `hasVault` and, on a real collision, requires an explicit Replace-or-Merge choice
+   * (merge listed first — the calmed, non-destructive default once a mode IS required).
+   *
+   * The global-sourced row (jarMeta === null) never offers "new" (you cannot create a new
+   * jar for the manager-wide global vault); on a FRESH profile `existingVaults` is empty
+   * (ruling 3: only new-jar/skip/global→global are legal), so a synthetic "Global (this
+   * profile)" destination is injected for that one row so the DD2/DD3 global→global path
+   * stays reachable without a real existing-vaults list.
+   *
+   * RESUME (ruling 9): callable both from the labels-ready notification (a fresh record) and
+   * from the page's "Resume restore" affordance (re-entering after a forced broadcast-close)
+   * — identical behavior either way; no secret re-entry is ever needed here. Cancel drops the
+   * held record (via clearPendingImport) and kills the resume affordance; a forced close
+   * (any OTHER broadcast, ruling 9) does NOT — this function's own `onCancel` is the only
+   * path that clears the record; a render-triggered `closeActivePageModal()` never runs it.
+   * @param {{ handle: string, labels: Array<{ sourceId: string, jarMeta: { name: string, color: string } | null, itemCount: number }> }} record
+   * @param {Array<{ vaultId: string, label: string }>} existingVaults  the CURRENT profile's vaults; empty on a fresh profile.
+   */
+  function openMappingModal(record, existingVaults) {
+    const body = el('div', 'vault-modal-form vault-mapping-form');
+    body.appendChild(el('p', 'vault-lede', 'Choose what happens to each vault in this bundle.'));
+
+    /** @type {Map<string, { directive?: string, destination?: string, mode?: string, newJar?: { name: string, color: string }, complete: boolean }>} */
+    const rowState = new Map();
+    /** @type {Array<() => void>} */
+    const seedFns = [];
+
+    function updateCommitEnabled() {
+      handle.setSubmitEnabled(record.labels.every((l) => rowState.get(l.sourceId)?.complete === true));
+    }
+
+    for (const label of record.labels) {
+      const isGlobalSource = label.jarMeta === null;
+      const title = isGlobalSource ? 'Global' : label.jarMeta.name;
+      const row = el('div', 'vault-mapping-row');
+      row.appendChild(
+        el('h4', 'vault-mapping-row-title', `${title} (${label.itemCount} item${label.itemCount === 1 ? '' : 's'})`)
+      );
+
+      const directiveSelect = /** @type {HTMLSelectElement} */ (el('select', 'vault-settings-select'));
+      directiveSelect.setAttribute('aria-label', `${title} — directive`);
+      const placeholder = /** @type {HTMLOptionElement} */ (el('option', undefined, 'Choose…'));
+      placeholder.value = '';
+      placeholder.disabled = true;
+      placeholder.selected = true;
+      directiveSelect.appendChild(placeholder);
+      appendOption(directiveSelect, 'skip', 'Skip');
+      if (!isGlobalSource) appendOption(directiveSelect, 'new', 'Create a new jar');
+      const destinationOptions = isGlobalSource
+        ? existingVaults.some((v) => v.vaultId === GLOBAL_VAULT_ID)
+          ? existingVaults
+          : [...existingVaults, { vaultId: GLOBAL_VAULT_ID, label: 'Global (this profile)' }]
+        : existingVaults;
+      if (destinationOptions.length) appendOption(directiveSelect, 'existing', 'Use an existing vault');
+      row.appendChild(directiveSelect);
+
+      // New-jar fields (name + color), shown only for directive === 'new'.
+      const newJarRow = el('div', 'vault-mapping-newjar-row');
+      newJarRow.hidden = true;
+      const nameInput = /** @type {HTMLInputElement} */ (el('input', 'vault-modal-path-input'));
+      nameInput.type = 'text';
+      nameInput.setAttribute('aria-label', `${title} — new jar name`);
+      nameInput.value = label.jarMeta ? label.jarMeta.name : title;
+      const colorInput = /** @type {HTMLInputElement} */ (el('input'));
+      colorInput.type = 'color';
+      colorInput.setAttribute('aria-label', `${title} — new jar color`);
+      colorInput.value = label.jarMeta && isSafeColor(label.jarMeta.color) ? label.jarMeta.color : '#4a90d9';
+      newJarRow.appendChild(nameInput);
+      newJarRow.appendChild(colorInput);
+      row.appendChild(newJarRow);
+
+      // Destination sub-picker — REUSES buildVaultSelect (the retiring single-select flows'
+      // builder). Shown only for directive === 'existing'.
+      const destRow = el('div', 'vault-mapping-dest-row');
+      destRow.hidden = true;
+      const destSelect = destinationOptions.length
+        ? buildVaultSelect(destinationOptions, `${title} — destination`)
+        : null;
+      if (destSelect) destRow.appendChild(destSelect);
+      row.appendChild(destRow);
+
+      // Replace-or-Merge — shown only once a real collision is confirmed at the destination.
+      const modeRow = el('div', 'vault-mapping-mode-row');
+      modeRow.hidden = true;
+      modeRow.appendChild(
+        el(
+          'p',
+          'vault-modal-warn',
+          'A vault already exists there. Merge keeps both; Replace destroys the existing one.'
+        )
+      );
+      const modeSelect = /** @type {HTMLSelectElement} */ (el('select', 'vault-settings-select'));
+      modeSelect.setAttribute('aria-label', `${title} — replace or merge`);
+      appendOption(modeSelect, 'merge', 'Merge (keep both, mark conflicts)');
+      appendOption(modeSelect, 'replace', 'Replace (destroy the existing vault)');
+      modeRow.appendChild(modeSelect);
+      row.appendChild(modeRow);
+
+      function probeDestinationCollision() {
+        const destination = /** @type {HTMLSelectElement} */ (destSelect).value;
+        Promise.resolve(bridge.hasVault(destination))
+          .then((r) => {
+            const collision = !!(r && r.present);
+            modeRow.hidden = !collision;
+            rowState.set(label.sourceId, {
+              directive: 'existing',
+              destination,
+              mode: collision ? modeSelect.value : undefined,
+              complete: true
+            });
+            updateCommitEnabled();
+          })
+          .catch(() => {
+            // Fail-safe: never silently allow a destructive replace when the probe itself failed.
+            modeRow.hidden = false;
+            rowState.set(label.sourceId, {
+              directive: 'existing',
+              destination,
+              mode: modeSelect.value,
+              complete: true
+            });
+            updateCommitEnabled();
+          });
+      }
+
+      function recompute() {
+        const v = directiveSelect.value;
+        newJarRow.hidden = v !== 'new';
+        destRow.hidden = v !== 'existing';
+        if (v === 'skip') {
+          modeRow.hidden = true;
+          rowState.set(label.sourceId, { directive: 'skip', complete: true });
+          updateCommitEnabled();
+        } else if (v === 'new') {
+          modeRow.hidden = true;
+          const name = nameInput.value.trim();
+          rowState.set(label.sourceId, {
+            directive: 'new',
+            newJar: { name, color: isSafeColor(colorInput.value) ? colorInput.value : '#4a90d9' },
+            complete: name.length > 0
+          });
+          updateCommitEnabled();
+        } else if (v === 'existing' && destSelect) {
+          rowState.set(label.sourceId, { directive: 'existing', destination: destSelect.value, complete: false });
+          updateCommitEnabled();
+          probeDestinationCollision();
+        } else {
+          modeRow.hidden = true;
+          rowState.set(label.sourceId, { complete: false });
+          updateCommitEnabled();
+        }
+      }
+      directiveSelect.addEventListener('change', recompute);
+      nameInput.addEventListener('input', recompute);
+      colorInput.addEventListener('input', recompute);
+      destSelect?.addEventListener('change', recompute);
+      modeSelect.addEventListener('change', () => {
+        const s = rowState.get(label.sourceId);
+        if (s) {
+          s.mode = modeSelect.value;
+          updateCommitEnabled();
+        }
+      });
+      seedFns.push(recompute);
+
+      body.appendChild(row);
+    }
+
+    const handle = openModal({
+      title: 'Choose destinations',
+      body,
+      submitLabel: 'Commit',
+      submitEnabled: false,
+      onSubmit: () => {
+        handle.setSubmitEnabled(false);
+        handle.setStatus('Restoring…');
+        /** @type {any} */
+        const mapping = {};
+        for (const [sourceId, s] of rowState) {
+          if (s.directive === 'skip') mapping[sourceId] = { directive: 'skip' };
+          else if (s.directive === 'new') mapping[sourceId] = { directive: 'new', newJar: s.newJar };
+          else mapping[sourceId] = { directive: 'existing', destination: s.destination, mode: s.mode };
+        }
+        Promise.resolve(bridge.commitImport({ handle: record.handle, mapping }))
+          .then((res) => {
+            pendingImportRecord = null; // the commit consumed the record either way.
+            if (res && res.ok) {
+              handle.close();
+              openCompletionModal(res, record.labels);
+              return;
+            }
+            handle.setStatus(
+              res && res.reason === 'busy'
+                ? 'A rotation is in progress — try again shortly.'
+                : 'That restore could not be completed. Start over from Import.'
+            );
+            handle.setSubmitEnabled(false);
+          })
+          .catch(() => {
+            handle.setStatus('That restore could not be completed. Start over from Import.');
+          });
+      },
+      onCancel: () => {
+        // DD5/ruling 9: an explicit cancel drops the held record and kills the resume affordance
+        // — a render-triggered forced close (any other broadcast) never reaches this branch.
+        pendingImportRecord = null;
+        Promise.resolve(bridge.clearPendingImport(record.handle)).catch(() => {});
+      }
+    });
+    for (const seed of seedFns) seed();
+  }
+
+  /**
+   * The restore completion surface (DD2 ruling 3(e); DD11: reflects post-restore state
+   * without a manual reload — this modal renders directly from the commit reply, and a fresh
+   * adopt's unlock broadcast independently re-queries state for the rest of the page). Lists
+   * each bundle vault's outcome by its friendly label (from the mapping step's own labels — no
+   * source id shown raw). A fresh adopt's one-time recovery key + the DD7 sever offer are
+   * surfaced main-side (the dismiss-locked recovery-show sheet, the Settings sever card) — this
+   * modal shows no secret, ever.
+   * @param {{ fresh?: boolean, results?: Array<{ sourceId: string, outcome: string, destination?: string, mergeReport?: { imported: number, skippedIdentical: number, conflictCopies: number } }> }} result
+   * @param {Array<{ sourceId: string, jarMeta: { name: string, color: string } | null }>} labels
+   */
+  function openCompletionModal(result, labels) {
+    const nameById = new Map(labels.map((l) => [l.sourceId, l.jarMeta ? l.jarMeta.name : 'Global']));
+    const OUTCOME_TEXT = {
+      landed: 'Restored',
+      skipped: 'Skipped',
+      'collision-refused': 'Skipped — a vault already exists there',
+      failed: 'Could not be restored'
+    };
+    const body = el('div', 'vault-modal-form');
+    const list = el('ul', 'vault-mapping-outcomes');
+    for (const row of result.results || []) {
+      const li = el('li');
+      const name = nameById.get(row.sourceId) || row.sourceId;
+      const outcomeText = /** @type {any} */ (OUTCOME_TEXT)[row.outcome] || row.outcome;
+      let text = `${name}: ${outcomeText}`;
+      if (row.mergeReport) {
+        text += ` — ${row.mergeReport.imported} added, ${row.mergeReport.skippedIdentical} already present, ${row.mergeReport.conflictCopies} kept as marked copies`;
+      }
+      li.textContent = text;
+      list.appendChild(li);
+    }
+    body.appendChild(list);
+    if (result.fresh) {
+      body.appendChild(
+        el(
+          'p',
+          'vault-lede',
+          'This profile is now set up and unlocked. Save the new recovery key shown on the secure prompt.'
+        )
+      );
+    }
+
+    const handle = openModal({
+      title: 'Restore complete',
+      body,
+      submitLabel: 'Done',
+      submitEnabled: true,
+      onSubmit: () => {
+        handle.close();
+        refresh();
+      }
+    });
   }
 
   // ── not-set-up + locked states (leg 1 shell; setup/unlock flows land in leg 4) ──
@@ -807,10 +1011,11 @@ function init() {
 
     // The two not-set-up entry points, side by side: "Set up" stays the PRIMARY CTA; "Import a
     // vault bundle" is a SECONDARY affordance that reaches the store's fresh-adopt branch (the
-    // marquee cross-machine restore — M12 F5 HAT, hat-fresh-profile-import). The import path enters
-    // NO secret here: it opens the destination-less fresh-mode modal, which hands off to the
-    // chrome-owned vault-import-unlock sheet (DD2/DD5). On a successful adopt the store leaves the
-    // profile set-up + UNLOCKED and broadcasts the lock-state → the page re-renders to unlocked.
+    // marquee cross-machine restore — M12 F5 HAT, hat-fresh-profile-import; UNIFIED into the ONE
+    // restore workflow, M18 F3 L3 / DD2). The import path enters NO secret here: it opens the
+    // restore pick modal, which hands off to the chrome-owned vault-import-unlock sheet (a
+    // PREVIEW), then the page's own mapping modal (DD2), whose commit adopts the profile and
+    // broadcasts the lock-state → the page re-renders to unlocked.
     const actions = el('div', 'vault-setup-actions');
     actions.appendChild(
       button('Set up the password manager', 'vault-btn primary', () => {
@@ -821,14 +1026,14 @@ function init() {
         Promise.resolve(bridge.requestSetup()).catch(() => {});
       })
     );
-    actions.appendChild(
-      button('Import a vault bundle', 'vault-btn', () => {
-        // Fresh-profile restore: a destination-less import modal (no vault select, no Replace
-        // checkbox) that adopts a bundle exported from another device. No destination exists yet.
-        openImportModal([], { fresh: true });
-      })
-    );
+    actions.appendChild(button('Import a vault bundle', 'vault-btn', () => openImportPickModal({ fresh: true })));
     section.appendChild(actions);
+    // Ruling 9's resume affordance also applies pre-adopt (a broadcast could in principle force-
+    // close the mapping modal before commit, however rarely) — the SAME record/banner pattern the
+    // Settings section uses, gated on the same module-scoped pendingImportRecord.
+    if (pendingImportRecord) {
+      section.appendChild(button('Resume restore…', 'vault-btn', () => openMappingModal(pendingImportRecord, [])));
+    }
     section.appendChild(note);
     return section;
   }
@@ -994,9 +1199,10 @@ function init() {
    * auto-lock + import + master-key management (with the compromise entry at its bottom).
    * While LOCKED: unlock/recover banner + auto-lock (settingsGet works without the MRK) +
    * the compromise entry below the Auto-lock block (R4 amendment). The persistent
-   * compromise completion card renders in BOTH states when a report is held (R8).
+   * compromise completion card renders in BOTH states when a report is held (R8); the DD7
+   * sever offer card likewise renders in BOTH states when an offer is held.
    * Carries the reserved section id `vault-settings` (the nav's top entry jumps here).
-   * @param {{ mode: string, vaults: Array<{ vaultId: string, label: string }>, adminProvisioned: boolean, compromiseReport: ({ admin: boolean, vaultIds: string[] } | null) }} view
+   * @param {{ mode: string, vaults: Array<{ vaultId: string, label: string }>, adminProvisioned: boolean, compromiseReport: ({ admin: boolean, vaultIds: string[] } | null), severOffer: ({ route: 'change-master' | 'recover' } | null) }} view
    * @returns {HTMLElement}
    */
   function buildSettingsSection(view) {
@@ -1024,6 +1230,8 @@ function init() {
       // The persistent "Everything rotated" card (R8) — above Master-key management,
       // matching the ruled prototype placement.
       if (view.compromiseReport) section.appendChild(buildCompromiseCard(view.compromiseReport, view.vaults));
+      // DD7: the post-fresh-adopt sever offer card — persists across BOTH lock states.
+      if (view.severOffer) section.appendChild(buildSeverOfferCard(view.severOffer));
       // Master-key management — change master / rotate recovery / admin rotate-provision +
       // the compromise entry at its bottom (R2). Each routes to a chrome-owned sheet; NO
       // master-equivalent secret here (DD5).
@@ -1033,9 +1241,53 @@ function init() {
       // consistent bottom-of-Settings placement — preceded by the persistent card when a
       // report is held (the card renders regardless of the lock state the page lands in).
       if (view.compromiseReport) section.appendChild(buildCompromiseCard(view.compromiseReport, view.vaults));
+      if (view.severOffer) section.appendChild(buildSeverOfferCard(view.severOffer));
       section.appendChild(buildCompromiseEntry());
     }
     return section;
+  }
+
+  /**
+   * The DD7 sever offer card: "The previous owner's master password still opens this
+   * profile — set your own?" Persists (session state, main-side) across page reloads
+   * and both lock states; the route flips live with lock state (recompiled every render
+   * from the freshest `internal-vault-state` read). The card's action fires the EXISTING
+   * bare trigger for that route — no new sheet, no new store op (DD7). Declining (Dismiss)
+   * leaves the profile fully usable.
+   * @param {{ route: 'change-master' | 'recover' }} offer
+   * @returns {HTMLElement}
+   */
+  function buildSeverOfferCard(offer) {
+    const card = el('div', 'vault-sever-card');
+    card.setAttribute('role', 'status');
+    card.appendChild(el('h3', 'vault-sever-card-title', 'Set your own master password'));
+    card.appendChild(
+      el(
+        'p',
+        'vault-lede',
+        'This profile was restored from another owner’s vault. Their master password still opens it — set your own to sever that access.'
+      )
+    );
+    const actions = el('div', 'vault-sever-card-actions');
+    actions.appendChild(
+      button(
+        offer.route === 'change-master' ? 'Set a new master password' : 'Recover with the new recovery key',
+        'vault-btn primary',
+        () => {
+          const trigger = offer.route === 'change-master' ? bridge.requestChangeMaster : bridge.requestRecover;
+          Promise.resolve(trigger()).catch(() => {});
+        }
+      )
+    );
+    actions.appendChild(
+      button('Dismiss', 'vault-btn small', () => {
+        Promise.resolve(bridge.severDismiss())
+          .then(() => refresh())
+          .catch(() => {});
+      })
+    );
+    card.appendChild(actions);
+    return card;
   }
 
   /**
@@ -1160,12 +1412,15 @@ function init() {
   }
 
   /**
-   * The "Import / Export" Settings subsection (M12 F5 HAT, I14). A heading + a one-line lede + EXACTLY
-   * two buttons: "Import…" and "Export…". Each opens a page-level modal that selects the vault
-   * (destination for import / source for export) AND the file location, ending in a Cancel/Submit
-   * combo. NO master-equivalent secret is entered on this page — import's source secret stays on the
-   * chrome-owned vault-import-unlock sheet; export is ciphertext-only + fully main-side (DD2/DD5).
-   * `textContent`-only.
+   * The "Import / Export" Settings subsection (M12 F5 HAT, I14; UNIFIED restore workflow +
+   * whole-profile export, M18 F3 L3 / DD2/DD1 ruling 7). A heading + a one-line lede + EXACTLY
+   * two buttons: "Import…" (the restore pick modal → the chrome-owned secret sheet → this
+   * page's mapping modal) and "Export…" (the whole-profile export modal). NO master-equivalent
+   * secret is entered on this page — the restore's source secret stays on the chrome-owned
+   * vault-import-unlock sheet; export is ciphertext-only + fully main-side (DD2/DD5). When a
+   * labels-bearing record is still held (ruling 9's resume affordance — a broadcast force-closed
+   * the mapping modal before commit), a "Resume restore" banner re-enters mapping with NO secret
+   * re-entry. `textContent`-only.
    * @param {Array<{ vaultId: string, label: string }>} vaults
    * @returns {HTMLElement}
    */
@@ -1176,13 +1431,21 @@ function init() {
       el(
         'p',
         'vault-lede',
-        'Import a portable vault bundle, or export one to a file. You’ll pick the vault and file location in a dialog; for import you’ll enter the source master password or recovery key on a secure prompt.'
+        'Import vaults from a portable bundle, or export this whole profile to a file. You’ll pick the file location in a dialog; for import you’ll enter the source master password or recovery key on a secure prompt, then choose where each vault lands.'
       )
     );
 
+    if (pendingImportRecord) {
+      const resumeRow = el('div', 'vault-settings-row');
+      resumeRow.appendChild(
+        button('Resume restore…', 'vault-btn', () => openMappingModal(pendingImportRecord, vaults))
+      );
+      section.appendChild(resumeRow);
+    }
+
     const row = el('div', 'vault-settings-row');
-    row.appendChild(button('Import…', 'vault-btn', () => openImportModal(vaults)));
-    row.appendChild(button('Export…', 'vault-btn', () => openExportModal(vaults)));
+    row.appendChild(button('Import…', 'vault-btn', () => openImportPickModal()));
+    row.appendChild(button('Export…', 'vault-btn', () => openExportProfileModal()));
     section.appendChild(row);
     return section;
   }
@@ -2169,6 +2432,7 @@ function init() {
     // refresh → render and would strand a stale unlocked-context modal over the now-locked page.
     closeActivePageModal();
     const view = selectVaultView(state);
+    lastViewVaults = view.vaults; // the mapping modal's "existing" destinations (labels-ready path).
     root.textContent = '';
     root.dataset.mode = view.mode;
 
@@ -2212,17 +2476,20 @@ function init() {
   }
 
   /**
-   * Fetch the current vault state + jar rows (for the nav dots) and render. Both are
-   * non-secret metadata reads; jarsList works regardless of vault lock state.
+   * Fetch the current vault state + jar rows (for the nav dots) + the held-import labels cache
+   * (M18 F3 L3 / DD2 ruling 9's resume affordance) and render. All three are non-secret metadata
+   * reads that work regardless of vault lock state.
    */
   function refresh() {
     if (!window.goldfinchInternal) return;
     Promise.all([
       window.goldfinchInternal.vaultState(),
-      Promise.resolve(window.goldfinchInternal.jarsList()).catch(() => [])
+      Promise.resolve(window.goldfinchInternal.jarsList()).catch(() => []),
+      Promise.resolve(bridge.fetchImportLabels()).catch(() => null)
     ])
-      .then(([state, jars]) => {
+      .then(([state, jars, importRecord]) => {
         jarRows = Array.isArray(jars) ? jars : [];
+        pendingImportRecord = importRecord && importRecord.labels ? importRecord : null;
         render(state);
       })
       .catch(() => {});
@@ -2233,8 +2500,44 @@ function init() {
   // is a NON-SECRET projection; the page always re-queries its full state (labels only).
   // Cleaned up on pagehide (the internal-page listener-handle pattern — otherwise each
   // guest reload leaks an ipcRenderer listener).
+  //
+  // M18 F3 L3 (DD2 ruling 9, cycle-2 HIGH — FD-ruled ACCEPT + cheap resume): render()
+  // unconditionally runs closeActivePageModal() on every push (the shipped autolock-mid-modal
+  // invariant), so ANY broadcast — including this one, firing for setup/unlock/autolock AND
+  // now a fresh adopt's own commit and a change-master/recover sever-offer completion — force-
+  // closes another window's (or this window's own) in-progress mapping modal. The collateral is
+  // made cheap: this refresh() call re-fetches the held-import cache above, so a labels-bearing
+  // record that survived the close (only the matrix's own drop paths clear it — a forced close
+  // never does) surfaces the "Resume restore" banner on the very next render.
   const lockStateHandle = bridge.onVaultLockState(() => refresh());
   window.addEventListener('pagehide', () => bridge.offVaultLockState(lockStateHandle), { once: true });
+
+  // M18 F3 L3 (DD2 ruling 3(c)): the labels-ready notification carries NO payload — on receipt,
+  // fetch THIS window's own record and open the mapping modal directly (first arrival). A null
+  // fetch (the record was dropped between the sheet's success and this fetch — lock, timer,
+  // another pick) is a strict no-op, never assuming the event implies its own record.
+  const importLabelsHandle = bridge.onVaultImportLabelsReady(() => {
+    Promise.resolve(bridge.fetchImportLabels())
+      .then((rec) => {
+        if (rec && rec.labels) {
+          pendingImportRecord = rec;
+          openMappingModal(rec, lastViewVaults);
+        }
+      })
+      .catch(() => {});
+  });
+  window.addEventListener('pagehide', () => bridge.offVaultImportLabelsReady(importLabelsHandle), { once: true });
+
+  // DD5 ruling 4's pagehide drop path (best-effort — no send-on-pagehide delivery guarantee
+  // exists in this codebase; the safety-drop timer is the authoritative bound). Once a labels-
+  // bearing record is held, leaving the vault page (tab close, navigate away) drops it.
+  window.addEventListener(
+    'pagehide',
+    () => {
+      if (pendingImportRecord) Promise.resolve(bridge.clearPendingImport(pendingImportRecord.handle)).catch(() => {});
+    },
+    { once: true }
+  );
 
   // M12 F3 Leg 5: re-fetch every unlocked vault's access-key list when the window regains
   // focus — the operator has just returned from the chrome-owned mint sheet (there is no

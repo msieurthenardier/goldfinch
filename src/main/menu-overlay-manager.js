@@ -90,6 +90,43 @@
 //
 //     `<body>` data attributes are deliberately NOT cleared by the scrub — DD8's
 //     drag-probe readback depends on its counters surviving the menu close.
+//
+// DD8 BLUR-SURVIVAL AXIS (M18 F3 L1) — a NEW per-open axis, parallel to but
+// INDEPENDENT of `dismissible`/`keepFocus`: an operator ruling reverses the shipped
+// default so vault credential sheets retain their half-entered state through window
+// blur/refocus (the copy-paste-from-another-secrets-manager scenario). Reusing
+// `dismissible` would leak blur-survival to every OTHER sheet type in the app
+// (bookmark-edit, auth-basic, cert-picker, downloads, …), so this is a distinct flag:
+// `currentSurvivesBlur`, set from `payload.survivesBlur === true` on every openMenu
+// (never leaks into a model-replace's next menu, mirroring `currentKeepFocus`).
+// `closeMenuOverlay` ignores reason 'blur' — and ONLY 'blur' — for a survives-blur
+// menu; escape/outside-click/activated/every lifecycle reason behave exactly as
+// before. Membership (which menuTypes carry the flag) is decided ONCE, chrome-side,
+// at the single open() funnel (src/renderer/chrome/overlay-menus.js) against the
+// shared `VAULT_BLUR_SURVIVAL_MENU_TYPES` allowlist (src/shared/vault-blur-survival.js)
+// — main trusts the chrome-sent flag with NO menuType validation here, matching the
+// `dismissible`/`keepFocus` precedent (the payload originates in the trusted chrome
+// document, not guest content).
+//
+// DD8 CLOSE-ON-LOCK (same leg) — a new HARD close reason, `'vault-lock'`, fired by
+// main.js on every vault lock transition (manual AND idle autolock — both route
+// through the store's injected onLock callback). Unlike every other reason, its
+// closability is SCOPED inside this module (`closesOnVaultLock`, same shared
+// allowlist MINUS 'vault-unlock' — locking is vault-unlock's own precondition, not
+// its invalidation) rather than left to the caller: main.js's fan-out calls
+// closeMenuOverlay('vault-lock') UNCONDITIONALLY on every window's sheet, and relies
+// on this module to no-op for a window whose open menu isn't an allowlisted
+// credential sheet (or has none open at all — the existing idempotent no-menu guard).
+// It bypasses the DD5 `dismissible` guard entirely (a dismiss-locked SHOW sheet is a
+// different, unrelated case — see the allowlist's own exclusions — so this reason
+// never reaches that guard's menuTypes in practice, but the ordering is deliberate:
+// scope-check first, dismissible-check second).
+
+// M18 F3 L1 (DD8): the shared blur-survival allowlist + its close-on-lock derivative
+// (allowlist minus 'vault-unlock') — see the module header. Real ESM `export`ed
+// module, required here the same way main.js requires url-safety.js / burner.js
+// (Node's synchronous require(esm), the src/shared/ convention).
+const { closesOnVaultLock } = require('../shared/vault-blur-survival');
 
 // Ceiling on the keep-focus re-grabs one menu session may spend (see the header).
 // A real post-submit navigation steals focus once or twice (redirect chains); a page
@@ -116,7 +153,8 @@ const KEEP_FOCUS_MAX = 5;
  * }} ContentViewLike
  * @typedef {{ menuType: string, model: Array<{id: string, label: string}>,
  *   anchor: any, startIndex?: number, token: number, noFocus?: boolean,
- *   dismissible?: boolean, jarId?: string, keepFocus?: boolean }} MenuOpenPayload
+ *   dismissible?: boolean, jarId?: string, keepFocus?: boolean,
+ *   survivesBlur?: boolean }} MenuOpenPayload
  * @typedef {{ contentView: ContentViewLike, win?: any, bounds?: (Bounds | null) }} Attachment
  */
 
@@ -173,6 +211,10 @@ function createMenuOverlayManager({
   // Re-grabs spent by the current menu session; capped so a page that steals focus in a
   // loop cannot drive an unbounded focus tug-of-war.
   let keepFocusGrabs = 0;
+  // DD8 (M18 F3 L1): whether the current menu opted into blur-survival (chrome sets this
+  // for every allowlisted vault-credential menuType — see the module header). Opt-in per
+  // open, reset on every close — a menu that never sets it behaves exactly as before.
+  let currentSurvivesBlur = false;
   /** @type {MenuOpenPayload | null} */
   let pendingInit = null; // at most ONE queued init (latest wins — F7 pattern)
   // DD7 attachment (M09 F6): the contentView/window the sheet is attached to,
@@ -375,6 +417,9 @@ function createMenuOverlayManager({
     // flag, and a re-open of the same keep-focus menu gets a fresh budget.
     currentKeepFocus = payload.keepFocus === true;
     keepFocusGrabs = 0;
+    // DD8 (M18 F3 L1): assigned unconditionally, exactly like currentKeepFocus above — a
+    // model-replace into a menu that doesn't opt in must never inherit the prior menu's flag.
+    currentSurvivesBlur = payload.survivesBlur === true;
     show();
     // DD5: find bar hidden while a menu is open (parity) — on the FIRST open of
     // a session (model-replace keeps the same open session; the call is
@@ -394,24 +439,42 @@ function createMenuOverlayManager({
   /**
    * The ONLY close path for menu closes (DD4). Idempotent; stale-token-safe.
    * @param {string} reason  'escape' | 'outside-click' | 'blur' | 'toggle' |
-   *   'activated' | 'superseded' | 'tab-switch' | 'tab-hide' | 'tab-close' | 'teardown'
+   *   'activated' | 'superseded' | 'tab-switch' | 'tab-hide' | 'tab-close' | 'teardown' |
+   *   'vault-lock'
    * @param {number} [token]  when provided (sheet-reported closes), must match
    *   the current menu's token or the close is dropped as stale
    */
   function closeMenuOverlay(reason, token) {
     if (!currentMenu) return; // idempotent — double-blur (app switch) safe
     if (token !== undefined && token !== currentMenu.token) return; // stale sheet report
+    // DD8 (M18 F3 L1): a survives-blur menu ignores ONLY reason 'blur' — every other
+    // reason (escape, outside-click, activated, every lifecycle reason, 'vault-lock')
+    // still applies normally below. Independent of the DD5 dismissible guard just below
+    // (a blur-surviving vault sheet stays normally dismissible via Escape/outside-click).
+    if (reason === 'blur' && currentSurvivesBlur) return;
+    // DD8 close-on-lock: a HARD reason — deliberately checked BEFORE the DD5 dismissible
+    // guard (it must close a dismissible-true credential sheet regardless) — but SCOPED
+    // to the credential allowlist minus 'vault-unlock' (closesOnVaultLock, the shared
+    // module). main.js's fan-out calls this reason unconditionally on every window; this
+    // scope check is what keeps it from ever force-closing an unrelated open menu (kebab,
+    // downloads, …) or a dismiss-locked one-time-key show sheet (out of the allowlist —
+    // its key is unrecoverable and lock doesn't invalidate it) or the vault-unlock prompt
+    // itself (locking is its precondition, not its invalidation).
+    if (reason === 'vault-lock' && !closesOnVaultLock(currentMenu.menuType)) return;
     // DD5 (M12 F3 Leg 4): a non-dismissible menu (vault-recovery-show) ignores the SOFT
     // dismiss reasons — Escape / outside-click / window-blur (window-factory's win.on
     // 'blur' → closeMenuOverlay('blur') is the main-initiated one). Only 'activated' (the
     // deliberate acknowledge) and hard lifecycle reasons (tab-switch/-hide/-close,
     // teardown, superseded) may close it — the one-time recovery key is unrecoverable.
+    // ('vault-lock' never reaches this line for a show sheet — the DD8 scope check above
+    // already returned, since the show sheets are outside the credential allowlist.)
     if (!currentDismissible && (reason === 'escape' || reason === 'outside-click' || reason === 'blur')) {
       return;
     }
     const closed = currentMenu;
     currentMenu = null;
     currentKeepFocus = false; // the session is over — a later stray refocus report is inert
+    currentSurvivesBlur = false; // DD8 — reset exactly like currentKeepFocus above
     pendingInit = null;
     // DD1f (M15 F3 L1): scrub the sheet's DOM EAGERLY, before anything else this close
     // does. Ordered ahead of hide()/channel 7 so the scrub message is queued to the sheet

@@ -82,6 +82,12 @@ function normalizeTotpForSave(item, unchangedSecrets) {
  * @param {(() => void)} [args.clearCompromiseReport]
  *        Drops the session-held report — the page card's dismiss affordance. Gated — offline
  *        tests that omit it skip `internal-vault-compromise-dismiss`.
+ * @param {(() => ({ route: 'change-master' | 'recover' } | null))} [args.getSeverOffer]
+ *        M18 F3 L3 (DD7): the post-fresh-adopt sever offer's route projection — non-secret
+ *        display state, computed from the offer's secretKind + the CURRENT lock state (so a
+ *        lock/unlock flips the card's route live). Optional (offline harnesses omit it); absent,
+ *        the state read reports `severOffer: null`. The offer's own dismiss is a
+ *        register-browser-ipc.js channel (vaultImportSeverDismiss) — not this module's job.
  * @param {(() => void)} [args.broadcastVaultLockState]
  *        Squawk 0059: post-revoke page-refresh seam — re-broadcasts vault-lock-state after a
  *        real access-key revoke so other windows' vault pages re-list. Optional (offline
@@ -96,6 +102,7 @@ function registerVaultIpc({
   vaultPickSavePath,
   getCompromiseReport,
   clearCompromiseReport,
+  getSeverOffer,
   // Squawk 0059: the post-revoke page-refresh seam — main.js binds its
   // broadcastVaultLockState so a successful access-key revoke re-broadcasts the
   // (unchanged) lock state, which is the only channel OTHER windows' vault pages
@@ -151,7 +158,10 @@ function registerVaultIpc({
       unlocked,
       vaults,
       adminProvisioned,
-      compromiseReport: getCompromiseReport ? getCompromiseReport() : null
+      compromiseReport: getCompromiseReport ? getCompromiseReport() : null,
+      // M18 F3 L3 (DD7): the post-fresh-adopt sever offer's route — null when no offer is
+      // pending (or the accessor isn't wired, offline harnesses).
+      severOffer: getSeverOffer ? getSeverOffer() : null
     };
   });
 
@@ -329,6 +339,32 @@ function registerVaultIpc({
       // Dual-mode (M12 F5 HAT, I14): with a pre-chosen savePath (the page Export modal picked the
       // location up front) write directly; without one (the jars delete-first offer) run the dialog.
       return await vaultSaveBundle(bundle, typeof savePath === 'string' ? savePath : undefined);
+    });
+  }
+
+  // Whole-profile portable EXPORT (M18 F3 L3 / DD1 ruling 7). The vault page's Export modal now
+  // exports the WHOLE PROFILE (v2 bundle) — one bundle, one secret, the operator's mission
+  // ruling; the per-vault source select is retired from that modal. Mirrors internal-vault-export
+  // byte-for-byte (exportProfile requires unlocked → VaultLockedError → { locked: true }; the
+  // bundle never transits to the page), differing only in WHICH store method builds the bundle
+  // and in carrying `carried` (the source ids actually landed — lazy jars absent by design) on a
+  // successful write, so the page's completion surface can state which vaults were exported. The
+  // jars page's delete-time single-vault export (`exportVault`/internal-vault-export) is
+  // UNTOUCHED — a deliberately separate, intentional caller. Gated on vaultSaveBundle.
+  if (vaultSaveBundle) {
+    registerInternalHandler(ipcMain, 'internal-vault-export-profile', async (_event, savePath) => {
+      let bundle;
+      try {
+        bundle = getVaultStore().exportProfile();
+      } catch (err) {
+        if (err instanceof VaultLockedError) return { locked: true };
+        throw err;
+      }
+      const res = await vaultSaveBundle(bundle, typeof savePath === 'string' ? savePath : undefined);
+      if (res && res.ok) {
+        return { ...res, carried: bundle.vaults.map((/** @type {any} */ v) => v.sourceId) };
+      }
+      return res;
     });
   }
 

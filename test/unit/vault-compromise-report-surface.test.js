@@ -44,6 +44,7 @@ const { registerVaultIpc } = require('../../src/main/register-vault-ipc');
 const { createSuppressionHolder } = require('../../src/main/vault/autolock-suppression');
 const { createCompromiseRevealStore } = require('../../src/main/vault/pending-compromise-reveals');
 const { selectVaultView, compromiseCardRows } = require('../../src/shared/vault-page-model.js');
+const { mapVaultSheetError, VAULT_COMPROMISE_ROTATE_CONFIG } = require('../../src/main/vault/vault-sheet-errors');
 
 const FAST_SCRYPT = { algo: 'scrypt', N: 2 ** 12, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 const OLD_MASTER = 'old compromised master';
@@ -56,11 +57,15 @@ function loginItem(overrides = {}) {
 }
 
 /**
- * The main.js composition, TRANSCRIBED FAITHFULLY (main.js is not importable —
- * it requires Electron at load): the compromise delegate over the real store
- * (main.js `vaultCompromiseRotate`) and the stash that normalizes `revoked`
- * into the session-held report (main.js `stashCompromiseReveal`). Keep these in
- * lockstep with main.js — they are the only replicated hops in this chain.
+ * The main.js composition (main.js is not importable — it requires Electron at
+ * load): the compromise delegate over the real store (main.js `vaultCompromiseRotate`)
+ * — since M18 F3 L1 (DD9) composed from the REAL error mapper module
+ * (vault-sheet-errors.js) with main.js's own VAULT_COMPROMISE_ROTATE_CONFIG, so a
+ * future mapping change fails loudly here instead of silently diverging — and the
+ * stash that normalizes `revoked` into the session-held report (main.js
+ * `stashCompromiseReveal`), which remains a faithful hand-transcription (it holds no
+ * error-mapping logic to import). Keep the stash in lockstep with main.js — it is the
+ * only still-replicated hop in this chain.
  */
 function makeMainComposition(store) {
   const holder = createSuppressionHolder({ setSuspended: () => {} });
@@ -86,11 +91,10 @@ function makeMainComposition(store) {
       const res = await store.compromiseRotate(args);
       return { ok: true, recoveryKey: res.recoveryKey, revoked: res.revoked };
     } catch (e) {
-      if (e instanceof vaultStoreModule.VaultPasswordReuseError) return { ok: false, reason: 'reuse' };
-      if (e instanceof vaultStoreModule.VaultAuthError) return { ok: false, reason: 'auth' };
-      if (e instanceof vaultStoreModule.VaultFormatError) return { ok: false, reason: 'format' };
-      if (e instanceof vaultStoreModule.VaultBusyError) return { ok: false, reason: 'busy' };
-      if (e instanceof vaultStoreModule.VaultStateError) return { ok: false, reason: 'state' };
+      // M18 F3 L1 (DD9): composed from the REAL mapper module (vault-sheet-errors.js)
+      // with main.js's own VAULT_COMPROMISE_ROTATE_CONFIG, never a transcribed ladder.
+      const mapped = mapVaultSheetError(e, VAULT_COMPROMISE_ROTATE_CONFIG);
+      if (mapped !== null) return mapped;
       throw e;
     }
   };
@@ -132,7 +136,7 @@ function makeOverlayHarness(main, { menuType, onStash }) {
       if (onStash) onStash(reveal);
       main.stashCompromiseReveal(chromeId, reveal);
     },
-    ackCompromiseReveal: () => true
+    ackVaultReveal: () => true
   });
   return { handlers, sheetSender };
 }

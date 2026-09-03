@@ -33,6 +33,7 @@ const path = require('path');
 const REPO_ROOT = path.join(__dirname, '../..');
 const RENDERER_JS = path.join(REPO_ROOT, 'src/renderer/renderer.js');
 const BOOKMARKS_BAR_JS = path.join(REPO_ROOT, 'src/renderer/chrome/bookmarks-bar.js');
+const VAULT_JS = path.join(REPO_ROOT, 'src/renderer/pages/vault.js');
 const A11Y_AUDIT_MJS = path.join(REPO_ROOT, 'scripts/a11y-audit.mjs');
 
 // The FD-approved closed-set size (CLAUDE.md "Renderer evaluate-seam
@@ -182,6 +183,15 @@ const RENDERER_LINE_BUDGET = 1836;
 // the budget as part of that leg rather than bumping it in isolation.
 const BOOKMARKS_BAR_LINE_BUDGET = 1100;
 
+// vault.js line budget (M18 F3 L3 / DD11): the mission's own noted risk — "the file crosses
+// ~2500 lines this leg and is the page most likely to accrete" — so this leg pins it, per
+// DD11's ruling, at ITS OWN landed size plus ~10% headroom (not a tight zero-headroom pin
+// like RENDERER_LINE_BUDGET above — vault.js is a page module, not the composition-root
+// renderer.js the CLAUDE.md house rule targets). Landed at 2556 lines (this test's own
+// split-array metric); budget = landed + 10%, rounded to a clean number. A future leg that
+// needs more room bumps this explicitly, named, same discipline as the renderer pin.
+const VAULT_PAGE_LINE_BUDGET = 2820;
+
 const SEAM_ANCHOR = 'Object.assign(/** @type {any} */ (globalThis), {';
 const IDENTIFIER_RE = /^[A-Za-z_$][\w$]*$/;
 
@@ -229,6 +239,12 @@ test('bookmarks-bar.js stays within its BOOKMARKS_BAR_LINE_BUDGET line budget', 
     lines <= BOOKMARKS_BAR_LINE_BUDGET,
     `bookmarks-bar.js has ${lines} lines; budget is ${BOOKMARKS_BAR_LINE_BUDGET}`
   );
+});
+
+test('vault.js stays within its VAULT_PAGE_LINE_BUDGET line budget (M18 F3 L3 / DD11)', () => {
+  const source = fs.readFileSync(VAULT_JS, 'utf8');
+  const lines = source.split(/\r?\n/).length;
+  assert.ok(lines <= VAULT_PAGE_LINE_BUDGET, `vault.js has ${lines} lines; budget is ${VAULT_PAGE_LINE_BUDGET}`);
 });
 
 // ---------------------------------------------------------------------------

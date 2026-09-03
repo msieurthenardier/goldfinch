@@ -28,7 +28,12 @@ function registerBrowserIpc({
   isVaultUnlocked,
   vaultImportBegin,
   clearPendingVaultImport,
-  setPendingVaultImportOverwrite,
+  // M18 F3 Leg 3 (DD2 ruling 3(c)/3(e), DD7): the mapping-step seams — the page's
+  // window-scoped labels fetch, the commit, and the sever-offer dismiss. All optional
+  // (offline register-browser-ipc tests omit them).
+  vaultImportFetchLabels,
+  vaultImportCommit,
+  vaultImportSeverDismiss,
   popupVaultIconMenu,
   popupRegistry,
   random = Math.random,
@@ -265,24 +270,31 @@ function registerBrowserIpc({
     return { ok: true };
   });
 
-  // Vault IMPORT (M12 F4 Leg 1 export-import, DD1/DD2; SPLIT for the M12 F5 HAT page modal, I14).
-  // Import is a two-surface flow driven by the page's Import modal, so the atomic pick+forward is
-  // split into three page-invoked channels — none of which ever carries a secret:
+  // Vault RESTORE (M12 F4 Leg 1 export-import, DD1/DD2; SPLIT for the M12 F5 HAT page modal, I14;
+  // RESHAPED M18 F3 Leg 3 / DD2 — one unified workflow, destination bound at COMMIT time). The
+  // restore is a multi-step flow driven by the page, so it splits into page-invoked channels —
+  // NONE of which ever carries a secret:
   //
   //  1. internal-vault-pick-import-file (pickImportFile) — awaits the injected `vaultImportBegin`
   //     delegate: it runs the open dialog, reads + parses the bundle (ciphertext) and HOLDS
-  //     { bundle, destinationTarget } main-side, returning { ok, path } | { canceled } | { error }.
-  //     It does NOT forward — the sheet opens only when the operator submits the modal. A canceled
-  //     dialog / unreadable file holds nothing (the delegate only sets the record on { ok }).
-  //  2. internal-vault-begin-import-unlock (beginImportUnlock) — binds `overwrite` (the modal's
-  //     Replace-existing checkbox, M12 F5 HAT tail) onto the held import record, then forwards the
-  //     BARE vault-request-import trigger to the owning chrome (chromeForTab(event.sender.id) — the
-  //     internal tab is in tabViews), which opens the chrome-owned vault-import-unlock sheet. The
-  //     held bundle is consumed there with the sheet's secret; the secret never touches this
-  //     channel or the page. Only `overwrite` (a boolean) crosses. Needs only chromeForTab, so it
-  //     is unconditional (mirrors internal-vault-request-setup), NOT gated on an injection.
-  //  3. internal-vault-clear-pending-import (clearPendingImport) — drops the held record (L1) when
-  //     the operator dismisses the modal after a pick. Always safe to call.
+  //     { bundle, handle } main-side (NO destination — ruling 1), returning
+  //     { ok, path, importHandle } | { canceled } | { error }. It does NOT forward — the sheet
+  //     opens only when the operator submits the pick modal.
+  //  2. internal-vault-begin-import-unlock (beginImportUnlock) — a BARE trigger (no payload; the
+  //     destination/mode decision moved entirely to the commit-time mapping step) forwarding
+  //     vault-request-import to the owning chrome (chromeForTab(event.sender.id) — the internal
+  //     tab is in tabViews), which opens the chrome-owned vault-import-unlock sheet. Unconditional
+  //     (mirrors internal-vault-request-setup), NOT gated on an injection.
+  //  3. internal-vault-clear-pending-import (clearPendingImport) — drops the held record at ANY
+  //     step (pick-modal Cancel, or post-secret the mapping-modal Cancel — the DD5 matrix's
+  //     explicit-cancel row) when the operator dismisses. Always safe to call.
+  //  4. internal-vault-import-labels (vaultImportFetchLabels) — the page's window-scoped fetch,
+  //     invoked after the labels-ready notification: a NON-SECRET { handle, labels } projection,
+  //     or null when this window holds nothing past the secret step (the page treats null as a
+  //     strict no-op — DD2's "Labels-ready fan-out" edge case).
+  //  5. internal-vault-import-commit (vaultImportCommit) — `{ handle, mapping }` → runs the
+  //     restore and returns the per-vault outcomes + generation, or a non-secret refusal.
+  //  6. internal-vault-sever-dismiss (vaultImportSeverDismiss) — DD7's offer-card dismiss.
   //
   // registerInternalHandler rejects any non-internal sender before each body runs.
   // PR#112 finding 5: the held import record is keyed by the OWNING CHROME id, so window A's
@@ -291,25 +303,37 @@ function registerBrowserIpc({
   // is also the identity the secret sheet submits under. The opaque `handle` (returned by the
   // pick) is echoed by the page on the mutating steps as a per-transaction guard within the window.
   if (vaultImportBegin) {
-    registerInternalHandler(ipcMain, 'internal-vault-pick-import-file', async (event, destinationTarget) => {
-      return await vaultImportBegin(destinationTarget, chromeForTab(event.sender.id)?.id);
+    registerInternalHandler(ipcMain, 'internal-vault-pick-import-file', async (event) => {
+      return await vaultImportBegin(chromeForTab(event.sender.id)?.id);
     });
   }
-  registerInternalHandler(ipcMain, 'internal-vault-begin-import-unlock', (event, payload) => {
-    // M12 F5 HAT tail (review MEDIUM-3): bind `overwrite` from the modal's Replace-existing
-    // checkbox FINAL state at the Continue step — BEFORE the sheet opens — so the held import
-    // record carries the operator's explicit replace decision. Strict-boolean coerced main-side.
-    // The page now passes `{ overwrite, handle }`; a bare boolean is tolerated for back-compat.
-    const overwrite = payload && typeof payload === 'object' ? payload.overwrite : payload;
-    const handle = payload && typeof payload === 'object' ? payload.handle : undefined;
-    const chromeId = chromeForTab(event.sender.id)?.id;
-    setPendingVaultImportOverwrite?.(chromeId, overwrite === true, handle);
+  registerInternalHandler(ipcMain, 'internal-vault-begin-import-unlock', (event) => {
     chromeForTab(event.sender.id)?.send('vault-request-import');
     return { ok: true };
   });
   if (clearPendingVaultImport) {
     registerInternalHandler(ipcMain, 'internal-vault-clear-pending-import', (event, handle) => {
       clearPendingVaultImport(chromeForTab(event.sender.id)?.id, handle);
+      return { ok: true };
+    });
+  }
+  if (vaultImportFetchLabels) {
+    registerInternalHandler(ipcMain, 'internal-vault-import-labels', (event) => {
+      return vaultImportFetchLabels(chromeForTab(event.sender.id)?.id);
+    });
+  }
+  if (vaultImportCommit) {
+    registerInternalHandler(ipcMain, 'internal-vault-import-commit', async (event, payload) => {
+      const { handle, mapping } = payload || {};
+      if (typeof handle !== 'string' || !mapping || typeof mapping !== 'object') {
+        return { ok: false, reason: 'state' };
+      }
+      return await vaultImportCommit(chromeForTab(event.sender.id)?.id, handle, mapping);
+    });
+  }
+  if (vaultImportSeverDismiss) {
+    registerInternalHandler(ipcMain, 'internal-vault-sever-dismiss', () => {
+      vaultImportSeverDismiss();
       return { ok: true };
     });
   }

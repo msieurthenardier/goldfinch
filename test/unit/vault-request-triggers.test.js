@@ -166,24 +166,33 @@ test('an unresolvable owning chrome no-ops gracefully (still returns ok)', () =>
 });
 
 // ---------------------------------------------------------------------------
-// Import (M12 Flight 4 Leg 1 export-import; SPLIT for the F5 HAT page modal, I14). The old atomic
-// request-import (pick+forward in ONE call) is split into three page-invoked channels so the page's
-// Import modal owns destination+file selection BEFORE the secret sheet opens:
-//   • pickImportFile          — dialog+read+HOLD, returns { ok, path } | { canceled } | { error }; NO forward.
-//   • beginImportUnlock       — the BARE vault-request-import forward (unconditional; needs only chromeForTab).
-//   • clearPendingImport      — drops the held record (L1) on modal dismiss.
-// pickImportFile is GATED on vaultImportBegin; clearPendingImport on clearPendingVaultImport.
+// Restore (M12 Flight 4 Leg 1 export-import; SPLIT for the F5 HAT page modal, I14; RE-MODELED
+// M18 F3 Leg 3 / DD2 ruling 1 — the pinned-shape casualty named in the leg spec: pick no longer
+// carries or binds a destination, so `vaultImportBegin(destinationTarget, chromeId)` loses its
+// first argument and `setPendingVaultImportOverwrite` is GONE entirely — destination + mode are
+// commit-time mapping concerns). The page-invoked channels:
+//   • pickImportFile          — dialog+read+HOLD { bundle, handle }, returns
+//                                { ok, path, importHandle } | { canceled } | { error }; NO forward.
+//   • beginImportUnlock       — a fully BARE vault-request-import forward (needs only chromeForTab).
+//   • clearPendingImport      — drops the held record (DD5 matrix's explicit-cancel row).
+//   • fetchImportLabels       — the page's window-scoped labels fetch (DD2 ruling 3(c)).
+//   • commitImport            — mapping → per-vault outcomes + generation (DD2 ruling 3(e)).
+//   • severDismiss            — DD7's offer-card dismiss.
+// pickImportFile is GATED on vaultImportBegin; clearPendingImport on clearPendingVaultImport;
+// fetchImportLabels/commitImport/severDismiss on their own delegates.
 // ---------------------------------------------------------------------------
 
-function makeImportHarness({ beginResult } = {}) {
+function makeImportHarness({ beginResult, commitResult, labelsResult } = {}) {
   const wrapped = new Map();
   const sends = [];
   const beginCalls = [];
   const beginChromeIds = [];
   const clearArgs = [];
-  const overwriteCalls = [];
+  const commitCalls = [];
+  const labelsCalls = [];
+  const severDismissCalls = [];
   let clearCalls = 0;
-  const chrome = { send: (channel, payload) => sends.push([channel, payload]) };
+  const chrome = { id: 5, send: (channel, payload) => sends.push([channel, payload]) };
   registerBrowserIpc({
     ipcMain: { handle: (channel, fn) => wrapped.set(channel, fn), on: () => {} },
     webContents: { fromId: () => null },
@@ -204,20 +213,38 @@ function makeImportHarness({ beginResult } = {}) {
     hostnameOf: (u) => new URL(u).hostname,
     shields: { active: () => false },
     getVaultHuman: () => ({}),
-    vaultImportBegin: async (destinationTarget, chromeId) => {
-      beginCalls.push(destinationTarget);
+    vaultImportBegin: async (chromeId) => {
       beginChromeIds.push(chromeId); // finding 5: the owning-chrome id is threaded in.
-      return beginResult || { ok: true, path: '/x/bundle.gfvaultbundle' };
+      beginCalls.push(chromeId);
+      return beginResult || { ok: true, path: '/x/bundle.gfvaultbundle', importHandle: 'h1' };
     },
     clearPendingVaultImport: (chromeId, handle) => {
       clearCalls += 1;
       clearArgs.push([chromeId, handle]);
     },
-    setPendingVaultImportOverwrite: (chromeId, overwrite) => {
-      overwriteCalls.push(overwrite);
+    vaultImportFetchLabels: (chromeId) => {
+      labelsCalls.push(chromeId);
+      return labelsResult !== undefined ? labelsResult : null;
+    },
+    vaultImportCommit: async (chromeId, handle, mapping) => {
+      commitCalls.push([chromeId, handle, mapping]);
+      return commitResult || { ok: true, fresh: false, results: [], generation: { completedAt: 1, nonce: 'n' } };
+    },
+    vaultImportSeverDismiss: () => {
+      severDismissCalls.push(true);
     }
   });
-  return { wrapped, sends, beginCalls, beginChromeIds, clearArgs, overwriteCalls, clearCallsCount: () => clearCalls };
+  return {
+    wrapped,
+    sends,
+    beginCalls,
+    beginChromeIds,
+    clearArgs,
+    commitCalls,
+    labelsCalls,
+    severDismissCalls,
+    clearCallsCount: () => clearCalls
+  };
 }
 
 test('pickImportFile is GATED on vaultImportBegin; clearPendingImport on clearPendingVaultImport; beginImportUnlock is unconditional', () => {
@@ -230,46 +257,76 @@ test('pickImportFile is GATED on vaultImportBegin; clearPendingImport on clearPe
   assert.equal(withDep.wrapped.has('internal-vault-clear-pending-import'), true);
 });
 
-test('internal sender: pickImportFile runs vaultImportBegin (dialog+read+hold) and returns { ok, path } WITHOUT forwarding', async () => {
-  const { wrapped, sends, beginCalls } = makeImportHarness();
-  const res = await wrapped.get('internal-vault-pick-import-file')(internalEvent(5), 'work');
-  assert.deepEqual(res, { ok: true, path: '/x/bundle.gfvaultbundle' });
-  assert.deepEqual(beginCalls, ['work'], 'the destination target is passed to the file-open delegate');
+test('internal sender: pickImportFile runs vaultImportBegin (dialog+read+hold, NO destination) and returns { ok, path, importHandle } WITHOUT forwarding', async () => {
+  const { wrapped, sends, beginCalls, beginChromeIds } = makeImportHarness();
+  const res = await wrapped.get('internal-vault-pick-import-file')(internalEvent(5));
+  assert.deepEqual(res, { ok: true, path: '/x/bundle.gfvaultbundle', importHandle: 'h1' });
+  assert.deepEqual(beginChromeIds, [5], 'ONLY the owning-chrome id is passed — no destination (DD2 ruling 1)');
+  assert.deepEqual(beginCalls, [5]);
   assert.deepEqual(sends, [], 'picking a file opens NO sheet — the forward is a separate step');
 });
 
-test('internal sender: beginImportUnlock forwards a BARE vault-request-import to the owning chrome', () => {
+test('internal sender: beginImportUnlock forwards a fully BARE vault-request-import to the owning chrome', () => {
   const { wrapped, sends } = makeImportHarness();
   const res = wrapped.get('internal-vault-begin-import-unlock')(internalEvent(5));
   assert.deepEqual(res, { ok: true });
-  assert.deepEqual(sends, [['vault-request-import', undefined]], 'a BARE trigger — no secret, no target');
-});
-
-test('beginImportUnlock binds `overwrite` (the Replace checkbox) onto the held record before forwarding (M12 F5 HAT tail)', () => {
-  // overwrite:true (Replace confirmed) → the delegate is called with strict true.
-  const yes = makeImportHarness();
-  yes.wrapped.get('internal-vault-begin-import-unlock')(internalEvent(5), true);
-  assert.deepEqual(yes.overwriteCalls, [true]);
-  assert.deepEqual(yes.sends, [['vault-request-import', undefined]], 'still a bare forward — only a boolean crosses');
-
-  // overwrite absent / false / truthy-but-not-true → coerced to strict false (overwrite DESTROYS).
-  for (const arg of [undefined, false, 'true', 1]) {
-    const h = makeImportHarness();
-    h.wrapped.get('internal-vault-begin-import-unlock')(internalEvent(5), arg);
-    assert.deepEqual(h.overwriteCalls, [false], `overwrite=${JSON.stringify(arg)} → strict false`);
-  }
+  assert.deepEqual(
+    sends,
+    [['vault-request-import', undefined]],
+    'a BARE trigger — no secret, no target, no overwrite (destination/mode moved to commit)'
+  );
 });
 
 test('a canceled / failed pick holds nothing and does not forward', async () => {
   const canceled = makeImportHarness({ beginResult: { canceled: true } });
-  const cres = await canceled.wrapped.get('internal-vault-pick-import-file')(internalEvent(5), 'work');
+  const cres = await canceled.wrapped.get('internal-vault-pick-import-file')(internalEvent(5));
   assert.deepEqual(cres, { canceled: true });
   assert.deepEqual(canceled.sends, [], 'a canceled dialog forwards nothing');
 
   const errored = makeImportHarness({ beginResult: { error: 'unreadable' } });
-  const eres = await errored.wrapped.get('internal-vault-pick-import-file')(internalEvent(5), 'work');
+  const eres = await errored.wrapped.get('internal-vault-pick-import-file')(internalEvent(5));
   assert.deepEqual(eres, { error: 'unreadable' });
   assert.deepEqual(errored.sends, [], 'an unreadable bundle forwards nothing');
+});
+
+test('internal sender: fetchImportLabels is window-scoped and forwards the delegate result verbatim (including null)', () => {
+  const nully = makeImportHarness({ labelsResult: null });
+  assert.deepEqual(nully.wrapped.get('internal-vault-import-labels')(internalEvent(5)), null);
+  assert.deepEqual(nully.labelsCalls, [5]);
+
+  const withLabels = makeImportHarness({
+    labelsResult: { handle: 'h1', labels: [{ sourceId: 'global', jarMeta: null, itemCount: 2 }] }
+  });
+  assert.deepEqual(withLabels.wrapped.get('internal-vault-import-labels')(internalEvent(5)), {
+    handle: 'h1',
+    labels: [{ sourceId: 'global', jarMeta: null, itemCount: 2 }]
+  });
+});
+
+test('internal sender: commitImport validates the payload shape before calling the delegate', async () => {
+  const h = makeImportHarness();
+  const commit = h.wrapped.get('internal-vault-import-commit');
+  assert.deepEqual(await commit(internalEvent(5), { handle: 'h1', mapping: { global: { directive: 'skip' } } }), {
+    ok: true,
+    fresh: false,
+    results: [],
+    generation: { completedAt: 1, nonce: 'n' }
+  });
+  assert.deepEqual(h.commitCalls, [[5, 'h1', { global: { directive: 'skip' } }]]);
+
+  // Malformed payloads never reach the delegate — a non-secret refusal instead.
+  const rejected = makeImportHarness();
+  const rejectedCommit = rejected.wrapped.get('internal-vault-import-commit');
+  assert.deepEqual(await rejectedCommit(internalEvent(5), {}), { ok: false, reason: 'state' });
+  assert.deepEqual(await rejectedCommit(internalEvent(5), { handle: 'h1' }), { ok: false, reason: 'state' });
+  assert.deepEqual(rejected.commitCalls, []);
+});
+
+test('internal sender: severDismiss calls the delegate and returns { ok:true }', () => {
+  const h = makeImportHarness();
+  const res = h.wrapped.get('internal-vault-sever-dismiss')(internalEvent(5));
+  assert.deepEqual(res, { ok: true });
+  assert.deepEqual(h.severDismissCalls, [true]);
 });
 
 test('internal sender: clearPendingImport drops the held record (L1)', () => {

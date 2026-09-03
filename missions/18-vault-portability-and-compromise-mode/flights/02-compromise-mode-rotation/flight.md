@@ -398,7 +398,7 @@ the stubbed-sheet harness (`vault-rotation-handlers.test.js:19-56`).
 ### Completion Checklist
 
 - [x] All legs completed
-- [ ] Code merged (PR #199 ready for review)
+- [x] Code merged (PR #199, merged 2026-09-02)
 - [x] Tests passing (suite + typecheck + lint; fault-injection suite
       included)
 - [x] Documentation updated (`docs/vault.md`; CLAUDE.md only if commands
