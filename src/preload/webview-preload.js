@@ -15,6 +15,37 @@ const { createBookmarkDropListeners } = require('./guest-bookmark-drop');
 const { tabBoundary } = require('../shared/tab-boundary');
 
 // ---------------------------------------------------------------------------
+// Badging API removal (squawk 0062). Chromium exposes navigator.setAppBadge /
+// clearAppBadge to every secure-context page, and Electron forwards the call
+// straight to the APP-level badge — a Windows taskbar overlay, the macOS dock
+// badge, the Unity launcher count — with no prompt and no permission string
+// (neither session permission handler is consulted, so session-runtime.js's
+// allowlist cannot deny it). In Chrome the call marks an installed PWA's own
+// icon; here it landed on Goldfinch's icon and session restore made it persist
+// across relaunch (Telegram Web's unread count was the live case). Chromium has
+// no runtime feature for it (`--disable-blink-features=Badging` is a no-op —
+// verified live), so the methods are deleted from Navigator.prototype at module
+// top, before any page script runs (contextIsolation:false — this file is the
+// page's first script). WebIDL operations are configurable, so `delete` works
+// and the page cannot restore them from this realm.
+//
+// Best-effort deny, NOT a security boundary: the preload runs in the top frame
+// only (nodeIntegrationInSubFrames is off), so a page can still reach a fresh
+// Navigator.prototype through any iframe's realm, and Electron also binds the
+// badge service for service workers. Every real-world caller badges from its
+// top-level document, which this closes; a structural gate needs an Electron
+// change (a permission check in front of BadgeService). Pinned by
+// test/unit/badging-preload-pin.test.js.
+// ---------------------------------------------------------------------------
+for (const name of ['setAppBadge', 'clearAppBadge']) {
+  try {
+    delete Navigator.prototype[name];
+  } catch {
+    // Not configurable in this build — nothing further to do here.
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Guest tab-boundary signal (M17 Flight 1 Leg 1, DD2). A capturing keydown on
 // window sees an unmodified Tab / Shift+Tab BEFORE any page listener and
 // before Chromium's own default Tab action. When tabBoundary says the press
