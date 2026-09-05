@@ -66,6 +66,14 @@ function registerOverlayIpc({
   // the page's commit-time invoke (register-browser-ipc.js). Optional (offline overlay tests
   // omit it) — the handler below is gated on its presence.
   vaultImportPreview,
+  // M18 F3 L4 (HAT fix 3): the leg's ruling 3(c) specified the vault-lock-state BROADCAST
+  // idiom (profile-wide, chrome + internal pages) for this notification — the mapping-modal
+  // listener lives on the vault PAGE's own internal webContents, a different webContents than
+  // this window's chrome, so a targeted `chrome.send(...)` (the shipped shape) never reached
+  // it. A narrow bound function (never main's internals — the broadcastVaultLockState
+  // injection precedent); optional (offline overlay tests omit it, matching every other
+  // vault-import delegate above).
+  notifyVaultImportLabelsReady,
   // M18 F2 L4 (compromise-mode rotation): the compromise sheets' delegate + surfacing
   // seams. `vaultCompromiseRotate` runs the store op and maps the five ruled error
   // classes to non-secret reasons; `stashCompromiseReveal` stashes the one-time
@@ -363,11 +371,14 @@ function registerOverlayIpc({
   // resolved here (DD2: that moved to the commit-time mapping step). The delegate (main.js)
   // follows the vaultUnlock pattern: a WRONG secret → VaultAuthError → { ok:false } and
   // NOTHING is stashed (the preview does all crypto, no write). On success we close the sheet
-  // ('activated') and notify the page — a bare `vault-import-labels-ready` send, NO payload
-  // (the page then invokes a window-scoped fetch for its own record's labels + handle,
-  // Labels-ready transport note: the send is profile-wide via no fan-out here, targeted to
-  // THIS window's chrome only). Gated on the vaultImportPreview injection so offline overlay
-  // tests never register it.
+  // ('activated') and notify the page — a bare `vault-import-labels-ready` PUSH, NO payload
+  // (the page then invokes a window-scoped fetch for its own record's labels + handle).
+  // M18 F3 L4 (HAT fix 3): ruling 3(c) specified the vault-lock-state BROADCAST idiom
+  // (profile-wide, every chrome + every internal page) — the listener lives on the vault
+  // PAGE's own internal webContents (internal-preload.js), never the chrome, so the
+  // originally-shipped targeted `chrome.send(...)` never reached it. Routed through the
+  // injected `notifyVaultImportLabelsReady` (the broadcastVaultLockState precedent) instead.
+  // Gated on the vaultImportPreview injection so offline overlay tests never register it.
   if (vaultImportPreview) {
     ipcMain.handle('menu-overlay:vault-import', async (event, payload) => {
       const rec = recordForSheetSender(event.sender);
@@ -388,9 +399,9 @@ function registerOverlayIpc({
         const res = await vaultImportPreview(chromeId, buf, kind); // { ok, reason? }
         if (res && res.ok) {
           rec.sheet.closeMenuOverlay('activated', current.token);
-          // DD2 ruling 3(c): a targeted, payload-FREE notification — the page fetches its own
+          // DD2 ruling 3(c): a broadcast, payload-FREE notification — the page fetches its own
           // record's labels via a window-scoped invoke rather than trusting an inline payload.
-          chrome?.send('vault-import-labels-ready');
+          notifyVaultImportLabelsReady?.();
           return { ok: true };
         }
         // Forward the NON-SECRET failure reason (format/busy/state) so the sheet can branch its

@@ -500,13 +500,26 @@ not after the fact.
       retirement), DD7 sever card routing to the existing flows, DD11
       budget/lockstep/focus-refresh accounting; HIGH risk — design
       review ran (2 cycles)
-- [ ] `guided-hat-restore` *(interactive)* — operator-guided walk:
+- [x] `guided-hat-restore` *(interactive)* — operator-guided walk:
       whole-profile export, wipe, fresh adopt with mapping (existing
       jar + new jar + skip), selective transplant with Replace and
-      Merge, sever offer both actions; inline fixes per HAT protocol
+      Merge, sever offer both actions; inline fixes per HAT protocol.
+      DONE — 11 inline fixes (see flight log); all criteria walked
+      green, criterion 8 sever verified on-disk + cold-restart. Two
+      operator vetoes ruled (single-vault export restored;
+      vault-unlock blur NOT vetoed). Surfaced one out-of-scope
+      security defect → leg 5.
+- [ ] `bundle-identity-opacity` — CLOSE the criterion-4 leak found at
+      the HAT: `vaults[].sourceId` ships in plaintext and jar ids are
+      name-slugs, so jar names are readable in the bundle before the
+      secret. Move real jar identity inside the encrypted jarMeta,
+      key entries by an opaque per-entry handle; restore + labels +
+      completion display (HAT fix 11) rekey off the handle/decrypted
+      name. Bundle v2 format change (none in the wild — free now).
+      HIGH risk (format + store + security) — design review mandatory
 - [ ] `witnessed-runs` — finalize + run `multi-vault-adopt` (hybrid
-      witnessed); run the compromise recovery-branch variant
-      on-script; docs verification
+      witnessed) against the OPACITY-fixed format; run the compromise
+      recovery-branch variant on-script; docs verification
 
 ---
 

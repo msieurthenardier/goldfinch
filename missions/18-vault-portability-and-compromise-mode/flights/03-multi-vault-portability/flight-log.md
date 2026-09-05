@@ -59,6 +59,60 @@ recommendation 2, mission Open Questions. Classifications:
 
 ## Leg Progress
 
+### Leg 4 — guided-hat-restore (in progress, 2026-09-05)
+Walking the whole portability surface live against the dev profile.
+Steps 1-3 (setup, blur contract, whole-profile export) passed; DD8's
+vault-unlock blur allowlist NOT vetoed. The fresh adopt + mapping
+(step 5) is verified GREEN after nine inline HAT fixes (see below and
+the Decisions/Anomalies sections): on-disk end state confirmed by FD —
+manager v2 with NO admin (criterion 6), personal landed under the
+existing `personal` jar (no duplicate), one dismiss-locked recovery
+sheet and no admin sheet (criterion 6 UI), sever offer card present
+(criterion 8). HAT fixes landed (all uncommitted, pending the
+end-of-HAT review + commit):
+1. single-vault export choice restored (operator veto 1)
+2. export result names carried vaults (not a bare count)
+3. labels-ready notification fixed — was a targeted chrome send, must
+   broadcast to the page (real defect; the flow dead-ended)
+4. mapping-modal polish (labels/spacing, dot-swatch color picker; lag
+   ruled environmental — software rendering)
+5. mapping-row state machine (skip hides new-jar controls; stale
+   collision text cleared; prefill binding; collapsed color control) —
+   root cause was CSS `display:flex` overriding `[hidden]`
+6. modal sticky header/footer, body-only scroll (generic openModal)
+7. jar double-create DIAGNOSED (none — was the harness reseed) +
+   rerun-onto-residue name-match prefill + scroll padding
+8. existing-jar destinations include vault-less containers (the "you
+   can't map into the seeded Personal container" defect) — via an
+   extraction into vault-page-model.js (vault.js was at budget)
+9. sever card → top of Settings as an info panel (operator ruling)
+All HAT steps now walked GREEN: probes (donor recovery key dead,
+donor master alive pre-sever), selective transplant (merge deduped
+identical items correctly, replace, skip), and the SEVER — criterion
+8 verified two ways: cold-restart behavioral (new master unlocks,
+donor master dead) AND on-disk (live master-envelope fingerprint
+dd5af8c9 ≠ donor 6d26d17, so the envelope was genuinely re-wrapped).
+HAT fixes 10 (modal wheel-scroll lock + edge padding, CSS-only) and
+11 (completion surface names per-vault outcomes incl. merge counts,
+extracted to vault-page-model.js — vault.js back to 2812) also landed.
+
+**Sever false-alarm (process note for the debrief)**: FD briefly
+suspected a criterion-8 persistence defect because manager.json's
+mtime (16:04:22) looked unchanged "since the adopt." Root cause of the
+confusion: the async operator/FD interleaving made the timeline
+ambiguous, and FD anchored 16:04:22 as the adopt write when it was
+actually the SEVER write (adopt earlier, transplant at 16:08 correctly
+never touches the manager). The fingerprint comparison against the
+donor backup settled it. Lesson: capture write-time fingerprints at
+each step during a live HAT rather than reconstructing the timeline
+from a single mtime after the fact.
+
+vault.js is at 2812/2820 after fix 11's extraction. STILL OPEN before
+the leg can land: the bundle-v2 plaintext-sourceId leak (logged under
+Decisions) — a criterion-4 violation not yet fixed; and the
+accumulated HAT fixes 1-11 need an independent review before commit.
+
+
 ### Leg 1 — substrate-prep
 
 **Status**: landed
@@ -981,6 +1035,83 @@ templates, and `RENDERER_LINE_BUDGET` are all untouched by this leg).
 
 ## Decisions
 
+### HAT veto 1: single-vault export returns (Leg 4, 2026-09-05)
+**Context**: Leg 3 ruling 7 made the vault page's Export modal
+whole-profile only, pre-flagged "operator may veto at the HAT."
+**Decision**: Veto exercised — the modal offers BOTH whole-profile
+(default) and single-vault export. FD classified it a FIX (restores
+shipped M12 capability whose UI entry leg 3 removed; store op, bridge,
+and handler all still live via the jars-page caller), single-surface
+(vault.js + docs) → inline HAT fix via Developer spawn, no design
+review. Whole-profile default preserves the mission's one-bundle
+ruling; criterion 4 unaffected.
+**Impact**: vault.js modal + docs/vault.md; committed with the HAT
+leg's fixes. DD8's other veto point (vault-unlock in the blur
+allowlist) was walked at step 2 and NOT vetoed.
+
+### HAT defect: "existing jar" destinations exclude vault-less containers (Leg 4, 2026-09-05)
+**Context**: operator found the mapping modal's "Use an existing
+vault" directive lists only jars that ALREADY have a vault, so a
+browsing container with no vault yet (the seeded Personal, or any
+user-made jar) can't be chosen — forcing new-jar and the
+same-name collision. Mission language is "an existing JAR, a new jar,
+or nowhere"; the implementation narrowed jar→vault.
+**Decision**: spec-vs-implementation gap = a FIX, but it touches the
+destination model, so it gets a design-check-then-implement pass
+(HAT multi-surface trigger), not a blind patch. Store already writes
+correctly into a vault-less container (destExists=false → fresh
+write; _resolveTarget gates on listJars() membership, not vault
+existence) — verifying page-surface-only before implementing. Global
+stays singleton (Global-or-skip, correct). vault.js is at 2811/2820 —
+if the fix needs >9 lines, an extraction is likely (flagged for the
+debrief regardless).
+**Note**: this supersedes HAT fix 7's name-match, which matched the
+wrong (vault-bearing only) list.
+**Design check result (2026-09-05)**: confirmed page-surface-only —
+store/IPC untouched. Root cause deeper than "vault-bearing only":
+`selectVaultView` returns `vaults:[]` in not-set-up mode
+(`vault-page-model.js:101-103`), so on a fresh adopt the existing-jar
+list is empty entirely. Fix blocked ONLY by the vault.js line budget
+(needs ~25-40 lines, 9 free). FD approved the recommended EXTRACTION:
+the destination-merge + presence-labeling logic moves into the pure,
+DOM-free `vault-page-model.js` module (the `vaultNavEntries`
+precedent), presence probe folded into `refresh()`'s existing
+Promise.all, vault.js left a thin wiring call. This realizes the
+budget-pressure extraction already flagged for the debrief.
+
+### HAT ruling: mapping modal keeps prefilled directives (Leg 4, 2026-09-05)
+**Context**: the shipped modal pre-fills sensible directives
+(Global→Global, jars→new jar) with Commit immediately enabled; flight
+DD2's letter says every row demands an explicit directive. Surfaced to
+the operator at the walk.
+**Decision**: operator ruled — keep prefilled defaults (visible and
+editable; consistent with the low-friction no-picker merge ruling).
+DD2's "explicit directive" is read as "every row's directive is
+visible and individually changeable," not "every row starts unset."
+No code change; the behavior spec's step-4 wording ("every row
+demands an explicit directive") is updated at leg 5 finalization.
+
+### HAT finding: bundle v2 leaks jar identity via plaintext sourceId (Leg 4, 2026-09-05)
+**Context**: FD byte-scanned the operator's real export at HAT step 3.
+`vaults[].sourceId` carries the jar id IN PLAINTEXT — and jar ids are
+slugs derived from jar NAMES (`personal`, `test` in the live bundle),
+so encrypted jarMeta is undone by its own key. Violates the mission's
+"nothing human-readable before the bundle secret" constraint
+(criterion 4). Leg 2's byte-scan pin missed it because its fixtures'
+display names differ from their slugs; real names ARE their slugs.
+Same leak is pre-existing in v1 bundles (`sourceVaultId`, shipped
+M12) — v2 multiplies it across every jar and is the format the
+constraint governs. HAT fix 2's copy change (naming carried vaults in
+the result) is unaffected — that surface is post-authorization.
+**Decision**: defect in chartered flight work, but it changes the v2
+bundle format + store code and needs design (opaque per-entry handles,
+real id moved inside the encrypted jarMeta, v1 legacy posture) —
+beyond the inline-fix bar. Scoped design pass + implementing spawn as
+HAT fix 3, sequenced after the export-modal fix (shared files). No v2
+bundle exists in the wild; the format change is free. The HAT walk
+continues on the current bundle (workflow mechanics are unaffected);
+re-export on the fixed format before leg 5's witnessed runs.
+
 *(none yet)*
 
 ---
@@ -992,6 +1123,64 @@ templates, and `RENDERER_LINE_BUDGET` are all untouched by this leg).
 ---
 
 ## Anomalies
+
+- 2026-09-05 (Leg 4 HAT — duplicate-Personal-jar defect, CORRECTED
+  diagnosis): FD first misattributed this to a wipe/zombie-process
+  race and wrote it up as a harness bug. WRONG — corrected after
+  reading the booted registry: goldfinch **seeds two default browsing
+  containers on every boot with an empty jar registry** — Personal
+  (green #4caf50) and Work (blue #2196f3), defaultId=personal. The
+  wipe DID clear the jars row (verified 0 while the app was down); the
+  app deterministically re-seeds on boot. So the operator's
+  duplicate-Personal was REAL and reproducible: the bundle's green
+  "Personal" vault, directed to a NEW jar, slug-collided with the
+  seeded Personal container → `personal-1`, the vault landing under
+  one and the empty container remaining as the other. The stray blue
+  `work` was never residue — it is a seeded default. Product
+  implications: (a) HAT fix 7's name-match prefill now steers the row
+  to the existing Personal container instead of minting a duplicate —
+  the correct fix, reached for the right reason once re-diagnosed;
+  (b) a "fresh" vault adopt is never a bare profile — browsing
+  containers pre-exist, and existing→(container with no vault) takes
+  the store's fresh-write path (destExists=false → no merge, no
+  collision), landing cleanly. Leg 5's behavior spec preconditions
+  must state the two seeded jars rather than assuming an empty
+  registry. Harness note retained: use `pkill -9` + verify-no-process
+  for wipes regardless (a live app would still reflush).
+- 2026-09-05 (Leg 4 HAT, step 5 — REAL DEFECT, fix in flight as HAT
+  fix 3): the restore flow dead-ends after a successful secret step —
+  sheet closes, no mapping modal, no error anywhere. Diagnosis:
+  `register-overlay-ipc.js:393` sends `vault-import-labels-ready` to
+  the CHROME webContents, but the listener is in the vault PAGE
+  webContents (`vault.js:2571`) — the leg's ruling 3(c) specified the
+  broadcast idiom (chrome + internal pages) and the implementation
+  used a targeted chrome send. Wrong-password re-prompt works (preview
+  itself is sound). Unit suites passed because each end was pinned in
+  isolation — the cross-webContents seam had no integration pin; the
+  live HAT walk caught it in one attempt (the exact class of gap
+  behavior testing exists for). Fix: injected broadcast notifier per
+  ruling 3(c) + an integration-shaped pin.
+
+- 2026-09-03 (Leg 4 HAT, environment — not product): dev app under
+  WSLg/Wayland FATAL'd twice ("GPU process isn't usable", error 1002;
+  second launch also "zygote socket closed prematurely" — first run
+  survived ~29 min, relaunch ~1 min). Memory fine (13 GB free);
+  Wayland/X11 sockets present. Worked around for the HAT session with
+  `npm run dev:automation -- --disable-gpu --ozone-platform=x11`
+  (the launcher only forces wayland when no ozone flag is passed);
+  stable thereafter. If it recurs on x11 too, WSLg is wedged →
+  `wsl --shutdown` from Windows. Known x11 trade-off per
+  dev-launch.mjs header: first OS click into another app's native
+  window may be swallowed. Not a flight defect; noted for
+  docs/dev-testing.md if it recurs across sessions.
+  UPDATE (same day): the x11+no-GPU launch ALSO died, after ~8.5 h —
+  network service, GPU process, and zygote all failing to spawn at
+  once, with fds//dev/shm/pids all healthy. Refined diagnosis: every
+  death coincides with a long idle gap — consistent with Windows
+  suspend/resume breaking WSL child-process spawning, independent of
+  ozone backend. Remedy is simply relaunching after resume (backend
+  fallback retained anyway); nothing in the app or flight is
+  implicated.
 
 - 2026-09-02 (Leg 2): `npm run typecheck` reports pre-existing errors
   outside this leg's scope, unchanged before/after this leg's edits —

@@ -191,4 +191,137 @@ function vaultNavEntries(vaults, jars) {
   ];
 }
 
-export { selectVaultView, compromiseCardRows, vaultNavEntries, SETTINGS_ID, VAULTS_ID };
+/**
+ * Build the restore mapping modal's "existing" destination options for a JAR-SOURCED bundle
+ * row (M18 F3 L4, HAT fix 8). Every PERSISTENT jar is a legal destination — vault-backed or
+ * not — labeled by its own presence so an operator can point a bundle vault at a browsing
+ * container that has never held a vault before. This closes the fresh-adopt gap: on a
+ * not-set-up profile `selectVaultView`'s vaults list is empty by design (above), so the old
+ * "existing" list built from it was empty/unusable and every jar row was forced onto "Create
+ * a new jar" — colliding with the SAME-NAMED seeded container (Personal/Work) and landing a
+ * duplicate `personal-1`. `jars` (jarRows) is populated regardless of setup/lock state and
+ * never carries the reserved global id, so this list is always usable, pre-setup included.
+ *
+ * Also resolves HAT-fix-7's rerun-recovery prefill against this SAME full list (trimmed,
+ * case-insensitive name match, first hit wins) — a residue jar left by a prior attempt is
+ * found whether or not it already carries a vault file.
+ *
+ * `presenceById` is keyed by jar id; a missing/malformed entry degrades to "no vault yet" —
+ * never thrown, never dropped from the list (a presence map that lags jarRows, e.g. mid-race,
+ * still offers every jar as a destination). `count` renders only alongside `hasVault: true`
+ * and only when it is a finite, non-negative number.
+ *
+ * @param {Array<{ id?: unknown, name?: unknown }>} [jars]  jarRows — the full persistent-jar list.
+ * @param {Record<string, { hasVault?: unknown, count?: unknown }>} [presenceById]
+ * @param {string} [bundleName]  the bundle row's jarMeta.name, for the rerun-recovery match.
+ * @returns {{ options: Array<{ vaultId: string, label: string }>, matched: { vaultId: string, label: string } | undefined }}
+ */
+function restoreDestinationOptions(jars, presenceById, bundleName) {
+  const presence = presenceById && typeof presenceById === 'object' ? presenceById : {};
+  const list = Array.isArray(jars) ? jars : [];
+  /** @type {Array<{ vaultId: string, label: string }>} */
+  const options = [];
+  for (const j of list) {
+    if (!j || typeof j !== 'object' || typeof j.id !== 'string' || !j.id) continue;
+    const name = typeof j.name === 'string' && j.name ? j.name : j.id;
+    const p = presence[j.id];
+    const hasVault = !!(p && p.hasVault === true);
+    const count = p && typeof p.count === 'number' && Number.isFinite(p.count) && p.count >= 0 ? p.count : null;
+    const state = hasVault
+      ? count === null
+        ? 'has a vault'
+        : `has a vault (${count} item${count === 1 ? '' : 's'})`
+      : 'no vault yet';
+    options.push({ vaultId: j.id, label: `${name} — ${state}` });
+  }
+
+  const target = typeof bundleName === 'string' ? bundleName.trim().toLowerCase() : '';
+  const hit = target
+    ? list.find(
+        (j) => j && typeof j === 'object' && typeof j.name === 'string' && j.name.trim().toLowerCase() === target
+      )
+    : undefined;
+  const matched = hit ? options.find((o) => o.vaultId === hit.id) : undefined;
+
+  return { options, matched };
+}
+
+/**
+ * Build the restore completion modal's per-vault outcome display lines (M18 F3 L4, HAT fix
+ * 11). Extracted so the pure results→display-strings mapping is unit-testable without a DOM —
+ * vault.js's completion render just maps over these (vault.js sits at its line-budget ceiling
+ * per the leg-4 HAT log; see the `vaultNavEntries`/`restoreDestinationOptions` precedent above).
+ *
+ * The operator feedback this closes: after a merge commit, the completion surface didn't say
+ * per-vault whether items were actually imported or deduped — an operator merging a vault that
+ * turned out to be identical to the destination (DD4: same-id-identical-content items skip)
+ * saw only "Restored" with no indication the merge legitimately imported nothing new.
+ *
+ * `sourceId`/`destination` are shown AS-IS — the bundle's own vault id and the resolved
+ * destination jar id, both non-secret at this point (this surface renders strictly
+ * post-authorization, after the operator has already supplied the bundle secret and committed
+ * the restore — the flight log's "HAT finding: bundle v2 leaks jar identity via plaintext
+ * sourceId" concerns the UNAUTHENTICATED bundle file, not this post-commit display; see leg 4's
+ * "HAT fix 2's copy change ... is unaffected — that surface is post-authorization" ruling, which
+ * applies identically here). No friendly-name lookup: this function takes only the raw
+ * `results` array, matching the commit reply's own shape one-for-one.
+ *
+ * Each malformed/missing entry is defensive: an entry with no string `sourceId` is dropped, a
+ * missing/non-string `destination` renders with no arrow, an unrecognized `outcome` falls back
+ * to echoing the raw value (or 'unknown'), and every `mergeReport` field coerces to `0` rather
+ * than rendering `NaN`/`undefined`. `conflictCopies` is mentioned only when it is > 0 (the
+ * common case — a clean dedup-only merge, the operator's exact reported scenario — reads as
+ * just "N new, M already present" with no trailing zero-copies clause).
+ *
+ * @param {Array<{ sourceId?: unknown, outcome?: unknown, destination?: unknown, mergeReport?: { imported?: unknown, skippedIdentical?: unknown, conflictCopies?: unknown } | unknown }>} [results]
+ * @returns {Array<{ sourceId: string, text: string }>}
+ */
+function restoreOutcomeLines(results) {
+  const list = Array.isArray(results) ? results : [];
+  /** @type {Array<{ sourceId: string, text: string }>} */
+  const lines = [];
+  for (const r of list) {
+    if (!r || typeof r !== 'object' || typeof r.sourceId !== 'string' || !r.sourceId) continue;
+    const sourceId = r.sourceId;
+    const destination = typeof r.destination === 'string' && r.destination ? r.destination : null;
+    const withDest = (/** @type {string} */ suffix) =>
+      `${sourceId}${destination ? ` → ${destination}` : ''}: ${suffix}`;
+
+    let text;
+    if (r.outcome === 'landed') {
+      const mr = r.mergeReport && typeof r.mergeReport === 'object' ? /** @type {any} */ (r.mergeReport) : null;
+      if (mr) {
+        const imported = typeof mr.imported === 'number' && Number.isFinite(mr.imported) ? mr.imported : 0;
+        const skippedIdentical =
+          typeof mr.skippedIdentical === 'number' && Number.isFinite(mr.skippedIdentical) ? mr.skippedIdentical : 0;
+        const conflictCopies =
+          typeof mr.conflictCopies === 'number' && Number.isFinite(mr.conflictCopies) ? mr.conflictCopies : 0;
+        let merged = `merged — ${imported} new, ${skippedIdentical} already present`;
+        if (conflictCopies > 0) merged += `, ${conflictCopies} kept as copies`;
+        text = withDest(merged);
+      } else {
+        text = withDest('restored');
+      }
+    } else if (r.outcome === 'collision-refused') {
+      text = withDest('not restored (a vault already exists; choose Replace or Merge)');
+    } else if (r.outcome === 'skipped') {
+      text = `${sourceId}: skipped`;
+    } else if (r.outcome === 'failed') {
+      text = `${sourceId}: failed`;
+    } else {
+      text = `${sourceId}: ${typeof r.outcome === 'string' && r.outcome ? r.outcome : 'unknown'}`;
+    }
+    lines.push({ sourceId, text });
+  }
+  return lines;
+}
+
+export {
+  selectVaultView,
+  compromiseCardRows,
+  vaultNavEntries,
+  restoreDestinationOptions,
+  restoreOutcomeLines,
+  SETTINGS_ID,
+  VAULTS_ID
+};

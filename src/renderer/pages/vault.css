@@ -896,26 +896,62 @@ textarea.vault-input {
   padding: 24px;
   background: rgb(0 0 0 / 55%);
 }
+/* M18 F3 L4 (HAT fix 10): while a page modal is open, lock the BACKGROUND page's own scroll —
+   a `:has()` guard (already precedented for `.welcome-engine-row` in styles.css on this same
+   Chromium/Electron target) needs no JS class toggle, so it costs zero vault.js lines against
+   the page's line budget. Pairs with `.vault-modal-body`'s `overscroll-behavior: contain`
+   below: this stops the page behind from scrolling at all; that stops wheel input from
+   chaining out of the modal's own scroll region once it hits a scroll boundary. */
+body:has(.vault-modal-backdrop) {
+  overflow: hidden;
+}
 .vault-modal-card {
+  display: flex;
+  flex-direction: column;
   width: 100%;
   max-width: 440px;
   max-height: calc(100vh - 48px);
-  overflow-y: auto;
-  padding: 20px;
+  overflow: hidden;
+  padding: 20px 0;
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: 10px;
   box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
 }
+/* Header (title) and footer (status + actions) are pinned flex-shrink:0 members of the card's
+   column; .vault-modal-body is the sole flex:1 scroll region below (M18 F3 L4, HAT fix 6) — a
+   mapping modal with many bundle rows scrolls its rows while Cancel/Commit stay visible. A short
+   modal (export/pick/completion/editors) never grows past its content height here, so this is a
+   no-op change for them: overflow-y only engages once combined content exceeds max-height.
+   M18 F3 L4 (HAT fix 10): the card itself carries only VERTICAL padding now — the horizontal
+   20px gutter moved onto each of the four children below (title/body/status/actions)
+   individually, so `.vault-modal-body`'s own padding sits INSIDE its scroll region instead of
+   outside it. That puts the scrollbar flush against the card's true right edge (matching fix
+   7's discipline of keeping the scrolled region's own breathing room inside the region it
+   frames) while native `<select>` popups and focus rings anchored to body content still clear
+   the card edge, instead of sitting flush against it. */
 .vault-modal-title {
+  flex-shrink: 0;
   margin: 0 0 12px;
+  padding: 0 20px;
   font-size: 16px;
   color: var(--fg);
 }
 .vault-modal-body {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
+  min-height: 0;
   gap: 12px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* M18 F3 L4 (HAT fix 7): bottom breathing room inside the SCROLLED region itself — without
+     it the last mapping row's control sits flush against the scroll boundary and reads as
+     slightly cut off once scrolled all the way down. The card's own padding only frames
+     the viewport, not the scrolled content's own end. HAT fix 10 adds the matching horizontal
+     0 20px here (moved off the card, see above) — same "inside the scroll region" discipline,
+     so it never fights fix 7's own padding-bottom (distinct box side, same shorthand). */
+  padding: 0 20px 8px;
 }
 /* A stacked field group inside the modal body (the vault select sits on its own line above the
    file-pick row so a long jar label never crowds the button). */
@@ -973,6 +1009,116 @@ textarea.vault-input {
   flex: 0 0 auto;
 }
 
+/* ── Restore mapping modal rows (M18 F3 L4, HAT fix 4) ──────────────────────────────────────
+   Each bundle vault gets its own row: a title, then one .vault-field per control (directive,
+   the conditional new-jar name+color or existing-vault destination, and the conditional
+   replace/merge mode). A visible border+gap between rows gives clear separation (the .vault-
+   modal-form/.vault-mapping-form ancestor already supplies the 12px row-to-row flex gap); a
+   flex column with its own gap inside each row gives the directive control breathing room
+   from whichever dependent control appears below it, matching the editor's field rhythm
+   instead of controls sitting flush against each other. */
+.vault-mapping-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.vault-mapping-row:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+.vault-mapping-row-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg);
+}
+.vault-mapping-newjar-row,
+.vault-mapping-dest-row,
+.vault-mapping-mode-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+/* HAT fix 5 (live-walk finding): an author-origin `display` declaration always beats the
+   UA stylesheet's `[hidden] { display: none }`, regardless of specificity — cascade ORIGIN is
+   sorted before specificity. Setting `.hidden = true` on these rows in JS therefore had NO
+   visual effect at all; every row showed every block (new-jar fields, destination, AND the
+   collision explainer) permanently, which is what read as "stale" content on a Skip row.
+   `.vault-kebab-menu[hidden]` below already carries this exact override — mirrored here. */
+.vault-mapping-newjar-row[hidden],
+.vault-mapping-dest-row[hidden],
+.vault-mapping-mode-row[hidden] {
+  display: none;
+}
+/* .vault-field's own margin-bottom is for stacked editor fields; the mapping row's flex gap
+   above already spaces these out, so it's zeroed here rather than doubling up. */
+.vault-mapping-row .vault-field {
+  margin-bottom: 0;
+}
+.vault-mapping-newjar-row .vault-modal-path-input {
+  width: 100%;
+}
+
+/* Dot-swatch color picker (HAT fix 4; collapsed-by-default toggle added at HAT fix 5) — mirrors
+   jars.css's .swatch-grid/.swatch-btn (the goldfinch://jars jar-creation idiom) so a restored
+   jar's color choice looks and behaves the same way as creating one from the jars page;
+   vault.css can't reference jars.css classes directly (separate page stylesheets), so the
+   rules are mirrored here under a vault-prefixed name rather than shared. */
+.vault-swatch-wrap {
+  position: relative;
+}
+.vault-swatch-toggle {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  cursor: pointer;
+  padding: 0;
+  background: var(--bg-2);
+}
+.vault-swatch-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.vault-swatch-dot {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+}
+.vault-swatch-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+/* Same author-origin-beats-UA gotcha as the mapping rows above — the grid is expanded/collapsed
+   via `.hidden`, so it needs its own explicit override too (unlike the mapping rows, this one
+   is NEW with the fix, so there's no pre-existing bug here — just don't repeat it). */
+.vault-swatch-grid[hidden] {
+  display: none;
+}
+.vault-swatch-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+}
+.vault-swatch-btn.selected {
+  border-color: var(--fg);
+  box-shadow:
+    0 0 0 2px var(--bg),
+    0 0 0 4px var(--accent);
+}
+.vault-swatch-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* Replace-existing confirmation (M12 F5 HAT tail): a warning line + a REQUIRED checkbox, shown
    only when the import destination already holds a vault (importing DESTROYS it). */
 .vault-modal-replace-row {
@@ -999,7 +1145,9 @@ textarea.vault-input {
   cursor: pointer;
 }
 .vault-modal-status {
+  flex-shrink: 0;
   margin: 12px 0 0;
+  padding: 0 20px;
   font-size: 12px;
   color: var(--fg-dim);
 }
@@ -1008,9 +1156,11 @@ textarea.vault-input {
 }
 .vault-modal-actions {
   display: flex;
+  flex-shrink: 0;
   justify-content: flex-end;
   gap: 8px;
   margin-top: 16px;
+  padding: 0 20px;
 }
 .vault-btn:disabled {
   opacity: 0.5;
@@ -1112,4 +1262,36 @@ textarea.vault-input {
 .vault-compromise-card-hint {
   margin-left: 6px;
   color: var(--fg-dim);
+}
+
+/* ── DD7 sever offer card (HAT fix 9) ──
+   "The previous owner's password still works" — moved to the top of Settings and restyled
+   as an attention-drawing info panel (same bordered/tinted callout shape as
+   .vault-compromise-card above, swapping --ok's success green for --accent's brand gold,
+   since this is a heads-up prompting action rather than a completed-work confirmation). */
+.vault-sever-card {
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: rgba(245, 197, 24, 0.1);
+  padding: 14px 16px;
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+}
+.vault-sever-card-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.vault-sever-card .vault-lede {
+  margin: 0;
+}
+.vault-sever-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }

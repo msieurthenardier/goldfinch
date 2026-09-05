@@ -849,6 +849,23 @@ function broadcastVaultLockState() {
   }
 }
 
+// M18 F3 L4 (HAT fix 3): the vault-import-labels-ready notification's carrier. The leg's own
+// ruling (3(c)) specified the vault-lock-state BROADCAST idiom — profile-wide, every chrome +
+// every internal page, exactly `broadcastVaultLockState` above — because the mapping-modal
+// listener lives on the vault PAGE's own internal webContents (internal-preload.js), a
+// DIFFERENT webContents than the window's chrome. The shipped register-overlay-ipc.js used a
+// targeted `chrome.send(...)` instead (this window's chrome only), so the notification never
+// reached the page: the sheet closed successfully but no labels fetch ever fired and no
+// mapping modal opened (operator-reproduced at the HAT; wrong-password re-prompt worked fine
+// since the preview step itself never touched this channel). Fixed by routing through the
+// same `broadcastToChromeAndInternal` fan-out as every other profile-wide vault push. No
+// payload rides this notification (unchanged contract) — each page's handler runs its own
+// window-scoped labels fetch and is a safe no-op when that fetch returns nothing (already
+// true page-side; only the transport was wrong).
+function notifyVaultImportLabelsReady() {
+  broadcastToChromeAndInternal('vault-import-labels-ready');
+}
+
 // Portable vault RESTORE held state (M12 F4 Leg 1 export-import, DD1/DD2; re-modeled M18 F3
 // Leg 3 / DD2). The restore is a multi-step flow: the vault page picks a bundle file
 // (main-side dialog + read), the chrome-owned vault-import-unlock sheet PREVIEWS the secret
@@ -1905,6 +1922,11 @@ registerOverlayIpc({
   // zeroize; this delegate runs the store preview op and stashes its own independent secret
   // copy + the non-secret labels onto the held record for the later commit.
   vaultImportPreview: (chromeId, buf, secretKind) => vaultImportPreviewFromSheet(chromeId, buf, secretKind),
+  // M18 F3 L4 (HAT fix 3): a narrow bound function, never main's internals (the
+  // broadcastVaultLockState injection precedent below) — the registrar cannot reach
+  // broadcastToChromeAndInternal directly, so this is the seam that fans the labels-ready
+  // notification out to every chrome + every internal page instead of one targeted chrome.
+  notifyVaultImportLabelsReady: () => notifyVaultImportLabelsReady(),
   // M18 F2 L4: the compromise-mode rotation delegate. Maps the leg-3 error classes to
   // NON-SECRET reasons so the sheet renders the ruled inline copy — deliberately WIDER
   // than the VaultAuthError-only sibling delegates (the op has five ruled failure

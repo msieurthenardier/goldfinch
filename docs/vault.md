@@ -511,9 +511,13 @@ page instead offers a cheap "Resume restore" affordance that re-enters the mappi
 the still-held record, with no secret re-entry. An explicit Cancel, by contrast, drops the
 record and the affordance disappears with it.
 
-**Export** (`exportProfile`, the vault page's Export modal) is now whole-profile only — one
-bundle, one secret, no per-vault source picker. The jars page's delete-time "Export this vault
-first" offer is the one intentional caller still using the single-vault `exportVault`.
+**Export** (the vault page's Export modal) offers a source choice: **whole profile**
+(`exportProfile`, the DEFAULT — one bundle, one secret) or a **single vault** (`exportVault`,
+global or any jar). Leg 3 (DD1 ruling 7) had made the modal whole-profile-only; the operator
+vetoed that at the HAT (M18 F3 L4, HAT fix 1) and asked for both choices back, restoring the
+modal's pre-leg-3 per-vault source picker alongside the whole-profile default. The jars page's
+delete-time "Export this vault first" offer remains a separate, always-single-vault caller of
+`exportVault`, untouched by either leg.
 
 ## Rotation & recovery
 

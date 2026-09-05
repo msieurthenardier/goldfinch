@@ -12,6 +12,8 @@ const {
   selectVaultView,
   compromiseCardRows,
   vaultNavEntries,
+  restoreDestinationOptions,
+  restoreOutcomeLines,
   SETTINGS_ID,
   VAULTS_ID
 } = require('../../src/shared/vault-page-model.js');
@@ -285,4 +287,140 @@ test('empty vaults → Settings + an empty Vaults group; malformed inputs degrad
     childrenOf(entries).map((e) => e.id),
     ['work']
   );
+});
+
+// ── restoreDestinationOptions: the mapping modal's jar-row "existing" destinations
+// (M18 F3 L4, HAT fix 8) ──
+
+test('restoreDestinationOptions: one option per jar, labeled by vault presence — including a vault-LESS jar (the fresh-adopt fix)', () => {
+  const { options } = restoreDestinationOptions(
+    jars,
+    { personal: { hasVault: true, count: 3 } } // work: no presence entry at all
+  );
+  assert.deepEqual(options, [
+    { vaultId: 'personal', label: 'Personal — has a vault (3 items)' },
+    { vaultId: 'work', label: 'Work — no vault yet' }
+  ]);
+});
+
+test('restoreDestinationOptions: a hasVault jar with no known count still offers a usable label', () => {
+  const { options } = restoreDestinationOptions([{ id: 'work', name: 'Work' }], { work: { hasVault: true } });
+  assert.deepEqual(options, [{ vaultId: 'work', label: 'Work — has a vault' }]);
+});
+
+test('restoreDestinationOptions: singular "item" at count 1', () => {
+  const { options } = restoreDestinationOptions([{ id: 'work', name: 'Work' }], { work: { hasVault: true, count: 1 } });
+  assert.equal(options[0].label, 'Work — has a vault (1 item)');
+});
+
+test('restoreDestinationOptions: rerun-recovery match is case-insensitive/trimmed and works against a VAULT-LESS destination', () => {
+  const { matched } = restoreDestinationOptions(jars, {}, '  personal  ');
+  assert.deepEqual(matched, { vaultId: 'personal', label: 'Personal — no vault yet' });
+});
+
+test('restoreDestinationOptions: no name given, or no match found, → matched is undefined', () => {
+  assert.equal(restoreDestinationOptions(jars, {}).matched, undefined);
+  assert.equal(restoreDestinationOptions(jars, {}, 'nonexistent').matched, undefined);
+});
+
+test('restoreDestinationOptions: empty/malformed jar list → empty options, no throw, no match', () => {
+  assert.deepEqual(restoreDestinationOptions([], {}, 'Personal'), { options: [], matched: undefined });
+  assert.deepEqual(restoreDestinationOptions(undefined, undefined, 'Personal'), { options: [], matched: undefined });
+  assert.deepEqual(restoreDestinationOptions([null, { name: 'no id' }, { id: 'work', name: 'Work' }], {}).options, [
+    { vaultId: 'work', label: 'Work — no vault yet' }
+  ]);
+});
+
+// ---------------------------------------------------------------------------
+// restoreOutcomeLines — the restore completion modal's per-vault outcome
+// display lines (M18 F3 L4, HAT fix 11). Operator feedback: a merge commit's
+// completion surface didn't say whether items actually landed or deduped —
+// this closes that by rendering merge detail whenever a mergeReport rides
+// the outcome.
+// ---------------------------------------------------------------------------
+
+test('restoreOutcomeLines: landed with no mergeReport → plain "restored"', () => {
+  assert.deepEqual(restoreOutcomeLines([{ sourceId: 'personal', outcome: 'landed', destination: 'personal-1' }]), [
+    { sourceId: 'personal', text: 'personal → personal-1: restored' }
+  ]);
+});
+
+test('restoreOutcomeLines: landed with a mergeReport, zero conflict copies → no trailing copies clause (the operator’s exact dedup case)', () => {
+  const lines = restoreOutcomeLines([
+    {
+      sourceId: 'personal',
+      outcome: 'landed',
+      destination: 'personal-1',
+      mergeReport: { imported: 0, skippedIdentical: 5, conflictCopies: 0 }
+    }
+  ]);
+  assert.deepEqual(lines, [{ sourceId: 'personal', text: 'personal → personal-1: merged — 0 new, 5 already present' }]);
+});
+
+test('restoreOutcomeLines: landed with a mergeReport AND conflict copies → trailing copies clause appended', () => {
+  const lines = restoreOutcomeLines([
+    {
+      sourceId: 'personal',
+      outcome: 'landed',
+      destination: 'personal-1',
+      mergeReport: { imported: 2, skippedIdentical: 3, conflictCopies: 1 }
+    }
+  ]);
+  assert.deepEqual(lines, [
+    { sourceId: 'personal', text: 'personal → personal-1: merged — 2 new, 3 already present, 1 kept as copies' }
+  ]);
+});
+
+test('restoreOutcomeLines: skipped → no destination in the line', () => {
+  assert.deepEqual(restoreOutcomeLines([{ sourceId: 'work', outcome: 'skipped' }]), [
+    { sourceId: 'work', text: 'work: skipped' }
+  ]);
+});
+
+test('restoreOutcomeLines: collision-refused → destination shown, guidance to choose Replace or Merge', () => {
+  assert.deepEqual(
+    restoreOutcomeLines([{ sourceId: 'personal', outcome: 'collision-refused', destination: 'personal-1' }]),
+    [
+      {
+        sourceId: 'personal',
+        text: 'personal → personal-1: not restored (a vault already exists; choose Replace or Merge)'
+      }
+    ]
+  );
+});
+
+test('restoreOutcomeLines: failed → no destination in the line', () => {
+  assert.deepEqual(restoreOutcomeLines([{ sourceId: 'global', outcome: 'failed' }]), [
+    { sourceId: 'global', text: 'global: failed' }
+  ]);
+});
+
+test('restoreOutcomeLines: multiple results render in order, one line each', () => {
+  const lines = restoreOutcomeLines([
+    { sourceId: 'a', outcome: 'landed', destination: 'a-1' },
+    { sourceId: 'b', outcome: 'skipped' },
+    { sourceId: 'c', outcome: 'failed' }
+  ]);
+  assert.deepEqual(
+    lines.map((l) => l.sourceId),
+    ['a', 'b', 'c']
+  );
+});
+
+test('restoreOutcomeLines: malformed input degrades safely — non-array, non-object entries, missing sourceId all drop/no-throw', () => {
+  assert.deepEqual(restoreOutcomeLines(undefined), []);
+  assert.deepEqual(restoreOutcomeLines([]), []);
+  assert.deepEqual(restoreOutcomeLines([null, 'nope', {}, { sourceId: '' }, { outcome: 'landed' }]), []);
+});
+
+test('restoreOutcomeLines: mergeReport with non-numeric/missing fields coerces to 0, never NaN/undefined in the text', () => {
+  const lines = restoreOutcomeLines([
+    { sourceId: 'personal', outcome: 'landed', destination: 'personal-1', mergeReport: {} }
+  ]);
+  assert.deepEqual(lines, [{ sourceId: 'personal', text: 'personal → personal-1: merged — 0 new, 0 already present' }]);
+});
+
+test('restoreOutcomeLines: an unrecognized outcome falls back to echoing the raw value', () => {
+  assert.deepEqual(restoreOutcomeLines([{ sourceId: 'x', outcome: 'weird' }]), [{ sourceId: 'x', text: 'x: weird' }]);
+  assert.deepEqual(restoreOutcomeLines([{ sourceId: 'x', outcome: 123 }]), [{ sourceId: 'x', text: 'x: unknown' }]);
 });

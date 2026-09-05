@@ -1,7 +1,13 @@
 // goldfinch://vault serves imports through an exact flat allowlist. These
 // specifiers intentionally describe serving paths rather than disk paths.
-// @ts-ignore — serving-path vs disk-path mismatch
-import { selectVaultView, compromiseCardRows, vaultNavEntries } from './vault-page-model.js';
+import {
+  selectVaultView,
+  compromiseCardRows,
+  vaultNavEntries,
+  restoreDestinationOptions,
+  restoreOutcomeLines
+  // @ts-ignore — serving-path vs disk-path mismatch
+} from './vault-page-model.js';
 import {
   MASK,
   EDITOR_LAYOUT,
@@ -79,6 +85,10 @@ function init() {
   // refreshed alongside vault state. `[]` until the first fetch resolves.
   /** @type {Array<{ id?: unknown, color?: unknown }>} */
   let jarRows = [];
+
+  // Per-jar hasVault + count (HAT fix 8) — precomputed in refresh(), never a per-open probe.
+  /** @type {Record<string, { hasVault: boolean, count?: number }>} */
+  let jarVaultPresence = {};
 
   // The last rendered view's vault list (M18 F3 L3) — the mapping modal's "existing"
   // destination options when opened directly from the labels-ready listener (which has no
@@ -524,29 +534,47 @@ function init() {
   }
 
   /**
-   * The whole-profile Export modal (M18 F3 L3 / DD1 ruling 7 — REPLACES the old per-vault
-   * source select entirely; the jars page's delete-time single-vault export offer is the one
-   * intentional retained `exportVault` caller, untouched — `jars-section-controller.js:638`).
-   * Body: a file-uploader ROW — a text input showing the save path + an open-folder icon
-   * button that runs `pickSavePath('profile')` (main-side save dialog ONLY, no write) and
-   * populates the field. The field is EDITABLE/PASTEABLE (operator ask); the actual write is
-   * gated MAIN-SIDE (canonical extension + existing writable parent), so a typed path can
-   * never be a write-anywhere primitive. Export is DISABLED until the field is non-empty.
-   * Submit runs `exportProfile(savePath)` fully main-side (ciphertext-only bundle; never
-   * transits the page); the result states which vaults were carried (lazy jars absent by
-   * design). A { locked } (idle-lock race) closes the modal, refreshes, and surfaces a brief
-   * notice; an invalid-path / write error shows on the status line — none is silently
-   * swallowed.
+   * The Export modal (M18 F3 L3 / DD1 ruling 7 made this WHOLE-PROFILE only; M18 F3 L4, HAT
+   * fix 1 — the operator VETOED that at the HAT and asked for both choices back). Body: a
+   * SOURCE select — "Whole profile" (DEFAULT, per the mission ruling — unchanged) or a single
+   * vault, global or any jar (the operator's veto — the pre-leg-3 select shape, restored via
+   * the same `buildVaultSelect` builder used elsewhere) — then the same file-uploader ROW as
+   * before: a text input showing the save path + an open-folder icon button that runs
+   * `pickSavePath(<target>)` (main-side save dialog ONLY, no write; target-keyed default
+   * filename) and populates the field. The field is EDITABLE/PASTEABLE (operator ask); the
+   * actual write is gated MAIN-SIDE (canonical extension + existing writable parent), so a
+   * typed path can never be a write-anywhere primitive. Export is DISABLED until the field is
+   * non-empty. Submit runs `exportProfile(savePath)` (whole profile) or `exportVault(target,
+   * savePath)` (single vault) fully main-side (ciphertext-only bundle; never transits the
+   * page) — the jars page's delete-time single-vault export offer remains a separate,
+   * untouched `exportVault` caller (`jars-section-controller.js:638`). A { locked } (idle-lock
+   * race) closes the modal, refreshes, and surfaces a brief notice on either path; an
+   * invalid-path / write error shows on the status line — none is silently swallowed.
+   * @param {Array<{ vaultId: string, label: string }>} vaults
    */
-  function openExportProfileModal() {
+  function openExportModal(vaults) {
     const body = el('div', 'vault-modal-form');
-    body.appendChild(
-      el(
-        'p',
-        'vault-lede',
-        'Export every vault in this profile — the global vault and every jar that has one — into a single encrypted file.'
-      )
-    );
+
+    const WHOLE_PROFILE_LEDE =
+      'Export every vault in this profile — the global vault and every jar that has one — into a single encrypted file.';
+    const SINGLE_VAULT_LEDE = 'Export this one vault into a single encrypted file.';
+    const lede = el('p', 'vault-lede', WHOLE_PROFILE_LEDE);
+    body.appendChild(lede);
+
+    // Source choice: "Whole profile" is a synthetic leading option (value '') prepended onto
+    // the SAME select buildVaultSelect builds for the vault entries — never a second control —
+    // so the pre-leg-3 single-vault select shape is restored verbatim, just with one extra
+    // option ahead of it. "Whole profile" is the DEFAULT (mission ruling 7, unchanged by the
+    // veto); a single vault is what the veto restores.
+    const field = el('label', 'vault-settings-field');
+    field.appendChild(el('span', 'vault-settings-label', 'Source'));
+    const select = buildVaultSelect(vaults, 'Export source');
+    const wholeProfileOpt = /** @type {HTMLOptionElement} */ (el('option', undefined, 'Whole profile'));
+    wholeProfileOpt.value = '';
+    select.insertBefore(wholeProfileOpt, select.firstChild);
+    select.value = '';
+    field.appendChild(select);
+    body.appendChild(field);
 
     // File-uploader row: a pasteable path input + an open-folder icon button (native save dialog).
     const fileRow = el('div', 'vault-modal-file-row');
@@ -561,7 +589,7 @@ function init() {
     fileRow.appendChild(pathInput);
     fileRow.appendChild(
       iconButton('folder', 'Choose a save location', () => {
-        Promise.resolve(bridge.pickSavePath('profile'))
+        Promise.resolve(bridge.pickSavePath(select.value || 'profile'))
           .then((res) => {
             if (res && res.path) {
               pathInput.value = res.path;
@@ -574,17 +602,28 @@ function init() {
     );
     body.appendChild(fileRow);
 
+    // Switching source clears any already-picked path (a whole-profile path and a single-vault
+    // path are different targets — never silently carry one over to the other) and swaps the
+    // lede so the modal always states what Export is about to do.
+    select.addEventListener('change', () => {
+      lede.textContent = select.value === '' ? WHOLE_PROFILE_LEDE : SINGLE_VAULT_LEDE;
+      pathInput.value = '';
+      handle.setStatus('');
+      handle.setSubmitEnabled(false);
+    });
+
     const handle = openModal({
-      title: 'Export this profile',
+      title: 'Export',
       body,
       submitLabel: 'Export',
       submitEnabled: false,
       onSubmit: () => {
         const savePath = pathInput.value.trim();
         if (!savePath) return;
+        const wholeProfile = select.value === '';
         handle.setSubmitEnabled(false);
         handle.setStatus('Exporting…');
-        Promise.resolve(bridge.exportProfile(savePath))
+        Promise.resolve(wholeProfile ? bridge.exportProfile(savePath) : bridge.exportVault(select.value, savePath))
           .then((res) => {
             if (res && res.locked) {
               pendingNotice = 'The manager locked — export canceled. Unlock and try again.';
@@ -593,10 +632,31 @@ function init() {
               return;
             }
             if (res && res.ok) {
-              const carried = Array.isArray(res.carried) ? res.carried.length : 0;
-              pendingNotice = `Exported ${carried} vault${carried === 1 ? '' : 's'}.`;
-              handle.close();
-              refresh();
+              if (wholeProfile) {
+                // Whole-profile result keeps its carried-vaults statement (ruling 7, unchanged) —
+                // M18 F3 L4, HAT fix 2: name the carried vaults (not just a count), so a lazy-jar
+                // omission is actually visible, using the labels the page already holds (no new
+                // IPC surface — `res.carried` is the vault-id list the existing reply carries).
+                // The cast is needed because `res`'s inferred type is the UNION of exportProfile's
+                // and exportVault's reply shapes (only the former declares `carried`) — this branch
+                // runs only when `wholeProfile` is true, i.e. only for an exportProfile reply.
+                const profileRes = /** @type {{ ok?: boolean; carried?: string[] }} */ (res);
+                const carriedIds = Array.isArray(profileRes.carried) ? profileRes.carried : [];
+                const count = carriedIds.length;
+                const names = carriedIds.map((id) => {
+                  const v = vaults.find((x) => x.vaultId === id);
+                  return v ? v.label : id;
+                });
+                pendingNotice =
+                  count === 0
+                    ? 'Exported 0 vaults.'
+                    : `Exported ${count} vault${count === 1 ? '' : 's'}: ${names.join(', ')}.`;
+                handle.close();
+                refresh();
+              } else {
+                // Single-vault result keeps its OLD (pre-leg-3) shape — a bare close, no notice.
+                handle.close();
+              }
               return;
             }
             if (res && res.error === 'invalid-path') {
@@ -611,11 +671,11 @@ function init() {
               handle.setSubmitEnabled(true);
               return;
             }
-            handle.setStatus('Could not export the profile.');
+            handle.setStatus(wholeProfile ? 'Could not export the profile.' : 'Could not export the vault.');
             handle.setSubmitEnabled(true);
           })
           .catch(() => {
-            handle.setStatus('Could not export the profile.');
+            handle.setStatus(wholeProfile ? 'Could not export the profile.' : 'Could not export the vault.');
             handle.setSubmitEnabled(true);
           });
       }
@@ -720,15 +780,147 @@ function init() {
     select.appendChild(opt);
   }
 
+  // Preset new-jar colors for the mapping modal's color picker (M18 F3 L4, HAT fix 4) — mirrors
+  // src/shared/jar-page-model.js's PALETTE verbatim so a restored jar's dot matches the jars
+  // page's own swatches. Duplicated rather than imported: goldfinch://vault's flat internal-page
+  // import allowlist has no route to jar-page-model.js, and this fix keeps changes to the page
+  // surface only (vault.js + vault.css + page-model tests) — a shared-module route is a
+  // main-side change (internal-page-map.js) out of scope here.
+  const JAR_COLOR_PALETTE = Object.freeze([
+    '#4caf50',
+    '#2196f3',
+    '#f5c518',
+    '#ff7043',
+    '#ab47bc',
+    '#26a69a',
+    '#ef5350',
+    '#5c6bc0',
+    '#8d6e63',
+    '#78909c',
+    '#ec407a',
+    '#9ccc65'
+  ]);
+  const NEW_JAR_FALLBACK_COLOR = '#4a90d9';
+
+  /**
+   * A dot-swatch color picker (HAT fix 4; collapsed-by-default toggle added at HAT fix 5, a
+   * live-walk operator ask) — mirrors the jars page's radiogroup-of-role=radio idiom
+   * (`jars-create-controller.js` / `jars-section-controller.js`'s `buildSwatchGrid`),
+   * reimplemented locally here for the same page-surface-only reason as JAR_COLOR_PALETTE
+   * above. `colors` is expected to already carry the prefilled color as a trailing extra
+   * swatch when it isn't one of the presets — mirroring `jars-section-controller.js`'s
+   * `editColors` (append-as-custom-swatch, never a "nearest color" guess). Collapsed state
+   * shows only the selected color as a single dot button; clicking it expands the grid inline
+   * below the dot (no overlay) — the same button+aria-expanded+outside-click/Escape-close
+   * shape as this page's own `buildKebabMenu`, sized down to one grid with no item-list nav.
+   * A swatch selection collapses the grid back to the dot.
+   * @param {readonly string[]} colors
+   * @param {string} initialColor
+   * @param {string} ariaLabel
+   * @param {(color: string) => void} onSelect
+   * @returns {HTMLElement}
+   */
+  function buildColorSwatchGrid(colors, initialColor, ariaLabel, onSelect) {
+    const wrap = el('div', 'vault-swatch-wrap');
+    let selected = initialColor;
+
+    const toggle = /** @type {HTMLButtonElement} */ (el('button', 'vault-swatch-toggle'));
+    toggle.type = 'button';
+    toggle.setAttribute('aria-haspopup', 'true');
+    toggle.setAttribute('aria-expanded', 'false');
+    toggle.setAttribute('aria-label', ariaLabel);
+    const dot = el('span', 'vault-swatch-dot');
+    toggle.appendChild(dot);
+
+    const grid = el('div', 'vault-swatch-grid');
+    grid.setAttribute('role', 'radiogroup');
+    grid.setAttribute('aria-label', ariaLabel);
+    grid.hidden = true;
+
+    /** @type {HTMLButtonElement[]} */
+    const buttons = [];
+    function paint() {
+      dot.style.background = isSafeColor(selected) ? selected : NEW_JAR_FALLBACK_COLOR;
+      for (const btn of buttons) {
+        const checked = btn.dataset.color === selected;
+        btn.setAttribute('aria-checked', String(checked));
+        btn.classList.toggle('selected', checked);
+      }
+    }
+
+    /** @type {((ev: Event) => void)|null} */
+    let onDocPointer = null;
+    const isOpen = () => !grid.hidden;
+    function open() {
+      if (isOpen()) return;
+      grid.hidden = false;
+      toggle.setAttribute('aria-expanded', 'true');
+      onDocPointer = (ev) => {
+        if (!wrap.contains(/** @type {Node} */ (ev.target))) close();
+      };
+      document.addEventListener('pointerdown', onDocPointer, true);
+      (buttons.find((b) => b.dataset.color === selected) || buttons[0])?.focus();
+    }
+    /** @param {boolean} [restoreFocus] */
+    function close(restoreFocus) {
+      if (!isOpen()) return;
+      grid.hidden = true;
+      toggle.setAttribute('aria-expanded', 'false');
+      if (onDocPointer) {
+        document.removeEventListener('pointerdown', onDocPointer, true);
+        onDocPointer = null;
+      }
+      if (restoreFocus) toggle.focus();
+    }
+    toggle.addEventListener('click', () => (isOpen() ? close() : open()));
+    wrap.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape' && isOpen()) {
+        ev.preventDefault();
+        ev.stopPropagation(); // collapse the palette only — don't also dismiss the modal
+        close(true);
+      }
+    });
+
+    for (const color of colors) {
+      const btn = /** @type {HTMLButtonElement} */ (el('button', 'vault-swatch-btn'));
+      btn.type = 'button';
+      btn.dataset.color = color;
+      btn.setAttribute('role', 'radio');
+      btn.setAttribute('aria-label', color);
+      btn.style.background = isSafeColor(color) ? color : NEW_JAR_FALLBACK_COLOR;
+      btn.addEventListener('click', () => {
+        selected = color;
+        paint();
+        onSelect(color);
+        close(true);
+      });
+      buttons.push(btn);
+      grid.appendChild(btn);
+    }
+    paint();
+
+    wrap.appendChild(toggle);
+    wrap.appendChild(grid);
+    return wrap;
+  }
+
   /**
    * The mapping modal (M18 F3 L3 / DD2 ruling 3(d), the Flight 1 O4 baseline): one row per
-   * bundle vault, EACH REQUIRING an explicit directive before Commit enables (a disabled
-   * placeholder "Choose…" option — nothing is pre-selected). Per row: Skip / Create a new jar
-   * (jar-sourced rows only; prefilled name+color from the label) / Use an existing vault — the
-   * destination sub-picker REUSES `buildVaultSelect` (the retiring single-select flows'
-   * builder, per the leg's "never leave it orphaned" note). Choosing an existing destination
-   * probes `hasVault` and, on a real collision, requires an explicit Replace-or-Merge choice
-   * (merge listed first — the calmed, non-destructive default once a mode IS required).
+   * bundle vault, EACH carrying an individually-changeable directive (HAT ruling, Leg 4: DD2's
+   * "explicit directive" is satisfied by every row's directive being visible and editable, not
+   * by starting unset — a disabled "Choose…" placeholder option exists for a row that would
+   * legitimately have no default, but every row DOES have one, prefilled at HAT fix 5: a global
+   * row defaults to Use an existing vault → Global, a jar row defaults to Create a new jar with
+   * its own name+color already filled in — UNLESS its name matches an existing jar (DD3 rerun-
+   * recovery, HAT fix 7), which instead defaults to Use an existing vault → that jar — so
+   * Commit starts enabled and "Choose…" is never the DISPLAYED value). Per row: Skip / Create a
+   * new jar (jar-sourced rows only) / Use an existing
+   * vault — the destination sub-picker REUSES `buildVaultSelect` (the retiring single-select
+   * flows' builder, per the leg's "never leave it orphaned" note). Choosing an existing
+   * destination probes `hasVault` and, on a real collision, requires an explicit Replace-or-Merge
+   * choice (merge listed first — the calmed, non-destructive default once a mode IS required);
+   * switching the directive away before the probe resolves supersedes it (HAT fix 5) so a late
+   * reply can never re-show the collision block or overwrite the row's now-current state.
    *
    * The global-sourced row (jarMeta === null) never offers "new" (you cannot create a new
    * jar for the manager-wide global vault); on a FRESH profile `existingVaults` is empty
@@ -766,6 +958,11 @@ function init() {
         el('h4', 'vault-mapping-row-title', `${title} (${label.itemCount} item${label.itemCount === 1 ? '' : 's'})`)
       );
 
+      // Each control below is wrapped in the editor's own .vault-field/.vault-field-label
+      // convention (HAT fix 4) — a visible label plus the shared vertical rhythm — instead of
+      // an unlabeled control sitting flush against its neighbor.
+      const directiveField = el('label', 'vault-field');
+      directiveField.appendChild(el('span', 'vault-field-label', 'Action'));
       const directiveSelect = /** @type {HTMLSelectElement} */ (el('select', 'vault-settings-select'));
       directiveSelect.setAttribute('aria-label', `${title} — directive`);
       const placeholder = /** @type {HTMLOptionElement} */ (el('option', undefined, 'Choose…'));
@@ -775,27 +972,61 @@ function init() {
       directiveSelect.appendChild(placeholder);
       appendOption(directiveSelect, 'skip', 'Skip');
       if (!isGlobalSource) appendOption(directiveSelect, 'new', 'Create a new jar');
+      // Jar rows source "existing" destinations from jarRows + jarVaultPresence, not
+      // existingVaults (HAT fix 8 — fixes the fresh-adopt gap where DD2 ruling 3 forces
+      // existingVaults empty). Also resolves HAT-fix-7's rerun match; degrades safely mid-race.
+      const jarDest = isGlobalSource ? null : restoreDestinationOptions(jarRows, jarVaultPresence, label.jarMeta.name);
       const destinationOptions = isGlobalSource
         ? existingVaults.some((v) => v.vaultId === GLOBAL_VAULT_ID)
           ? existingVaults
           : [...existingVaults, { vaultId: GLOBAL_VAULT_ID, label: 'Global (this profile)' }]
-        : existingVaults;
+        : jarDest.options;
       if (destinationOptions.length) appendOption(directiveSelect, 'existing', 'Use an existing vault');
-      row.appendChild(directiveSelect);
+      const matchedExisting = isGlobalSource ? undefined : jarDest.matched;
+      // Prefill a sensible default directive (HAT fix 5, live-walk operator ruling): a global
+      // row always has an 'existing' destination (Global itself, synthesized above when
+      // missing), so it prefills 'existing'→Global; a jar row prefills 'new' (its own
+      // name/color are prefilled below) UNLESS a name-matched residue jar exists, above. No
+      // row is left on the disabled placeholder, so the Action select's DISPLAYED value never
+      // reads "Choose…".
+      directiveSelect.value = isGlobalSource ? 'existing' : matchedExisting ? 'existing' : 'new';
+      directiveField.appendChild(directiveSelect);
+      row.appendChild(directiveField);
 
-      // New-jar fields (name + color), shown only for directive === 'new'.
+      // New-jar fields (name + color), shown only for directive === 'new'. Color is a
+      // dot-swatch picker (HAT fix 4) — mirrors the jars page's own jar-creation idiom instead
+      // of a native <input type=color> rectangle+RGB picker.
       const newJarRow = el('div', 'vault-mapping-newjar-row');
       newJarRow.hidden = true;
+      const nameField = el('label', 'vault-field');
+      nameField.appendChild(el('span', 'vault-field-label', 'Jar name'));
       const nameInput = /** @type {HTMLInputElement} */ (el('input', 'vault-modal-path-input'));
       nameInput.type = 'text';
       nameInput.setAttribute('aria-label', `${title} — new jar name`);
       nameInput.value = label.jarMeta ? label.jarMeta.name : title;
-      const colorInput = /** @type {HTMLInputElement} */ (el('input'));
-      colorInput.type = 'color';
-      colorInput.setAttribute('aria-label', `${title} — new jar color`);
-      colorInput.value = label.jarMeta && isSafeColor(label.jarMeta.color) ? label.jarMeta.color : '#4a90d9';
-      newJarRow.appendChild(nameInput);
-      newJarRow.appendChild(colorInput);
+      nameField.appendChild(nameInput);
+      newJarRow.appendChild(nameField);
+      const initialColor =
+        label.jarMeta && isSafeColor(label.jarMeta.color) ? label.jarMeta.color : NEW_JAR_FALLBACK_COLOR;
+      // selectedColor is captured by the swatch grid's onSelect below and read back in
+      // recompute()'s 'new' branch — the grid has no <input> to read a .value from.
+      let selectedColor = initialColor;
+      const colorField = el('div', 'vault-field');
+      colorField.appendChild(el('span', 'vault-field-label', 'Jar color'));
+      colorField.appendChild(
+        buildColorSwatchGrid(
+          // Mirrors jars-section-controller.js's editColors: the prefilled bundle color rides
+          // as a trailing custom swatch when it isn't already one of the presets.
+          JAR_COLOR_PALETTE.includes(initialColor) ? JAR_COLOR_PALETTE : [...JAR_COLOR_PALETTE, initialColor],
+          initialColor,
+          `${title} — new jar color`,
+          (color) => {
+            selectedColor = color;
+            recompute();
+          }
+        )
+      );
+      newJarRow.appendChild(colorField);
       row.appendChild(newJarRow);
 
       // Destination sub-picker — REUSES buildVaultSelect (the retiring single-select flows'
@@ -805,7 +1036,17 @@ function init() {
       const destSelect = destinationOptions.length
         ? buildVaultSelect(destinationOptions, `${title} — destination`)
         : null;
-      if (destSelect) destRow.appendChild(destSelect);
+      // buildVaultSelect defaults to its first option; a global row's prefilled 'existing'
+      // directive specifically targets Global, and a name-matched jar row's targets ITS
+      // residue jar — neither is necessarily first once other vaults exist in destinationOptions.
+      if (destSelect && isGlobalSource) destSelect.value = GLOBAL_VAULT_ID;
+      else if (destSelect && matchedExisting) destSelect.value = matchedExisting.vaultId;
+      if (destSelect) {
+        const destField = el('label', 'vault-field');
+        destField.appendChild(el('span', 'vault-field-label', 'Destination'));
+        destField.appendChild(destSelect);
+        destRow.appendChild(destField);
+      }
       row.appendChild(destRow);
 
       // Replace-or-Merge — shown only once a real collision is confirmed at the destination.
@@ -818,17 +1059,30 @@ function init() {
           'A vault already exists there. Merge keeps both; Replace destroys the existing one.'
         )
       );
+      const modeField = el('label', 'vault-field');
+      modeField.appendChild(el('span', 'vault-field-label', 'What to do'));
       const modeSelect = /** @type {HTMLSelectElement} */ (el('select', 'vault-settings-select'));
       modeSelect.setAttribute('aria-label', `${title} — replace or merge`);
       appendOption(modeSelect, 'merge', 'Merge (keep both, mark conflicts)');
       appendOption(modeSelect, 'replace', 'Replace (destroy the existing vault)');
-      modeRow.appendChild(modeSelect);
+      modeField.appendChild(modeSelect);
+      modeRow.appendChild(modeField);
       row.appendChild(modeRow);
+
+      // Bumped on every recompute() call so a hasVault probe that resolves AFTER this row has
+      // since moved on (directive switched away, or switched to a different destination) drops
+      // its result instead of clobbering the row's current state (HAT fix 5, live-walk finding):
+      // a Skip/New row could flip back to a stale 'existing'+collision-block display when an
+      // in-flight probe from a PRIOR 'existing' selection landed late.
+      let probeGeneration = 0;
 
       function probeDestinationCollision() {
         const destination = /** @type {HTMLSelectElement} */ (destSelect).value;
+        const myGeneration = probeGeneration;
+        const stale = () => myGeneration !== probeGeneration;
         Promise.resolve(bridge.hasVault(destination))
           .then((r) => {
+            if (stale()) return;
             const collision = !!(r && r.present);
             modeRow.hidden = !collision;
             rowState.set(label.sourceId, {
@@ -840,6 +1094,7 @@ function init() {
             updateCommitEnabled();
           })
           .catch(() => {
+            if (stale()) return;
             // Fail-safe: never silently allow a destructive replace when the probe itself failed.
             modeRow.hidden = false;
             rowState.set(label.sourceId, {
@@ -853,6 +1108,10 @@ function init() {
       }
 
       function recompute() {
+        // Superseding a prior probe happens FIRST, and the visible controls below swap
+        // synchronously — the row never waits on the (fire-and-forget, never awaited) probe to
+        // repaint. HAT fix 5's lag re-check confirmed this path has no synchronous IPC wait.
+        probeGeneration++;
         const v = directiveSelect.value;
         newJarRow.hidden = v !== 'new';
         destRow.hidden = v !== 'existing';
@@ -865,7 +1124,7 @@ function init() {
           const name = nameInput.value.trim();
           rowState.set(label.sourceId, {
             directive: 'new',
-            newJar: { name, color: isSafeColor(colorInput.value) ? colorInput.value : '#4a90d9' },
+            newJar: { name, color: isSafeColor(selectedColor) ? selectedColor : NEW_JAR_FALLBACK_COLOR },
             complete: name.length > 0
           });
           updateCommitEnabled();
@@ -881,7 +1140,9 @@ function init() {
       }
       directiveSelect.addEventListener('change', recompute);
       nameInput.addEventListener('input', recompute);
-      colorInput.addEventListener('input', recompute);
+      // The color swatch grid's onSelect already calls recompute() directly on click — no
+      // separate change/input listener needed here (one fewer per-row hook than the old
+      // native-input approach).
       destSelect?.addEventListener('change', recompute);
       modeSelect.addEventListener('change', () => {
         const s = rowState.get(label.sourceId);
@@ -915,7 +1176,7 @@ function init() {
             pendingImportRecord = null; // the commit consumed the record either way.
             if (res && res.ok) {
               handle.close();
-              openCompletionModal(res, record.labels);
+              openCompletionModal(res);
               return;
             }
             handle.setStatus(
@@ -943,32 +1204,19 @@ function init() {
    * The restore completion surface (DD2 ruling 3(e); DD11: reflects post-restore state
    * without a manual reload — this modal renders directly from the commit reply, and a fresh
    * adopt's unlock broadcast independently re-queries state for the rest of the page). Lists
-   * each bundle vault's outcome by its friendly label (from the mapping step's own labels — no
-   * source id shown raw). A fresh adopt's one-time recovery key + the DD7 sever offer are
-   * surfaced main-side (the dismiss-locked recovery-show sheet, the Settings sever card) — this
-   * modal shows no secret, ever.
+   * each bundle vault's outcome (raw sourceId/destination — non-secret post-authorization,
+   * `restoreOutcomeLines` doc) INCLUDING merge detail, so a dedup-only merge (DD4) reads as
+   * legibly-empty rather than silently "Restored" (HAT fix 11). A fresh adopt's one-time
+   * recovery key + the DD7 sever offer are surfaced main-side (the dismiss-locked recovery-show
+   * sheet, the Settings sever card) — this modal shows no secret, ever.
    * @param {{ fresh?: boolean, results?: Array<{ sourceId: string, outcome: string, destination?: string, mergeReport?: { imported: number, skippedIdentical: number, conflictCopies: number } }> }} result
-   * @param {Array<{ sourceId: string, jarMeta: { name: string, color: string } | null }>} labels
    */
-  function openCompletionModal(result, labels) {
-    const nameById = new Map(labels.map((l) => [l.sourceId, l.jarMeta ? l.jarMeta.name : 'Global']));
-    const OUTCOME_TEXT = {
-      landed: 'Restored',
-      skipped: 'Skipped',
-      'collision-refused': 'Skipped — a vault already exists there',
-      failed: 'Could not be restored'
-    };
+  function openCompletionModal(result) {
     const body = el('div', 'vault-modal-form');
     const list = el('ul', 'vault-mapping-outcomes');
-    for (const row of result.results || []) {
+    for (const line of restoreOutcomeLines(result.results)) {
       const li = el('li');
-      const name = nameById.get(row.sourceId) || row.sourceId;
-      const outcomeText = /** @type {any} */ (OUTCOME_TEXT)[row.outcome] || row.outcome;
-      let text = `${name}: ${outcomeText}`;
-      if (row.mergeReport) {
-        text += ` — ${row.mergeReport.imported} added, ${row.mergeReport.skippedIdentical} already present, ${row.mergeReport.conflictCopies} kept as marked copies`;
-      }
-      li.textContent = text;
+      li.textContent = line.text;
       list.appendChild(li);
     }
     body.appendChild(list);
@@ -1199,8 +1447,8 @@ function init() {
    * auto-lock + import + master-key management (with the compromise entry at its bottom).
    * While LOCKED: unlock/recover banner + auto-lock (settingsGet works without the MRK) +
    * the compromise entry below the Auto-lock block (R4 amendment). The persistent
-   * compromise completion card renders in BOTH states when a report is held (R8); the DD7
-   * sever offer card likewise renders in BOTH states when an offer is held.
+   * compromise completion card renders in BOTH states when a report is held (R8). The DD7
+   * sever offer card (HAT fix 9) sits at the TOP of Settings, above Auto-lock, as an info panel.
    * Carries the reserved section id `vault-settings` (the nav's top entry jumps here).
    * @param {{ mode: string, vaults: Array<{ vaultId: string, label: string }>, adminProvisioned: boolean, compromiseReport: ({ admin: boolean, vaultIds: string[] } | null), severOffer: ({ route: 'change-master' | 'recover' } | null) }} view
    * @returns {HTMLElement}
@@ -1218,6 +1466,9 @@ function init() {
       section.appendChild(buildLockedBanner());
     }
 
+    // DD7 (HAT fix 9): sever card moved to the TOP of Settings, above Auto-lock, as an info panel — persists in BOTH lock states.
+    if (view.severOffer) section.appendChild(buildSeverOfferCard(view.severOffer));
+
     // Manager-wide auto-lock — both states (a plain settings read/write; needs no MRK).
     // "Lock now" now lives INLINE beside the auto-lock dropdown (unlocked only — locking
     // is global and needs an unlocked manager), so the old top-of-Settings actions row is gone.
@@ -1230,8 +1481,6 @@ function init() {
       // The persistent "Everything rotated" card (R8) — above Master-key management,
       // matching the ruled prototype placement.
       if (view.compromiseReport) section.appendChild(buildCompromiseCard(view.compromiseReport, view.vaults));
-      // DD7: the post-fresh-adopt sever offer card — persists across BOTH lock states.
-      if (view.severOffer) section.appendChild(buildSeverOfferCard(view.severOffer));
       // Master-key management — change master / rotate recovery / admin rotate-provision +
       // the compromise entry at its bottom (R2). Each routes to a chrome-owned sheet; NO
       // master-equivalent secret here (DD5).
@@ -1241,7 +1490,6 @@ function init() {
       // consistent bottom-of-Settings placement — preceded by the persistent card when a
       // report is held (the card renders regardless of the lock state the page lands in).
       if (view.compromiseReport) section.appendChild(buildCompromiseCard(view.compromiseReport, view.vaults));
-      if (view.severOffer) section.appendChild(buildSeverOfferCard(view.severOffer));
       section.appendChild(buildCompromiseEntry());
     }
     return section;
@@ -1412,15 +1660,17 @@ function init() {
   }
 
   /**
-   * The "Import / Export" Settings subsection (M12 F5 HAT, I14; UNIFIED restore workflow +
-   * whole-profile export, M18 F3 L3 / DD2/DD1 ruling 7). A heading + a one-line lede + EXACTLY
-   * two buttons: "Import…" (the restore pick modal → the chrome-owned secret sheet → this
-   * page's mapping modal) and "Export…" (the whole-profile export modal). NO master-equivalent
-   * secret is entered on this page — the restore's source secret stays on the chrome-owned
-   * vault-import-unlock sheet; export is ciphertext-only + fully main-side (DD2/DD5). When a
-   * labels-bearing record is still held (ruling 9's resume affordance — a broadcast force-closed
-   * the mapping modal before commit), a "Resume restore" banner re-enters mapping with NO secret
-   * re-entry. `textContent`-only.
+   * The "Import / Export" Settings subsection (M12 F5 HAT, I14; UNIFIED restore workflow,
+   * M18 F3 L3 / DD2; Export modal restored to a source CHOICE, M18 F3 L4 HAT fix 1 — leg 3's
+   * ruling 7 made it whole-profile-only, the operator vetoed that at the HAT). A heading + a
+   * one-line lede + EXACTLY two buttons: "Import…" (the restore pick modal → the chrome-owned
+   * secret sheet → this page's mapping modal) and "Export…" (the Export modal — whole profile
+   * by DEFAULT per the mission ruling, or a single vault per the operator's veto). NO
+   * master-equivalent secret is entered on this page — the restore's source secret stays on
+   * the chrome-owned vault-import-unlock sheet; export is ciphertext-only + fully main-side
+   * (DD2/DD5). When a labels-bearing record is still held (ruling 9's resume affordance — a
+   * broadcast force-closed the mapping modal before commit), a "Resume restore" banner
+   * re-enters mapping with NO secret re-entry. `textContent`-only.
    * @param {Array<{ vaultId: string, label: string }>} vaults
    * @returns {HTMLElement}
    */
@@ -1431,7 +1681,7 @@ function init() {
       el(
         'p',
         'vault-lede',
-        'Import vaults from a portable bundle, or export this whole profile to a file. You’ll pick the file location in a dialog; for import you’ll enter the source master password or recovery key on a secure prompt, then choose where each vault lands.'
+        'Import vaults from a portable bundle, or export this whole profile — or a single vault — to a file. You’ll pick the file location in a dialog; for import you’ll enter the source master password or recovery key on a secure prompt, then choose where each vault lands.'
       )
     );
 
@@ -1445,7 +1695,7 @@ function init() {
 
     const row = el('div', 'vault-settings-row');
     row.appendChild(button('Import…', 'vault-btn', () => openImportPickModal()));
-    row.appendChild(button('Export…', 'vault-btn', () => openExportProfileModal()));
+    row.appendChild(button('Export…', 'vault-btn', () => openExportModal(vaults)));
     section.appendChild(row);
     return section;
   }
@@ -2476,9 +2726,8 @@ function init() {
   }
 
   /**
-   * Fetch the current vault state + jar rows (for the nav dots) + the held-import labels cache
-   * (M18 F3 L3 / DD2 ruling 9's resume affordance) and render. All three are non-secret metadata
-   * reads that work regardless of vault lock state.
+   * Fetch vault state + jar rows (nav dots) + the held-import labels cache (DD2 ruling 9) +
+   * each jar's vault presence (HAT fix 8, precomputed — never a per-open probe), then render.
    */
   function refresh() {
     if (!window.goldfinchInternal) return;
@@ -2490,7 +2739,15 @@ function init() {
       .then(([state, jars, importRecord]) => {
         jarRows = Array.isArray(jars) ? jars : [];
         pendingImportRecord = importRecord && importRecord.labels ? importRecord : null;
-        render(state);
+        const countById = new Map((Array.isArray(state?.vaults) ? state.vaults : []).map((v) => [v.vaultId, v.count]));
+        const presenceFor = (id) =>
+          Promise.resolve(bridge.hasVault(id))
+            .then((r) => [id, { hasVault: !!(r && r.present), count: countById.get(id) }])
+            .catch(() => [id, { hasVault: false, count: countById.get(id) }]);
+        return Promise.all(jarRows.map((j) => presenceFor(typeof j.id === 'string' ? j.id : ''))).then((pairs) => {
+          jarVaultPresence = Object.fromEntries(pairs);
+          render(state);
+        });
       })
       .catch(() => {});
   }

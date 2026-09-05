@@ -150,6 +150,74 @@ test("FRESH restore: jar-id RECONCILIATION — a bundle jar's slug colliding wit
   }
 });
 
+test("FRESH restore: a single 'new' directive invokes the injected createJar EXACTLY ONCE, yielding exactly one destination jar (HAT fix 7 diagnosis — no double-create) — M18 F3 L4", async () => {
+  // The operator's exact live-walk shape: a 3-vault bundle (global, personal, test) restored
+  // onto a genuinely CLEAN profile with personal→new, test→skip, global→existing global. A
+  // symptom reported at the HAT ("2 Personal jars, one empty") turned out to be a test-harness
+  // artifact (a zombie process resurrecting a residue jar row — see the flight log's Leg 4 HAT
+  // anomaly entry), not a store defect; this pins the invariant the trace confirmed: the store
+  // (vault-store.js's `_restoreProfile`) calls its injected `createJar` dep at most once per
+  // 'new' directive, in a single un-looped pass over the mapping — never once from main.js (it
+  // only wires `createJar` as a constructor dependency, main.js:802, and never calls jars.add
+  // itself) and never twice from the store.
+  const srcDir = tmpDir();
+  const srcDeps = makeJarDeps([
+    { id: 'personal', name: 'Personal', color: '#2196f3', partition: 'persist:container:personal', retentionDays: 30 },
+    { id: 'test', name: 'Test', color: '#4caf50', partition: 'persist:container:test', retentionDays: 30 }
+  ]);
+  let bundle;
+  try {
+    const src = makeStore(srcDir, srcDeps);
+    await src.setup({ masterPassword: MASTER });
+    src.saveItem('global', { type: 'login', title: 'Global', username: 'g', password: 'gp' });
+    src.saveItem('personal', { type: 'login', title: 'PersonalItem', username: 'p', password: 'pp' });
+    src.saveItem('test', { type: 'login', title: 'TestItem', username: 't', password: 'tp' });
+    bundle = src.exportProfile();
+  } finally {
+    rm(srcDir);
+  }
+
+  const freshDir = tmpDir();
+  try {
+    const freshDeps = makeJarDeps(); // a genuinely CLEAN registry — no residue jars.
+    let createJarCalls = 0;
+    const countingCreateJar = (name, color) => {
+      createJarCalls++;
+      return freshDeps.createJar(name, color);
+    };
+    const fresh = vs.load(freshDir, {
+      scryptParams: FAST_SCRYPT,
+      listJars: freshDeps.listJars,
+      createJar: countingCreateJar,
+      verifyJarPersisted: freshDeps.verifyJarPersisted
+    });
+    const res = await fresh.restoreProfile(JSON.parse(JSON.stringify(bundle)), {
+      secret: Buffer.from(MASTER, 'utf8'),
+      secretKind: 'master',
+      mapping: {
+        global: { directive: 'existing', destination: 'global' },
+        personal: { directive: 'new', newJar: { name: 'Personal', color: '#2196f3' } },
+        test: { directive: 'skip' }
+      }
+    });
+    assert.equal(res.fresh, true);
+    assert.equal(createJarCalls, 1, 'createJar invoked exactly once for the single new directive');
+    assert.equal(freshDeps.containers.length, 1, 'exactly one jar exists on the destination profile');
+    assert.equal(freshDeps.containers[0].name, 'Personal');
+    const personalRow = res.results.find((r) => r.sourceId === 'personal');
+    assert.equal(personalRow.outcome, 'landed');
+    assert.equal(
+      personalRow.destination,
+      freshDeps.containers[0].id,
+      'the vault landed under the ONE jar that was created, not a second empty one'
+    );
+    assert.equal(fresh.listItems(personalRow.destination)[0].password, 'pp');
+    assert.equal(res.results.find((r) => r.sourceId === 'test').outcome, 'skipped');
+  } finally {
+    rm(freshDir);
+  }
+});
+
 test("FRESH restore: ruling 3's ban on non-global 'existing' destinations falls out of _resolveTarget — a truly fresh profile's empty jar registry admits ONLY 'global', refused BEFORE any write", async () => {
   const src = await makeSourceProfile();
   try {
