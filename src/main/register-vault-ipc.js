@@ -347,22 +347,30 @@ function registerVaultIpc({
   // ruling; the per-vault source select is retired from that modal. Mirrors internal-vault-export
   // byte-for-byte (exportProfile requires unlocked → VaultLockedError → { locked: true }; the
   // bundle never transits to the page), differing only in WHICH store method builds the bundle
-  // and in carrying `carried` (the source ids actually landed — lazy jars absent by design) on a
-  // successful write, so the page's completion surface can state which vaults were exported. The
-  // jars page's delete-time single-vault export (`exportVault`/internal-vault-export) is
-  // UNTOUCHED — a deliberately separate, intentional caller. Gated on vaultSaveBundle.
+  // and in carrying `carried` on a successful write, so the page's completion surface can state
+  // which vaults were exported. The jars page's delete-time single-vault export
+  // (`exportVault`/internal-vault-export) is UNTOUCHED — a deliberately separate, intentional
+  // caller. Gated on vaultSaveBundle.
+  //
+  // M18 F3 L5 (ruling 4c): `exportProfile()` now returns `{ bundle, carried }` — `carried` is a
+  // MAIN-PROCESS-ONLY parallel list of the real jar/Global NAMES (built by the store from its own
+  // pre-encryption local enumeration), never a bundle-vault id/handle. It is NEVER attached to
+  // `bundle` before the save call, so it can never be serialized into the bundle file — only
+  // `bundle` itself is handed to `vaultSaveBundle`. The reply forwards `carried` as-is; the page
+  // (`vault.js:634-654`) consumes it directly as names, no id→name lookup needed any more (the
+  // bundle's own vaults now carry opaque entryHandles, not name-slug ids).
   if (vaultSaveBundle) {
     registerInternalHandler(ipcMain, 'internal-vault-export-profile', async (_event, savePath) => {
-      let bundle;
+      let built;
       try {
-        bundle = getVaultStore().exportProfile();
+        built = getVaultStore().exportProfile();
       } catch (err) {
         if (err instanceof VaultLockedError) return { locked: true };
         throw err;
       }
-      const res = await vaultSaveBundle(bundle, typeof savePath === 'string' ? savePath : undefined);
+      const res = await vaultSaveBundle(built.bundle, typeof savePath === 'string' ? savePath : undefined);
       if (res && res.ok) {
-        return { ...res, carried: bundle.vaults.map((/** @type {any} */ v) => v.sourceId) };
+        return { ...res, carried: built.carried };
       }
       return res;
     });

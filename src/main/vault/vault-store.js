@@ -99,15 +99,21 @@ const READABLE_MANAGER_VERSIONS = new Set([MANAGER_VERSION, MANAGER_VERSION_V2])
 // OWNS this format independently of the gfmanager / gfvault version spaces.
 const BUNDLE_FORMAT = 'gfvault-bundle';
 const BUNDLE_VERSION = 1;
-// The whole-profile, multi-vault bundle format (M18 F3 Leg 2 / DD1 ruling 2):
-// `{ format, version: 2, managerVersion, kdf, mrk:{master,recovery,admin?},
-// adminPublicKeyB64?, vaults: [{ sourceId, jarMeta?, vault }] }` — every jar
-// entry's `jarMeta` ({name,color}) rides as CIPHERTEXT (see `encryptJarMeta`/
-// `decryptJarMeta` below), keyed off the bundle MRK. `exportVault`/`importVault`
-// (single-vault, BUNDLE_VERSION) are UNCHANGED this leg; `exportProfile`/
-// `restoreProfile` are the new v2 entry points. `restoreProfile` additionally
-// ACCEPTS a v1 bundle (normalized to a one-row v2 shape internally — ruling 9);
-// `importVault`'s own gate stays v1-only — it never learns v2 exists.
+// The whole-profile, multi-vault bundle format (M18 F3 Leg 2 / DD1 ruling 2;
+// re-shaped M18 F3 Leg 5 to close a plaintext-identity leak — see the
+// identity/entryHandle section below): `{ format, version: 2, managerVersion,
+// kdf, mrk:{master,recovery,admin?}, adminPublicKeyB64?, vaults: [{ entryHandle,
+// identity, vault }] }` — the entry KEY is an opaque `entryHandle` (a random
+// token carrying no identity — NOT the old plaintext `sourceId`, which was a
+// jar name-slug); EVERY entry's `identity` (`{kind:'global'}` or
+// `{kind:'jar',name,color}`, including the global vault) rides as CIPHERTEXT
+// (see `encryptIdentity`/`decryptIdentity` below), keyed off the bundle MRK and
+// AAD-bound to its own entryHandle. `exportVault`/`importVault` (single-vault,
+// BUNDLE_VERSION) are UNCHANGED this leg; `exportProfile`/`restoreProfile` are
+// the v2 entry points. `restoreProfile` additionally ACCEPTS a v1 bundle
+// (normalized to a one-row v2 shape internally, with a PLAINTEXT tagged
+// synthetic identity — ruling 5 below); `importVault`'s own gate stays
+// v1-only — it never learns v2 exists.
 const BUNDLE_VERSION_V2 = 2;
 
 // The item types this store recognizes. vault-crypto treats items as opaque
@@ -242,80 +248,162 @@ function mrkEnvelopeAad(version) {
 }
 
 // ---------------------------------------------------------------------------
-// jarMeta — the bundle v2 encrypted jar identity (M18 F3 Leg 2 / DD1 ruling 2).
-// A jar's PORTABLE identity (`{ name, color }` — everything else on the jar
-// record is destination-local) rides in the bundle as ciphertext keyed off the
-// bundle MRK, via the EXPORTED generic primitives (`deriveHkdfKey` +
-// `wrapVaultKey`/`unwrapVaultKey`, `vault-crypto.js`) — no new crypto surface,
-// mirroring the `mrkEnvelopeAad` local-helper idiom above. `restoreProfile`
-// itself never reads jarMeta (cycle-1 review question 3, ruled): it consumes
-// the explicit `mapping[].newJar.{name,color}` the mapping step supplies;
-// `decryptJarMeta` is exported for THAT (leg 3's) pre-mapping label step.
+// entryHandle + identity — the bundle v2 opaque entry key + encrypted identity
+// (M18 F3 Leg 2 / DD1 ruling 2; RE-DESIGNED M18 F3 Leg 5 to close a plaintext-
+// identity leak found at the flight's HAT — the entry key WAS `sourceId`, a
+// plaintext jar name-slug, so a bundle file exposed jar names before the
+// bundle secret was ever entered). Two changes from the leg-2 shape:
+//   1. The entry KEY is now an opaque `entryHandle` (a random token minted at
+//      export, carrying no identity) instead of the plaintext sourceId.
+//   2. Real identity — `{kind:'global'}` or `{kind:'jar',name,color}` — moves
+//      INSIDE the encrypted per-entry `identity` field, present on EVERY
+//      entry including global (leg-2's jarMeta was jar-only). Nothing
+//      plaintext in an entry reveals identity OR even which entry is global.
+// `identity` rides in the bundle as ciphertext keyed off the bundle MRK, via
+// the EXPORTED generic primitives (`deriveHkdfKey` + `wrapVaultKey`/
+// `unwrapVaultKey`, `vault-crypto.js`) — no new crypto surface, mirroring the
+// `mrkEnvelopeAad` local-helper idiom above. `restoreProfile` itself never
+// reads `identity` (cycle-1 review question 3, ruled, unchanged this leg): it
+// consumes the explicit `mapping[].newJar.{name,color}` the mapping step
+// supplies; `decryptIdentity` is exported for leg 3's pre-mapping label step.
 // ---------------------------------------------------------------------------
 
-const JARMETA_SALT_BYTES = 16;
-// Domain-separation label for the jarMeta wrapping-key HKDF derive — distinct
-// from every vault-crypto internal HKDF info string (recovery/access/admin),
-// so a jarMeta key can never collide with an envelope wrapping key even though
-// both derive from key material an attacker might control (the bundle MRK is
-// never attacker-controlled, but domain separation is cheap and correct).
-const JARMETA_HKDF_INFO = Buffer.from('gfvault-bundle/jarMeta', 'utf8');
+// Width of a minted entryHandle: 16 random bytes (128 bits), hex-encoded — the
+// `vault-crypto.js` `serializeVault` vaultId precedent (`crypto.randomBytes(16)
+// .toString('hex')`). Carries no identity; uniqueness is mint-and-check
+// (`_exportProfile` below), not relied on structurally.
+const ENTRY_HANDLE_BYTES = 16;
 
-/**
- * AAD for a jarMeta envelope: binds the bundle context + the vault's sourceId
- * (the `mrkEnvelopeAad` idiom) — a jarMeta envelope spliced onto a DIFFERENT
- * bundle vault entry fails GCM authentication rather than silently relabeling.
- * @param {string} sourceId
- * @returns {Buffer}
- */
-function jarMetaAad(sourceId) {
-  return Buffer.from(`gfvault-bundle/jarMeta/${sourceId}`, 'utf8');
+/** @returns {string} a fresh opaque per-entry bundle token. */
+function mintEntryHandle() {
+  return crypto.randomBytes(ENTRY_HANDLE_BYTES).toString('hex');
 }
 
 /**
- * Encrypt a jar's portable identity for the bundle. Ruling 2's requirement:
- * NOTHING human-readable about a jar may appear in a bundle before the bundle
- * secret is entered — a byte-scan of the serialized bundle must find no name
- * or color string.
+ * The v1-normalization entryHandle (ruling 5): DETERMINISTIC, not random, unlike
+ * `mintEntryHandle` above — `normalizeRestoreBundle` runs independently at
+ * `previewRestoreBundle` and again at `restoreProfile` for the SAME held v1
+ * bundle (main.js's `pending.bundle` is passed to both, unmutated), so the
+ * mapping key the preview step hands the operator must be the SAME key
+ * `restoreProfile` computes later, or the commit's `_validateRestoreMapping`
+ * would reject it as unknown. A v1 bundle's `sourceVaultId` is already
+ * plaintext (ruling 5's documented legacy posture), so determinism costs
+ * nothing here that opacity would have bought anyway.
+ * @param {string} sourceVaultId
+ * @returns {string}
+ */
+function v1EntryHandle(sourceVaultId) {
+  return crypto.createHash('sha256').update(`gfvault-bundle/v1-entry/${sourceVaultId}`).digest('hex').slice(0, 32);
+}
+
+const IDENTITY_SALT_BYTES = 16;
+// Domain-separation label for the identity wrapping-key HKDF derive — distinct
+// from every vault-crypto internal HKDF info string (recovery/access/admin),
+// so an identity key can never collide with an envelope wrapping key even
+// though both derive from key material an attacker might control (the bundle
+// MRK is never attacker-controlled, but domain separation is cheap and
+// correct).
+const IDENTITY_HKDF_INFO = Buffer.from('gfvault-bundle/identity', 'utf8');
+
+/**
+ * AAD for an identity envelope: binds the bundle context + the entry's OPAQUE
+ * entryHandle (the `mrkEnvelopeAad` idiom, rebased off the handle rather than
+ * the old plaintext sourceId — ruling 3) — an identity envelope spliced onto a
+ * DIFFERENT bundle entry fails GCM authentication rather than silently
+ * relabeling. Since the handle is itself the plaintext entry key, this keeps
+ * the exact splice protection the old sourceId-bound AAD gave, but the AAD
+ * string now leaks nothing (a random token, not a name).
+ * @param {string} entryHandle
+ * @returns {Buffer}
+ */
+function entryIdentityAad(entryHandle) {
+  return Buffer.from(`gfvault-bundle/meta/${entryHandle}`, 'utf8');
+}
+
+/**
+ * Encrypt an entry's identity for the bundle. Ruling 2's requirement: NOTHING
+ * human-readable about a jar (or which entry is global) may appear in a
+ * bundle before the bundle secret is entered — a byte-scan of the serialized
+ * bundle must find no name or color string, for ANY entry.
  * @param {Buffer} mrk  the LIVE bundle/profile MRK.
- * @param {string} sourceId
- * @param {{ name: string, color: string }} meta
+ * @param {string} entryHandle
+ * @param {{ kind: 'global' } | { kind: 'jar', name: string, color: string }} identity
  * @returns {{ salt: string, iv: string, ct: string, tag: string }}
  */
-function encryptJarMeta(mrk, sourceId, meta) {
-  const salt = crypto.randomBytes(JARMETA_SALT_BYTES);
-  const key = vc.deriveHkdfKey(mrk, salt, JARMETA_HKDF_INFO);
-  const blob = vc.wrapVaultKey(Buffer.from(JSON.stringify(meta), 'utf8'), key, jarMetaAad(sourceId));
+function encryptIdentity(mrk, entryHandle, identity) {
+  const salt = crypto.randomBytes(IDENTITY_SALT_BYTES);
+  const key = vc.deriveHkdfKey(mrk, salt, IDENTITY_HKDF_INFO);
+  const blob = vc.wrapVaultKey(Buffer.from(JSON.stringify(identity), 'utf8'), key, entryIdentityAad(entryHandle));
   return { salt: salt.toString('base64'), ...blob };
 }
 
 /**
- * Decrypt a bundle vault entry's jarMeta (leg 3's pre-mapping label step — NOT
+ * Decrypt a bundle entry's identity (leg 3's pre-mapping label step — NOT
  * called by `restoreProfile`, ruling 2's split). A tampered envelope (wrong
- * bundle MRK, altered ciphertext, or an AAD mismatch from a spliced sourceId)
- * fails GCM authentication LOUDLY — never a silent unnamed jar (the "lone
- * jarMeta tamper" edge case).
+ * bundle MRK, altered ciphertext, or an AAD mismatch from a spliced
+ * entryHandle) fails GCM authentication LOUDLY — never a silent unnamed jar
+ * (the "lone identity tamper" edge case). Rejects a v1 legacy PLAINTEXT
+ * synthetic identity (`identityPlaintext: true`, ruling 5) — that shape is
+ * used as-is by its caller and must never reach this decrypt path; a v2 entry
+ * can never legitimately carry that tag (normalize never copies it from an
+ * incoming bundle — see `normalizeRestoreBundle`), so a v2 entry that DOES is
+ * refused loudly rather than silently trusted (the tag-smuggling regression
+ * this closes).
  * @param {Buffer} mrk  the LIVE bundle MRK (already authenticated by the bundle secret).
- * @param {string} sourceId
- * @param {{ salt: string, iv: string, ct: string, tag: string }} envelope
- * @returns {{ name: string, color: string }}
+ * @param {string} entryHandle
+ * @param {{ salt: string, iv: string, ct: string, tag: string, identityPlaintext?: boolean }} envelope
+ * @returns {{ kind: 'global' } | { kind: 'jar', name: string, color: string }}
  */
-function decryptJarMeta(mrk, sourceId, envelope) {
+function decryptIdentity(mrk, entryHandle, envelope) {
+  if (envelope && typeof envelope === 'object' && envelope.identityPlaintext === true) {
+    throw new vc.VaultFormatError('vault-store: a v2 identity envelope must not carry identityPlaintext');
+  }
   if (!envelope || typeof envelope !== 'object' || typeof envelope.salt !== 'string') {
-    throw new vc.VaultFormatError('vault-store: jarMeta envelope missing salt');
+    throw new vc.VaultFormatError('vault-store: identity envelope missing salt');
   }
-  const key = vc.deriveHkdfKey(mrk, Buffer.from(envelope.salt, 'base64'), JARMETA_HKDF_INFO);
-  const plain = vc.unwrapVaultKey(envelope, key, jarMetaAad(sourceId));
-  let meta;
+  const key = vc.deriveHkdfKey(mrk, Buffer.from(envelope.salt, 'base64'), IDENTITY_HKDF_INFO);
+  const plain = vc.unwrapVaultKey(envelope, key, entryIdentityAad(entryHandle));
+  let identity;
   try {
-    meta = JSON.parse(plain.toString('utf8'));
+    identity = JSON.parse(plain.toString('utf8'));
   } catch {
-    throw new vc.VaultFormatError('vault-store: jarMeta did not decrypt to valid JSON');
+    throw new vc.VaultFormatError('vault-store: identity did not decrypt to valid JSON');
   }
-  if (!meta || typeof meta !== 'object' || typeof meta.name !== 'string' || typeof meta.color !== 'string') {
-    throw new vc.VaultFormatError('vault-store: jarMeta has an invalid shape');
+  if (!identity || typeof identity !== 'object') {
+    throw new vc.VaultFormatError('vault-store: identity has an invalid shape');
   }
-  return meta;
+  if (identity.kind === 'global') return { kind: 'global' };
+  if (identity.kind === 'jar' && typeof identity.name === 'string' && typeof identity.color === 'string') {
+    return { kind: 'jar', name: identity.name, color: identity.color };
+  }
+  throw new vc.VaultFormatError('vault-store: identity has an invalid shape');
+}
+
+/**
+ * The UNIFORM identity-resolution step (ruling 5): distinguishes a v1 legacy
+ * PLAINTEXT synthetic identity from a real v2 ENCRYPTED envelope by the
+ * caller-supplied `identityPlaintext` flag alone — NOT shape-sniffing, and
+ * NOT by inspecting `identity` itself (a field inside `identity` is
+ * attacker-controlled data on a v2 entry; `identityPlaintext` is instead
+ * read off the NORMALIZED ENTRY, where `normalizeRestoreBundle`'s v2
+ * extraction structurally cannot produce it — see that function's SECURITY
+ * comment). The plaintext branch is used AS-IS (there is no mrk to decrypt
+ * under yet at normalize time); everything else goes through
+ * `decryptIdentity`, which independently refuses an envelope carrying the
+ * tag (defense-in-depth against a v2 entry smuggling it into `identity`).
+ * @param {Buffer} mrk
+ * @param {string} entryHandle
+ * @param {any} identity
+ * @param {boolean} [identityPlaintext]  from the NORMALIZED ENTRY (`entry.identityPlaintext === true`), never from `identity` itself.
+ * @returns {{ kind: 'global' } | { kind: 'jar', name: string, color?: string }}
+ */
+function resolveIdentity(mrk, entryHandle, identity, identityPlaintext) {
+  if (identityPlaintext === true) {
+    return identity.kind === 'global'
+      ? { kind: 'global' }
+      : { kind: 'jar', name: identity.name, color: identity.color };
+  }
+  return decryptIdentity(mrk, entryHandle, identity);
 }
 
 /**
@@ -522,17 +610,48 @@ function validateBundleEnvelope(bundle) {
 }
 
 // ---------------------------------------------------------------------------
-// restoreProfile's v1/v2 normalization (M18 F3 Leg 2 / DD1 ruling 9). A v1
+// restoreProfile's v1/v2 normalization (M18 F3 Leg 2 / DD1 ruling 9;
+// RE-DESIGNED M18 F3 Leg 5 ruling 5 for the opaque-entryHandle shape). A v1
 // bundle is the "one-row case" of the same flow: its single `sourceVaultId` +
-// `vault` become a one-entry `vaults` array with no jarMeta. Runs BEFORE
-// `validateBundleEnvelope` (format/version-specific shape first, then the
-// shared envelope rules). Never mutates the input bundle.
+// `vault` become a one-entry `vaults` array with a DETERMINISTIC entryHandle
+// (`v1EntryHandle` — NOT `mintEntryHandle`'s random token: the SAME v1 bundle
+// is normalized independently at preview AND at commit, so the mapping key
+// must be stable across both calls) and a PLAINTEXT synthetic `identity` (v1
+// has no ciphertext identity to decrypt — normalize runs BEFORE the mrk
+// exists, so it cannot produce ciphertext), tagged `identityPlaintext: true`
+// on the ENTRY itself (a SIBLING of `identity`/`entryHandle`/`vault` — NOT
+// nested inside `identity`) — the explicit internal tag the uniform
+// `resolveIdentity` step uses to skip `decryptIdentity` and use the value
+// as-is — NOT shape-sniffing.
+//
+// SECURITY (ruling 5, tag-smuggling foreclosed — cycle-1 correction: the tag
+// MUST live at the entry level, not inside `identity`, or this protection
+// does nothing): this function writes `identityPlaintext: true` ONLY on the
+// v1 synthetic path below and NEVER reads it from the incoming (untrusted)
+// bundle. The v2 branch below extracts its entry fields with EXPLICIT NAMED
+// FIELDS (`{ entryHandle: e.entryHandle, identity: e.identity, vault:
+// e.vault }`) — NEVER a `{...e}` spread, and critically OMITTING
+// `identityPlaintext` entirely — so an incoming v2 JSON entry's own
+// top-level `identityPlaintext` field (an attacker can set anything at the
+// top level) is structurally DROPPED by the extraction, never copied to the
+// normalized output; it can never reach `resolveIdentity`'s routing
+// decision, so a v2 entry can never bypass AAD-authenticated decrypt this
+// way. (Nesting the tag inside `identity` instead does NOT work: identity
+// rides through the extraction wholesale, `identity: e.identity`, so a tag
+// nested there would survive untouched; `decryptIdentity`'s own defensive
+// refusal of an envelope carrying the tag is the remaining backstop for
+// exactly that shape.) The normalized bundle this function returns is
+// consumed in-memory only — never re-serialized or written back to disk —
+// so the tag never reaches a file.
+//
+// Runs BEFORE `validateBundleEnvelope` (format/version-specific shape first,
+// then the shared envelope rules). Never mutates the input bundle.
 // ---------------------------------------------------------------------------
 
 /**
  * @param {any} bundle
  * @returns {{ managerVersion?: any, kdf: any, mrk: any, adminPublicKeyB64?: any,
- *   vaults: Array<{ sourceId: string, jarMeta?: any, vault: any }> }}
+ *   vaults: Array<{ entryHandle: string, identity: any, identityPlaintext?: true, vault: any }> }}
  */
 function normalizeRestoreBundle(bundle) {
   if (!bundle || typeof bundle !== 'object' || Array.isArray(bundle)) {
@@ -548,12 +667,30 @@ function normalizeRestoreBundle(bundle) {
     if (bundle.vault === undefined) {
       throw new vc.VaultFormatError('vault-store: v1 bundle missing its vault document');
     }
+    // v1 carried no color, and its "identity" is just the plaintext sourceVaultId
+    // itself — an unchangeable property of the old format (documented, not
+    // "fixed" in v1; the leak-closure below is a v2-only guarantee).
+    //
+    // SECURITY: `identityPlaintext` lives on the ENTRY itself (a SIBLING of
+    // `identity`, `entryHandle`, `vault`) — NOT nested inside the `identity`
+    // value. That placement is load-bearing: the v2 branch's explicit named-
+    // field extraction below builds `{ entryHandle, identity, vault }` and
+    // nothing else, so an incoming v2 JSON entry's own top-level
+    // `identityPlaintext` field (however an attacker sets it) is structurally
+    // DROPPED, never copied to the normalized output. Nesting the tag inside
+    // `identity` instead would have let it ride through untouched (identity
+    // is passed through wholesale, `identity: e.identity`) — a smuggling path
+    // this exact placement forecloses.
+    const identity =
+      bundle.sourceVaultId === GLOBAL_ID ? { kind: 'global' } : { kind: 'jar', name: bundle.sourceVaultId };
     return {
       managerVersion: bundle.managerVersion,
       kdf: bundle.kdf,
       mrk: bundle.mrk,
       adminPublicKeyB64: bundle.adminPublicKeyB64,
-      vaults: [{ sourceId: bundle.sourceVaultId, vault: bundle.vault }]
+      vaults: [
+        { entryHandle: v1EntryHandle(bundle.sourceVaultId), identity, identityPlaintext: true, vault: bundle.vault }
+      ]
     };
   }
   if (bundle.version === BUNDLE_VERSION_V2) {
@@ -562,15 +699,23 @@ function normalizeRestoreBundle(bundle) {
     }
     const seen = new Set();
     for (const entry of bundle.vaults) {
-      if (!entry || typeof entry !== 'object' || typeof entry.sourceId !== 'string' || entry.sourceId.length === 0) {
-        throw new vc.VaultFormatError('vault-store: v2 bundle vault entry missing sourceId');
+      if (
+        !entry ||
+        typeof entry !== 'object' ||
+        typeof entry.entryHandle !== 'string' ||
+        entry.entryHandle.length === 0
+      ) {
+        throw new vc.VaultFormatError('vault-store: v2 bundle vault entry missing entryHandle');
       }
-      if (seen.has(entry.sourceId)) {
-        throw new vc.VaultFormatError(`vault-store: v2 bundle has a duplicate sourceId "${entry.sourceId}"`);
+      if (seen.has(entry.entryHandle)) {
+        throw new vc.VaultFormatError(`vault-store: v2 bundle has a duplicate entryHandle "${entry.entryHandle}"`);
       }
-      seen.add(entry.sourceId);
+      seen.add(entry.entryHandle);
+      if (entry.identity === undefined) {
+        throw new vc.VaultFormatError(`vault-store: v2 bundle vault "${entry.entryHandle}" missing its identity`);
+      }
       if (entry.vault === undefined) {
-        throw new vc.VaultFormatError(`vault-store: v2 bundle vault "${entry.sourceId}" missing its vault document`);
+        throw new vc.VaultFormatError(`vault-store: v2 bundle vault "${entry.entryHandle}" missing its vault document`);
       }
     }
     return {
@@ -578,9 +723,12 @@ function normalizeRestoreBundle(bundle) {
       kdf: bundle.kdf,
       mrk: bundle.mrk,
       adminPublicKeyB64: bundle.adminPublicKeyB64,
+      // Explicit named-field extraction — NEVER `{...e}` (ruling 5's security
+      // requirement above): a v2 JSON entry can carry arbitrary extra keys, and
+      // spreading would let `identityPlaintext: true` ride through untouched.
       vaults: bundle.vaults.map((/** @type {any} */ e) => ({
-        sourceId: e.sourceId,
-        jarMeta: e.jarMeta,
+        entryHandle: e.entryHandle,
+        identity: e.identity,
         vault: e.vault
       }))
     };
@@ -1811,16 +1959,39 @@ class VaultStore {
 
   /**
    * Build a v2 portable bundle for the WHOLE profile (M18 F3 Leg 2 / DD1 ruling
-   * 2): the global vault plus every JAR vault that EXISTS on disk (a lazy,
-   * never-saved jar vault is simply absent — the `vaults` array names exactly
-   * what was carried), each jar entry's identity (`{name,color}`) riding as an
-   * ENCRYPTED `jarMeta` envelope (`encryptJarMeta` above) so nothing
-   * human-readable about a jar appears before the bundle secret is entered.
+   * 2; RE-DESIGNED M18 F3 Leg 5 to close the plaintext-identity leak): the
+   * global vault plus every JAR vault that EXISTS on disk (a lazy, never-saved
+   * jar vault is simply absent — the `vaults` array names exactly what was
+   * carried), each entry keyed by a fresh opaque `entryHandle` and carrying its
+   * identity (`{kind:'global'}` or `{kind:'jar',name,color}`, EVERY entry, not
+   * jar-only) as an ENCRYPTED `identity` envelope (`encryptIdentity` above,
+   * AAD-bound to the entryHandle) so nothing human-readable — including which
+   * entry is global — appears before the bundle secret is entered.
+   *
+   * Returns `{ bundle, carried }`: `bundle` is the file-shaped object (pass
+   * straight to the save path); `carried` is a MAIN-PROCESS-ONLY, PARALLEL list
+   * of the real jar/Global NAMES actually carried, in the SAME order as
+   * `bundle.vaults` (ruling 4c) — built from the same local `listJars()` +
+   * GLOBAL enumeration this method already walks, in the SAME loop iteration as
+   * each entry, pushed AFTER the lazy `if (doc === null) continue` so its
+   * length/order exactly matches `bundle.vaults` and it never names an
+   * uncarried jar. `carried` is NEVER part of `bundle` and must NEVER be
+   * serialized into the bundle file — callers use it only for an in-app
+   * notice (e.g. the export-completion surface's "Exported N vaults: …").
+   *
+   * Each embedded `.gfvault` document also has its OWN plaintext `vaultId`
+   * field (set to the LOCAL id at write time) SCRUBBED to the entry's own
+   * `entryHandle` before embedding — that field is otherwise a second,
+   * independent leak of the exact identity this method's `identity` ciphertext
+   * exists to hide (found while adding ruling 6's name==slug byte-scan) and
+   * plays no role downstream (`_restoreProfile`/`_previewRestoreBundle` never
+   * read `doc.vaultId`).
+   *
    * GATED + the same unlock-window POLICY as `exportVault` (ruling 8 / DD10).
    * NO write, NO password argument (every input is already on disk).
-   * @returns {{ format: string, version: number, managerVersion: number, kdf: any,
+   * @returns {{ bundle: { format: string, version: number, managerVersion: number, kdf: any,
    *   mrk: { master: any, recovery: any, admin?: any }, adminPublicKeyB64?: string,
-   *   vaults: Array<{ sourceId: string, jarMeta?: any, vault: any }> }}
+   *   vaults: Array<{ entryHandle: string, identity: any, vault: any }> }, carried: string[] }}
    */
   exportProfile() {
     const releaseOp = this._enterGatedOp();
@@ -1839,33 +2010,60 @@ class VaultStore {
     const m = this._readManager();
     const hasAdmin = m.mrk.admin !== undefined;
     const jars = this.listJars().filter((j) => j.id !== GLOBAL_ID);
-    const sourceIds = [GLOBAL_ID, ...jars.map((j) => j.id)];
+    const localIds = [GLOBAL_ID, ...jars.map((j) => j.id)];
     const jarById = new Map(jars.map((j) => [j.id, j]));
-    /** @type {Array<{ sourceId: string, jarMeta?: any, vault: any }>} */
+    /** @type {Array<{ entryHandle: string, identity: any, vault: any }>} */
     const vaults = [];
-    for (const sourceId of sourceIds) {
-      const doc = this._readVault(sourceId);
+    /** @type {string[]} */
+    const carried = [];
+    // Ruling 1: entryHandle is unique WITHIN A BUNDLE — mint-and-check (16 random
+    // bytes makes a real collision astronomically unlikely, but the invariant is
+    // asserted rather than merely assumed).
+    const usedHandles = new Set();
+    for (const localId of localIds) {
+      const doc = this._readVault(localId);
       if (doc === null) continue; // lazy vault — absent by design.
-      /** @type {{ sourceId: string, jarMeta?: any, vault: any }} */
-      const entry = { sourceId, vault: doc };
-      if (sourceId !== GLOBAL_ID) {
-        const jar = /** @type {{ id: string, name: string, color: string }} */ (jarById.get(sourceId));
-        entry.jarMeta = encryptJarMeta(mrk, sourceId, { name: jar.name, color: jar.color });
+      let entryHandle = mintEntryHandle();
+      while (usedHandles.has(entryHandle)) entryHandle = mintEntryHandle();
+      usedHandles.add(entryHandle);
+      /** @type {{ kind: 'global' } | { kind: 'jar', name: string, color: string }} */
+      let identity;
+      if (localId === GLOBAL_ID) {
+        identity = { kind: 'global' };
+        carried.push('Global');
+      } else {
+        const jar = /** @type {{ id: string, name: string, color: string }} */ (jarById.get(localId));
+        identity = { kind: 'jar', name: jar.name, color: jar.color };
+        carried.push(jar.name);
       }
-      vaults.push(entry);
+      // SECURITY (found while testing ruling 6's name==slug byte-scan): the on-disk
+      // `.gfvault` document carries its OWN plaintext `vaultId` field (set to the
+      // LOCAL id at write time — `_writeVault`), which duplicates the exact leak
+      // this leg closes one level down. That field plays no role downstream —
+      // `_restoreProfile`/`_previewRestoreBundle` read `doc.envelopes`/`doc.items`/
+      // `doc.version` only, never `doc.vaultId` — so it is scrubbed to the entry's
+      // own opaque `entryHandle` before embedding, never the raw local id.
+      vaults.push({
+        entryHandle,
+        identity: encryptIdentity(mrk, entryHandle, identity),
+        vault: { ...doc, vaultId: entryHandle }
+      });
     }
     return {
-      format: BUNDLE_FORMAT,
-      version: BUNDLE_VERSION_V2,
-      managerVersion: m.version,
-      kdf: m.kdf,
-      mrk: {
-        master: m.mrk.master,
-        recovery: m.mrk.recovery,
-        ...(hasAdmin ? { admin: m.mrk.admin } : {})
+      bundle: {
+        format: BUNDLE_FORMAT,
+        version: BUNDLE_VERSION_V2,
+        managerVersion: m.version,
+        kdf: m.kdf,
+        mrk: {
+          master: m.mrk.master,
+          recovery: m.mrk.recovery,
+          ...(hasAdmin ? { admin: m.mrk.admin } : {})
+        },
+        ...(hasAdmin ? { adminPublicKeyB64: m.adminPublicKeyB64 } : {}),
+        vaults
       },
-      ...(hasAdmin ? { adminPublicKeyB64: m.adminPublicKeyB64 } : {}),
-      vaults
+      carried
     };
   }
 
@@ -2094,19 +2292,19 @@ class VaultStore {
   // -------------------------------------------------------------------------
 
   /**
-   * Validate a restore's per-sourceId directive mapping against the bundle's
-   * vault list — STRUCTURAL legality — entirely BEFORE any crypto or write
-   * (the loud, pre-write edge cases: an unknown sourceId in the mapping, a
-   * bundle vault with no mapping entry — "every row demands an explicit
-   * directive"). Ruling 3's fresh-profile restriction ("only 'new'/'skip'/
-   * global→global on a fresh profile") falls out of `_resolveTarget` itself —
-   * a truly fresh profile's `listJars()` is empty, so no non-global
-   * destination resolves — WITHOUT an extra fresh-specific gate here, which
-   * would otherwise make the adopt-rerun residue recovery path (ruling 4: a
-   * failed fresh adopt's created-but-unadopted jars stay mappable as
-   * 'existing' destinations on rerun, while `isSetUp()` is still false)
-   * unreachable. Touches neither disk nor crypto.
-   * @param {Array<{ sourceId: string }>} vaults
+   * Validate a restore's per-entryHandle directive mapping against the
+   * bundle's vault list — STRUCTURAL legality — entirely BEFORE any crypto or
+   * write (the loud, pre-write edge cases: an unknown entryHandle in the
+   * mapping, a bundle vault with no mapping entry — "every row demands an
+   * explicit directive"). Ruling 3's fresh-profile restriction ("only
+   * 'new'/'skip'/global→global on a fresh profile") falls out of
+   * `_resolveTarget` itself — a truly fresh profile's `listJars()` is empty,
+   * so no non-global destination resolves — WITHOUT an extra fresh-specific
+   * gate here, which would otherwise make the adopt-rerun residue recovery
+   * path (ruling 4: a failed fresh adopt's created-but-unadopted jars stay
+   * mappable as 'existing' destinations on rerun, while `isSetUp()` is still
+   * false) unreachable. Touches neither disk nor crypto.
+   * @param {Array<{ entryHandle: string }>} vaults
    * @param {any} mapping
    * @returns {void}
    */
@@ -2114,32 +2312,32 @@ class VaultStore {
     if (!mapping || typeof mapping !== 'object' || Array.isArray(mapping)) {
       throw new VaultStateError('vault-store: restore mapping must be an object');
     }
-    const bundleIds = new Set(vaults.map((v) => v.sourceId));
+    const bundleIds = new Set(vaults.map((v) => v.entryHandle));
     for (const key of Object.keys(mapping)) {
       if (!bundleIds.has(key)) {
-        throw new VaultStateError(`vault-store: restore mapping references unknown sourceId "${key}"`);
+        throw new VaultStateError(`vault-store: restore mapping references unknown entryHandle "${key}"`);
       }
     }
-    for (const { sourceId } of vaults) {
-      const directive = mapping[sourceId];
+    for (const { entryHandle } of vaults) {
+      const directive = mapping[entryHandle];
       if (!directive || typeof directive !== 'object') {
-        throw new VaultStateError(`vault-store: restore mapping is missing a directive for "${sourceId}"`);
+        throw new VaultStateError(`vault-store: restore mapping is missing a directive for "${entryHandle}"`);
       }
       if (directive.directive !== 'existing' && directive.directive !== 'new' && directive.directive !== 'skip') {
-        throw new VaultStateError(`vault-store: restore mapping has an invalid directive for "${sourceId}"`);
+        throw new VaultStateError(`vault-store: restore mapping has an invalid directive for "${entryHandle}"`);
       }
       if (directive.directive === 'new') {
         const nj = directive.newJar;
         if (!nj || typeof nj !== 'object' || typeof nj.name !== 'string' || typeof nj.color !== 'string') {
           throw new VaultStateError(
-            `vault-store: restore mapping's 'new' directive for "${sourceId}" needs a valid newJar`
+            `vault-store: restore mapping's 'new' directive for "${entryHandle}" needs a valid newJar`
           );
         }
       }
       if (directive.directive === 'existing') {
         if (typeof directive.destination !== 'string' || directive.destination.length === 0) {
           throw new VaultStateError(
-            `vault-store: restore mapping's 'existing' directive for "${sourceId}" needs a destination`
+            `vault-store: restore mapping's 'existing' directive for "${entryHandle}" needs a destination`
           );
         }
         // Resolve NOW (loud, pre-write) — an unknown/burner/non-existent jar id refuses
@@ -2155,7 +2353,7 @@ class VaultStore {
         this._resolveTarget(directive.destination);
       }
       if (directive.mode !== undefined && directive.mode !== 'replace' && directive.mode !== 'merge') {
-        throw new VaultStateError(`vault-store: restore mapping has an invalid mode for "${sourceId}"`);
+        throw new VaultStateError(`vault-store: restore mapping has an invalid mode for "${entryHandle}"`);
       }
     }
   }
@@ -2166,7 +2364,7 @@ class VaultStore {
    * SINGLE-FLIGHT guarded (ruling 7) in addition to the re-key gate (ruling 8).
    * @param {any} bundle
    * @param {{ secret: Buffer, secretKind?: 'master'|'recovery', mapping: any }} opts
-   * @returns {Promise<{ fresh: boolean, results: Array<{ sourceId: string,
+   * @returns {Promise<{ fresh: boolean, results: Array<{ entryHandle: string,
    *   outcome: 'landed'|'skipped'|'collision-refused'|'failed', destination?: string,
    *   mergeReport?: { imported: number, skippedIdentical: number, conflictCopies: number } }>,
    *   generation: { completedAt: number, nonce: string }, recoveryKeyDisplay?: string }>}
@@ -2221,9 +2419,9 @@ class VaultStore {
       const doc = vc.parseVault(typeof entry.vault === 'string' ? entry.vault : JSON.stringify(entry.vault));
       const mrkEnv = doc.envelopes.find((/** @type {any} */ e) => e.keyId === 'mrk');
       if (!mrkEnv) {
-        throw new vc.VaultFormatError(`vault-store: bundle vault "${entry.sourceId}" missing mrk envelope`);
+        throw new vc.VaultFormatError(`vault-store: bundle vault "${entry.entryHandle}" missing mrk envelope`);
       }
-      return { sourceId: entry.sourceId, doc, mrkEnv };
+      return { entryHandle: entry.entryHandle, doc, mrkEnv };
     });
 
     if (!fresh) {
@@ -2243,15 +2441,15 @@ class VaultStore {
       mrk = await vc.unwrapMaster(normalized.mrk.master, secret, { version: managerVersion, params: normalized.kdf });
     }
 
-    /** @type {Array<{ sourceId: string, outcome: 'landed'|'skipped'|'collision-refused'|'failed',
+    /** @type {Array<{ entryHandle: string, outcome: 'landed'|'skipped'|'collision-refused'|'failed',
      *   destination?: string, mergeReport?: { imported: number, skippedIdentical: number, conflictCopies: number } }>} */
     const results = [];
     let anyFailed = false;
     try {
-      for (const { sourceId, doc, mrkEnv } of parsedVaults) {
-        const directive = mapping[sourceId];
+      for (const { entryHandle, doc, mrkEnv } of parsedVaults) {
+        const directive = mapping[entryHandle];
         if (directive.directive === 'skip') {
-          results.push({ sourceId, outcome: 'skipped' });
+          results.push({ entryHandle, outcome: 'skipped' });
           continue;
         }
 
@@ -2267,7 +2465,7 @@ class VaultStore {
           const created = this._createJar(directive.newJar.name, directive.newJar.color);
           const verified = this._verifyJarPersisted(created.id);
           if (!verified) {
-            results.push({ sourceId, outcome: 'failed' });
+            results.push({ entryHandle, outcome: 'failed' });
             anyFailed = true;
             break; // per-vault atomicity + rerun (ruling 4) — stop; later entries untouched.
           }
@@ -2278,7 +2476,7 @@ class VaultStore {
 
         const destExists = fs.existsSync(this._vaultPath(destId));
         if (destExists && !directive.mode) {
-          results.push({ sourceId, outcome: 'collision-refused', destination: destId });
+          results.push({ entryHandle, outcome: 'collision-refused', destination: destId });
           continue;
         }
 
@@ -2322,7 +2520,7 @@ class VaultStore {
             }
           }
           results.push({
-            sourceId,
+            entryHandle,
             outcome: 'landed',
             destination: destId,
             ...(mergeReport ? { mergeReport } : {})
@@ -2378,9 +2576,9 @@ class VaultStore {
    * project a non-secret whitelist). Runs `validateImportedItems` on EVERY bundle
    * vault's decrypted plaintext (cycle-2 HIGH): a malformed-plaintext vault must fail
    * HERE, at the secret step where nothing is written — never mid-commit after
-   * earlier vaults already landed. jarMeta (present for jar vaults only) is decrypted
-   * via `decryptJarMeta` for display; a tamper there fails loudly (that helper's own
-   * contract), never a silent unnamed jar.
+   * earlier vaults already landed. `identity` (present on EVERY entry, including
+   * global — M18 F3 L5) is resolved via `resolveIdentity` for display; a tamper
+   * there fails loudly (that helper's own contract), never a silent unnamed jar.
    *
    * Gated via `_enterGatedOp` — NOT for `exportVault`'s local-read rationale (preview
    * touches no local vault state) but so an operator cannot START a multi-step import
@@ -2388,7 +2586,7 @@ class VaultStore {
    * (that guard belongs to `restoreProfile`, which writes) — a preview never mutates.
    * @param {any} bundle
    * @param {{ secret: Buffer, secretKind?: 'master'|'recovery' }} opts
-   * @returns {Promise<{ labels: Array<{ sourceId: string, jarMeta: { name: string, color: string } | null, itemCount: number }> }>}
+   * @returns {Promise<{ labels: Array<{ entryHandle: string, identity: { kind: 'global' } | { kind: 'jar', name: string, color?: string }, itemCount: number }> }>}
    */
   async previewRestoreBundle(bundle, opts = /** @type {any} */ ({})) {
     const releaseOp = this._enterGatedOp();
@@ -2418,9 +2616,19 @@ class VaultStore {
       const doc = vc.parseVault(typeof entry.vault === 'string' ? entry.vault : JSON.stringify(entry.vault));
       const mrkEnv = doc.envelopes.find((/** @type {any} */ e) => e.keyId === 'mrk');
       if (!mrkEnv) {
-        throw new vc.VaultFormatError(`vault-store: bundle vault "${entry.sourceId}" missing mrk envelope`);
+        throw new vc.VaultFormatError(`vault-store: bundle vault "${entry.entryHandle}" missing mrk envelope`);
       }
-      return { sourceId: entry.sourceId, jarMeta: entry.jarMeta, doc, mrkEnv };
+      return {
+        entryHandle: entry.entryHandle,
+        identity: entry.identity,
+        // Read off the NORMALIZED ENTRY (never `entry.identity.identityPlaintext` —
+        // ruling 5's tag-smuggling fix): `normalizeRestoreBundle`'s v2 extraction
+        // structurally cannot produce this field, so it is `true` only for the v1
+        // synthetic path.
+        identityPlaintext: entry.identityPlaintext === true,
+        doc,
+        mrkEnv
+      };
     });
 
     // ---- bundle-secret crypto (auth) ----
@@ -2438,15 +2646,15 @@ class VaultStore {
 
     try {
       const labels = [];
-      for (const { sourceId, jarMeta, doc, mrkEnv } of parsedVaults) {
+      for (const { entryHandle, identity, identityPlaintext, doc, mrkEnv } of parsedVaults) {
         let vaultKey = null;
         try {
           // Ruling 11's per-iteration discipline: at most one bundle vault key live at a time.
           vaultKey = vc.unwrapVaultKey(mrkEnv, mrk, mrkEnvelopeAad(doc.version));
           const items = validateImportedItems(vc.decryptItems(doc.items, vaultKey));
           labels.push({
-            sourceId,
-            jarMeta: jarMeta !== undefined ? decryptJarMeta(mrk, sourceId, jarMeta) : null,
+            entryHandle,
+            identity: resolveIdentity(mrk, entryHandle, identity, identityPlaintext),
             itemCount: items.length
           });
           // The decrypted item objects themselves are dropped by scope here (JS strings, not
@@ -3306,8 +3514,10 @@ module.exports = {
   // schema and the decrypted-item-array guard are unit-tested directly.
   validateImportedKdf,
   validateImportedItems,
-  // M18 F3 Leg 2 (DD1 ruling 2): the bundle v2 jarMeta decrypt helper — leg 3's
-  // pre-mapping label step consumes this directly; unit-tested here (including
-  // the tamper → loud auth/format error case).
-  decryptJarMeta
+  // M18 F3 Leg 2 (DD1 ruling 2); renamed + re-scoped M18 F3 Leg 5 (every entry,
+  // not jar-only, keyed on entryHandle not sourceId): the bundle v2 identity
+  // decrypt helper — leg 3's pre-mapping label step consumes this directly;
+  // unit-tested here (including the tamper → loud auth/format error case, and
+  // the identityPlaintext-tag-smuggling regression pin).
+  decryptIdentity
 };

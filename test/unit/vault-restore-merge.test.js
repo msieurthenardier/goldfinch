@@ -37,6 +37,13 @@ function makeStore(dir, jars = []) {
   return vs.load(dir, { scryptParams: FAST_SCRYPT, listJars: () => jars, now: () => 1000 });
 }
 
+// M18 F3 L5: mapping/results key on the bundle's OPAQUE entryHandle now, not the old
+// plaintext sourceId. Every fixture in this file uses a single 'work' jar, so
+// bundle.vaults is always [global, work] (`_exportProfile`'s deterministic order).
+function entriesOf(bundle) {
+  return { global: bundle.vaults[0].entryHandle, work: bundle.vaults[1].entryHandle };
+}
+
 test('merge: all three counter classes in ONE scenario (identical id+content skips, diverged id lands as a MARKED copy under a fresh id, disjoint ids coexist) — zero data loss', async () => {
   const jars = [{ id: 'work', name: 'Work', color: '#000', partition: 'persist:container:work', retentionDays: 30 }];
 
@@ -100,14 +107,18 @@ test('merge: all three counter classes in ONE scenario (identical id+content ski
   });
 
   try {
-    const bundle = src.exportProfile();
+    const { bundle } = src.exportProfile();
+    const entries = entriesOf(bundle);
     const res = await dest.restoreProfile(JSON.parse(JSON.stringify(bundle)), {
       secret: Buffer.from(MASTER, 'utf8'),
       secretKind: 'master',
-      mapping: { global: { directive: 'skip' }, work: { directive: 'existing', destination: 'work', mode: 'merge' } }
+      mapping: {
+        [entries.global]: { directive: 'skip' },
+        [entries.work]: { directive: 'existing', destination: 'work', mode: 'merge' }
+      }
     });
 
-    const workRow = res.results.find((r) => r.sourceId === 'work');
+    const workRow = res.results.find((r) => r.entryHandle === entries.work);
     assert.equal(workRow.outcome, 'landed');
     assert.deepEqual(workRow.mergeReport, { imported: 1, skippedIdentical: 1, conflictCopies: 1 });
 
@@ -153,13 +164,17 @@ test('merge: an EMPTY destination vault (lazily created by the merge itself) —
   src.saveItem('work', { type: 'login', title: 'B', username: 'b', password: 'bp' });
 
   try {
-    const bundle = src.exportProfile();
+    const { bundle } = src.exportProfile();
+    const entries = entriesOf(bundle);
     const res = await dest.restoreProfile(JSON.parse(JSON.stringify(bundle)), {
       secret: Buffer.from(MASTER, 'utf8'),
       secretKind: 'master',
-      mapping: { global: { directive: 'skip' }, work: { directive: 'existing', destination: 'work', mode: 'merge' } }
+      mapping: {
+        [entries.global]: { directive: 'skip' },
+        [entries.work]: { directive: 'existing', destination: 'work', mode: 'merge' }
+      }
     });
-    const workRow = res.results.find((r) => r.sourceId === 'work');
+    const workRow = res.results.find((r) => r.entryHandle === entries.work);
     assert.equal(workRow.outcome, 'landed');
     assert.equal('mergeReport' in workRow, false, 'a no-collision landing carries no mergeReport');
     assert.equal(dest.listItems('work').length, 2);
@@ -188,21 +203,28 @@ test('merge: byte-identical content INCLUDES timestamps — a genuinely re-resto
   });
 
   try {
-    const bundle = src.exportProfile();
+    const { bundle } = src.exportProfile();
+    const entries = entriesOf(bundle);
     // First restore lands it fresh into the destination (no collision — the jar has no
     // vault yet), then a SECOND restore of the SAME bundle over the SAME destination
     // (now WITH a vault) exercises the identical-content skip path exactly.
     await dest.restoreProfile(JSON.parse(JSON.stringify(bundle)), {
       secret: Buffer.from(MASTER, 'utf8'),
       secretKind: 'master',
-      mapping: { global: { directive: 'skip' }, work: { directive: 'existing', destination: 'work' } }
+      mapping: {
+        [entries.global]: { directive: 'skip' },
+        [entries.work]: { directive: 'existing', destination: 'work' }
+      }
     });
     const res2 = await dest.restoreProfile(JSON.parse(JSON.stringify(bundle)), {
       secret: Buffer.from(MASTER, 'utf8'),
       secretKind: 'master',
-      mapping: { global: { directive: 'skip' }, work: { directive: 'existing', destination: 'work', mode: 'merge' } }
+      mapping: {
+        [entries.global]: { directive: 'skip' },
+        [entries.work]: { directive: 'existing', destination: 'work', mode: 'merge' }
+      }
     });
-    const workRow = res2.results.find((r) => r.sourceId === 'work');
+    const workRow = res2.results.find((r) => r.entryHandle === entries.work);
     assert.deepEqual(workRow.mergeReport, { imported: 0, skippedIdentical: 1, conflictCopies: 0 });
     assert.equal(dest.listItems('work').length, 1, 'no duplicate created for a byte-identical re-restore');
   } finally {

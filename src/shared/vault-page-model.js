@@ -213,7 +213,7 @@ function vaultNavEntries(vaults, jars) {
  *
  * @param {Array<{ id?: unknown, name?: unknown }>} [jars]  jarRows — the full persistent-jar list.
  * @param {Record<string, { hasVault?: unknown, count?: unknown }>} [presenceById]
- * @param {string} [bundleName]  the bundle row's jarMeta.name, for the rerun-recovery match.
+ * @param {string} [bundleName]  the bundle row's identity.name, for the rerun-recovery match.
  * @returns {{ options: Array<{ vaultId: string, label: string }>, matched: { vaultId: string, label: string } | undefined }}
  */
 function restoreDestinationOptions(jars, presenceById, bundleName) {
@@ -248,44 +248,66 @@ function restoreDestinationOptions(jars, presenceById, bundleName) {
 
 /**
  * Build the restore completion modal's per-vault outcome display lines (M18 F3 L4, HAT fix
- * 11). Extracted so the pure results→display-strings mapping is unit-testable without a DOM —
- * vault.js's completion render just maps over these (vault.js sits at its line-budget ceiling
- * per the leg-4 HAT log; see the `vaultNavEntries`/`restoreDestinationOptions` precedent above).
+ * 11; RE-KEYED M18 F3 L5 to close the bundle identity leak). Extracted so the pure
+ * results→display-strings mapping is unit-testable without a DOM — vault.js's completion
+ * render just maps over these (vault.js sits at its line-budget ceiling per the leg-4 HAT log;
+ * see the `vaultNavEntries`/`restoreDestinationOptions` precedent above).
  *
  * The operator feedback this closes: after a merge commit, the completion surface didn't say
  * per-vault whether items were actually imported or deduped — an operator merging a vault that
  * turned out to be identical to the destination (DD4: same-id-identical-content items skip)
  * saw only "Restored" with no indication the merge legitimately imported nothing new.
  *
- * `sourceId`/`destination` are shown AS-IS — the bundle's own vault id and the resolved
- * destination jar id, both non-secret at this point (this surface renders strictly
+ * M18 F3 L5: the commit reply's per-vault key is now the bundle's opaque `entryHandle` — a
+ * random token, not the old plaintext `sourceId` (a jar name-slug) HAT fix 11 originally leaned
+ * on to display "as-is". An entryHandle is NEVER shown to the operator: this function takes a
+ * SECOND argument, `labels` (the mapping step's decrypted per-entry labels, `{entryHandle,
+ * identity,itemCount}` — vault.js passes `record.labels`, in closure from the mapping modal's
+ * `onSubmit`), and joins each result's entryHandle to its decrypted display NAME (`'Global'` for
+ * `identity.kind === 'global'`, else `identity.name`) before rendering. `destination` is still
+ * shown AS-IS — the resolved LOCAL destination jar id the OPERATOR chose at the mapping step,
+ * never anything from the bundle — exactly as before (this surface renders strictly
  * post-authorization, after the operator has already supplied the bundle secret and committed
- * the restore — the flight log's "HAT finding: bundle v2 leaks jar identity via plaintext
- * sourceId" concerns the UNAUTHENTICATED bundle file, not this post-commit display; see leg 4's
- * "HAT fix 2's copy change ... is unaffected — that surface is post-authorization" ruling, which
- * applies identically here). No friendly-name lookup: this function takes only the raw
- * `results` array, matching the commit reply's own shape one-for-one.
+ * the restore).
  *
- * Each malformed/missing entry is defensive: an entry with no string `sourceId` is dropped, a
+ * Each malformed/missing entry is defensive: an entry with no string `entryHandle` is dropped, a
  * missing/non-string `destination` renders with no arrow, an unrecognized `outcome` falls back
  * to echoing the raw value (or 'unknown'), and every `mergeReport` field coerces to `0` rather
  * than rendering `NaN`/`undefined`. `conflictCopies` is mentioned only when it is > 0 (the
  * common case — a clean dedup-only merge, the operator's exact reported scenario — reads as
- * just "N new, M already present" with no trailing zero-copies clause).
+ * just "N new, M already present" with no trailing zero-copies clause). A result whose
+ * entryHandle has no matching label (a defensive fallback, not an expected path — the mapping
+ * step's labels and the commit reply's results are always the same bundle) falls back to the
+ * generic "a vault" rather than ever surfacing the raw entryHandle.
  *
- * @param {Array<{ sourceId?: unknown, outcome?: unknown, destination?: unknown, mergeReport?: { imported?: unknown, skippedIdentical?: unknown, conflictCopies?: unknown } | unknown }>} [results]
- * @returns {Array<{ sourceId: string, text: string }>}
+ * @param {Array<{ entryHandle?: unknown, outcome?: unknown, destination?: unknown, mergeReport?: { imported?: unknown, skippedIdentical?: unknown, conflictCopies?: unknown } | unknown }>} [results]
+ * @param {Array<{ entryHandle?: unknown, identity?: unknown }>} [labels]
+ * @returns {Array<{ entryHandle: string, text: string }>}
  */
-function restoreOutcomeLines(results) {
+function restoreOutcomeLines(results, labels) {
   const list = Array.isArray(results) ? results : [];
-  /** @type {Array<{ sourceId: string, text: string }>} */
+  /** @type {Map<string, string>} */
+  const nameByHandle = new Map();
+  for (const l of Array.isArray(labels) ? labels : []) {
+    if (!l || typeof l !== 'object' || typeof l.entryHandle !== 'string' || !l.entryHandle) continue;
+    const identity = l.identity && typeof l.identity === 'object' ? /** @type {any} */ (l.identity) : null;
+    const name =
+      identity && identity.kind === 'global'
+        ? 'Global'
+        : identity && typeof identity.name === 'string' && identity.name
+          ? identity.name
+          : 'a vault';
+    nameByHandle.set(l.entryHandle, name);
+  }
+
+  /** @type {Array<{ entryHandle: string, text: string }>} */
   const lines = [];
   for (const r of list) {
-    if (!r || typeof r !== 'object' || typeof r.sourceId !== 'string' || !r.sourceId) continue;
-    const sourceId = r.sourceId;
+    if (!r || typeof r !== 'object' || typeof r.entryHandle !== 'string' || !r.entryHandle) continue;
+    const entryHandle = r.entryHandle;
+    const name = nameByHandle.get(entryHandle) || 'a vault';
     const destination = typeof r.destination === 'string' && r.destination ? r.destination : null;
-    const withDest = (/** @type {string} */ suffix) =>
-      `${sourceId}${destination ? ` → ${destination}` : ''}: ${suffix}`;
+    const withDest = (/** @type {string} */ suffix) => `${name}${destination ? ` → ${destination}` : ''}: ${suffix}`;
 
     let text;
     if (r.outcome === 'landed') {
@@ -305,13 +327,13 @@ function restoreOutcomeLines(results) {
     } else if (r.outcome === 'collision-refused') {
       text = withDest('not restored (a vault already exists; choose Replace or Merge)');
     } else if (r.outcome === 'skipped') {
-      text = `${sourceId}: skipped`;
+      text = `${name}: skipped`;
     } else if (r.outcome === 'failed') {
-      text = `${sourceId}: failed`;
+      text = `${name}: failed`;
     } else {
-      text = `${sourceId}: ${typeof r.outcome === 'string' && r.outcome ? r.outcome : 'unknown'}`;
+      text = `${name}: ${typeof r.outcome === 'string' && r.outcome ? r.outcome : 'unknown'}`;
     }
-    lines.push({ sourceId, text });
+    lines.push({ entryHandle, text });
   }
   return lines;
 }

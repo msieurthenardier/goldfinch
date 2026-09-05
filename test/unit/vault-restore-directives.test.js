@@ -1,14 +1,25 @@
 'use strict';
 
 // Unit tests for restoreProfile()'s per-vault DIRECTIVE / OUTCOME matrix
-// (M18 F3 Leg 2 / flight DD2/DD3): existing (replace, collision-refused),
-// new (create-then-verify, jar-id reconciliation), skip, mapping-validation
-// edge cases, and the single-flight guard (DD3 ruling 7). Merge is its own
-// suite (vault-restore-merge.test.js); fault injection is its own suite
+// (M18 F3 Leg 2 / flight DD2/DD3; RE-KEYED M18 F3 Leg 5 to the opaque
+// entryHandle): existing (replace, collision-refused), new (create-then-verify,
+// jar-id reconciliation), skip, mapping-validation edge cases, and the
+// single-flight guard (DD3 ruling 7). Merge is its own suite
+// (vault-restore-merge.test.js); fault injection is its own suite
 // (vault-restore-fault-injection.test.js); export-side shape/gate coverage
 // lives in vault-bundle-v2.test.js.
 //
 // Electron-free: real temp dirs + FAST scrypt.
+//
+// M18 F3 L5 note: `mapping` now keys on the bundle's OPAQUE `entryHandle`, not
+// the old plaintext `sourceId` — a test can no longer write `mapping: {
+// global: ..., work: ... }` directly. `makeSourceProfile()` below resolves
+// and returns the entryHandles POSITIONALLY: `_exportProfile`'s own
+// enumeration order is GLOBAL_ID first, then jars in `listJars()` order,
+// skipping any lazy-absent vault (`vault-store.js`) — deterministic, so a
+// fixture that saves into every declared jar can rely on `bundle.vaults[]`
+// mirroring that order 1:1. Tests reference `src.entries.global` /
+// `src.entries.work` instead of the raw strings.
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -75,8 +86,10 @@ async function makeSourceProfile() {
   await store.setup({ masterPassword: MASTER });
   store.saveItem('global', { type: 'login', title: 'Global', username: 'g', password: 'gp' });
   store.saveItem('work', { type: 'login', title: 'WorkItem', username: 'w', password: 'wp' });
-  const bundle = store.exportProfile();
-  return { dir, store, bundle };
+  const { bundle } = store.exportProfile();
+  // Positional resolution (see file header): global first, then 'work'.
+  const entries = { global: bundle.vaults[0].entryHandle, work: bundle.vaults[1].entryHandle };
+  return { dir, store, bundle, entries };
 }
 
 // ---------------------------------------------------------------------------
@@ -94,13 +107,13 @@ test("FRESH restore: 'new' creates the destination jar THEN writes; result maps 
         secret: Buffer.from(MASTER, 'utf8'),
         secretKind: 'master',
         mapping: {
-          global: { directive: 'existing', destination: 'global' },
-          work: { directive: 'new', newJar: { name: 'Work', color: '#2196f3' } }
+          [src.entries.global]: { directive: 'existing', destination: 'global' },
+          [src.entries.work]: { directive: 'new', newJar: { name: 'Work', color: '#2196f3' } }
         }
       });
       assert.equal(res.fresh, true);
-      const globalRow = res.results.find((r) => r.sourceId === 'global');
-      const workRow = res.results.find((r) => r.sourceId === 'work');
+      const globalRow = res.results.find((r) => r.entryHandle === src.entries.global);
+      const workRow = res.results.find((r) => r.entryHandle === src.entries.work);
       assert.equal(globalRow.outcome, 'landed');
       assert.equal(globalRow.destination, 'global');
       assert.equal(workRow.outcome, 'landed');
@@ -133,11 +146,11 @@ test("FRESH restore: jar-id RECONCILIATION — a bundle jar's slug colliding wit
         secret: Buffer.from(MASTER, 'utf8'),
         secretKind: 'master',
         mapping: {
-          global: { directive: 'skip' },
-          work: { directive: 'new', newJar: { name: 'Work', color: '#2196f3' } }
+          [src.entries.global]: { directive: 'skip' },
+          [src.entries.work]: { directive: 'new', newJar: { name: 'Work', color: '#2196f3' } }
         }
       });
-      const workRow = res.results.find((r) => r.sourceId === 'work');
+      const workRow = res.results.find((r) => r.entryHandle === src.entries.work);
       assert.equal(workRow.outcome, 'landed');
       assert.notEqual(workRow.destination, 'work', 'the source id does not survive into the destination profile');
       assert.equal(workRow.destination, 'work-1', "createJar's own uniquifier is what the store's deps drive");
@@ -166,13 +179,20 @@ test("FRESH restore: a single 'new' directive invokes the injected createJar EXA
     { id: 'test', name: 'Test', color: '#4caf50', partition: 'persist:container:test', retentionDays: 30 }
   ]);
   let bundle;
+  let entries;
   try {
     const src = makeStore(srcDir, srcDeps);
     await src.setup({ masterPassword: MASTER });
     src.saveItem('global', { type: 'login', title: 'Global', username: 'g', password: 'gp' });
     src.saveItem('personal', { type: 'login', title: 'PersonalItem', username: 'p', password: 'pp' });
     src.saveItem('test', { type: 'login', title: 'TestItem', username: 't', password: 'tp' });
-    bundle = src.exportProfile();
+    ({ bundle } = src.exportProfile());
+    // Positional: global, then personal, then test (srcDeps.listJars() order).
+    entries = {
+      global: bundle.vaults[0].entryHandle,
+      personal: bundle.vaults[1].entryHandle,
+      test: bundle.vaults[2].entryHandle
+    };
   } finally {
     rm(srcDir);
   }
@@ -195,16 +215,16 @@ test("FRESH restore: a single 'new' directive invokes the injected createJar EXA
       secret: Buffer.from(MASTER, 'utf8'),
       secretKind: 'master',
       mapping: {
-        global: { directive: 'existing', destination: 'global' },
-        personal: { directive: 'new', newJar: { name: 'Personal', color: '#2196f3' } },
-        test: { directive: 'skip' }
+        [entries.global]: { directive: 'existing', destination: 'global' },
+        [entries.personal]: { directive: 'new', newJar: { name: 'Personal', color: '#2196f3' } },
+        [entries.test]: { directive: 'skip' }
       }
     });
     assert.equal(res.fresh, true);
     assert.equal(createJarCalls, 1, 'createJar invoked exactly once for the single new directive');
     assert.equal(freshDeps.containers.length, 1, 'exactly one jar exists on the destination profile');
     assert.equal(freshDeps.containers[0].name, 'Personal');
-    const personalRow = res.results.find((r) => r.sourceId === 'personal');
+    const personalRow = res.results.find((r) => r.entryHandle === entries.personal);
     assert.equal(personalRow.outcome, 'landed');
     assert.equal(
       personalRow.destination,
@@ -212,7 +232,7 @@ test("FRESH restore: a single 'new' directive invokes the injected createJar EXA
       'the vault landed under the ONE jar that was created, not a second empty one'
     );
     assert.equal(fresh.listItems(personalRow.destination)[0].password, 'pp');
-    assert.equal(res.results.find((r) => r.sourceId === 'test').outcome, 'skipped');
+    assert.equal(res.results.find((r) => r.entryHandle === entries.test).outcome, 'skipped');
   } finally {
     rm(freshDir);
   }
@@ -232,8 +252,8 @@ test("FRESH restore: ruling 3's ban on non-global 'existing' destinations falls 
           secret: Buffer.from(MASTER, 'utf8'),
           secretKind: 'master',
           mapping: {
-            global: { directive: 'existing', destination: 'no-such-jar' },
-            work: { directive: 'skip' }
+            [src.entries.global]: { directive: 'existing', destination: 'no-such-jar' },
+            [src.entries.work]: { directive: 'skip' }
           }
         }),
         (e) => e instanceof vs.VaultStateError
@@ -270,12 +290,12 @@ test("FRESH restore: the adopt-rerun RESIDUE exception (ruling 4) — a jar left
         secret: Buffer.from(MASTER, 'utf8'),
         secretKind: 'master',
         mapping: {
-          global: { directive: 'existing', destination: 'global' },
-          work: { directive: 'existing', destination: 'residue-work' }
+          [src.entries.global]: { directive: 'existing', destination: 'global' },
+          [src.entries.work]: { directive: 'existing', destination: 'residue-work' }
         }
       });
       assert.equal(res.fresh, true);
-      const workRow = res.results.find((r) => r.sourceId === 'work');
+      const workRow = res.results.find((r) => r.entryHandle === src.entries.work);
       assert.equal(workRow.outcome, 'landed');
       assert.equal(workRow.destination, 'residue-work', 'mapped onto the residue jar, not a duplicate');
       assert.equal(fresh.isSetUp(), true, 'this run completed the adopt');
@@ -299,8 +319,8 @@ test("FRESH restore: 'skip everything except one jar vault' is legal (the degene
         secret: Buffer.from(MASTER, 'utf8'),
         secretKind: 'master',
         mapping: {
-          global: { directive: 'skip' },
-          work: { directive: 'new', newJar: { name: 'Work', color: '#2196f3' } }
+          [src.entries.global]: { directive: 'skip' },
+          [src.entries.work]: { directive: 'new', newJar: { name: 'Work', color: '#2196f3' } }
         }
       });
       assert.equal(res.fresh, true);
@@ -310,7 +330,7 @@ test("FRESH restore: 'skip everything except one jar vault' is legal (the degene
         false,
         'global vault absent — lazy, representable'
       );
-      const workRow = res.results.find((r) => r.sourceId === 'work');
+      const workRow = res.results.find((r) => r.entryHandle === src.entries.work);
       assert.equal(workRow.outcome, 'landed');
       assert.equal(fresh.listItems(workRow.destination)[0].password, 'wp');
     } finally {
@@ -341,9 +361,12 @@ test("EXISTING restore: 'existing' with NO mode against an occupied destination 
       const res = await dest.restoreProfile(JSON.parse(JSON.stringify(src.bundle)), {
         secret: Buffer.from(MASTER, 'utf8'),
         secretKind: 'master',
-        mapping: { global: { directive: 'skip' }, work: { directive: 'existing', destination: 'work' } }
+        mapping: {
+          [src.entries.global]: { directive: 'skip' },
+          [src.entries.work]: { directive: 'existing', destination: 'work' }
+        }
       });
-      const workRow = res.results.find((r) => r.sourceId === 'work');
+      const workRow = res.results.find((r) => r.entryHandle === src.entries.work);
       assert.equal(workRow.outcome, 'collision-refused');
       assert.deepEqual(fs.readFileSync(path.join(destDir, 'vaults', 'work.gfvault')), before, 'destination untouched');
       assert.equal(dest.listItems('work')[0].title, 'Existing', 'original data intact');
@@ -371,11 +394,11 @@ test("EXISTING restore: 'existing' with mode:'replace' whole-vault-overwrites th
         secret: Buffer.from(MASTER, 'utf8'),
         secretKind: 'master',
         mapping: {
-          global: { directive: 'skip' },
-          work: { directive: 'existing', destination: 'work', mode: 'replace' }
+          [src.entries.global]: { directive: 'skip' },
+          [src.entries.work]: { directive: 'existing', destination: 'work', mode: 'replace' }
         }
       });
-      const workRow = res.results.find((r) => r.sourceId === 'work');
+      const workRow = res.results.find((r) => r.entryHandle === src.entries.work);
       assert.equal(workRow.outcome, 'landed');
       const items = dest.listItems('work');
       assert.equal(items.length, 1, 'replace is whole-vault — the old item is gone');
@@ -407,11 +430,11 @@ test("EXISTING restore: 'new' onto a set-up profile creates a fresh jar and land
         secret: Buffer.from(MASTER, 'utf8'),
         secretKind: 'master',
         mapping: {
-          global: { directive: 'skip' },
-          work: { directive: 'new', newJar: { name: 'Imported Work', color: '#abcdef' } }
+          [src.entries.global]: { directive: 'skip' },
+          [src.entries.work]: { directive: 'new', newJar: { name: 'Imported Work', color: '#abcdef' } }
         }
       });
-      const workRow = res.results.find((r) => r.sourceId === 'work');
+      const workRow = res.results.find((r) => r.entryHandle === src.entries.work);
       assert.equal(workRow.outcome, 'landed');
       assert.equal(
         deps.containers.some((c) => c.id === workRow.destination),
@@ -431,7 +454,7 @@ test("EXISTING restore: 'new' onto a set-up profile creates a fresh jar and land
 // an explicit directive")
 // ---------------------------------------------------------------------------
 
-test('mapping validation: an unknown sourceId in the mapping → VaultStateError before any write', async () => {
+test('mapping validation: an unknown entryHandle in the mapping → VaultStateError before any write', async () => {
   const src = await makeSourceProfile();
   try {
     const destDir = tmpDir();
@@ -444,12 +467,12 @@ test('mapping validation: an unknown sourceId in the mapping → VaultStateError
           secret: Buffer.from(MASTER, 'utf8'),
           secretKind: 'master',
           mapping: {
-            global: { directive: 'skip' },
-            work: { directive: 'skip' },
+            [src.entries.global]: { directive: 'skip' },
+            [src.entries.work]: { directive: 'skip' },
             'does-not-exist': { directive: 'skip' }
           }
         }),
-        (e) => e instanceof vs.VaultStateError && /unknown sourceId/.test(e.message)
+        (e) => e instanceof vs.VaultStateError && /unknown entryHandle/.test(e.message)
       );
     } finally {
       rm(destDir);
@@ -471,7 +494,7 @@ test('mapping validation: a bundle vault with NO mapping entry → VaultStateErr
         dest.restoreProfile(JSON.parse(JSON.stringify(src.bundle)), {
           secret: Buffer.from(MASTER, 'utf8'),
           secretKind: 'master',
-          mapping: { global: { directive: 'skip' } } // 'work' omitted
+          mapping: { [src.entries.global]: { directive: 'skip' } } // 'work' omitted
         }),
         (e) => e instanceof vs.VaultStateError && /missing a directive/.test(e.message)
       );
@@ -496,8 +519,8 @@ test('mapping validation: an unknown/burner destination on an existing profile �
           secret: Buffer.from(MASTER, 'utf8'),
           secretKind: 'master',
           mapping: {
-            global: { directive: 'skip' },
-            work: { directive: 'existing', destination: 'no-such-jar' }
+            [src.entries.global]: { directive: 'skip' },
+            [src.entries.work]: { directive: 'existing', destination: 'no-such-jar' }
           }
         }),
         (e) => e instanceof vs.VaultStateError
@@ -521,14 +544,14 @@ test('mapping validation: a reserved-id-space newJar name is covered by the exis
         secret: Buffer.from(MASTER, 'utf8'),
         secretKind: 'master',
         mapping: {
-          global: { directive: 'existing', destination: 'global' },
+          [src.entries.global]: { directive: 'existing', destination: 'global' },
           // A newJar name whose slug collides with the reserved 'global' base — the
           // injected createJar fake mirrors jars.js's remap-to-`jar-` behavior itself,
           // so this pins that the store defers entirely to the injected createJar.
-          work: { directive: 'new', newJar: { name: 'Global', color: '#fff' } }
+          [src.entries.work]: { directive: 'new', newJar: { name: 'Global', color: '#fff' } }
         }
       });
-      const workRow = res.results.find((r) => r.sourceId === 'work');
+      const workRow = res.results.find((r) => r.entryHandle === src.entries.work);
       assert.equal(workRow.outcome, 'landed');
       assert.notEqual(workRow.destination, 'global', 'never aliases the sentinel global vault');
     } finally {
@@ -553,13 +576,19 @@ test('single-flight guard: a concurrent second restoreProfile call throws VaultB
       const first = fresh.restoreProfile(JSON.parse(JSON.stringify(src.bundle)), {
         secret: Buffer.from(MASTER, 'utf8'),
         secretKind: 'master',
-        mapping: { global: { directive: 'existing', destination: 'global' }, work: { directive: 'skip' } }
+        mapping: {
+          [src.entries.global]: { directive: 'existing', destination: 'global' },
+          [src.entries.work]: { directive: 'skip' }
+        }
       });
       await assert.rejects(
         fresh.restoreProfile(JSON.parse(JSON.stringify(src.bundle)), {
           secret: Buffer.from(MASTER, 'utf8'),
           secretKind: 'master',
-          mapping: { global: { directive: 'existing', destination: 'global' }, work: { directive: 'skip' } }
+          mapping: {
+            [src.entries.global]: { directive: 'existing', destination: 'global' },
+            [src.entries.work]: { directive: 'skip' }
+          }
         }),
         (e) => e instanceof vs.VaultBusyError
       );
@@ -573,7 +602,10 @@ test('single-flight guard: a concurrent second restoreProfile call throws VaultB
       const third = await fresh.restoreProfile(JSON.parse(JSON.stringify(src.bundle)), {
         secret: Buffer.from(MASTER, 'utf8'),
         secretKind: 'master',
-        mapping: { global: { directive: 'skip' }, work: { directive: 'skip' } }
+        mapping: {
+          [src.entries.global]: { directive: 'skip' },
+          [src.entries.work]: { directive: 'skip' }
+        }
       });
       assert.equal(third.fresh, false);
     } finally {

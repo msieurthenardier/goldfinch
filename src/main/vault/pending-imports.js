@@ -34,9 +34,14 @@
 const SAFETY_DROP_MS = 5 * 60 * 1000;
 
 /**
+ * M18 F3 L5: `sourceId` (a plaintext bundle-entry key) renamed `entryHandle`
+ * (an opaque token — leave `PendingImportRecord.handle` below alone, the
+ * per-IMPORT-SESSION token, a same-name-a-line-apart hazard flagged at
+ * design review); `jarMeta` (jar-only) renamed `identity` (present on EVERY
+ * label, including global) and re-shaped to `{kind,name?,color?}`.
  * @typedef {Object} PendingImportLabel
- * @property {string} sourceId
- * @property {{ name: string, color: string } | null} jarMeta
+ * @property {string} entryHandle
+ * @property {{ kind: 'global' } | { kind: 'jar', name: string, color?: string }} identity
  * @property {number} itemCount
  */
 

@@ -109,7 +109,7 @@ test('stashSecret binds { secret, secretKind, labels } and arms the safety-drop 
   const { store, timers } = makeStore();
   const h = store.hold(100, { bundle: {} });
   const secret = Buffer.from('correct horse battery staple');
-  const labels = [{ sourceId: 'work', jarMeta: { name: 'Work', color: '#fff' }, itemCount: 3 }];
+  const labels = [{ entryHandle: 'h1', identity: { kind: 'jar', name: 'Work', color: '#fff' }, itemCount: 3 }];
   store.stashSecret(100, { secret, secretKind: 'recovery', labels }, h);
 
   const rec = store.peek(100);
@@ -207,7 +207,7 @@ test('peekLabels returns null before the secret step, and { handle, labels } (ne
   const h = store.hold(100, { bundle: { tag: 'secret-bundle-contents' } });
   assert.equal(store.peekLabels(100), null, 'no labels yet — the secret step has not run');
 
-  const labels = [{ sourceId: 'global', jarMeta: null, itemCount: 5 }];
+  const labels = [{ entryHandle: 'h1', identity: { kind: 'global' }, itemCount: 5 }];
   store.stashSecret(100, { secret: Buffer.from('x'), secretKind: 'master', labels }, h);
   const projection = store.peekLabels(100);
   assert.deepEqual(projection, { handle: h, labels });

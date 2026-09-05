@@ -38,7 +38,10 @@ const vc = require('../../src/main/vault/vault-crypto');
 
 const FAST_SCRYPT = { algo: 'scrypt', N: 2 ** 12, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 const MASTER = 'correct horse battery staple';
-const JARS = [{ id: 'work' }, { id: 'personal' }];
+const JARS = [
+  { id: 'work', name: 'Work', color: '#2196f3' },
+  { id: 'personal', name: 'Personal', color: '#f5c518' }
+];
 
 function tmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'gf-rekey-gate-'));
@@ -132,11 +135,9 @@ test('all eleven gated ops throw VaultBusyError at entry while the gate is up, a
     const saved = store.saveItem('work', loginItem({ title: 'After' }));
     assert.equal(saved.title, 'After', 'gated ops work again after release');
     assert.deepEqual(store.exportVault('work').sourceVaultId, 'work');
-    assert.deepEqual(
-      store.exportProfile().vaults.map((v) => v.sourceId),
-      ['global', 'work'],
-      'exportProfile works again after release too'
-    );
+    const { bundle: reBundle, carried } = store.exportProfile();
+    assert.equal(reBundle.vaults.length, 2, 'exportProfile works again after release too');
+    assert.deepEqual(carried.sort(), ['Global', 'Work'].sort());
   } finally {
     rm(dir);
   }

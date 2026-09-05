@@ -807,18 +807,25 @@ interface GoldfinchInternalBridge {
    * safe. { ok }. */
   clearPendingImport(handle?: string): Promise<{ ok: boolean }>;
   /** The page's window-scoped labels fetch (DD2 ruling 3(c)) — call after onVaultImportLabelsReady.
-   * A NON-SECRET { handle, labels } projection, or null when nothing is held past the secret step. */
+   * A NON-SECRET { handle, labels } projection, or null when nothing is held past the secret step.
+   * M18 F3 L5: labels key on the bundle's opaque `entryHandle`, not the old plaintext `sourceId`;
+   * `identity` (renamed from `jarMeta`) is present on EVERY label, including global. */
   fetchImportLabels(): Promise<{
     handle: string;
-    labels: Array<{ sourceId: string; jarMeta: { name: string; color: string } | null; itemCount: number }>;
+    labels: Array<{
+      entryHandle: string;
+      identity: { kind: 'global' } | { kind: 'jar'; name: string; color?: string };
+      itemCount: number;
+    }>;
   } | null>;
   /** Commit the multi-vault restore with the operator's per-vault mapping (DD2 ruling 3(e)).
-   * { ok:true, fresh, results, generation } on success, or a non-secret { ok:false, reason }. */
+   * { ok:true, fresh, results, generation } on success, or a non-secret { ok:false, reason }.
+   * M18 F3 L5: results key on the bundle's opaque `entryHandle`, not the old plaintext `sourceId`. */
   commitImport(payload: { handle: string; mapping: any }): Promise<{
     ok: boolean;
     fresh?: boolean;
     results?: Array<{
-      sourceId: string;
+      entryHandle: string;
       outcome: 'landed' | 'skipped' | 'collision-refused' | 'failed';
       destination?: string;
       mergeReport?: { imported: number; skippedIdentical: number; conflictCopies: number };

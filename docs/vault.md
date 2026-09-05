@@ -394,17 +394,35 @@ ciphertext:
 - the KDF params,
 - the source manager's stated version (`managerVersion`; absent ⇒ 1 in old bundles) — the
   envelopes are AAD-bound to it, so import unwraps at the bundle's stated version,
-- `exportVault`: the target `.gfvault` document (its `mrk` envelope + item ciphertext).
-  `exportProfile`: an array of `{ sourceId, jarMeta?, vault }` entries — the global vault
+- `exportVault`: the target `.gfvault` document (its `mrk` envelope + item ciphertext) —
+  keyed by the target's plaintext `sourceVaultId` (legacy, single-vault, unchanged; see the
+  bundle-identity-opacity note below).
+  `exportProfile`: an array of `{ entryHandle, identity, vault }` entries — the global vault
   plus every jar vault that **exists on disk** (a lazily-never-saved jar vault is simply
-  absent; the array itself names what was carried). Each jar entry's portable identity
-  (`{ name, color }` — everything else on the jar record is destination-local) rides as
-  **encrypted** `jarMeta`, keyed off the bundle MRK via the same generic wrap primitives
-  the MRK envelopes use (`deriveHkdfKey` + `wrapVaultKey`, AAD-bound to the bundle context
-  + the vault's `sourceId`) — nothing human-readable about a jar appears before the bundle
-  secret is entered. `decryptJarMeta` is the paired reader (a tampered envelope fails GCM
-  authentication loudly, never a silent unnamed jar); `restoreProfile` itself never reads
-  jarMeta — the caller's explicit mapping step supplies `newJar.{name,color}` instead.
+  absent; the array itself names what was carried). **Bundle identity opacity (M18 F3 Leg
+  5):** each entry is keyed by an opaque `entryHandle` (a random token, minted at export,
+  carrying no identity) instead of a readable id, and EVERY entry — including the global
+  vault — carries its identity (`{kind:'global'}` or `{kind:'jar',name,color}`; everything
+  else on the jar record is destination-local) as an **encrypted** `identity` envelope, keyed
+  off the bundle MRK via the same generic wrap primitives the MRK envelopes use
+  (`deriveHkdfKey` + `wrapVaultKey`, AAD-bound to the bundle context + the entry's OWN
+  entryHandle) — nothing human-readable, including which entry is global, appears before the
+  bundle secret is entered. (The embedded `.gfvault` document's own `vaultId` field is also
+  scrubbed to the entryHandle before embedding — it otherwise duplicated the same leak one
+  level down and plays no role once inside a bundle.) `decryptIdentity` is the paired reader
+  (a tampered envelope fails GCM authentication loudly, never a silent unnamed jar, and
+  independently refuses a plaintext-tagged envelope — see the v1 note below);
+  `restoreProfile` itself never reads `identity` — the caller's explicit mapping step
+  supplies `newJar.{name,color}` instead. `exportProfile()` returns `{ bundle, carried }`:
+  `bundle` is the file-shaped object; `carried` is a parallel, MAIN-PROCESS-ONLY list of the
+  real jar/Global names actually carried (never serialized into the bundle file) that the
+  export-completion notice uses. A v1 bundle carries no such opacity: its single
+  `sourceVaultId` is plaintext, an unchangeable property of the legacy single-vault format —
+  `restoreProfile`'s v1 normalization synthesizes a fresh `entryHandle` plus a PLAINTEXT
+  `identity` tagged `identityPlaintext: true` (an internal marker `normalizeRestoreBundle`
+  writes only on that path and never reads from an incoming bundle, so a v2 JSON entry cannot
+  smuggle the tag to bypass authenticated decrypt); the uniform identity-resolution step uses
+  that plaintext value as-is instead of decrypting.
 
 No plaintext secret ever enters the bundle. Carrying the MRK envelope set preserves
 recovery-key (and, when provisioned, admin) portability on the far side.
@@ -442,7 +460,7 @@ writes/installs nothing). The source **master password** (a Buffer) or the sourc
   every rotated key at once for its batch-then-one-write shape; this loop writes each vault
   immediately, so there is nothing to batch).
 
-`restoreProfile` additionally: takes an explicit per-`sourceId` directive
+`restoreProfile` additionally: takes an explicit per-`entryHandle` directive
 (`'existing' | 'new' | 'skip'`, with `mode: 'replace' | 'merge'` on a collision) — every
 bundle vault demands one, loudly, before any write; commits **per-vault atomically** (DD3),
 so a mid-list failure (today: a `'new'` directive whose jar registration doesn't durably
@@ -471,7 +489,8 @@ more state than it needs:
    ciphertext whose decrypted content fails validation) is refused **here**, before any
    destination exists to write to. On success the sheet closes and the page is notified
    (`vault-import-labels-ready`, no payload); the page then fetches its own window's labels —
-   `{ sourceId, jarMeta, itemCount }` per bundle vault, never a secret or the ciphertext.
+   `{ entryHandle, identity, itemCount }` per bundle vault, never a secret or the ciphertext,
+   and never the entryHandle shown to the operator (the page renders the decrypted name).
 3. **Mapping.** The page renders one row per bundle vault: skip / create a new jar (name+color
    prefilled from the label) / use an existing vault, with an explicit Replace-or-Merge choice
    once a real destination collision is confirmed. Every row demands an explicit directive

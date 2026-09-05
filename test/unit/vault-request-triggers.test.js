@@ -295,11 +295,11 @@ test('internal sender: fetchImportLabels is window-scoped and forwards the deleg
   assert.deepEqual(nully.labelsCalls, [5]);
 
   const withLabels = makeImportHarness({
-    labelsResult: { handle: 'h1', labels: [{ sourceId: 'global', jarMeta: null, itemCount: 2 }] }
+    labelsResult: { handle: 'h1', labels: [{ entryHandle: 'e1', identity: { kind: 'global' }, itemCount: 2 }] }
   });
   assert.deepEqual(withLabels.wrapped.get('internal-vault-import-labels')(internalEvent(5)), {
     handle: 'h1',
-    labels: [{ sourceId: 'global', jarMeta: null, itemCount: 2 }]
+    labels: [{ entryHandle: 'e1', identity: { kind: 'global' }, itemCount: 2 }]
   });
 });
 

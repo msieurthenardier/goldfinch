@@ -398,7 +398,7 @@ function init() {
    * (commitImport's own handle match is the real guard). Powers the "Resume restore" banner
    * (ruling 9) — the mapping modal itself is opened directly by the labels-ready listener below
    * on first arrival; this cache exists for the RE-entry path after a forced modal close.
-   * @type {{ handle: string, labels: Array<{ sourceId: string, jarMeta: { name: string, color: string } | null, itemCount: number }> } | null}
+   * @type {{ handle: string, labels: Array<{ entryHandle: string, identity: { kind: 'global' } | { kind: 'jar', name: string, color?: string }, itemCount: number }> } | null}
    */
   let pendingImportRecord = null;
 
@@ -634,19 +634,15 @@ function init() {
             if (res && res.ok) {
               if (wholeProfile) {
                 // Whole-profile result keeps its carried-vaults statement (ruling 7, unchanged) —
-                // M18 F3 L4, HAT fix 2: name the carried vaults (not just a count), so a lazy-jar
-                // omission is actually visible, using the labels the page already holds (no new
-                // IPC surface — `res.carried` is the vault-id list the existing reply carries).
-                // The cast is needed because `res`'s inferred type is the UNION of exportProfile's
+                // M18 F3 L4, HAT fix 2: name the carried vaults, not just a count. M18 F3 L5
+                // (ruling 4c): `res.carried` is real NAMES directly now — main-only, never
+                // serialized; entryHandles are opaque, so the old id→label lookup is gone.
+                // The cast below is needed because `res`'s inferred type is the UNION of exportProfile's
                 // and exportVault's reply shapes (only the former declares `carried`) — this branch
                 // runs only when `wholeProfile` is true, i.e. only for an exportProfile reply.
                 const profileRes = /** @type {{ ok?: boolean; carried?: string[] }} */ (res);
-                const carriedIds = Array.isArray(profileRes.carried) ? profileRes.carried : [];
-                const count = carriedIds.length;
-                const names = carriedIds.map((id) => {
-                  const v = vaults.find((x) => x.vaultId === id);
-                  return v ? v.label : id;
-                });
+                const names = Array.isArray(profileRes.carried) ? profileRes.carried : [];
+                const count = names.length;
                 pendingNotice =
                   count === 0
                     ? 'Exported 0 vaults.'
@@ -922,11 +918,11 @@ function init() {
    * switching the directive away before the probe resolves supersedes it (HAT fix 5) so a late
    * reply can never re-show the collision block or overwrite the row's now-current state.
    *
-   * The global-sourced row (jarMeta === null) never offers "new" (you cannot create a new
-   * jar for the manager-wide global vault); on a FRESH profile `existingVaults` is empty
-   * (ruling 3: only new-jar/skip/global→global are legal), so a synthetic "Global (this
-   * profile)" destination is injected for that one row so the DD2/DD3 global→global path
-   * stays reachable without a real existing-vaults list.
+   * The global-sourced row (`identity.kind === 'global'`) never offers "new" (you cannot
+   * create a new jar for the manager-wide global vault); on a FRESH profile `existingVaults`
+   * is empty (ruling 3: only new-jar/skip/global→global are legal), so a synthetic "Global
+   * (this profile)" destination is injected for that one row so the DD2/DD3 global→global
+   * path stays reachable without a real existing-vaults list.
    *
    * RESUME (ruling 9): callable both from the labels-ready notification (a fresh record) and
    * from the page's "Resume restore" affordance (re-entering after a forced broadcast-close)
@@ -934,7 +930,8 @@ function init() {
    * held record (via clearPendingImport) and kills the resume affordance; a forced close
    * (any OTHER broadcast, ruling 9) does NOT — this function's own `onCancel` is the only
    * path that clears the record; a render-triggered `closeActivePageModal()` never runs it.
-   * @param {{ handle: string, labels: Array<{ sourceId: string, jarMeta: { name: string, color: string } | null, itemCount: number }> }} record
+   * M18 F3 L5: rows key off `label.entryHandle` (opaque, not the old `sourceId`); `label.jarMeta` is now `label.identity` — submit's mapping keys on entryHandle too.
+   * @param {{ handle: string, labels: Array<{ entryHandle: string, identity: { kind: 'global' } | { kind: 'jar', name: string, color?: string }, itemCount: number }> }} record
    * @param {Array<{ vaultId: string, label: string }>} existingVaults  the CURRENT profile's vaults; empty on a fresh profile.
    */
   function openMappingModal(record, existingVaults) {
@@ -947,12 +944,13 @@ function init() {
     const seedFns = [];
 
     function updateCommitEnabled() {
-      handle.setSubmitEnabled(record.labels.every((l) => rowState.get(l.sourceId)?.complete === true));
+      handle.setSubmitEnabled(record.labels.every((l) => rowState.get(l.entryHandle)?.complete === true));
     }
 
     for (const label of record.labels) {
-      const isGlobalSource = label.jarMeta === null;
-      const title = isGlobalSource ? 'Global' : label.jarMeta.name;
+      const identity = label.identity;
+      const isGlobalSource = identity.kind === 'global';
+      const title = identity.kind === 'jar' ? identity.name : 'Global';
       const row = el('div', 'vault-mapping-row');
       row.appendChild(
         el('h4', 'vault-mapping-row-title', `${title} (${label.itemCount} item${label.itemCount === 1 ? '' : 's'})`)
@@ -975,7 +973,8 @@ function init() {
       // Jar rows source "existing" destinations from jarRows + jarVaultPresence, not
       // existingVaults (HAT fix 8 — fixes the fresh-adopt gap where DD2 ruling 3 forces
       // existingVaults empty). Also resolves HAT-fix-7's rerun match; degrades safely mid-race.
-      const jarDest = isGlobalSource ? null : restoreDestinationOptions(jarRows, jarVaultPresence, label.jarMeta.name);
+      const jarDest =
+        identity.kind === 'jar' ? restoreDestinationOptions(jarRows, jarVaultPresence, identity.name) : null;
       const destinationOptions = isGlobalSource
         ? existingVaults.some((v) => v.vaultId === GLOBAL_VAULT_ID)
           ? existingVaults
@@ -1003,11 +1002,11 @@ function init() {
       const nameInput = /** @type {HTMLInputElement} */ (el('input', 'vault-modal-path-input'));
       nameInput.type = 'text';
       nameInput.setAttribute('aria-label', `${title} — new jar name`);
-      nameInput.value = label.jarMeta ? label.jarMeta.name : title;
+      nameInput.value = title;
       nameField.appendChild(nameInput);
       newJarRow.appendChild(nameField);
       const initialColor =
-        label.jarMeta && isSafeColor(label.jarMeta.color) ? label.jarMeta.color : NEW_JAR_FALLBACK_COLOR;
+        identity.kind === 'jar' && isSafeColor(identity.color) ? identity.color : NEW_JAR_FALLBACK_COLOR;
       // selectedColor is captured by the swatch grid's onSelect below and read back in
       // recompute()'s 'new' branch — the grid has no <input> to read a .value from.
       let selectedColor = initialColor;
@@ -1085,7 +1084,7 @@ function init() {
             if (stale()) return;
             const collision = !!(r && r.present);
             modeRow.hidden = !collision;
-            rowState.set(label.sourceId, {
+            rowState.set(label.entryHandle, {
               directive: 'existing',
               destination,
               mode: collision ? modeSelect.value : undefined,
@@ -1097,7 +1096,7 @@ function init() {
             if (stale()) return;
             // Fail-safe: never silently allow a destructive replace when the probe itself failed.
             modeRow.hidden = false;
-            rowState.set(label.sourceId, {
+            rowState.set(label.entryHandle, {
               directive: 'existing',
               destination,
               mode: modeSelect.value,
@@ -1117,24 +1116,24 @@ function init() {
         destRow.hidden = v !== 'existing';
         if (v === 'skip') {
           modeRow.hidden = true;
-          rowState.set(label.sourceId, { directive: 'skip', complete: true });
+          rowState.set(label.entryHandle, { directive: 'skip', complete: true });
           updateCommitEnabled();
         } else if (v === 'new') {
           modeRow.hidden = true;
           const name = nameInput.value.trim();
-          rowState.set(label.sourceId, {
+          rowState.set(label.entryHandle, {
             directive: 'new',
             newJar: { name, color: isSafeColor(selectedColor) ? selectedColor : NEW_JAR_FALLBACK_COLOR },
             complete: name.length > 0
           });
           updateCommitEnabled();
         } else if (v === 'existing' && destSelect) {
-          rowState.set(label.sourceId, { directive: 'existing', destination: destSelect.value, complete: false });
+          rowState.set(label.entryHandle, { directive: 'existing', destination: destSelect.value, complete: false });
           updateCommitEnabled();
           probeDestinationCollision();
         } else {
           modeRow.hidden = true;
-          rowState.set(label.sourceId, { complete: false });
+          rowState.set(label.entryHandle, { complete: false });
           updateCommitEnabled();
         }
       }
@@ -1145,7 +1144,7 @@ function init() {
       // native-input approach).
       destSelect?.addEventListener('change', recompute);
       modeSelect.addEventListener('change', () => {
-        const s = rowState.get(label.sourceId);
+        const s = rowState.get(label.entryHandle);
         if (s) {
           s.mode = modeSelect.value;
           updateCommitEnabled();
@@ -1164,19 +1163,24 @@ function init() {
       onSubmit: () => {
         handle.setSubmitEnabled(false);
         handle.setStatus('Restoring…');
+        // M18 F3 L5 (cycle-2, the most consequential rekey site): mapping MUST key on
+        // entryHandle, not the old plaintext sourceId (`record.handle` above is the
+        // unrelated per-IMPORT-SESSION token).
         /** @type {any} */
         const mapping = {};
-        for (const [sourceId, s] of rowState) {
-          if (s.directive === 'skip') mapping[sourceId] = { directive: 'skip' };
-          else if (s.directive === 'new') mapping[sourceId] = { directive: 'new', newJar: s.newJar };
-          else mapping[sourceId] = { directive: 'existing', destination: s.destination, mode: s.mode };
+        for (const [entryHandle, s] of rowState) {
+          if (s.directive === 'skip') mapping[entryHandle] = { directive: 'skip' };
+          else if (s.directive === 'new') mapping[entryHandle] = { directive: 'new', newJar: s.newJar };
+          else mapping[entryHandle] = { directive: 'existing', destination: s.destination, mode: s.mode };
         }
         Promise.resolve(bridge.commitImport({ handle: record.handle, mapping }))
           .then((res) => {
             pendingImportRecord = null; // the commit consumed the record either way.
             if (res && res.ok) {
               handle.close();
-              openCompletionModal(res);
+              // record.labels (in closure) carries the decrypted names the completion display
+              // joins against (ruling 4) — an entryHandle is never shown to the operator.
+              openCompletionModal(res, record.labels);
               return;
             }
             handle.setStatus(
@@ -1204,17 +1208,18 @@ function init() {
    * The restore completion surface (DD2 ruling 3(e); DD11: reflects post-restore state
    * without a manual reload — this modal renders directly from the commit reply, and a fresh
    * adopt's unlock broadcast independently re-queries state for the rest of the page). Lists
-   * each bundle vault's outcome (raw sourceId/destination — non-secret post-authorization,
-   * `restoreOutcomeLines` doc) INCLUDING merge detail, so a dedup-only merge (DD4) reads as
+   * each bundle vault's outcome INCLUDING merge detail, so a dedup-only merge (DD4) reads as
    * legibly-empty rather than silently "Restored" (HAT fix 11). A fresh adopt's one-time
    * recovery key + the DD7 sever offer are surfaced main-side (the dismiss-locked recovery-show
    * sheet, the Settings sever card) — this modal shows no secret, ever.
-   * @param {{ fresh?: boolean, results?: Array<{ sourceId: string, outcome: string, destination?: string, mergeReport?: { imported: number, skippedIdentical: number, conflictCopies: number } }> }} result
+   * M18 F3 L5: results key on the bundle's opaque `entryHandle` — the caller passes `labels` (its `record.labels`, still in closure) so `restoreOutcomeLines` can join each to a decrypted NAME; an entryHandle is NEVER shown.
+   * @param {{ fresh?: boolean, results?: Array<{ entryHandle: string, outcome: string, destination?: string, mergeReport?: { imported: number, skippedIdentical: number, conflictCopies: number } }> }} result
+   * @param {Array<{ entryHandle: string, identity: { kind: 'global' } | { kind: 'jar', name: string, color?: string } }>} [labels]
    */
-  function openCompletionModal(result) {
+  function openCompletionModal(result, labels) {
     const body = el('div', 'vault-modal-form');
     const list = el('ul', 'vault-mapping-outcomes');
-    for (const line of restoreOutcomeLines(result.results)) {
+    for (const line of restoreOutcomeLines(result.results, labels)) {
       const li = el('li');
       li.textContent = line.text;
       list.appendChild(li);

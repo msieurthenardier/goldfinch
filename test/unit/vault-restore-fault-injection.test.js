@@ -1,12 +1,19 @@
 'use strict';
 
 // Unit tests for restoreProfile()'s PER-VAULT ATOMICITY + RERUN recovery
-// (M18 F3 Leg 2 / flight DD3 ruling 4): an injected mid-list failure leaves
-// earlier vaults landed, later vaults untouched, and — on a FRESH profile —
-// the manager is left ABSENT (isSetUp() stays false) so a rerun re-adopts
-// over the residue. Covers both the fresh and existing-profile paths (the
+// (M18 F3 Leg 2 / flight DD3 ruling 4; RE-KEYED M18 F3 Leg 5 to the opaque
+// entryHandle): an injected mid-list failure leaves earlier vaults landed,
+// later vaults untouched, and — on a FRESH profile — the manager is left
+// ABSENT (isSetUp() stays false) so a rerun re-adopts over the residue.
+// Covers both the fresh and existing-profile paths (the
 // `vault-key-rotation.test.js` fault-injection idiom, applied to the
 // create-then-verify step).
+//
+// M18 F3 L5 note: `mapping`/`results` now key on the bundle's OPAQUE
+// `entryHandle`, not the old plaintext `sourceId`. `makeSourceProfile()`
+// resolves the entryHandles POSITIONALLY (see vault-restore-directives.test.js's
+// header note for why this is safe): `bundle.vaults[0]` is always global,
+// then one entry per `jarNames` element in order.
 //
 // Electron-free: real temp dirs + FAST scrypt.
 
@@ -81,8 +88,14 @@ async function makeSourceProfile(jarNames) {
       password: `${n.toLowerCase()}-pw`
     });
   }
-  const bundle = store.exportProfile();
-  return { dir, store, bundle };
+  const { bundle } = store.exportProfile();
+  // Positional resolution: bundle.vaults[0] is global, then one entry per jarNames element,
+  // in order — `_exportProfile`'s own deterministic enumeration (vault-store.js).
+  const entries = { global: bundle.vaults[0].entryHandle };
+  jarNames.forEach((n, i) => {
+    entries[n.toLowerCase()] = bundle.vaults[i + 1].entryHandle;
+  });
+  return { dir, store, bundle, entries };
 }
 
 // ---------------------------------------------------------------------------
@@ -104,10 +117,10 @@ test('FRESH restore fault injection: a mid-list new-jar verify failure STOPS the
         secret: Buffer.from(MASTER, 'utf8'),
         secretKind: 'master',
         mapping: {
-          global: { directive: 'existing', destination: 'global' },
-          alpha: { directive: 'new', newJar: { name: 'Alpha', color: '#000' } },
-          bravo: { directive: 'new', newJar: { name: 'Bravo', color: '#000' } },
-          charlie: { directive: 'new', newJar: { name: 'Charlie', color: '#000' } }
+          [src.entries.global]: { directive: 'existing', destination: 'global' },
+          [src.entries.alpha]: { directive: 'new', newJar: { name: 'Alpha', color: '#000' } },
+          [src.entries.bravo]: { directive: 'new', newJar: { name: 'Bravo', color: '#000' } },
+          [src.entries.charlie]: { directive: 'new', newJar: { name: 'Charlie', color: '#000' } }
         }
       });
 
@@ -116,11 +129,11 @@ test('FRESH restore fault injection: a mid-list new-jar verify failure STOPS the
         false,
         'the manager is ABSENT — vault-before-manager, no adopt on a mid-list failure'
       );
-      const outcomes = new Map(res.results.map((r) => [r.sourceId, r]));
-      assert.equal(outcomes.get('global').outcome, 'landed', 'earlier-in-order global landed');
-      assert.equal(outcomes.get('alpha').outcome, 'landed', 'earlier-in-order alpha landed');
-      assert.equal(outcomes.get('bravo').outcome, 'failed', 'the injected failure');
-      assert.equal(outcomes.has('charlie'), false, 'later entries never reached — the loop stopped');
+      const outcomes = new Map(res.results.map((r) => [r.entryHandle, r]));
+      assert.equal(outcomes.get(src.entries.global).outcome, 'landed', 'earlier-in-order global landed');
+      assert.equal(outcomes.get(src.entries.alpha).outcome, 'landed', 'earlier-in-order alpha landed');
+      assert.equal(outcomes.get(src.entries.bravo).outcome, 'failed', 'the injected failure');
+      assert.equal(outcomes.has(src.entries.charlie), false, 'later entries never reached — the loop stopped');
 
       // Residue on disk: the vault files for the landed entries exist even though
       // there is no manager — the flight's documented recovery shape.
@@ -145,16 +158,16 @@ test('FRESH restore fault injection: a mid-list new-jar verify failure STOPS the
         secret: Buffer.from(MASTER, 'utf8'),
         secretKind: 'master',
         mapping: {
-          global: { directive: 'existing', destination: 'global', mode: 'replace' },
-          alpha: { directive: 'existing', destination: alphaExistingId, mode: 'replace' },
-          bravo: { directive: 'existing', destination: bravoExistingId },
-          charlie: { directive: 'new', newJar: { name: 'Charlie', color: '#000' } }
+          [src.entries.global]: { directive: 'existing', destination: 'global', mode: 'replace' },
+          [src.entries.alpha]: { directive: 'existing', destination: alphaExistingId, mode: 'replace' },
+          [src.entries.bravo]: { directive: 'existing', destination: bravoExistingId },
+          [src.entries.charlie]: { directive: 'new', newJar: { name: 'Charlie', color: '#000' } }
         }
       });
       assert.equal(fresh.isSetUp(), true, 'the rerun completes the adopt');
-      const rerunOutcomes = new Map(rerun.results.map((r) => [r.sourceId, r]));
-      assert.equal(rerunOutcomes.get('bravo').outcome, 'landed');
-      assert.equal(rerunOutcomes.get('charlie').outcome, 'landed');
+      const rerunOutcomes = new Map(rerun.results.map((r) => [r.entryHandle, r]));
+      assert.equal(rerunOutcomes.get(src.entries.bravo).outcome, 'landed');
+      assert.equal(rerunOutcomes.get(src.entries.charlie).outcome, 'landed');
       assert.equal(fresh.isUnlocked(), true);
       assert.equal(fresh.listItems(bravoExistingId)[0].password, 'bravo-pw');
     } finally {
@@ -184,17 +197,17 @@ test('EXISTING-profile restore fault injection: a mid-list new-jar verify failur
         secret: Buffer.from(MASTER, 'utf8'),
         secretKind: 'master',
         mapping: {
-          global: { directive: 'skip' },
-          alpha: { directive: 'new', newJar: { name: 'Alpha', color: '#000' } },
-          bravo: { directive: 'new', newJar: { name: 'Bravo', color: '#000' } },
-          charlie: { directive: 'new', newJar: { name: 'Charlie', color: '#000' } }
+          [src.entries.global]: { directive: 'skip' },
+          [src.entries.alpha]: { directive: 'new', newJar: { name: 'Alpha', color: '#000' } },
+          [src.entries.bravo]: { directive: 'new', newJar: { name: 'Bravo', color: '#000' } },
+          [src.entries.charlie]: { directive: 'new', newJar: { name: 'Charlie', color: '#000' } }
         }
       });
 
-      const outcomes = new Map(res.results.map((r) => [r.sourceId, r]));
-      assert.equal(outcomes.get('alpha').outcome, 'landed');
-      assert.equal(outcomes.get('bravo').outcome, 'failed');
-      assert.equal(outcomes.has('charlie'), false, 'later entries never reached');
+      const outcomes = new Map(res.results.map((r) => [r.entryHandle, r]));
+      assert.equal(outcomes.get(src.entries.alpha).outcome, 'landed');
+      assert.equal(outcomes.get(src.entries.bravo).outcome, 'failed');
+      assert.equal(outcomes.has(src.entries.charlie), false, 'later entries never reached');
       assert.equal(dest.isSetUp(), true, 'the profile was already set up — unaffected by the residue');
 
       // Rerun completes it.
@@ -204,19 +217,19 @@ test('EXISTING-profile restore fault injection: a mid-list new-jar verify failur
         secret: Buffer.from(MASTER, 'utf8'),
         secretKind: 'master',
         mapping: {
-          global: { directive: 'skip' },
-          alpha: {
+          [src.entries.global]: { directive: 'skip' },
+          [src.entries.alpha]: {
             directive: 'existing',
             destination: deps.containers.find((c) => c.name === 'Alpha').id,
             mode: 'replace'
           },
-          bravo: { directive: 'existing', destination: bravoId },
-          charlie: { directive: 'new', newJar: { name: 'Charlie', color: '#000' } }
+          [src.entries.bravo]: { directive: 'existing', destination: bravoId },
+          [src.entries.charlie]: { directive: 'new', newJar: { name: 'Charlie', color: '#000' } }
         }
       });
-      const rerunOutcomes = new Map(rerun.results.map((r) => [r.sourceId, r]));
-      assert.equal(rerunOutcomes.get('bravo').outcome, 'landed');
-      assert.equal(rerunOutcomes.get('charlie').outcome, 'landed');
+      const rerunOutcomes = new Map(rerun.results.map((r) => [r.entryHandle, r]));
+      assert.equal(rerunOutcomes.get(src.entries.bravo).outcome, 'landed');
+      assert.equal(rerunOutcomes.get(src.entries.charlie).outcome, 'landed');
       assert.equal(dest.listItems(bravoId)[0].password, 'bravo-pw');
     } finally {
       rm(destDir);
@@ -254,9 +267,9 @@ test('zeroize discipline: a mid-loop throw leaves zero live bundle-vault-key buf
             secret: Buffer.from(MASTER, 'utf8'),
             secretKind: 'master',
             mapping: {
-              global: { directive: 'skip' },
-              alpha: { directive: 'new', newJar: { name: 'Alpha', color: '#000' } },
-              bravo: { directive: 'new', newJar: { name: 'Bravo', color: '#000' } }
+              [src.entries.global]: { directive: 'skip' },
+              [src.entries.alpha]: { directive: 'new', newJar: { name: 'Alpha', color: '#000' } },
+              [src.entries.bravo]: { directive: 'new', newJar: { name: 'Bravo', color: '#000' } }
             }
           }),
           (e) => /injected mid-loop failure/.test(e.message)

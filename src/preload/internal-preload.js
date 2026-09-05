@@ -772,7 +772,9 @@ if (INTERNAL_ORIGINS.has(location.origin)) {
      * onVaultImportLabelsReady. Resolves a NON-SECRET `{ handle, labels }` projection of this
      * window's held record, or `null` when nothing is held past the secret step (the page must
      * treat null as a strict no-op — never assume the event implies its own record).
-     * @returns {Promise<{ handle: string, labels: Array<{ sourceId: string, jarMeta: { name: string, color: string } | null, itemCount: number }> } | null>}
+     * M18 F3 L5: labels key on the bundle's opaque `entryHandle`, not the old plaintext
+     * `sourceId`; `identity` (renamed from `jarMeta`) is present on EVERY label, including global.
+     * @returns {Promise<{ handle: string, labels: Array<{ entryHandle: string, identity: { kind: 'global' } | { kind: 'jar', name: string, color?: string }, itemCount: number }> } | null>}
      */
     fetchImportLabels: () => ipcRenderer.invoke('internal-vault-import-labels'),
 

@@ -747,6 +747,87 @@ test('internal-vault-export with a pre-chosen savePath forwards it to vaultSaveB
 });
 
 // ---------------------------------------------------------------------------
+// Whole-profile portable EXPORT (M18 F3 L3 / DD1 ruling 7) — internal-vault-export-profile.
+// RE-SCOPED M18 F3 L5 (ruling 4c): `carried` must be real jar/Global NAMES (never a bundle
+// entry's opaque entryHandle), built MAIN-PROCESS-ONLY and never attached to the serialized
+// bundle. No coverage of this handler existed before this leg (the gap ruling 4c calls out).
+// ---------------------------------------------------------------------------
+
+test('internal-vault-export-profile: carried is real NAMES (not entryHandles), and never lands in the serialized bundle', async () => {
+  const dir = tmpDir();
+  try {
+    // A jar whose NAME equals its id (the real-world slug case) — the exact fixture the
+    // opacity byte-scan needs; reused here to pin `carried` shows the readable name.
+    const namedJars = [{ id: 'work', name: 'work', color: '#4287f5' }];
+    const store = vs.load(dir, { scryptParams: FAST_SCRYPT, getAutoLockMinutes: () => 10, listJars: () => namedJars });
+    await store.setup({ masterPassword: MASTER });
+    store.saveItem('global', { type: 'login', title: 'G', username: 'u', password: 'hunter2' });
+    store.saveItem('work', { type: 'login', title: 'W', username: 'u', password: 'hunter3' });
+
+    const saved = [];
+    const ipcMain = makeFakeIpcMain();
+    registerVaultIpc({
+      ipcMain,
+      registerInternalHandler,
+      getVaultStore: () => store,
+      jars: { list: () => namedJars },
+      vaultSaveBundle: async (bundle) => {
+        saved.push(bundle);
+        return { ok: true, path: '/tmp/profile.gfvaultbundle' };
+      }
+    });
+
+    const res = await ipcMain.invoke('internal-vault-export-profile', vaultEvent());
+    assert.equal(res.ok, true);
+    assert.deepEqual(res.carried, ['Global', 'work'], 'carried names, Global first, in bundle.vaults order');
+
+    // The exact regression ruling 4c closes: `carried` must never be serialized into the
+    // bundle file — only the store's `bundle` half is ever handed to the save delegate.
+    assert.equal(saved.length, 1);
+    assert.equal('carried' in saved[0], false, 'carried is never attached to the object handed to vaultSaveBundle');
+    assert.equal(JSON.stringify(saved[0]).includes('"carried"'), false);
+
+    // And the bundle itself stays opaque: no entryHandle-keyed entry carries the jar name.
+    for (const v of saved[0].vaults) {
+      assert.equal(typeof v.entryHandle, 'string');
+      assert.ok(v.entryHandle.length > 0);
+      assert.equal('sourceId' in v, false);
+    }
+    assert.equal(JSON.stringify(saved[0]).includes('work'), false, 'the jar name never appears in the bundle');
+  } finally {
+    rm(dir);
+  }
+});
+
+test('internal-vault-export-profile on a LOCKED manager returns { locked: true } (never calls the save dialog)', async () => {
+  const dir = tmpDir();
+  try {
+    const store = vs.load(dir, { scryptParams: FAST_SCRYPT, getAutoLockMinutes: () => 10, listJars: () => REAL_JARS });
+    await store.setup({ masterPassword: MASTER });
+    store.lockNow();
+
+    let called = 0;
+    const ipcMain = makeFakeIpcMain();
+    registerVaultIpc({
+      ipcMain,
+      registerInternalHandler,
+      getVaultStore: () => store,
+      jars: { list: () => REAL_JARS },
+      vaultSaveBundle: async () => {
+        called += 1;
+        return { ok: true };
+      }
+    });
+
+    const res = await ipcMain.invoke('internal-vault-export-profile', vaultEvent());
+    assert.deepEqual(res, { locked: true });
+    assert.equal(called, 0, 'the save dialog is never reached when locked');
+  } finally {
+    rm(dir);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Save-location PICK (M12 F5 HAT, I14) — internal-vault-pick-save-path. GATED on the
 // vaultPickSavePath injection; runs the save dialog ONLY (no build, no write), holds no state.
 // ---------------------------------------------------------------------------

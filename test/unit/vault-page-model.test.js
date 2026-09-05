@@ -333,94 +333,134 @@ test('restoreDestinationOptions: empty/malformed jar list → empty options, no 
 
 // ---------------------------------------------------------------------------
 // restoreOutcomeLines — the restore completion modal's per-vault outcome
-// display lines (M18 F3 L4, HAT fix 11). Operator feedback: a merge commit's
-// completion surface didn't say whether items actually landed or deduped —
-// this closes that by rendering merge detail whenever a mergeReport rides
-// the outcome.
+// display lines (M18 F3 L4, HAT fix 11; RE-KEYED M18 F3 L5 to close the
+// bundle identity leak). Results are keyed by the bundle's opaque
+// `entryHandle`; `labels` (the mapping step's decrypted per-entry identities)
+// is the second argument the join resolves display NAMES from — an
+// entryHandle itself is never rendered. Operator feedback (unchanged):
+// a merge commit's completion surface didn't say whether items actually
+// landed or deduped — this closes that by rendering merge detail whenever a
+// mergeReport rides the outcome.
 // ---------------------------------------------------------------------------
 
-test('restoreOutcomeLines: landed with no mergeReport → plain "restored"', () => {
-  assert.deepEqual(restoreOutcomeLines([{ sourceId: 'personal', outcome: 'landed', destination: 'personal-1' }]), [
-    { sourceId: 'personal', text: 'personal → personal-1: restored' }
+const JAR_LABEL = (entryHandle, name) => ({ entryHandle, identity: { kind: 'jar', name } });
+const GLOBAL_LABEL = (entryHandle) => ({ entryHandle, identity: { kind: 'global' } });
+
+test('restoreOutcomeLines: landed with no mergeReport → plain "restored", name resolved via labels', () => {
+  const labels = [JAR_LABEL('h1', 'personal')];
+  assert.deepEqual(restoreOutcomeLines([{ entryHandle: 'h1', outcome: 'landed', destination: 'personal-1' }], labels), [
+    { entryHandle: 'h1', text: 'personal → personal-1: restored' }
   ]);
 });
 
 test('restoreOutcomeLines: landed with a mergeReport, zero conflict copies → no trailing copies clause (the operator’s exact dedup case)', () => {
-  const lines = restoreOutcomeLines([
-    {
-      sourceId: 'personal',
-      outcome: 'landed',
-      destination: 'personal-1',
-      mergeReport: { imported: 0, skippedIdentical: 5, conflictCopies: 0 }
-    }
-  ]);
-  assert.deepEqual(lines, [{ sourceId: 'personal', text: 'personal → personal-1: merged — 0 new, 5 already present' }]);
+  const labels = [JAR_LABEL('h1', 'personal')];
+  const lines = restoreOutcomeLines(
+    [
+      {
+        entryHandle: 'h1',
+        outcome: 'landed',
+        destination: 'personal-1',
+        mergeReport: { imported: 0, skippedIdentical: 5, conflictCopies: 0 }
+      }
+    ],
+    labels
+  );
+  assert.deepEqual(lines, [{ entryHandle: 'h1', text: 'personal → personal-1: merged — 0 new, 5 already present' }]);
 });
 
 test('restoreOutcomeLines: landed with a mergeReport AND conflict copies → trailing copies clause appended', () => {
-  const lines = restoreOutcomeLines([
-    {
-      sourceId: 'personal',
-      outcome: 'landed',
-      destination: 'personal-1',
-      mergeReport: { imported: 2, skippedIdentical: 3, conflictCopies: 1 }
-    }
-  ]);
+  const labels = [JAR_LABEL('h1', 'personal')];
+  const lines = restoreOutcomeLines(
+    [
+      {
+        entryHandle: 'h1',
+        outcome: 'landed',
+        destination: 'personal-1',
+        mergeReport: { imported: 2, skippedIdentical: 3, conflictCopies: 1 }
+      }
+    ],
+    labels
+  );
   assert.deepEqual(lines, [
-    { sourceId: 'personal', text: 'personal → personal-1: merged — 2 new, 3 already present, 1 kept as copies' }
+    { entryHandle: 'h1', text: 'personal → personal-1: merged — 2 new, 3 already present, 1 kept as copies' }
   ]);
 });
 
 test('restoreOutcomeLines: skipped → no destination in the line', () => {
-  assert.deepEqual(restoreOutcomeLines([{ sourceId: 'work', outcome: 'skipped' }]), [
-    { sourceId: 'work', text: 'work: skipped' }
+  const labels = [JAR_LABEL('h1', 'work')];
+  assert.deepEqual(restoreOutcomeLines([{ entryHandle: 'h1', outcome: 'skipped' }], labels), [
+    { entryHandle: 'h1', text: 'work: skipped' }
   ]);
 });
 
 test('restoreOutcomeLines: collision-refused → destination shown, guidance to choose Replace or Merge', () => {
+  const labels = [JAR_LABEL('h1', 'personal')];
   assert.deepEqual(
-    restoreOutcomeLines([{ sourceId: 'personal', outcome: 'collision-refused', destination: 'personal-1' }]),
+    restoreOutcomeLines([{ entryHandle: 'h1', outcome: 'collision-refused', destination: 'personal-1' }], labels),
     [
       {
-        sourceId: 'personal',
+        entryHandle: 'h1',
         text: 'personal → personal-1: not restored (a vault already exists; choose Replace or Merge)'
       }
     ]
   );
 });
 
-test('restoreOutcomeLines: failed → no destination in the line', () => {
-  assert.deepEqual(restoreOutcomeLines([{ sourceId: 'global', outcome: 'failed' }]), [
-    { sourceId: 'global', text: 'global: failed' }
+test('restoreOutcomeLines: failed → no destination in the line; the global identity resolves to "Global"', () => {
+  const labels = [GLOBAL_LABEL('h1')];
+  assert.deepEqual(restoreOutcomeLines([{ entryHandle: 'h1', outcome: 'failed' }], labels), [
+    { entryHandle: 'h1', text: 'Global: failed' }
   ]);
 });
 
 test('restoreOutcomeLines: multiple results render in order, one line each', () => {
-  const lines = restoreOutcomeLines([
-    { sourceId: 'a', outcome: 'landed', destination: 'a-1' },
-    { sourceId: 'b', outcome: 'skipped' },
-    { sourceId: 'c', outcome: 'failed' }
-  ]);
+  const labels = [JAR_LABEL('ha', 'a'), JAR_LABEL('hb', 'b'), JAR_LABEL('hc', 'c')];
+  const lines = restoreOutcomeLines(
+    [
+      { entryHandle: 'ha', outcome: 'landed', destination: 'a-1' },
+      { entryHandle: 'hb', outcome: 'skipped' },
+      { entryHandle: 'hc', outcome: 'failed' }
+    ],
+    labels
+  );
   assert.deepEqual(
-    lines.map((l) => l.sourceId),
-    ['a', 'b', 'c']
+    lines.map((l) => l.entryHandle),
+    ['ha', 'hb', 'hc']
   );
 });
 
-test('restoreOutcomeLines: malformed input degrades safely — non-array, non-object entries, missing sourceId all drop/no-throw', () => {
+test('restoreOutcomeLines: malformed input degrades safely — non-array, non-object entries, missing entryHandle all drop/no-throw', () => {
   assert.deepEqual(restoreOutcomeLines(undefined), []);
   assert.deepEqual(restoreOutcomeLines([]), []);
-  assert.deepEqual(restoreOutcomeLines([null, 'nope', {}, { sourceId: '' }, { outcome: 'landed' }]), []);
+  assert.deepEqual(restoreOutcomeLines([null, 'nope', {}, { entryHandle: '' }, { outcome: 'landed' }]), []);
+});
+
+test('restoreOutcomeLines: an entryHandle with NO matching label falls back to "a vault" — never the raw entryHandle', () => {
+  assert.deepEqual(restoreOutcomeLines([{ entryHandle: 'orphan', outcome: 'skipped' }], []), [
+    { entryHandle: 'orphan', text: 'a vault: skipped' }
+  ]);
+  // Malformed/missing labels array degrades the same way — never throws.
+  assert.deepEqual(restoreOutcomeLines([{ entryHandle: 'orphan', outcome: 'skipped' }]), [
+    { entryHandle: 'orphan', text: 'a vault: skipped' }
+  ]);
 });
 
 test('restoreOutcomeLines: mergeReport with non-numeric/missing fields coerces to 0, never NaN/undefined in the text', () => {
-  const lines = restoreOutcomeLines([
-    { sourceId: 'personal', outcome: 'landed', destination: 'personal-1', mergeReport: {} }
-  ]);
-  assert.deepEqual(lines, [{ sourceId: 'personal', text: 'personal → personal-1: merged — 0 new, 0 already present' }]);
+  const labels = [JAR_LABEL('h1', 'personal')];
+  const lines = restoreOutcomeLines(
+    [{ entryHandle: 'h1', outcome: 'landed', destination: 'personal-1', mergeReport: {} }],
+    labels
+  );
+  assert.deepEqual(lines, [{ entryHandle: 'h1', text: 'personal → personal-1: merged — 0 new, 0 already present' }]);
 });
 
 test('restoreOutcomeLines: an unrecognized outcome falls back to echoing the raw value', () => {
-  assert.deepEqual(restoreOutcomeLines([{ sourceId: 'x', outcome: 'weird' }]), [{ sourceId: 'x', text: 'x: weird' }]);
-  assert.deepEqual(restoreOutcomeLines([{ sourceId: 'x', outcome: 123 }]), [{ sourceId: 'x', text: 'x: unknown' }]);
+  const labels = [JAR_LABEL('h1', 'x')];
+  assert.deepEqual(restoreOutcomeLines([{ entryHandle: 'h1', outcome: 'weird' }], labels), [
+    { entryHandle: 'h1', text: 'x: weird' }
+  ]);
+  assert.deepEqual(restoreOutcomeLines([{ entryHandle: 'h1', outcome: 123 }], labels), [
+    { entryHandle: 'h1', text: 'x: unknown' }
+  ]);
 });

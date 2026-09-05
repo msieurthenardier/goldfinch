@@ -1,8 +1,9 @@
 'use strict';
 
-// Unit tests for `previewRestoreBundle()` (M18 F3 Leg 3 / DD2 ruling 2): the store's
+// Unit tests for `previewRestoreBundle()` (M18 F3 Leg 3 / DD2 ruling 2; RE-KEYED
+// M18 F3 Leg 5 to the opaque entryHandle + encrypted identity): the store's
 // decrypt-then-discard SECRET STEP for the multi-vault restore workflow — verifies the
-// bundle secret (auth), returns NON-SECRET per-vault labels (source jar name/color, item
+// bundle secret (auth), returns NON-SECRET per-vault labels (decrypted identity, item
 // count) for the page's mapping step, and installs nothing. Covers: v1 and v2 bundles (the
 // "one-row case"), the byte-scan-adjacent claim that no key material/decrypted content rides
 // the return, the gated entry (mirrored in vault-rekey-gate.test.js), and the cycle-2 HIGH
@@ -48,27 +49,33 @@ function destStore() {
   return { dir, store: vs.load(dir, { scryptParams: FAST_SCRYPT, listJars: () => [] }) };
 }
 
-test('previewRestoreBundle: v2 bundle → one label per vault, itemCount correct, jarMeta decrypted for jar vaults, null for global', async () => {
+test('previewRestoreBundle: v2 bundle → one label per vault, itemCount correct, identity decrypted for EVERY entry (global too)', async () => {
   const src = await makeSourceProfile();
   const dest = destStore();
   try {
-    const bundle = src.store.exportProfile();
+    const { bundle } = src.store.exportProfile();
     const res = await dest.store.previewRestoreBundle(bundle, {
       secret: Buffer.from(MASTER, 'utf8'),
       secretKind: 'master'
     });
     assert.equal(res.labels.length, 2);
-    const global = res.labels.find((l) => l.sourceId === 'global');
-    const work = res.labels.find((l) => l.sourceId === 'work');
-    assert.deepEqual(global, { sourceId: 'global', jarMeta: null, itemCount: 1 });
-    assert.deepEqual(work, { sourceId: 'work', jarMeta: { name: 'Work', color: '#2196f3' }, itemCount: 2 });
+    // The labels carry no readable id at all — resolve by decrypted identity instead.
+    const global = res.labels.find((l) => l.identity.kind === 'global');
+    const work = res.labels.find((l) => l.identity.kind === 'jar');
+    assert.ok(global, 'one label decrypts to the global identity');
+    assert.equal(global.itemCount, 1);
+    assert.equal(typeof global.entryHandle, 'string');
+    assert.deepEqual(work.identity, { kind: 'jar', name: 'Work', color: '#2196f3' });
+    assert.equal(work.itemCount, 2);
+    assert.notEqual(global.entryHandle, work.entryHandle, 'distinct entryHandles');
+    assert.equal(global.entryHandle === 'global' || work.entryHandle === 'work', false, 'never the old plaintext id');
   } finally {
     rm(src.dir);
     rm(dest.dir);
   }
 });
 
-test('previewRestoreBundle: v1 bundle (the one-row case) → a single label, no jarMeta', async () => {
+test('previewRestoreBundle: v1 bundle (the one-row case) → a single label, PLAINTEXT synthetic identity, deterministic entryHandle', async () => {
   const src = await makeSourceProfile();
   const dest = destStore();
   try {
@@ -78,7 +85,19 @@ test('previewRestoreBundle: v1 bundle (the one-row case) → a single label, no 
       secret: Buffer.from(MASTER, 'utf8'),
       secretKind: 'master'
     });
-    assert.deepEqual(res.labels, [{ sourceId: 'global', jarMeta: null, itemCount: 1 }]);
+    assert.equal(res.labels.length, 1);
+    assert.deepEqual(res.labels[0].identity, { kind: 'global' });
+    assert.equal(res.labels[0].itemCount, 1);
+    assert.equal(typeof res.labels[0].entryHandle, 'string');
+    assert.notEqual(res.labels[0].entryHandle, 'global', 'still an opaque-looking handle, not the sourceVaultId');
+
+    // Deterministic (not random) for v1 — a second preview of the SAME bundle resolves the
+    // SAME entryHandle, so the mapping key learned here still matches at commit time.
+    const res2 = await dest.store.previewRestoreBundle(JSON.parse(JSON.stringify(v1Bundle)), {
+      secret: Buffer.from(MASTER, 'utf8'),
+      secretKind: 'master'
+    });
+    assert.equal(res2.labels[0].entryHandle, res.labels[0].entryHandle);
   } finally {
     rm(src.dir);
     rm(dest.dir);
@@ -89,7 +108,7 @@ test('previewRestoreBundle: preview NEVER installs anything — a fresh destinat
   const src = await makeSourceProfile();
   const dest = destStore();
   try {
-    const bundle = src.store.exportProfile();
+    const { bundle } = src.store.exportProfile();
     assert.equal(dest.store.isSetUp(), false);
     await dest.store.previewRestoreBundle(bundle, { secret: Buffer.from(MASTER, 'utf8'), secretKind: 'master' });
     assert.equal(dest.store.isSetUp(), false, 'preview writes nothing — no adopt, no manager.json');
@@ -103,7 +122,7 @@ test('previewRestoreBundle: wrong secret throws VaultAuthError; a wrong recovery
   const src = await makeSourceProfile();
   const dest = destStore();
   try {
-    const bundle = src.store.exportProfile();
+    const { bundle } = src.store.exportProfile();
     await assert.rejects(
       dest.store.previewRestoreBundle(bundle, { secret: Buffer.from('nope', 'utf8'), secretKind: 'master' }),
       (e) => e instanceof vs.VaultAuthError
@@ -114,19 +133,21 @@ test('previewRestoreBundle: wrong secret throws VaultAuthError; a wrong recovery
   }
 });
 
-test('previewRestoreBundle: labels carry NO key material, no decrypted item content — only sourceId/jarMeta{name,color}/itemCount', async () => {
+test('previewRestoreBundle: labels carry NO key material, no decrypted item content — only entryHandle/identity{kind,name?,color?}/itemCount', async () => {
   const src = await makeSourceProfile();
   const dest = destStore();
   try {
-    const bundle = src.store.exportProfile();
+    const { bundle } = src.store.exportProfile();
     const res = await dest.store.previewRestoreBundle(bundle, {
       secret: Buffer.from(MASTER, 'utf8'),
       secretKind: 'master'
     });
     for (const label of res.labels) {
       const keys = Object.keys(label).sort();
-      assert.deepEqual(keys, ['itemCount', 'jarMeta', 'sourceId']);
-      if (label.jarMeta) assert.deepEqual(Object.keys(label.jarMeta).sort(), ['color', 'name']);
+      assert.deepEqual(keys, ['entryHandle', 'identity', 'itemCount']);
+      if (label.identity.kind === 'jar')
+        assert.deepEqual(Object.keys(label.identity).sort(), ['color', 'kind', 'name']);
+      else assert.deepEqual(Object.keys(label.identity).sort(), ['kind']);
     }
     // A byte-scan of the serialized result finds neither the item titles/usernames/passwords
     // nor anything base64-shaped that could be key material.
@@ -150,7 +171,7 @@ test('previewRestoreBundle: a GCM-authentic bundle whose plaintext is malformed 
   const dest = destStore();
   const original = vc.decryptItems;
   try {
-    const bundle = src.store.exportProfile();
+    const { bundle } = src.store.exportProfile();
     let call = 0;
     vc.decryptItems = (blob, key, version) => {
       call++;
@@ -174,7 +195,7 @@ test('previewRestoreBundle: a duplicate item id within one bundle vault is caugh
   const dest = destStore();
   const original = vc.decryptItems;
   try {
-    const bundle = src.store.exportProfile();
+    const { bundle } = src.store.exportProfile();
     let call = 0;
     vc.decryptItems = (blob, key, version) => {
       call++;
@@ -197,18 +218,83 @@ test('previewRestoreBundle: a duplicate item id within one bundle vault is caugh
   }
 });
 
-test('previewRestoreBundle: a lone jarMeta tamper (bad AAD) fails loudly via decryptJarMeta, never a silent unnamed jar', async () => {
+test('previewRestoreBundle: a lone identity tamper (bad AAD) fails loudly via decryptIdentity, never a silent unnamed jar', async () => {
   const src = await makeSourceProfile();
   const dest = destStore();
   try {
-    const bundle = src.store.exportProfile();
-    // Splice the 'work' entry's jarMeta onto a bundle that otherwise looks fine — the AAD
-    // binds sourceId, so a spliced envelope fails GCM authentication.
-    const workEntry = bundle.vaults.find((v) => v.sourceId === 'work');
-    workEntry.jarMeta = { ...workEntry.jarMeta, ct: workEntry.jarMeta.ct.slice(0, -4) + 'AAAA' };
+    const { bundle } = src.store.exportProfile();
+    // Corrupt the jar entry's identity ciphertext — the AAD binds the entry's OWN
+    // entryHandle, so a corrupted envelope fails GCM authentication. Global is always
+    // index 0 per the deterministic export order (see vault-bundle-v2.test.js), so index 1
+    // is the jar entry without needing to decrypt first to identify it.
+    const jarEntry = bundle.vaults[1];
+    jarEntry.identity = { ...jarEntry.identity, ct: jarEntry.identity.ct.slice(0, -4) + 'AAAA' };
     await assert.rejects(
       dest.store.previewRestoreBundle(bundle, { secret: Buffer.from(MASTER, 'utf8'), secretKind: 'master' }),
       (e) => e instanceof vc.VaultAuthError || e instanceof vc.VaultFormatError
+    );
+  } finally {
+    rm(src.dir);
+    rm(dest.dir);
+  }
+});
+
+test('previewRestoreBundle: SECURITY regression pin — a v2 entry whose identity envelope carries identityPlaintext:true is refused, never trusted as a bypass', async () => {
+  const src = await makeSourceProfile();
+  const dest = destStore();
+  try {
+    const { bundle } = src.store.exportProfile();
+    const jarEntry = bundle.vaults[1];
+    jarEntry.identity = { ...jarEntry.identity, identityPlaintext: true };
+    await assert.rejects(
+      dest.store.previewRestoreBundle(bundle, { secret: Buffer.from(MASTER, 'utf8'), secretKind: 'master' }),
+      (e) => e instanceof vc.VaultFormatError
+    );
+  } finally {
+    rm(src.dir);
+    rm(dest.dir);
+  }
+});
+
+test('previewRestoreBundle: SECURITY regression pin — an ENTRY-LEVEL (sibling) identityPlaintext:true carrying a plaintext attacker-named identity is refused, never surfaced (M18 F3 L5 security regression: entry-level identityPlaintext)', async () => {
+  const src = await makeSourceProfile();
+  const dest = destStore();
+  try {
+    const { bundle } = src.store.exportProfile();
+    const jarEntry = bundle.vaults[1];
+    // This is the PRIMARY smuggling vector, distinct from the nested-envelope test above: the
+    // attacker sets `identityPlaintext: true` as a SIBLING of entryHandle/identity/vault at the
+    // ENTRY level (never nested inside `identity`), and swaps in a plaintext, attacker-chosen
+    // `identity` value in place of the real encrypted envelope — exactly the shape
+    // `normalizeRestoreBundle`'s v2 explicit named-field extraction (`{ entryHandle, identity,
+    // vault }`, never `{...e}`) is designed to foreclose by structurally dropping the entry's
+    // own top-level `identityPlaintext` field before `resolveIdentity` ever sees it. (The nested
+    // vector above only reaches `decryptIdentity`'s defense-in-depth backstop; this one attacks
+    // the primary defense directly.)
+    jarEntry.identityPlaintext = true;
+    jarEntry.identity = { kind: 'jar', name: 'ATTACKER-CONTROLLED', color: '#000000' };
+
+    let labels = null;
+    try {
+      const res = await dest.store.previewRestoreBundle(bundle, {
+        secret: Buffer.from(MASTER, 'utf8'),
+        secretKind: 'master'
+      });
+      labels = res.labels;
+    } catch (e) {
+      // Refusing loudly satisfies the security property. Assert on the OUTCOME (some vault
+      // error), not a specific message, so this stays valid if the refusal's wording changes.
+      assert.ok(
+        e instanceof vc.VaultFormatError || e instanceof vc.VaultAuthError,
+        `expected a vault error refusing the smuggled entry, got: ${e && e.stack}`
+      );
+      return;
+    }
+    // If the call did NOT throw, the security property must still hold: the attacker's injected
+    // plaintext identity must never have surfaced anywhere in the result.
+    assert.ok(
+      !labels.some((l) => l && l.identity && l.identity.name === 'ATTACKER-CONTROLLED'),
+      'the attacker-controlled identity must never surface, whether or not the call throws'
     );
   } finally {
     rm(src.dir);

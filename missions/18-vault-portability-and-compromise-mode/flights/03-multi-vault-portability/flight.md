@@ -509,7 +509,7 @@ not after the fact.
       operator vetoes ruled (single-vault export restored;
       vault-unlock blur NOT vetoed). Surfaced one out-of-scope
       security defect → leg 5.
-- [ ] `bundle-identity-opacity` — CLOSE the criterion-4 leak found at
+- [x] `bundle-identity-opacity` — CLOSE the criterion-4 leak found at
       the HAT: `vaults[].sourceId` ships in plaintext and jar ids are
       name-slugs, so jar names are readable in the bundle before the
       secret. Move real jar identity inside the encrypted jarMeta,

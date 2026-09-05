@@ -59,6 +59,89 @@ recommendation 2, mission Open Questions. Classifications:
 
 ## Leg Progress
 
+### Leg 5 — bundle-identity-opacity (landed, 2026-09-05)
+Closed the criterion-4 leak logged at Leg 4's HAT ("bundle v2 leaks jar
+identity via plaintext sourceId", Decisions). Every v2 entry is now
+keyed by an opaque `entryHandle` (random, `crypto.randomBytes(16)`)
+instead of the plaintext `sourceId`; real identity
+(`{kind:'global'}` / `{kind:'jar',name,color}`, present on EVERY entry
+including global, not jar-only) rides encrypted as `identity`
+(renamed from `jarMeta`), AAD-bound to the entry's own entryHandle
+(`encryptIdentity`/`decryptIdentity`, replacing `encryptJarMeta`/
+`decryptJarMeta`). Rekeyed every consumer: `_restoreProfile`'s
+mapping + results, `previewRestoreBundle`'s labels,
+`pending-imports.js`'s `PendingImportLabel` typedef, vault.js's
+mapping modal + the submit-time IPC mapping build (vault.js's most
+consequential rekey site) + `openCompletionModal` (now takes
+`record.labels` for the entryHandle→decrypted-name join,
+`restoreOutcomeLines` in `vault-page-model.js` does the join) — no
+raw entryHandle is ever shown to the operator. `exportProfile()` now
+returns `{ bundle, carried }`: `carried` is a main-process-only,
+never-serialized list of real jar/Global NAMES (ruling 4c), built in
+the SAME export loop; `register-vault-ipc.js` forwards it as-is and
+vault.js's export-completion notice consumes it directly (the old
+id→local-label lookup is gone — entryHandles carry no meaning
+locally).
+
+v1 legacy bundles synthesize a PLAINTEXT `identity` tagged
+`identityPlaintext: true` (v1 has no ciphertext identity to decrypt;
+normalize runs before the mrk exists) — SECURITY-CRITICAL: the tag
+lives on the normalized ENTRY itself (a sibling of
+`entryHandle`/`identity`/`vault`), never nested inside `identity`,
+because the v2 branch's explicit named-field extraction
+(`{ entryHandle: e.entryHandle, identity: e.identity, vault: e.vault
+}`, never `{...e}`) only omits attacker-supplied fields at the ENTRY
+level — nesting the tag inside `identity` would have let it ride
+through untouched (`identity: e.identity` passes the value through
+wholesale) and let an attacker's v2 JSON bundle bypass
+AAD-authenticated decrypt entirely. Caught by a dedicated regression
+test after an initial (wrong) implementation nested the tag inside
+`identity` and a "smuggling" test failed to reject it — fixed before
+landing; `decryptIdentity` also independently refuses any envelope
+carrying the tag as defense-in-depth. v1's `sourceVaultId` gets a
+DETERMINISTIC entryHandle (`v1EntryHandle`, a domain-separated SHA-256
+of the sourceVaultId, not `mintEntryHandle`'s random token) — a v1
+bundle normalizes independently at preview and at commit, so a random
+per-call handle would desync the two steps and make every v1 restore
+fail at commit with "unknown entryHandle"; caught by wiring a
+preview-then-commit round trip into the v1 test instead of asserting
+each step in isolation.
+
+Two additional plaintext-identity leaks were found and closed beyond
+the leg's literal ruling text, both because they'd have defeated
+ruling 6's own byte-scan pin: (1) the embedded `.gfvault` document
+carries its OWN `vaultId` field (set to the local jar/GLOBAL_ID at
+write time) — duplicated the exact leak one level down; scrubbed to
+the entry's own entryHandle before embedding (confirmed `vaultId`
+plays no role downstream — `_restoreProfile`/`_previewRestoreBundle`
+never read it). (2) `register-vault-ipc.js`'s `internal-vault-export-
+profile` handler had NO test coverage at all before this leg (per the
+leg's own note); added coverage there plus the ruling-6 name==slug
+byte-scan directly on `exportProfile()`'s store-level output.
+
+Tests: opacity byte-scan (name==slug fixture, ruling 6) at both the
+store level (`vault-bundle-v2.test.js`) and the IPC level
+(`register-vault-ipc.test.js`, new coverage); AAD-splice rejection;
+v1 legacy import (both global and jar sourceVaultId); the
+identityPlaintext tag-smuggling regression pin (twice — direct
+`decryptIdentity` call and through `previewRestoreBundle`); round-trip;
+completion-display-by-name; the export-completion `carried`-shows-
+names pin. Rewrote the stale doc comments at `vault-page-model.js`
+(the old sourceId-is-post-authorization defense, now moot — the field
+carries no identity at all) and `vault.js` (`openCompletionModal`'s
+doc). `docs/vault.md`'s Portability section rewritten for the new
+format + the v1 posture. vault.js: 2812 → 2817 (wc -l) after the
+rekey; two comment-density passes to stay at/under budget (2820 in
+the test's own `split(/\r?\n/).length` metric, which is `wc -l` + 1)
+— no code extraction needed (the entryHandle→name join already lives
+in `vault-page-model.js`'s `restoreOutcomeLines`, not vault.js, so
+there was nothing further to extract). Gates: full suite 4289/4289
+(up from the 4281 baseline — net new tests, none removed), lint
+clean, format:check clean, typecheck clean (also fixed two
+discriminated-union narrowing errors in vault.js and updated
+`renderer-globals.d.ts`'s stale `fetchImportLabels`/`commitImport`
+JSDoc types, both missed on the first typecheck pass).
+
 ### Leg 4 — guided-hat-restore (in progress, 2026-09-05)
 Walking the whole portability surface live against the dev profile.
 Steps 1-3 (setup, blur contract, whole-profile export) passed; DD8's
@@ -808,6 +891,63 @@ templates, and `RENDERER_LINE_BUDGET` are all untouched by this leg).
 
 ## Flight Director Notes
 
+- 2026-09-05: Leg 4 (HAT) committed (43eabb1, pushed to PR #204) after
+  an independent review of the 11-fix diff ([HANDOFF:confirmed], 4281
+  green). Leg 5 `bundle-identity-opacity` designed
+  (`legs/05-bundle-identity-opacity.md`) to close the criterion-4
+  plaintext-sourceId leak found at the HAT. **Risk tier: HIGH** —
+  bundle v2 FORMAT change + store crypto (AAD rebind) + security
+  (the leak IS a criterion violation); flight pre-ruled design review
+  mandatory. Core rulings for review to strike at: opaque random
+  per-entry handle replaces plaintext sourceId; identity (incl. which
+  entry is global) moves inside the encrypted per-entry `meta`; AAD
+  rebinds to the handle; restore/labels/completion rekey to
+  handle+decrypted-name (operator never sees a handle); v1 legacy
+  posture (proposed: keep reading v1, export only v2); a
+  name==slug byte-scan pin (the assertion that would have caught it).
+  Design review spawning (max 2 cycles).
+- 2026-09-05: Leg 5 design review cycle 1 — **approve with changes**,
+  two HIGHs incorporated: (1) the export-completion "carried" notice
+  (`register-vault-ipc.js:365` → `vault.js:634-654`, HAT fix 2)
+  resolves bundle sourceIds against the LOCAL jar list and would show
+  raw opaque handles post-opacity — ruling 4c added: `exportProfile`
+  returns a main-only carried-NAMES list, handler + page consume names
+  directly (register-vault-ipc.js added to scope). (2) ruling 5 was
+  mechanically impossible — normalizeRestoreBundle runs PRE-mrk so it
+  can't encrypt the v1 synthetic entry's identity; corrected to a
+  PLAINTEXT tagged identity the uniform decrypt step skips. Also:
+  per-entry token renamed `handle`→`entryHandle` (collides with
+  `PendingImportRecord.handle`, the session token, in the same
+  functions); bundle field `jarMeta`→`identity` (not `meta` — clashes
+  with item-level `listItemsMeta`); main.js confirmed a pure
+  passthrough; PendingImportLabel typedef + the stale
+  vault-page-model.js:255-267 doc comment added to scope; vault.js
+  budget margin flagged THIN with the completion name-join as the
+  extraction candidate. Reviewer confirmed the core sound: no
+  _resolveTarget/listJars consumes the bundle sourceId, no pre-decrypt
+  global/jar distinction exists, adopt-rerun-residue keys off local
+  destinations (unaffected), leg-2's byte-scan missed the leak only
+  because its fixture name≠slug. Substantive → cycle 2 spawned.
+- 2026-09-05: Leg 5 design review cycle 2 (delta-scoped) — **approve
+  with changes**; the highest-value check PASSED: the v1
+  plaintext-tag smuggling attack is structurally foreclosed —
+  normalizeRestoreBundle's v2 branch uses explicit named-field
+  extraction (never `{...e}`), so an attacker can't set
+  identityPlaintext on a v2 entry to inject an unauthenticated
+  identity; and the normalized bundle is in-memory only (never
+  written), so the tag never reaches disk. Two precision MEDIUMs
+  folded in: ruling 4c now pairs the carried-NAME push with the
+  entry push AFTER the lazy `if(doc===null) continue` (else
+  count/order diverges); ruling 4's vault.js citation widened to the
+  submit-time mapping build at 1168-1174 (the IPC `mapping` object
+  that must key on entryHandle — the single most consequential rekey
+  site, with `record.handle` the session token 3 lines away). Also
+  pinned: explicit-named-field v2 construction as the smuggling
+  mitigation, loud `entry.identity` validation, tighter
+  pending-imports citation. Max review cycles reached; remaining were
+  specified fixes → leg marked `ready`. `[HANDOFF:review-needed]` →
+  implementation spawn.
+
 - 2026-09-02: Flight marked `in-flight`; branch
   `flight/03-multi-vault-portability` created off `main` (5eaec48);
   planning artifacts committed (61a5318). Crew file
@@ -1111,6 +1251,10 @@ HAT fix 3, sequenced after the export-modal fix (shared files). No v2
 bundle exists in the wild; the format change is free. The HAT walk
 continues on the current bundle (workflow mechanics are unaffected);
 re-export on the fixed format before leg 5's witnessed runs.
+**Resolved**: closed by the `bundle-identity-opacity` leg (this
+flight's leg 5, inserted after this finding — the pre-existing
+"witnessed-runs" leg renumbers to leg 6) — see the Leg Progress
+section above.
 
 *(none yet)*
 

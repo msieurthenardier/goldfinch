@@ -159,13 +159,13 @@ test('openMappingModal: the new-jar color control is a dot-swatch picker, not a 
   assert.ok(body.includes('buildColorSwatchGrid('), 'the row builds a dot-swatch grid for the new-jar color');
 });
 
-test('openMappingModal: the color swatch grid prefills the bundle jarMeta color and mirrors the jars page editColors idiom (append-as-custom-swatch, never a nearest-color guess)', () => {
+test('openMappingModal: the color swatch grid prefills the bundle identity color and mirrors the jars page editColors idiom (append-as-custom-swatch, never a nearest-color guess)', () => {
   const body = openMappingModalBody();
   assert.ok(
-    /label\.jarMeta\s*&&\s*isSafeColor\(label\.jarMeta\.color\)\s*\?\s*label\.jarMeta\.color\s*:\s*NEW_JAR_FALLBACK_COLOR/.test(
+    /identity\.kind === 'jar'\s*&&\s*isSafeColor\(identity\.color\)\s*\?\s*identity\.color\s*:\s*NEW_JAR_FALLBACK_COLOR/.test(
       body
     ),
-    'initialColor prefers the bundle jarMeta color, validated with isSafeColor'
+    'initialColor prefers the bundle identity color, validated with isSafeColor (M18 F3 L5 rename)'
   );
   assert.ok(
     /JAR_COLOR_PALETTE\.includes\(initialColor\)\s*\?\s*JAR_COLOR_PALETTE\s*:\s*\[\s*\.\.\.JAR_COLOR_PALETTE,\s*initialColor\s*\]/.test(
@@ -266,7 +266,7 @@ test('openMappingModal: every row prefills a directive — the Action select is 
 test('openMappingModal: a jar-sourced row builds its destination options AND rerun-recovery match via restoreDestinationOptions(jarRows, jarVaultPresence, …) — never existingVaults', () => {
   const body = openMappingModalBody();
   assert.ok(
-    /const jarDest = isGlobalSource\s*\?\s*null\s*:\s*restoreDestinationOptions\(jarRows, jarVaultPresence, label\.jarMeta\.name\)/.test(
+    /const jarDest =\s*identity\.kind === 'jar'\s*\?\s*restoreDestinationOptions\(jarRows, jarVaultPresence, identity\.name\)\s*:\s*null/.test(
       body
     ),
     'jarDest is computed via restoreDestinationOptions against jarRows + jarVaultPresence, for jar rows only'
