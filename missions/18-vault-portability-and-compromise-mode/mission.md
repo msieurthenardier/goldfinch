@@ -281,7 +281,7 @@ workflow spanning store + jar registry + IPC/UI.
       only `manager.json` mutations today), surfacing chain extension + its
       hybrid witnessed behavior-test spec. Pre-named divert trigger: the
       transaction layer growing into its own leg cluster.
-- [ ] Flight 3: Multi-vault portability — bundle v2, whole-profile export,
+- [x] Flight 3: Multi-vault portability — bundle v2, whole-profile export,
       the single restore workflow with explicit mapping / create-new-jar /
       skip (create-jar-then-import ordering: the resolver requires the
       destination jar to exist), selective transplant, offered master

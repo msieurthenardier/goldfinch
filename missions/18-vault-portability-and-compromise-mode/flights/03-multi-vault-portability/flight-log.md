@@ -1268,6 +1268,17 @@ section above.
 
 ## Anomalies
 
+- 2026-09-06 (Leg 6 smoke — NON-bug, operator-resolved): operator
+  reported "after the sever I can't re-import the export with either
+  password." FD fingerprint-compared the bundle vs the live manager:
+  bundle master envelope dd5af8c9 (the export-time password) ≠ current
+  manager master 4d1b7e3b (a later sever), likewise for recovery — so
+  the bundle correctly requires its export-time credential, which the
+  current passwords aren't. Snapshot semantics working as designed (an
+  on-disk export is not re-encrypted by a later master change).
+  Operator confirmed: was selecting the WRONG bundle file; the smoke
+  bundle re-imports fine with its export-time password. No defect.
+
 - 2026-09-05 (Leg 4 HAT — duplicate-Personal-jar defect, CORRECTED
   diagnosis): FD first misattributed this to a wipe/zombie-process
   race and wrote it up as a harness bug. WRONG — corrected after
@@ -1391,3 +1402,17 @@ section above.
   cost, the `vault-unlock` blur-allowlist ruling, and the no-picker
   merge shape); operator approved as-is. Flight marked `ready`;
   `/agentic-workflow` invoked, starting with `substrate-prep`.
+- 2026-09-06: **Flight LANDED.** Six legs completed. Leg 6 closed via
+  operator live smoke of the opacity build (fixes 12-14: label
+  "no secrets yet"/"N secrets", export notice prominence + dismiss +
+  single-vault notice; net vault.js at the 2820 ceiling). Criteria
+  4-8 verified: opacity on real bytes, adopt-no-admin on disk, sever
+  on-disk + cold-restart, merge dedup, selective transplant. Full
+  two-agent witnessed run deferred (specs active/CI-ready). Legs 1-3
+  committed 3bdfbfb, leg 4 43eabb1, leg 5 b9b66dd; leg 6 committing
+  now. PR #204 → ready for review. `[COMPLETE:flight]`. Debrief
+  (`/flight-debrief`) is the follow-up; carry-forward queued: vault.js
+  budget ceiling, refresh() hasVault fan-out, a transient 2-test
+  flake, the deferred witnessed run, the 14-fix HAT iteration count,
+  the jar-page-model palette-constant duplication, and the
+  focus-hold-protocol retirement.

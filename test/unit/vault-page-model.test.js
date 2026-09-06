@@ -298,24 +298,24 @@ test('restoreDestinationOptions: one option per jar, labeled by vault presence �
     { personal: { hasVault: true, count: 3 } } // work: no presence entry at all
   );
   assert.deepEqual(options, [
-    { vaultId: 'personal', label: 'Personal — has a vault (3 items)' },
-    { vaultId: 'work', label: 'Work — no vault yet' }
+    { vaultId: 'personal', label: 'Personal — 3 secrets' },
+    { vaultId: 'work', label: 'Work — no secrets yet' }
   ]);
 });
 
 test('restoreDestinationOptions: a hasVault jar with no known count still offers a usable label', () => {
   const { options } = restoreDestinationOptions([{ id: 'work', name: 'Work' }], { work: { hasVault: true } });
-  assert.deepEqual(options, [{ vaultId: 'work', label: 'Work — has a vault' }]);
+  assert.deepEqual(options, [{ vaultId: 'work', label: 'Work — has secrets' }]);
 });
 
-test('restoreDestinationOptions: singular "item" at count 1', () => {
+test('restoreDestinationOptions: singular "secret" at count 1', () => {
   const { options } = restoreDestinationOptions([{ id: 'work', name: 'Work' }], { work: { hasVault: true, count: 1 } });
-  assert.equal(options[0].label, 'Work — has a vault (1 item)');
+  assert.equal(options[0].label, 'Work — 1 secret');
 });
 
 test('restoreDestinationOptions: rerun-recovery match is case-insensitive/trimmed and works against a VAULT-LESS destination', () => {
   const { matched } = restoreDestinationOptions(jars, {}, '  personal  ');
-  assert.deepEqual(matched, { vaultId: 'personal', label: 'Personal — no vault yet' });
+  assert.deepEqual(matched, { vaultId: 'personal', label: 'Personal — no secrets yet' });
 });
 
 test('restoreDestinationOptions: no name given, or no match found, → matched is undefined', () => {
@@ -327,7 +327,7 @@ test('restoreDestinationOptions: empty/malformed jar list → empty options, no 
   assert.deepEqual(restoreDestinationOptions([], {}, 'Personal'), { options: [], matched: undefined });
   assert.deepEqual(restoreDestinationOptions(undefined, undefined, 'Personal'), { options: [], matched: undefined });
   assert.deepEqual(restoreDestinationOptions([null, { name: 'no id' }, { id: 'work', name: 'Work' }], {}).options, [
-    { vaultId: 'work', label: 'Work — no vault yet' }
+    { vaultId: 'work', label: 'Work — no secrets yet' }
   ]);
 });
 

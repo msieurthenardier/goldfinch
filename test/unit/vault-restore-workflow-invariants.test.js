@@ -311,3 +311,82 @@ test('buildColorSwatchGrid: collapsed by default behind a dot toggle button with
   );
   assert.ok(/onSelect\(color\);\s*close\(true\);/.test(body), 'selecting a swatch collapses the grid back to the dot');
 });
+
+// ---------------------------------------------------------------------------
+// M18 F3 L6 (smoke polish 2): the single-vault Export branch surfaces its own on-page notice
+// (it used to close bare, no notice — the whole-profile branch was the only one that told the
+// operator anything happened), and the page notice gets a dismiss control so it doesn't have to
+// wait for the next render() to go away.
+// ---------------------------------------------------------------------------
+
+test('openExportModal: a successful single-vault export sets pendingNotice naming the exported vault, mirroring the whole-profile branch', () => {
+  const start = VAULT_JS.indexOf('function openExportModal(vaults) {');
+  assert.ok(start !== -1, 'openExportModal(vaults) found');
+  const afterStart = VAULT_JS.slice(start);
+  const endMatch = afterStart.match(/\n {2}\}\n/);
+  assert.ok(endMatch, "openExportModal()'s closing brace found");
+  const body = afterStart.slice(0, /** @type {number} */ (endMatch.index));
+  assert.ok(
+    /pendingNotice = `Exported \$\{select\.selectedOptions\[0\]\.textContent\}\.`/.test(body),
+    "the single-vault success branch sets a pendingNotice naming the selected option's own label"
+  );
+  assert.equal(
+    /Single-vault result keeps its OLD/.test(body),
+    false,
+    'the old bare-close-no-notice branch comment is gone'
+  );
+});
+
+// M18 F3 L6 (smoke polish 3): the single-vault pendingNotice above was being set but never
+// painted — the whole-profile branch called handle.close(); refresh(); itself, but the
+// single-vault branch only called handle.close(), so refresh() (which triggers the render()
+// that paints pendingNotice) never ran for it. Fixed by hoisting a single shared
+// handle.close(); refresh(); out of the if/else so both success paths reach it exactly once.
+test('openExportModal: both export success branches reach a single shared handle.close()+refresh(), not their own', () => {
+  const start = VAULT_JS.indexOf('function openExportModal(vaults) {');
+  assert.ok(start !== -1, 'openExportModal(vaults) found');
+  const afterStart = VAULT_JS.slice(start);
+  const endMatch = afterStart.match(/\n {2}\}\n/);
+  assert.ok(endMatch, "openExportModal()'s closing brace found");
+  const body = afterStart.slice(0, /** @type {number} */ (endMatch.index));
+
+  const okStart = body.indexOf('if (res && res.ok) {');
+  assert.ok(okStart !== -1, 'the res.ok success block is found');
+  const okBlock = body.slice(okStart);
+
+  assert.ok(
+    /\} else \{\s*pendingNotice = `Exported \$\{select\.selectedOptions\[0\]\.textContent\}\.`;.*\n\s*\}\n\s*\/\/[^\n]*\n\s*handle\.close\(\);\s*\n\s*refresh\(\);\s*\n\s*return;/s.test(
+      okBlock
+    ),
+    'after the if/else, a single shared handle.close(); refresh(); runs before the return — the ' +
+      'single-vault branch no longer ends with its own bare handle.close()'
+  );
+
+  // The res.ok block itself must contain exactly one handle.close()+refresh() pair (the shared
+  // one above) — the earlier `res.locked` branch's own close+refresh lives outside this block
+  // and returns early, so it can never double-close alongside the shared call.
+  assert.equal((okBlock.match(/handle\.close\(\);/g) || []).length, 1, 'the res.ok block closes exactly once');
+  assert.equal((okBlock.match(/refresh\(\);/g) || []).length, 1, 'the res.ok block refreshes exactly once');
+
+  const lockedMatch = body.match(/res\.locked[\s\S]*?handle\.close\(\);\s*refresh\(\);\s*return;/);
+  assert.ok(lockedMatch, 'the res.locked branch keeps its own separate close+refresh+early-return');
+});
+
+test('render(): the pending page notice renders a dismiss control (the "close" icon button, aria-label Dismiss) alongside the role=status message', () => {
+  const start = VAULT_JS.indexOf('function render(state) {');
+  const afterStart = VAULT_JS.slice(start);
+  const endMatch = afterStart.match(/\n {2}\}\n/);
+  const body = afterStart.slice(0, /** @type {number} */ (endMatch.index));
+  assert.ok(
+    /el\('span', undefined, pendingNotice\)\)\.setAttribute\('role', 'status'\)/.test(body),
+    'the message span keeps role=status'
+  );
+  assert.ok(
+    /iconButton\('close', 'Dismiss', \(\) => notice\.remove\(\)\)/.test(body),
+    'a dismiss icon button (aria-label Dismiss, via iconButton) removes the notice element on click'
+  );
+});
+
+test('ICON_PATHS defines a "close" glyph for the page notice\'s dismiss button', () => {
+  assert.ok(/close:\s*\[/.test(VAULT_JS), 'a close icon entry exists in ICON_PATHS');
+});

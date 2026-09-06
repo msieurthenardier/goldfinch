@@ -206,7 +206,7 @@ function vaultNavEntries(vaults, jars) {
  * case-insensitive name match, first hit wins) — a residue jar left by a prior attempt is
  * found whether or not it already carries a vault file.
  *
- * `presenceById` is keyed by jar id; a missing/malformed entry degrades to "no vault yet" —
+ * `presenceById` is keyed by jar id; a missing/malformed entry degrades to "no secrets yet" —
  * never thrown, never dropped from the list (a presence map that lags jarRows, e.g. mid-race,
  * still offers every jar as a destination). `count` renders only alongside `hasVault: true`
  * and only when it is a finite, non-negative number.
@@ -229,9 +229,9 @@ function restoreDestinationOptions(jars, presenceById, bundleName) {
     const count = p && typeof p.count === 'number' && Number.isFinite(p.count) && p.count >= 0 ? p.count : null;
     const state = hasVault
       ? count === null
-        ? 'has a vault'
-        : `has a vault (${count} item${count === 1 ? '' : 's'})`
-      : 'no vault yet';
+        ? 'has secrets'
+        : `${count} secret${count === 1 ? '' : 's'}`
+      : 'no secrets yet';
     options.push({ vaultId: j.id, label: `${name} — ${state}` });
   }
 

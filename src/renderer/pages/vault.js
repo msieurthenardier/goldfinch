@@ -149,7 +149,8 @@ function init() {
     ],
     // Open-folder — the file-uploader row's "browse" affordance (M12 F5 HAT tail): opens the
     // native dialog (pickImportFile / pickSavePath) and populates the path field.
-    folder: ['M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z']
+    folder: ['M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z'],
+    close: ['M18 6 6 18', 'M6 6l12 12'] // dismiss "×" — the page notice's own close (M18 F3 L6)
   };
 
   const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -647,12 +648,12 @@ function init() {
                   count === 0
                     ? 'Exported 0 vaults.'
                     : `Exported ${count} vault${count === 1 ? '' : 's'}: ${names.join(', ')}.`;
-                handle.close();
-                refresh();
               } else {
-                // Single-vault result keeps its OLD (pre-leg-3) shape — a bare close, no notice.
-                handle.close();
+                pendingNotice = `Exported ${select.selectedOptions[0].textContent}.`; // M18 F3 L6 (smoke polish 3)
               }
+              // Shared close+refresh: refresh() paints pendingNotice (locked branch above closes+refreshes itself and returns early, so no double-close).
+              handle.close();
+              refresh();
               return;
             }
             if (res && res.error === 'invalid-path') {
@@ -2694,8 +2695,9 @@ function init() {
     // A pending page notice (e.g. an export that raced an idle auto-lock → { locked }): show it once
     // at the top of #vault-root, then clear it so it does not persist across later renders.
     if (pendingNotice) {
-      const notice = el('p', 'vault-page-notice', pendingNotice);
-      notice.setAttribute('role', 'status');
+      const notice = el('div', 'vault-page-notice');
+      notice.appendChild(el('span', undefined, pendingNotice)).setAttribute('role', 'status');
+      notice.appendChild(iconButton('close', 'Dismiss', () => notice.remove()));
       root.appendChild(notice);
       pendingNotice = null;
     }

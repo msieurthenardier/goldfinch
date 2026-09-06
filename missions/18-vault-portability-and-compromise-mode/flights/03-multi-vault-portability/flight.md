@@ -1,6 +1,6 @@
 # Flight: Multi-Vault Portability
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Vault Portability & Compromise Mode](../../mission.md)
 
 ## Contributing to Criteria
@@ -517,9 +517,11 @@ not after the fact.
       completion display (HAT fix 11) rekey off the handle/decrypted
       name. Bundle v2 format change (none in the wild — free now).
       HIGH risk (format + store + security) — design review mandatory
-- [ ] `witnessed-runs` — finalize + run `multi-vault-adopt` (hybrid
-      witnessed) against the OPACITY-fixed format; run the compromise
-      recovery-branch variant on-script; docs verification
+- [x] `witnessed-runs` — behavior spec finalized + `active`; closed
+      via an operator live smoke of the opacity build (criterion-4
+      opacity proven on real bytes, UI round-trip, on-disk no-admin
+      manager); full two-agent witnessed run + compromise variant
+      DEFERRED (specs active/CI-ready, operator ruling); docs verified
 
 ---
 
@@ -527,11 +529,12 @@ not after the fact.
 
 ### Completion Checklist
 
-- [ ] All legs completed
-- [ ] Code merged
-- [ ] Tests passing (suite + typecheck + lint)
-- [ ] Documentation updated (`docs/vault.md` portability + threat
-      model; CLAUDE.md if commands/counts change)
+- [x] All legs completed
+- [ ] Code merged — PR #204 ready for review (merge is the reviewer's)
+- [x] Tests passing (4294 suite + typecheck + lint + format, on the
+      merged tree incl. squawk 0062)
+- [x] Documentation updated (`docs/vault.md` portability + threat
+      model + opaque-bundle guarantee)
 
 ### Verification
 

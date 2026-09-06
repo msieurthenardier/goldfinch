@@ -1167,15 +1167,29 @@ body:has(.vault-modal-backdrop) {
   cursor: not-allowed;
 }
 
-/* Transient page notice (e.g. an export that raced an idle auto-lock → { locked }). */
+/* Transient page notice (e.g. a completed export, or one that raced an idle auto-lock →
+   { locked }) — M18 F3 L6 (smoke polish): restyled from a plain bg-2 line (too subtle to
+   notice after an export) into the same tinted/bordered callout idiom as .vault-sever-card
+   below, so a result the operator needs to see doesn't blend into the page. Its own dismiss
+   icon button (smoke polish 2) sits flush at the trailing edge, vertically centered on the
+   message regardless of how many lines it wraps to. */
 .vault-page-notice {
-  margin: 0 0 16px;
-  padding: 8px 12px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-2);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 20px;
+  padding: 12px 16px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: rgba(245, 197, 24, 0.1);
   color: var(--fg);
   font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.vault-page-notice .vault-icon-btn {
+  flex: none;
 }
 
 /* ── Compromise-mode rotation (M18 F2 L4; R2/R3/R8) ── */
