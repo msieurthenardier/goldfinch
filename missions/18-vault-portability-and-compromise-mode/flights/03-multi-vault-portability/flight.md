@@ -1,6 +1,6 @@
 # Flight: Multi-Vault Portability
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Vault Portability & Compromise Mode](../../mission.md)
 
 ## Contributing to Criteria
