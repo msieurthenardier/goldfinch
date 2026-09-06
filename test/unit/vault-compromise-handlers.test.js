@@ -24,7 +24,11 @@ const assert = require('node:assert/strict');
 
 const { registerOverlayIpc } = require('../../src/main/register-overlay-ipc');
 const { createSuppressionHolder } = require('../../src/main/vault/autolock-suppression');
-const { createCompromiseRevealStore } = require('../../src/main/vault/pending-compromise-reveals');
+const {
+  createCompromiseRevealStore,
+  COMPROMISE_REASON,
+  ADOPT_REASON
+} = require('../../src/main/vault/pending-compromise-reveals');
 
 function makeIpc() {
   const handlers = new Map();
@@ -41,42 +45,38 @@ function makeIpc() {
   };
 }
 
-// The main.js composition, rebuilt over the real holder + reveal store: stash sets the
-// session report + stashes the reveal (acquiring the hold); ack consumes-if-present and
-// fires the completion broadcast; takeAdoptAdminKey mirrors main's adopt store.
+// The main.js composition, rebuilt over the real holder + GENERALIZED reveal store (M18 F3
+// L3 / DD6 ruling 5): stash sets the session report + stashes the compromise reveal
+// (acquiring the hold); stashAdoptReveal is the adopt-flow twin (no separate admin-key store
+// any more — the OLD `_pendingAdoptAdminKeys` chain is deleted, not modeled here); ack
+// consumes-if-present (either reason) and fires the completion broadcast for EITHER flow.
 function makeSurfacing() {
   const suspended = [];
   const holder = createSuppressionHolder({ setSuspended: (on) => suspended.push(on) });
   const reveals = createCompromiseRevealStore(holder);
-  const adoptKeys = new Map();
   const broadcasts = [];
   const events = [];
   let report = null;
   return {
     holder,
     reveals,
-    adoptKeys,
     broadcasts,
     suspended,
     events,
     getReport: () => report,
-    stashAdoptAdminKey(chromeId, key) {
-      adoptKeys.set(chromeId, key);
-      holder.acquire(chromeId, 'adopt');
-    },
-    takeAdoptAdminKey(chromeId) {
-      if (chromeId == null || !adoptKeys.has(chromeId)) return undefined;
-      const key = adoptKeys.get(chromeId);
-      adoptKeys.delete(chromeId);
-      holder.release(chromeId, 'adopt');
-      return key;
+    // M18 F3 L3 (DD6 ruling 5): the fresh-adopt reveal now joins the SAME store, under the
+    // ADOPT_REASON — main.js's real vaultImportCommit stashes here (H2 ordering: BEFORE the
+    // sheet send), mirrored by this test double for the ack-discrimination tests below.
+    stashAdoptReveal(chromeId, recoveryKey) {
+      events.push(['stash-adopt', chromeId]);
+      reveals.stash(chromeId, recoveryKey, ADOPT_REASON);
     },
     stashCompromiseReveal(chromeId, { recoveryKey, revoked }) {
       events.push(['stash', chromeId]);
       report = revoked;
-      reveals.stash(chromeId, recoveryKey);
+      reveals.stash(chromeId, recoveryKey, COMPROMISE_REASON);
     },
-    ackCompromiseReveal(chromeId) {
+    ackVaultReveal(chromeId) {
       if (!reveals.ack(chromeId)) return false;
       broadcasts.push('vault-lock-state');
       return true;
@@ -109,8 +109,7 @@ function harness({ vaultCompromiseRotate, menuType = 'vault-compromise', surfaci
     sanitizeActivatedValue: (v) => (typeof v === 'string' && v.length <= 24 ? v : undefined),
     vaultCompromiseRotate,
     stashCompromiseReveal: (chromeId, reveal) => surfacing.stashCompromiseReveal(chromeId, reveal),
-    ackCompromiseReveal: (chromeId) => surfacing.ackCompromiseReveal(chromeId),
-    takeAdoptAdminKey: (chromeId) => surfacing.takeAdoptAdminKey(chromeId)
+    ackVaultReveal: (chromeId) => surfacing.ackVaultReveal(chromeId)
   });
   return { ipcMain, sheetSender, win, rec, chrome, events, surfacing };
 }
@@ -288,13 +287,40 @@ test('compromise: WINDOW-GONE at resolution (H2 null-guard) — the reveal is st
 
   // H2 resurface: the next chrome boot re-keys the orphaned reveal to the new window.
   const reveal = surfacing.reveals.rekey(100, 555);
-  assert.deepEqual(reveal, { recoveryKey: 'NEW-COMPROMISE-RECOVERY-KEY' }, 'the reveal survives, re-keyed');
+  assert.deepEqual(
+    reveal,
+    { recoveryKey: 'NEW-COMPROMISE-RECOVERY-KEY', reason: 'compromise' },
+    'the reveal survives, re-keyed — reason preserved (M18 F3 L3 / DD6 ruling 5)'
+  );
   assert.equal(surfacing.reveals.has(100), false, 'the dead window key is gone');
   assert.equal(surfacing.reveals.has(555), true, 'the reveal now belongs to the new window');
   assert.equal(surfacing.holder.isHeld(100, 'compromise'), false, "the dead window's hold moved");
   assert.equal(surfacing.holder.isHeld(555, 'compromise'), true, "…to the new window's identity");
   // And the new window's ack completes normally.
-  assert.equal(surfacing.ackCompromiseReveal(555), true);
+  assert.equal(surfacing.ackVaultReveal(555), true);
+  assert.equal(surfacing.holder.count(), 0);
+});
+
+test('adopt: an ORPHANED adopt reveal re-keys exactly like a compromise one (M18 F3 L3 / DD6 ruling 5) — reason preserved, hold moved, new window acks normally', () => {
+  const surfacing = makeSurfacing();
+  // The window that received the fresh-adopt commit reply died before the recovery-show ack
+  // (the same H2 shape as the compromise WINDOW-GONE case above, now exercised for 'adopt').
+  surfacing.stashAdoptReveal(100, 'RCV-ADOPT-ORPHAN-KEY');
+  assert.equal(surfacing.reveals.has(100), true);
+  assert.equal(surfacing.holder.isHeld(100, 'adopt'), true);
+
+  // H2 resurface: the next chrome boot re-keys the orphaned adopt reveal to the new window.
+  const reveal = surfacing.reveals.rekey(100, 777);
+  assert.deepEqual(reveal, { recoveryKey: 'RCV-ADOPT-ORPHAN-KEY', reason: 'adopt' }, 'reason preserved across rekey');
+  assert.equal(surfacing.reveals.has(100), false, 'the dead window key is gone');
+  assert.equal(surfacing.reveals.has(777), true, 'the reveal now belongs to the new window');
+  assert.equal(surfacing.holder.isHeld(100, 'adopt'), false, "the dead window's hold moved");
+  assert.equal(surfacing.holder.isHeld(777, 'adopt'), true, "…to the new window's identity");
+
+  // The new window's ack completes normally — no second sheet (the admin-key chain is gone),
+  // and the completion broadcast fires (a fresh adopt also ends unlocked, ruling 5).
+  assert.equal(surfacing.ackVaultReveal(777), true);
+  assert.deepEqual(surfacing.broadcasts, ['vault-lock-state']);
   assert.equal(surfacing.holder.count(), 0);
 });
 
@@ -383,7 +409,9 @@ test('compromise-recover: reason pass-through + menuType predicate', async () =>
 
 // A two-window activation harness: each window has its own sheet + chrome; the
 // recovery-show sheet is the live menu on both. Surfacing delegates are the REAL
-// holder/reveal-store composition.
+// holder/reveal-store composition. RE-MODELED M18 F3 L3 / DD6 ruling 5: the OLD two-sheet
+// admin-key chain (a second `vault-adminkey-show` sheet opened only after this ack) is
+// GONE — ackVaultReveal is now the SOLE ack path for BOTH compromise and adopt reveals.
 function ackHarness() {
   const ipcMain = makeIpc();
   const surfacing = makeSurfacing();
@@ -407,33 +435,44 @@ function ackHarness() {
     chromeForAttachment: (w) => (w === a.rec.win ? a.chrome : w === b.rec.win ? b.chrome : null),
     chromeForTab: () => null,
     sanitizeActivatedValue: (v) => (typeof v === 'string' && v.length <= 24 ? v : undefined),
-    takeAdoptAdminKey: (chromeId) => surfacing.takeAdoptAdminKey(chromeId),
-    ackCompromiseReveal: (chromeId) => surfacing.ackCompromiseReveal(chromeId)
+    ackVaultReveal: (chromeId) => surfacing.ackVaultReveal(chromeId)
   });
   const activated = ipcMain.listeners.get('menu-overlay:activated');
   const ack = (windowHalf) => activated({ sender: windowHalf.sheetSender }, { id: 'ack', token: 7 });
   return { surfacing, sends, a, b, ack };
 }
 
-test('ack kind 1 — setup/rotate-recovery (no marker anywhere): a strict no-op — no second sheet, no broadcast, holder untouched', () => {
+// Every activated ack ALSO echoes a routine `menu-overlay-activated` — filter it out so
+// these tests assert only on a SECOND SHEET send (the old admin-key chain's shape).
+function secondSheetSends(sends) {
+  return sends.filter(([, ch]) => ch !== 'menu-overlay-activated');
+}
+
+test('ack kind 1 — setup/rotate-recovery (no marker anywhere): a strict no-op — no broadcast, holder untouched', () => {
   const { surfacing, sends, a, ack } = ackHarness();
   ack(a);
-  const secondSheetSends = sends.filter(([, ch]) => ch === 'vault-adminkey-show');
-  assert.deepEqual(secondSheetSends, [], 'no adminkey-show');
+  assert.deepEqual(secondSheetSends(sends), [], 'no second sheet — the admin-key chain is gone');
   assert.deepEqual(surfacing.broadcasts, [], 'no completion broadcast');
   assert.equal(surfacing.holder.count(), 0);
 });
 
-test('ack kind 2 — adopt-only: the adminkey-show chain fires; the compromise path is untouched', () => {
+test('ack kind 2 — adopt-only: the completion broadcast fires; the compromise path is untouched; no second sheet', () => {
   const { surfacing, sends, a, ack } = ackHarness();
-  surfacing.stashAdoptAdminKey(100, 'adopt-admin-key-b64');
+  surfacing.stashAdoptReveal(100, 'RCV-ADOPT-KEY');
+  assert.equal(surfacing.holder.isHeld(100, 'adopt'), true);
   ack(a);
   assert.deepEqual(
-    sends.filter(([, ch]) => ch === 'vault-adminkey-show'),
-    [[100, 'vault-adminkey-show', { adminPrivateKey: 'adopt-admin-key-b64' }]]
+    secondSheetSends(sends),
+    [],
+    'no second sheet — a fresh adopt now ends with ONE dismiss-locked reveal'
   );
-  assert.deepEqual(surfacing.broadcasts, [], 'the adopt ack is NOT a compromise completion');
-  assert.equal(surfacing.holder.count(), 0, "the adopt hold released — exactly (100, 'adopt')");
+  assert.deepEqual(
+    surfacing.broadcasts,
+    ['vault-lock-state'],
+    'a fresh adopt also ends unlocked — the SAME completion broadcast fires (ruling 5)'
+  );
+  assert.equal(surfacing.holder.isHeld(100, 'adopt'), false, "the adopt hold released — exactly (100, 'adopt')");
+  assert.equal(surfacing.reveals.has(100), false, 'the reveal consumed');
 });
 
 test('ack kind 3 — compromise-only: exact (chromeId, reason) release + the completion broadcast; no second sheet', () => {
@@ -441,11 +480,7 @@ test('ack kind 3 — compromise-only: exact (chromeId, reason) release + the com
   surfacing.stashCompromiseReveal(100, { recoveryKey: 'KEY', revoked: { admin: true, vaultIds: [] } });
   assert.equal(surfacing.holder.isHeld(100, 'compromise'), true);
   ack(a);
-  assert.deepEqual(
-    sends.filter(([, ch]) => ch === 'vault-adminkey-show'),
-    [],
-    'no adminkey-show'
-  );
+  assert.deepEqual(secondSheetSends(sends), [], 'no second sheet');
   assert.deepEqual(surfacing.broadcasts, ['vault-lock-state'], 'the completion trigger (M3): one re-broadcast');
   assert.equal(surfacing.holder.isHeld(100, 'compromise'), false, 'the exact pair released');
   assert.equal(surfacing.reveals.has(100), false, 'the reveal consumed');
@@ -453,24 +488,25 @@ test('ack kind 3 — compromise-only: exact (chromeId, reason) release + the com
 
 test('ack kind 4 — both flows pending in DIFFERENT windows: each ack consumes only its own; neither release touches the other', () => {
   const { surfacing, sends, a, b, ack } = ackHarness();
-  surfacing.stashAdoptAdminKey(100, 'window-a-adopt-key');
+  surfacing.stashAdoptReveal(100, 'RCV-WINDOW-A-ADOPT-KEY');
   surfacing.stashCompromiseReveal(200, { recoveryKey: 'WINDOW-B-KEY', revoked: { admin: false, vaultIds: ['jar1'] } });
   assert.equal(surfacing.holder.count(), 2);
 
-  // Window A's ack: adopt chain only. Window B's compromise reveal + hold untouched.
+  // Window A's ack: its own adopt reveal only. Window B's compromise reveal + hold untouched.
   ack(a);
+  assert.deepEqual(secondSheetSends(sends), [], 'no second sheet ever — the chain is gone');
   assert.deepEqual(
-    sends.filter(([, ch]) => ch === 'vault-adminkey-show'),
-    [[100, 'vault-adminkey-show', { adminPrivateKey: 'window-a-adopt-key' }]]
+    surfacing.broadcasts,
+    ['vault-lock-state'],
+    "window A's adopt ack fires the completion broadcast too (ruling 5)"
   );
-  assert.deepEqual(surfacing.broadcasts, [], "window A's ack fired no compromise completion");
   assert.equal(surfacing.holder.isHeld(200, 'compromise'), true, "window B's hold survives A's release");
   assert.equal(surfacing.reveals.has(200), true, "window B's reveal survives");
   assert.deepEqual(surfacing.suspended, [true], 'suppression NEVER dropped between the two acks');
 
-  // Window B's ack: compromise completion only.
+  // Window B's ack: compromise completion, on top of A's.
   ack(b);
-  assert.deepEqual(surfacing.broadcasts, ['vault-lock-state']);
+  assert.deepEqual(surfacing.broadcasts, ['vault-lock-state', 'vault-lock-state']);
   assert.equal(surfacing.holder.count(), 0);
   assert.deepEqual(surfacing.suspended, [true, false], 'suppression cleared only once BOTH reveals are done');
 });

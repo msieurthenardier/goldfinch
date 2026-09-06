@@ -222,7 +222,7 @@ test('exportVault on a LOCKED manager throws VaultLockedError (policy — export
 // importVault — FRESH profile (adopt the manager; unlock by master AND by recovery)
 // ---------------------------------------------------------------------------
 
-test('FRESH profile import (MASTER-kind adopt): forces rotation of recovery + admin under the live MRK; keeps the donor MASTER envelope (DD4); returns the two new one-time secrets', async () => {
+test('FRESH profile import (MASTER-kind adopt, M18 F3 Leg 2 / DD6 — NO admin mint): forces rotation of recovery ONLY under the live MRK; keeps the donor MASTER envelope (DD4); returns ONLY the new recovery secret', async () => {
   const src = await makeSource();
   const bundle = roundTrip(src.store.exportVault('global'));
   const srcManager = JSON.parse(fs.readFileSync(managerPath(src.dir), 'utf8'));
@@ -237,15 +237,14 @@ test('FRESH profile import (MASTER-kind adopt): forces rotation of recovery + ad
       secret: Buffer.from(MASTER, 'utf8'),
       secretKind: 'master'
     });
-    // The fresh branch returns the new 5-field shape: the fixed trio plus the two
-    // force-rotated one-time secrets (dynamic values — asserted as non-empty strings).
+    // The fresh branch's return shape (DD6): the fixed trio plus ONLY the
+    // force-rotated recovery secret — NO adminPrivateKeyB64 anywhere.
     assert.equal(res.imported, true);
     assert.equal(res.fresh, true);
     assert.equal(res.vaultId, 'global');
     assert.equal(typeof res.recoveryKeyDisplay, 'string');
     assert.ok(res.recoveryKeyDisplay.length > 0, 'a new recovery display is returned');
-    assert.equal(typeof res.adminPrivateKeyB64, 'string');
-    assert.ok(res.adminPrivateKeyB64.length > 0, 'a new admin private key is returned');
+    assert.equal('adminPrivateKeyB64' in res, false, 'adopt no longer mints an admin key at all (DD6)');
 
     // Vault file written; manager adopted; left UNLOCKED (analogous to setup).
     assert.ok(fs.existsSync(vaultPath(freshDir, 'global')), 'global vault written');
@@ -257,16 +256,17 @@ test('FRESH profile import (MASTER-kind adopt): forces rotation of recovery + ad
     assert.equal(items[0].password, 'hunter2');
     assert.equal(items[0].username, 'user@example.com');
 
-    // Forced rotation: neither donor envelope/seal survives — recovery + admin differ, and
-    // the admin PUBLIC key differs. The donor MASTER envelope is RETAINED verbatim (DD4
-    // residual — proves the scope boundary is intentional). kdf is adopted unchanged.
+    // Forced rotation: the donor recovery envelope does not survive. The donor MASTER
+    // envelope is RETAINED verbatim (DD4 residual — proves the scope boundary is
+    // intentional). kdf is adopted unchanged. NO admin fields anywhere in the adopted
+    // manager (DD6) — legal at v1 under ruling 10's optional-but-paired relaxation.
     const adopted = JSON.parse(fs.readFileSync(managerPath(freshDir), 'utf8'));
     assert.equal(adopted.format, 'gfmanager');
     assert.deepEqual(adopted.kdf, srcManager.kdf);
     assert.deepEqual(adopted.mrk.master, srcManager.mrk.master, 'donor MASTER envelope survives (DD4)');
     assert.notDeepEqual(adopted.mrk.recovery, srcManager.mrk.recovery, 'recovery envelope was rotated');
-    assert.notDeepEqual(adopted.mrk.admin, srcManager.mrk.admin, 'admin seal was rotated');
-    assert.notEqual(adopted.adminPublicKeyB64, srcManager.adminPublicKeyB64, 'admin public key was rotated');
+    assert.equal('admin' in adopted.mrk, false, 'no admin seal written (DD6)');
+    assert.equal('adminPublicKeyB64' in adopted, false, 'no admin public key written (DD6)');
 
     // The RETURNED new recovery key unlocks the adopted profile (no lockout on rotation).
     store.lockNow();
@@ -279,15 +279,16 @@ test('FRESH profile import (MASTER-kind adopt): forces rotation of recovery + ad
       (e) => e instanceof vc.VaultAuthError
     );
 
-    // The RETURNED new admin private key opens all vaults; the DONOR admin private key is
-    // REJECTED (its seal was replaced — mirrors vault-admin-key-provision.test.js:120-124).
-    const opened = store.openAllWithAdminKey(res.adminPrivateKeyB64);
-    assert.ok(opened.has('global'), 'the new admin private key opens the global vault');
-    for (const k of opened.values()) k.fill(0);
-    assert.throws(
-      () => store.openAllWithAdminKey(src.adminPriv),
-      (e) => e instanceof vc.VaultAuthError
-    );
+    // No admin key is provisioned at all: BOTH the donor admin key and an arbitrary
+    // well-formed admin key fail with the no-admin STATE error, never a GCM auth error.
+    const dummyAdminPriv = vc.generateAdminKeypair().privateKeyB64;
+    for (const priv of [src.adminPriv, dummyAdminPriv]) {
+      assert.throws(
+        () => store.openAllWithAdminKey(priv),
+        (e) => e instanceof vs.VaultStateError && e.message === 'no admin key provisioned'
+      );
+    }
+    assert.equal(store.adminPublicKey(), null, 'no admin key is provisioned on an adopted profile (DD6)');
   } finally {
     rm(src.dir);
     rm(freshDir);
@@ -323,7 +324,7 @@ test('FRESH profile import → unlock by the SOURCE MASTER password on restart (
   }
 });
 
-test('FRESH profile import (RECOVERY-kind adopt): rotation invalidates the SOURCE recovery key; the RETURNED new recovery key unlocks; donor admin key rejected', async () => {
+test('FRESH profile import (RECOVERY-kind adopt, M18 F3 Leg 2 / DD6 — NO admin mint): rotation invalidates the SOURCE recovery key; the RETURNED new recovery key unlocks; no admin key provisioned', async () => {
   const src = await makeSource();
   const bundle = roundTrip(src.store.exportVault('global'));
   const srcManager = JSON.parse(fs.readFileSync(managerPath(src.dir), 'utf8'));
@@ -343,15 +344,15 @@ test('FRESH profile import (RECOVERY-kind adopt): rotation invalidates the SOURC
     assert.equal(res.fresh, true);
     assert.equal(typeof res.recoveryKeyDisplay, 'string');
     assert.ok(res.recoveryKeyDisplay.length > 0);
-    assert.equal(typeof res.adminPrivateKeyB64, 'string');
-    assert.ok(res.adminPrivateKeyB64.length > 0);
+    assert.equal('adminPrivateKeyB64' in res, false, 'adopt no longer mints an admin key at all (DD6)');
 
-    // Forced rotation, recovery-kind: recovery + admin rotated, donor MASTER retained (DD4).
+    // Forced rotation, recovery-kind: recovery rotated, donor MASTER retained (DD4), NO
+    // admin fields written anywhere (DD6) — legal at v1 under ruling 10's relaxation.
     const adopted = JSON.parse(fs.readFileSync(managerPath(freshDir), 'utf8'));
     assert.deepEqual(adopted.mrk.master, srcManager.mrk.master, 'donor MASTER envelope survives (DD4)');
     assert.notDeepEqual(adopted.mrk.recovery, srcManager.mrk.recovery, 'recovery envelope was rotated');
-    assert.notDeepEqual(adopted.mrk.admin, srcManager.mrk.admin, 'admin seal was rotated');
-    assert.notEqual(adopted.adminPublicKeyB64, srcManager.adminPublicKeyB64, 'admin public key was rotated');
+    assert.equal('admin' in adopted.mrk, false, 'no admin seal written (DD6)');
+    assert.equal('adminPublicKeyB64' in adopted, false, 'no admin public key written (DD6)');
 
     // Restart: the SOURCE recovery key is now REJECTED (its envelope was rotated away) …
     store.lockNow();
@@ -365,14 +366,15 @@ test('FRESH profile import (RECOVERY-kind adopt): rotation invalidates the SOURC
     assert.equal(store.isUnlocked(), true, 'the new recovery key unlocks the imported profile');
     assert.equal(store.listItems('global')[0].password, 'hunter2');
 
-    // The RETURNED new admin private key opens; the DONOR admin private key is REJECTED.
-    const opened = store.openAllWithAdminKey(res.adminPrivateKeyB64);
-    assert.ok(opened.has('global'));
-    for (const k of opened.values()) k.fill(0);
-    assert.throws(
-      () => store.openAllWithAdminKey(src.adminPriv),
-      (e) => e instanceof vc.VaultAuthError
-    );
+    // No admin key is provisioned at all: BOTH the donor admin key and an arbitrary
+    // well-formed admin key fail with the no-admin STATE error, never a GCM auth error.
+    const dummyAdminPriv = vc.generateAdminKeypair().privateKeyB64;
+    for (const priv of [src.adminPriv, dummyAdminPriv]) {
+      assert.throws(
+        () => store.openAllWithAdminKey(priv),
+        (e) => e instanceof vs.VaultStateError && e.message === 'no admin key provisioned'
+      );
+    }
   } finally {
     rm(src.dir);
     rm(freshDir);

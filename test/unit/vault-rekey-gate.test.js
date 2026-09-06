@@ -1,11 +1,16 @@
 'use strict';
 
 // Unit tests for vault-store's WRITE-EXCLUSIVITY machinery (Mission 18,
-// Flight 2, Leg 2 / flight DD3): the re-key gate (`_rekeyInProgress`), the
-// in-flight counter + drain (`_acquireRekeyGate`), the entry-check
-// `VaultBusyError` on all eight gated ops, and the SECOND WALL inside the
-// write sinks (`_writeVault` / `_writeManager`) that stops a mutator which
-// awaited past its entry check from persisting a pre-rotation document.
+// Flight 2, Leg 2 / flight DD3; op count updated to TEN by M18 F3 Leg 2 / DD10
+// ruling 8 — `exportProfile` + `restoreProfile` joined the original eight —
+// then to ELEVEN by M18 F3 Leg 3, which added `previewRestoreBundle`: a
+// preview writes nothing, but must not let an operator START a multi-step
+// import while a compromise rotation is rewriting the profile): the re-key
+// gate (`_rekeyInProgress`), the in-flight counter + drain
+// (`_acquireRekeyGate`), the entry-check `VaultBusyError` on all ELEVEN gated
+// ops, and the SECOND WALL inside the write sinks (`_writeVault` /
+// `_writeManager`) that stops a mutator which awaited past its entry check
+// from persisting a pre-rotation document.
 //
 // RACE PINS (leg spec): op entered before the gate → the drain blocks the
 // acquire until it settles; op arriving after the gate → VaultBusyError at
@@ -33,7 +38,10 @@ const vc = require('../../src/main/vault/vault-crypto');
 
 const FAST_SCRYPT = { algo: 'scrypt', N: 2 ** 12, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 const MASTER = 'correct horse battery staple';
-const JARS = [{ id: 'work' }, { id: 'personal' }];
+const JARS = [
+  { id: 'work', name: 'Work', color: '#2196f3' },
+  { id: 'personal', name: 'Personal', color: '#f5c518' }
+];
 
 function tmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'gf-rekey-gate-'));
@@ -78,17 +86,19 @@ async function setUpStore(dir) {
 }
 
 // ---------------------------------------------------------------------------
-// Entry wall — all eight gated ops refuse while the gate is up (AC3)
+// Entry wall — all ELEVEN gated ops refuse while the gate is up (AC3; M18 F3
+// Leg 2 / DD10 ruling 8 added exportProfile + restoreProfile; M18 F3 Leg 3
+// added previewRestoreBundle)
 // ---------------------------------------------------------------------------
 
-test('all eight gated ops throw VaultBusyError at entry while the gate is up, and work again after release', async () => {
+test('all eleven gated ops throw VaultBusyError at entry while the gate is up, and work again after release', async () => {
   const dir = tmpDir();
   try {
     const store = await setUpStore(dir);
     const release = await withTimeout(store._acquireRekeyGate(), 'acquire on an idle store');
 
     const busy = (e) => e instanceof vs.VaultBusyError;
-    // The five synchronous mutating/read ops...
+    // The six synchronous mutating/read ops...
     assert.throws(() => store.saveItem('work', loginItem()), busy, 'saveItem');
     assert.throws(() => store.deleteItem('work', 'seed'), busy, 'deleteItem');
     assert.throws(
@@ -99,9 +109,16 @@ test('all eight gated ops throw VaultBusyError at entry while the gate is up, an
     assert.throws(() => store.revokeAccessKey('work', 'no-such-key'), busy, 'revokeAccessKey');
     assert.throws(() => store.exportVault('work'), busy, 'exportVault (gated for its reads)');
     assert.throws(() => store.deleteVault('work'), busy, 'deleteVault');
-    // ...and the two async ones reject before any await/validation.
+    assert.throws(() => store.exportProfile(), busy, 'exportProfile (gated for its reads, mirrors exportVault)');
+    // ...and the three async ones reject before any await/validation.
     await assert.rejects(store.mintAccessKey('work', { masterPassword: MASTER }), busy, 'mintAccessKey');
     await assert.rejects(store.importVault({}, { secret: Buffer.from('x') }), busy, 'importVault');
+    await assert.rejects(store.restoreProfile({}, { secret: Buffer.from('x'), mapping: {} }), busy, 'restoreProfile');
+    await assert.rejects(
+      store.previewRestoreBundle({}, { secret: Buffer.from('x') }),
+      busy,
+      'previewRestoreBundle (gated so an import cannot START while a rotation is up)'
+    );
 
     // Nothing was written or removed while the wall held.
     assert.deepEqual(
@@ -118,6 +135,9 @@ test('all eight gated ops throw VaultBusyError at entry while the gate is up, an
     const saved = store.saveItem('work', loginItem({ title: 'After' }));
     assert.equal(saved.title, 'After', 'gated ops work again after release');
     assert.deepEqual(store.exportVault('work').sourceVaultId, 'work');
+    const { bundle: reBundle, carried } = store.exportProfile();
+    assert.equal(reBundle.vaults.length, 2, 'exportProfile works again after release too');
+    assert.deepEqual(carried.sort(), ['Global', 'Work'].sort());
   } finally {
     rm(dir);
   }

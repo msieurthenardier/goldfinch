@@ -19,7 +19,8 @@
 /**
  * @typedef {{ vaultId: string, label: string, count?: number }} VaultRow
  * @typedef {{ admin: boolean, vaultIds: string[] }} CompromiseReport
- * @typedef {{ mode: 'not-set-up' | 'locked' | 'unlocked', vaults: VaultRow[], adminProvisioned: boolean, compromiseReport: CompromiseReport | null }} VaultView
+ * @typedef {{ route: 'change-master' | 'recover' }} SeverOffer
+ * @typedef {{ mode: 'not-set-up' | 'locked' | 'unlocked', vaults: VaultRow[], adminProvisioned: boolean, compromiseReport: CompromiseReport | null, severOffer: SeverOffer | null }} VaultView
  * @typedef {{ id: string, kind: 'global' | 'jar', label: string, count?: number, color?: string|null }} VaultChildEntry
  * @typedef {(
  *   { id: string, kind: 'settings', label: string } |
@@ -52,7 +53,13 @@ const VAULTS_ID = 'vaults';
  * definition set up). A malformed report normalizes to null; vaultIds keeps
  * string entries only (textContent-safe).
  *
- * @param {{ setUp?: unknown, unlocked?: unknown, vaults?: unknown, adminProvisioned?: unknown, compromiseReport?: unknown }} [state]
+ * M18 F3 L3 (DD7): the view also carries `severOffer` (the post-fresh-adopt sever
+ * card's route — 'change-master' | 'recover') — normalized the same defensive way as
+ * `compromiseReport`, rides BOTH the locked and unlocked views (the offer's route
+ * flips live with lock state; the edge case: "Sever card while locked: card persists,
+ * route flips to recover"), and is dropped for 'not-set-up' alongside the report.
+ *
+ * @param {{ setUp?: unknown, unlocked?: unknown, vaults?: unknown, adminProvisioned?: unknown, compromiseReport?: unknown, severOffer?: unknown }} [state]
  * @returns {VaultView}
  */
 function selectVaultView(state) {
@@ -83,9 +90,19 @@ function selectVaultView(state) {
     };
   }
 
-  if (!setUp) return { mode: 'not-set-up', vaults: [], adminProvisioned: false, compromiseReport: null };
-  if (!unlocked) return { mode: 'locked', vaults, adminProvisioned, compromiseReport };
-  return { mode: 'unlocked', vaults, adminProvisioned, compromiseReport };
+  /** @type {SeverOffer | null} */
+  let severOffer = null;
+  const rawOffer = s.severOffer;
+  if (rawOffer && typeof rawOffer === 'object' && !Array.isArray(rawOffer)) {
+    const o = /** @type {{ route?: unknown }} */ (rawOffer);
+    if (o.route === 'change-master' || o.route === 'recover') severOffer = { route: o.route };
+  }
+
+  if (!setUp) {
+    return { mode: 'not-set-up', vaults: [], adminProvisioned: false, compromiseReport: null, severOffer: null };
+  }
+  if (!unlocked) return { mode: 'locked', vaults, adminProvisioned, compromiseReport, severOffer };
+  return { mode: 'unlocked', vaults, adminProvisioned, compromiseReport, severOffer };
 }
 
 /**
@@ -174,4 +191,159 @@ function vaultNavEntries(vaults, jars) {
   ];
 }
 
-export { selectVaultView, compromiseCardRows, vaultNavEntries, SETTINGS_ID, VAULTS_ID };
+/**
+ * Build the restore mapping modal's "existing" destination options for a JAR-SOURCED bundle
+ * row (M18 F3 L4, HAT fix 8). Every PERSISTENT jar is a legal destination — vault-backed or
+ * not — labeled by its own presence so an operator can point a bundle vault at a browsing
+ * container that has never held a vault before. This closes the fresh-adopt gap: on a
+ * not-set-up profile `selectVaultView`'s vaults list is empty by design (above), so the old
+ * "existing" list built from it was empty/unusable and every jar row was forced onto "Create
+ * a new jar" — colliding with the SAME-NAMED seeded container (Personal/Work) and landing a
+ * duplicate `personal-1`. `jars` (jarRows) is populated regardless of setup/lock state and
+ * never carries the reserved global id, so this list is always usable, pre-setup included.
+ *
+ * Also resolves HAT-fix-7's rerun-recovery prefill against this SAME full list (trimmed,
+ * case-insensitive name match, first hit wins) — a residue jar left by a prior attempt is
+ * found whether or not it already carries a vault file.
+ *
+ * `presenceById` is keyed by jar id; a missing/malformed entry degrades to "no secrets yet" —
+ * never thrown, never dropped from the list (a presence map that lags jarRows, e.g. mid-race,
+ * still offers every jar as a destination). `count` renders only alongside `hasVault: true`
+ * and only when it is a finite, non-negative number.
+ *
+ * @param {Array<{ id?: unknown, name?: unknown }>} [jars]  jarRows — the full persistent-jar list.
+ * @param {Record<string, { hasVault?: unknown, count?: unknown }>} [presenceById]
+ * @param {string} [bundleName]  the bundle row's identity.name, for the rerun-recovery match.
+ * @returns {{ options: Array<{ vaultId: string, label: string }>, matched: { vaultId: string, label: string } | undefined }}
+ */
+function restoreDestinationOptions(jars, presenceById, bundleName) {
+  const presence = presenceById && typeof presenceById === 'object' ? presenceById : {};
+  const list = Array.isArray(jars) ? jars : [];
+  /** @type {Array<{ vaultId: string, label: string }>} */
+  const options = [];
+  for (const j of list) {
+    if (!j || typeof j !== 'object' || typeof j.id !== 'string' || !j.id) continue;
+    const name = typeof j.name === 'string' && j.name ? j.name : j.id;
+    const p = presence[j.id];
+    const hasVault = !!(p && p.hasVault === true);
+    const count = p && typeof p.count === 'number' && Number.isFinite(p.count) && p.count >= 0 ? p.count : null;
+    const state = hasVault
+      ? count === null
+        ? 'has secrets'
+        : `${count} secret${count === 1 ? '' : 's'}`
+      : 'no secrets yet';
+    options.push({ vaultId: j.id, label: `${name} — ${state}` });
+  }
+
+  const target = typeof bundleName === 'string' ? bundleName.trim().toLowerCase() : '';
+  const hit = target
+    ? list.find(
+        (j) => j && typeof j === 'object' && typeof j.name === 'string' && j.name.trim().toLowerCase() === target
+      )
+    : undefined;
+  const matched = hit ? options.find((o) => o.vaultId === hit.id) : undefined;
+
+  return { options, matched };
+}
+
+/**
+ * Build the restore completion modal's per-vault outcome display lines (M18 F3 L4, HAT fix
+ * 11; RE-KEYED M18 F3 L5 to close the bundle identity leak). Extracted so the pure
+ * results→display-strings mapping is unit-testable without a DOM — vault.js's completion
+ * render just maps over these (vault.js sits at its line-budget ceiling per the leg-4 HAT log;
+ * see the `vaultNavEntries`/`restoreDestinationOptions` precedent above).
+ *
+ * The operator feedback this closes: after a merge commit, the completion surface didn't say
+ * per-vault whether items were actually imported or deduped — an operator merging a vault that
+ * turned out to be identical to the destination (DD4: same-id-identical-content items skip)
+ * saw only "Restored" with no indication the merge legitimately imported nothing new.
+ *
+ * M18 F3 L5: the commit reply's per-vault key is now the bundle's opaque `entryHandle` — a
+ * random token, not the old plaintext `sourceId` (a jar name-slug) HAT fix 11 originally leaned
+ * on to display "as-is". An entryHandle is NEVER shown to the operator: this function takes a
+ * SECOND argument, `labels` (the mapping step's decrypted per-entry labels, `{entryHandle,
+ * identity,itemCount}` — vault.js passes `record.labels`, in closure from the mapping modal's
+ * `onSubmit`), and joins each result's entryHandle to its decrypted display NAME (`'Global'` for
+ * `identity.kind === 'global'`, else `identity.name`) before rendering. `destination` is still
+ * shown AS-IS — the resolved LOCAL destination jar id the OPERATOR chose at the mapping step,
+ * never anything from the bundle — exactly as before (this surface renders strictly
+ * post-authorization, after the operator has already supplied the bundle secret and committed
+ * the restore).
+ *
+ * Each malformed/missing entry is defensive: an entry with no string `entryHandle` is dropped, a
+ * missing/non-string `destination` renders with no arrow, an unrecognized `outcome` falls back
+ * to echoing the raw value (or 'unknown'), and every `mergeReport` field coerces to `0` rather
+ * than rendering `NaN`/`undefined`. `conflictCopies` is mentioned only when it is > 0 (the
+ * common case — a clean dedup-only merge, the operator's exact reported scenario — reads as
+ * just "N new, M already present" with no trailing zero-copies clause). A result whose
+ * entryHandle has no matching label (a defensive fallback, not an expected path — the mapping
+ * step's labels and the commit reply's results are always the same bundle) falls back to the
+ * generic "a vault" rather than ever surfacing the raw entryHandle.
+ *
+ * @param {Array<{ entryHandle?: unknown, outcome?: unknown, destination?: unknown, mergeReport?: { imported?: unknown, skippedIdentical?: unknown, conflictCopies?: unknown } | unknown }>} [results]
+ * @param {Array<{ entryHandle?: unknown, identity?: unknown }>} [labels]
+ * @returns {Array<{ entryHandle: string, text: string }>}
+ */
+function restoreOutcomeLines(results, labels) {
+  const list = Array.isArray(results) ? results : [];
+  /** @type {Map<string, string>} */
+  const nameByHandle = new Map();
+  for (const l of Array.isArray(labels) ? labels : []) {
+    if (!l || typeof l !== 'object' || typeof l.entryHandle !== 'string' || !l.entryHandle) continue;
+    const identity = l.identity && typeof l.identity === 'object' ? /** @type {any} */ (l.identity) : null;
+    const name =
+      identity && identity.kind === 'global'
+        ? 'Global'
+        : identity && typeof identity.name === 'string' && identity.name
+          ? identity.name
+          : 'a vault';
+    nameByHandle.set(l.entryHandle, name);
+  }
+
+  /** @type {Array<{ entryHandle: string, text: string }>} */
+  const lines = [];
+  for (const r of list) {
+    if (!r || typeof r !== 'object' || typeof r.entryHandle !== 'string' || !r.entryHandle) continue;
+    const entryHandle = r.entryHandle;
+    const name = nameByHandle.get(entryHandle) || 'a vault';
+    const destination = typeof r.destination === 'string' && r.destination ? r.destination : null;
+    const withDest = (/** @type {string} */ suffix) => `${name}${destination ? ` → ${destination}` : ''}: ${suffix}`;
+
+    let text;
+    if (r.outcome === 'landed') {
+      const mr = r.mergeReport && typeof r.mergeReport === 'object' ? /** @type {any} */ (r.mergeReport) : null;
+      if (mr) {
+        const imported = typeof mr.imported === 'number' && Number.isFinite(mr.imported) ? mr.imported : 0;
+        const skippedIdentical =
+          typeof mr.skippedIdentical === 'number' && Number.isFinite(mr.skippedIdentical) ? mr.skippedIdentical : 0;
+        const conflictCopies =
+          typeof mr.conflictCopies === 'number' && Number.isFinite(mr.conflictCopies) ? mr.conflictCopies : 0;
+        let merged = `merged — ${imported} new, ${skippedIdentical} already present`;
+        if (conflictCopies > 0) merged += `, ${conflictCopies} kept as copies`;
+        text = withDest(merged);
+      } else {
+        text = withDest('restored');
+      }
+    } else if (r.outcome === 'collision-refused') {
+      text = withDest('not restored (a vault already exists; choose Replace or Merge)');
+    } else if (r.outcome === 'skipped') {
+      text = `${name}: skipped`;
+    } else if (r.outcome === 'failed') {
+      text = `${name}: failed`;
+    } else {
+      text = `${name}: ${typeof r.outcome === 'string' && r.outcome ? r.outcome : 'unknown'}`;
+    }
+    lines.push({ entryHandle, text });
+  }
+  return lines;
+}
+
+export {
+  selectVaultView,
+  compromiseCardRows,
+  vaultNavEntries,
+  restoreDestinationOptions,
+  restoreOutcomeLines,
+  SETTINGS_ID,
+  VAULTS_ID
+};

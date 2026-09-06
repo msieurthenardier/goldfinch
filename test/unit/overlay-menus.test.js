@@ -89,6 +89,57 @@ test('activation dispatch is allowlisted to registered menu types', async () => 
 });
 
 // ---------------------------------------------------------------------------
+// M18 F3 L1 (DD8): open() is the SINGLE chrome-side funnel every vault sheet
+// open passes through — this is where the shared VAULT_BLUR_SURVIVAL_MENU_TYPES
+// allowlist is applied, so every call site (vault-controller.js's ~20 opens,
+// including the *ForAudit a11y duplicates) gets it for free.
+// ---------------------------------------------------------------------------
+
+async function vaultAwareHarness() {
+  const { createOverlayMenus, fixedTriggerMenu } = await import('../../src/renderer/chrome/overlay-menus.js');
+  const events = [];
+  const bridge = {
+    menuOverlayOpen: (payload) => events.push(payload),
+    menuOverlayClose: () => {},
+    onMenuOverlayActivated: () => {},
+    onMenuOverlayClosed: () => {}
+  };
+  const states = {
+    kebab: fixedTriggerMenu(() => ({ setAttribute() {}, focus() {} })),
+    'vault-set': fixedTriggerMenu(() => ({ setAttribute() {}, focus() {} })),
+    'vault-unlock': fixedTriggerMenu(() => ({ setAttribute() {}, focus() {} }))
+  };
+  const client = createOverlayMenus({ bridge, states, now: () => 0, onActivated: () => {}, onClosed: () => {} });
+  return { events, client };
+}
+
+test('DD8: an allowlisted vault menuType gets survivesBlur:true on its open payload', async () => {
+  const h = await vaultAwareHarness();
+  h.client.open('vault-set', [], null, 0);
+  assert.equal(h.events[0].survivesBlur, true);
+  h.client.open('vault-unlock', [], null, 0);
+  assert.equal(h.events[1].survivesBlur, true, 'vault-unlock is IN the allowlist too');
+});
+
+test('DD8: a non-vault menuType (kebab) gets survivesBlur:false explicitly', async () => {
+  const h = await vaultAwareHarness();
+  h.client.open('kebab', [], null, 0);
+  assert.equal(h.events[0].survivesBlur, false, 'the funnel is authoritative in both directions, not just true');
+});
+
+test('DD8: a caller-supplied survivesBlur option can never override the shared allowlist verdict, in EITHER direction', async () => {
+  const h = await vaultAwareHarness();
+  // A caller trying to force it OFF for an allowlisted menuType is overridden (applied
+  // after the ...options spread, per the leg's implementation guidance).
+  h.client.open('vault-set', [], null, 0, { survivesBlur: false });
+  assert.equal(h.events[0].survivesBlur, true, 'the allowlist wins over a false caller-supplied option');
+  // A caller trying to force it ON for a NON-allowlisted menuType is also overridden —
+  // membership decides, never the caller.
+  h.client.open('kebab', [], null, 0, { survivesBlur: true });
+  assert.equal(h.events[1].survivesBlur, false, 'the allowlist wins over a true caller-supplied option too');
+});
+
+// ---------------------------------------------------------------------------
 // openSiteSettingsTab (M16 F2 Leg 1, DD10): reuses ONLY a tab whose URL host
 // is 'settings' — fragment- and path-blind on purpose (every real Settings
 // tab carries the '#privacy' fragment), never any other internal tab.

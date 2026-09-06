@@ -793,9 +793,12 @@ import {
   let vaultBusy = false;
 
   // no `items` — roving no-ops; Tab-cycling + Escape are dialog-local below. No onClose
-  // middle (hide + report only).
+  // middle (hide + report only). survivesBlur: true (M18 F3 L1, DD8) — vault-unlock is
+  // IN the blur-survival allowlist (the operator's literal stated scenario: the
+  // master-password entry point).
   const vaultEntry = sheet({
     node: vaultNode,
+    survivesBlur: true,
     onOpen() {
       vaultInput.value = '';
       vaultError.textContent = '';
@@ -1284,6 +1287,7 @@ import {
   // no `items` — roving no-ops; Tab-cycling + Escape are the modal-card helper below.
   const vaultSetEntry = sheet({
     node: vaultSetNode,
+    survivesBlur: true, // M18 F3 L1, DD8 — allowlisted vault-credential sheet
     onOpen() {
       vaultSet.input.value = '';
       vaultSet.confirm.value = '';
@@ -1452,6 +1456,7 @@ import {
   // no `items` — roving no-ops; Tab-cycling + Escape are the modal-card helper below.
   const vaultStepupEntry = sheet({
     node: vaultStepupNode,
+    survivesBlur: true, // M18 F3 L1, DD8 — allowlisted vault-credential sheet
     onOpen() {
       vaultStepup.input.value = '';
       vaultStepup.error.textContent = '';
@@ -1715,6 +1720,7 @@ import {
   // no `items` — roving no-ops; Tab-cycling + Escape are the modal-card helper below.
   const vaultImportEntry = sheet({
     node: vaultImportNode,
+    survivesBlur: true, // M18 F3 L1, DD8 — allowlisted vault-credential sheet (menuType 'vault-import-unlock')
     onOpen() {
       vaultImport.input.value = '';
       vaultImport.error.textContent = '';
@@ -1824,6 +1830,7 @@ import {
 
   const vaultChangeMasterEntry = sheet({
     node: vaultChangeMasterNode,
+    survivesBlur: true, // M18 F3 L1, DD8 — allowlisted vault-credential sheet
     onOpen() {
       vaultChangeMaster.oldInput.value = '';
       vaultChangeMaster.newInput.value = '';
@@ -1950,6 +1957,7 @@ import {
 
   const vaultRecoverEntry = sheet({
     node: vaultRecoverNode,
+    survivesBlur: true, // M18 F3 L1, DD8 — allowlisted vault-credential sheet
     onOpen() {
       vaultRecover.recoveryInput.value = '';
       vaultRecover.newInput.value = '';
@@ -2093,6 +2101,7 @@ import {
 
   const vaultCompromiseEntry = sheet({
     node: vaultCompromiseNode,
+    survivesBlur: true, // M18 F3 L1, DD8 — allowlisted vault-credential sheet
     onOpen() {
       vaultCompromise.oldInput.value = '';
       vaultCompromise.newInput.value = '';
@@ -2239,6 +2248,7 @@ import {
 
   const vaultCompromiseRecoverEntry = sheet({
     node: vaultCompromiseRecoverNode,
+    survivesBlur: true, // M18 F3 L1, DD8 — allowlisted vault-credential sheet
     onOpen() {
       vaultCompromiseRecover.recoveryInput.value = '';
       vaultCompromiseRecover.newInput.value = '';

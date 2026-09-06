@@ -276,21 +276,24 @@ test('absent popupRegistry dep is tolerated at window close (optional-chained)',
 
 // ---------------------------------------------------------------------------
 // M17 F4 L3 (AC4, squawk 0051), RE-MODELED M18 F2 L4 (flight DD5) — window-close
-// release of the window's vault suppression HOLDS. main.js itself cannot be
-// require()'d under node:test (see test/helpers/source-scan.js's "NO TEST IN
-// THIS REPO LOADS main.js"), so these tests exercise the window-factory
-// close-handler wiring against a fake `releaseVaultHoldsForWindow` delegate
-// modeling main.js's real contract — now built over the REAL refcounted
-// suppression holder (src/main/vault/autolock-suppression.js), NOT the retired
-// per-flow `size === 0` boolean discipline: drop this window's pending adopt
-// admin-key entry and release ALL of this window's holds; the store flag is
-// holders > 0, so suppression stays up while ANY other window (either flow —
-// adopt or compromise) still holds a pending reveal.
+// release of the window's vault suppression HOLDS. RE-MODELED AGAIN M18 F3 L3 (DD5
+// ruling 4, DD6 ruling 5): the pending fresh-adopt ADMIN-KEY map this fake used to model
+// is GONE (adopt no longer mints an admin pair — its recovery reveal now rides the SAME
+// generalized reveal store the compromise flow already used, still purely holder-scoped
+// here); the fake now models the OTHER thing window-close drops instead — this window's
+// held MULTI-VAULT IMPORT record (the recon leak this leg closes). main.js itself cannot
+// be require()'d under node:test (see test/helpers/source-scan.js's "NO TEST IN THIS REPO
+// LOADS main.js"), so these tests exercise the window-factory close-handler wiring against
+// a fake `releaseVaultHoldsForWindow` delegate modeling main.js's real contract — built
+// over the REAL refcounted suppression holder (src/main/vault/autolock-suppression.js):
+// drop this window's pending import record and release ALL of this window's holds; the
+// store flag is holders > 0, so suppression stays up while ANY other window (either
+// reveal reason — adopt or compromise) still holds a pending reveal.
 // ---------------------------------------------------------------------------
 
 const { createSuppressionHolder } = require('../../src/main/vault/autolock-suppression');
 
-function vaultHoldsFake(initialHolds) {
+function vaultHoldsFake(initialHolds, initialImportChromeIds = []) {
   // The store's setAutoLockSuspended flag, driven by the REAL holder.
   const store = { suspendAutoLock: false };
   const holder = createSuppressionHolder({
@@ -298,24 +301,26 @@ function vaultHoldsFake(initialHolds) {
       store.suspendAutoLock = on;
     }
   });
-  const pendingAdoptKeys = new Map();
-  for (const [chromeId, reason, adoptKey] of initialHolds) {
+  for (const [chromeId, reason] of initialHolds) {
     holder.acquire(chromeId, reason);
-    if (adoptKey !== undefined) pendingAdoptKeys.set(chromeId, adoptKey);
   }
+  // Models pending-imports.js's per-chromeId held-record set (DD5 ruling 4) — orthogonal to
+  // the holder above (DD5: "NO autolock suppression is ever acquired for a held bundle").
+  const pendingImports = new Set(initialImportChromeIds);
   const calls = [];
-  // Models main.js's releaseVaultHoldsForWindow byte-for-byte.
+  // Models main.js's releaseVaultHoldsForWindow byte-for-byte (M18 F3 L3 shape:
+  // `_pendingVaultImports.clear(chromeId); _autolockSuppression.releaseWindow(chromeId);`).
   const releaseVaultHoldsForWindow = (chromeId) => {
     calls.push(chromeId);
     if (chromeId == null) return;
-    pendingAdoptKeys.delete(chromeId);
+    pendingImports.delete(chromeId);
     holder.releaseWindow(chromeId);
   };
-  return { holder, store, pendingAdoptKeys, calls, releaseVaultHoldsForWindow };
+  return { holder, store, pendingImports, calls, releaseVaultHoldsForWindow };
 }
 
 test("window close releases the resolved chrome id's holds on the holder and un-suppresses once nothing remains held", () => {
-  const fake = vaultHoldsFake([[900, 'adopt', 'admin-key-b64']]);
+  const fake = vaultHoldsFake([[900, 'adopt']], [900]);
   assert.equal(fake.store.suspendAutoLock, true, 'precondition: the adopt hold suspends autolock');
   const h = createHarness({
     releaseVaultHoldsForWindow: fake.releaseVaultHoldsForWindow,
@@ -325,20 +330,23 @@ test("window close releases the resolved chrome id's holds on the holder and un-
   rec.win.emit('close');
 
   assert.deepEqual(fake.calls, [900], 'called with the resolved chrome id');
-  assert.equal(fake.pendingAdoptKeys.has(900), false, 'the pending admin-key entry is removed');
+  assert.equal(fake.pendingImports.has(900), false, 'the held import record is dropped (DD5 ruling 4)');
   assert.equal(fake.holder.count(), 0, "the window's holds are released");
   assert.equal(fake.store.suspendAutoLock, false, 'holders > 0 is the flag — zero holders un-suspends');
 });
 
 test("window close leaves autolock suspended while another window holds a pending reveal — EITHER flow's (the DD5 cross-flow pin)", () => {
-  // Window 900 holds an adopt reveal; window 901 holds a COMPROMISE reveal. Closing
-  // 900 releases only 900's hold — under the retired two-boolean discipline this is
-  // exactly the case where whichever flow emptied first would have un-suppressed
-  // while 901's dismiss-locked one-time display was still on screen.
-  const fake = vaultHoldsFake([
-    [900, 'adopt', 'this-window-key'],
-    [901, 'compromise']
-  ]);
+  // Window 900 holds an adopt reveal (+ an unrelated held import record); window 901 holds a
+  // COMPROMISE reveal. Closing 900 releases only 900's hold — under the retired two-boolean
+  // discipline this is exactly the case where whichever flow emptied first would have
+  // un-suppressed while 901's dismiss-locked one-time display was still on screen.
+  const fake = vaultHoldsFake(
+    [
+      [900, 'adopt'],
+      [901, 'compromise']
+    ],
+    [900]
+  );
   const h = createHarness({
     releaseVaultHoldsForWindow: fake.releaseVaultHoldsForWindow,
     chromeForAttachment: (win) => (win ? { id: 900 } : null)
@@ -347,13 +355,13 @@ test("window close leaves autolock suspended while another window holds a pendin
   rec.win.emit('close');
 
   assert.deepEqual(fake.calls, [900]);
-  assert.equal(fake.pendingAdoptKeys.has(900), false, "this window's adopt entry is removed");
+  assert.equal(fake.pendingImports.has(900), false, "this window's held import record is dropped");
   assert.equal(fake.holder.isHeld(901, 'compromise'), true, "the other window's compromise hold is untouched");
   assert.equal(fake.store.suspendAutoLock, true, "suspension stays while another window's reveal is pending");
 });
 
 test('window close calls releaseVaultHoldsForWindow with undefined when the window resolves no chrome (no-op, per the real contract)', () => {
-  const fake = vaultHoldsFake([[900, 'adopt', 'admin-key-b64']]);
+  const fake = vaultHoldsFake([[900, 'adopt']], [900]);
   const h = createHarness({
     releaseVaultHoldsForWindow: fake.releaseVaultHoldsForWindow,
     chromeForAttachment: () => null
@@ -362,7 +370,7 @@ test('window close calls releaseVaultHoldsForWindow with undefined when the wind
   rec.win.emit('close');
 
   assert.deepEqual(fake.calls, [undefined]);
-  assert.equal(fake.pendingAdoptKeys.size, 1, 'an unrelated window close never touches a hold it does not own');
+  assert.equal(fake.pendingImports.size, 1, 'an unrelated window close never touches a record it does not own');
   assert.equal(fake.store.suspendAutoLock, true);
 });
 

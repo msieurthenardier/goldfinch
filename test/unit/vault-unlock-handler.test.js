@@ -6,15 +6,18 @@
 // { ok } result, the broadcast + sheet-close on success only, and the sender /
 // token discipline.
 //
-// The `vaultUnlock` delegate is built here the SAME way main.js builds it
-// (getVaultStore().unlock wrapped so VaultAuthError → false, others rethrow) so the
-// composed unlock→onUnlock→broadcast chain is exercised end-to-end.
+// The `vaultUnlock` delegate is built here the SAME way main.js builds it — routed
+// through the REAL extracted mapper module (M18 F3 L1, DD9: vault-sheet-errors.js) with
+// main.js's own VAULT_UNLOCK_CONFIG, so a future mapping change fails loudly here
+// instead of silently diverging — so the composed unlock→onUnlock→broadcast chain is
+// exercised end-to-end.
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
 const { registerOverlayIpc } = require('../../src/main/register-overlay-ipc');
 const vs = require('../../src/main/vault/vault-store');
+const { mapVaultSheetError, VAULT_UNLOCK_CONFIG } = require('../../src/main/vault/vault-sheet-errors');
 
 function makeIpc() {
   const listeners = new Map();
@@ -77,13 +80,15 @@ function makeHarness(store) {
   const rec = { sheet };
   const registry = { records: () => [rec], getWindowForChrome: () => null };
 
-  // The main.js vaultUnlock delegate, verbatim in shape.
+  // The main.js vaultUnlock delegate, verbatim in shape — now composed from the REAL
+  // mapper module (M18 F3 L1, DD9), never a transcribed ladder.
   const vaultUnlock = async (buf) => {
     try {
       await store.unlock(buf);
       return true;
     } catch (e) {
-      if (e instanceof vs.VaultAuthError) return false;
+      const mapped = mapVaultSheetError(e, VAULT_UNLOCK_CONFIG);
+      if (mapped !== null) return mapped;
       throw e;
     }
   };

@@ -16,7 +16,17 @@ const documentStub = {
   /** @type {any} */ activeElement: null
 };
 globalThis.document = /** @type {any} */ (documentStub);
-globalThis.window = /** @type {any} */ ({ addEventListener() {} });
+// windowHandlers RECORDS the module-level listener (unlike documentStub's discarding
+// no-op above) so tests below can fire it directly — the only way to exercise
+// menu-controller.js's module-scope `window.addEventListener('blur', …)` guard
+// (dismissible / M18 F3 L1 DD8 survivesBlur) without a real DOM.
+/** @type {Record<string, (e?: any) => void>} */
+const windowHandlers = {};
+globalThis.window = /** @type {any} */ ({
+  addEventListener(/** @type {string} */ type, /** @type {(e?: any) => void} */ fn) {
+    windowHandlers[type] = fn;
+  }
+});
 
 const { menuController, focusItem } = require('../../src/renderer/menu-controller');
 
@@ -273,4 +283,50 @@ test('focusItem wraps negative and overflow indices', () => {
   assert.equal(items[2].focusCalls, 1, '-1 wraps to last');
   focusItem(/** @type {any} */ (items), 3);
   assert.equal(items[0].focusCalls, 1, '3 wraps to first');
+});
+
+// ---------------------------------------------------------------------------
+// Module-scope window 'blur' listener: closes the open menu UNLESS the entry
+// opts out via `dismissible: false` (M12 F3 Leg 4, DD5) or, since M18 F3 L1
+// (DD8), `survivesBlur: true` — a NEW, independent axis (vault credential
+// sheets retain half-entered state through window blur/refocus). Only this
+// listener changed for DD8; the pointerdown outside-click guard above stays
+// dismissible-only (untouched, no test change needed here).
+// ---------------------------------------------------------------------------
+test('window blur closes the open menu by default (no dismissible/survivesBlur opt-out)', () => {
+  const a = makeFakeEntry();
+  menuController.open(a.entry);
+  windowHandlers.blur();
+  assert.equal(a.onClose.calls.length, 1, 'ordinary menu closes on window blur');
+  assert.equal(menuController.current, null);
+});
+
+test('window blur does NOT close a dismissible:false entry (vault-recovery-show precedent, unchanged)', () => {
+  const a = makeFakeEntry();
+  a.entry.dismissible = false;
+  menuController.open(a.entry);
+  windowHandlers.blur();
+  assert.equal(a.onClose.calls.length, 0, 'a non-dismissible entry survives window blur');
+  assert.equal(menuController.current, a.entry);
+  menuController.closeAll();
+});
+
+test('window blur does NOT close a survivesBlur:true entry (M18 F3 L1, DD8)', () => {
+  const a = makeFakeEntry();
+  a.entry.survivesBlur = true;
+  menuController.open(a.entry);
+  windowHandlers.blur();
+  assert.equal(a.onClose.calls.length, 0, 'a blur-surviving entry stays open through window blur');
+  assert.equal(menuController.current, a.entry);
+  menuController.closeAll();
+});
+
+test('survivesBlur is independent of dismissible: a survivesBlur:true, dismissible:true entry still ignores blur', () => {
+  const a = makeFakeEntry();
+  a.entry.dismissible = true;
+  a.entry.survivesBlur = true;
+  menuController.open(a.entry);
+  windowHandlers.blur();
+  assert.equal(a.onClose.calls.length, 0);
+  menuController.closeAll();
 });

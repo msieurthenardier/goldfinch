@@ -444,6 +444,42 @@ function remove(id) {
   return removed;
 }
 
+// M18 F3 Leg 2 (DD3 ruling 4): a read-back CONFIRMATION that a jar id landed
+// durably. `add()` pushes in-memory and calls the deliberately fail-soft
+// `save()` (comment above `save()`'s definition — swallow-all) regardless of
+// outcome, returning the container either way; a caller that must not
+// proceed past a silent write failure (a fresh vault write under a jar that
+// might not actually exist on restart) needs an INDEPENDENT confirmation.
+// Re-reads the CURRENT row via `docStore.read()` + the injected codec —
+// mirrors `load()`'s row-present parse — and checks the id is present in
+// its `containers` array; never trusts the in-memory `containers` list,
+// which reads identical whether or not the write actually landed. Purely
+// additive: `save()`'s fail-soft contract and every existing caller's
+// behavior are unchanged. Returns `false` (never throws) when `docStore` is
+// unset (add() before load() — the pre-existing exercised path, `save()`'s
+// own comment), on a missing row, on an unreadable/unparseable row, or when
+// the id is simply absent.
+/** @param {string} id @returns {boolean} */
+function verifyPersisted(id) {
+  if (!docStore) return false;
+  let row;
+  try {
+    row = docStore.read();
+  } catch {
+    return false; // an unwritable/closed store reads as "not verified", never throws.
+  }
+  if (row === null) return false;
+  let parsed;
+  try {
+    parsed = codec.deserialize(row);
+  } catch {
+    return false;
+  }
+  return Boolean(
+    parsed && Array.isArray(parsed.containers) && parsed.containers.some((/** @type {any} */ c) => c && c.id === id)
+  );
+}
+
 // Retention edit (history flight M08 F3 / DD4). Unlike cleanRetention (the
 // load-time coercion above, which silently falls back to the default on any
 // invalid value), setRetention REJECTS an invalid days value outright — an
@@ -496,5 +532,6 @@ module.exports = {
   getDefault,
   setRetention,
   validateContainers,
-  isSafeColor
+  isSafeColor,
+  verifyPersisted
 };

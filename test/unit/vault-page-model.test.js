@@ -12,6 +12,8 @@ const {
   selectVaultView,
   compromiseCardRows,
   vaultNavEntries,
+  restoreDestinationOptions,
+  restoreOutcomeLines,
   SETTINGS_ID,
   VAULTS_ID
 } = require('../../src/shared/vault-page-model.js');
@@ -45,15 +47,55 @@ test('flags are strict === true (truthy-but-not-true does not unlock)', () => {
 });
 
 test('malformed / absent payload degrades to not-set-up with no vaults', () => {
-  const empty = { mode: 'not-set-up', vaults: [], adminProvisioned: false, compromiseReport: null };
+  const empty = { mode: 'not-set-up', vaults: [], adminProvisioned: false, compromiseReport: null, severOffer: null };
   assert.deepEqual(selectVaultView(), empty);
   assert.deepEqual(selectVaultView(null), empty);
   assert.deepEqual(selectVaultView({ setUp: true, unlocked: true }), {
     mode: 'unlocked',
     vaults: [],
     adminProvisioned: false,
-    compromiseReport: null
+    compromiseReport: null,
+    severOffer: null
   });
+});
+
+// ---------------------------------------------------------------------------
+// M18 F3 L3 (DD7): severOffer — the same defensive-normalization + lock-state
+// matrix discipline as compromiseReport above.
+// ---------------------------------------------------------------------------
+
+test('DD7 matrix: severOffer rides BOTH the locked and unlocked views (the card persists; route flips live with lock state)', () => {
+  for (const unlocked of [true, false]) {
+    const view = selectVaultView({
+      setUp: true,
+      unlocked,
+      vaults: rows,
+      severOffer: { route: unlocked ? 'change-master' : 'recover' }
+    });
+    assert.equal(view.mode, unlocked ? 'unlocked' : 'locked');
+    assert.deepEqual(view.severOffer, { route: unlocked ? 'change-master' : 'recover' });
+  }
+});
+
+test('not-set-up drops severOffer too (a fresh-adopted profile is by definition set up)', () => {
+  const view = selectVaultView({
+    setUp: false,
+    unlocked: false,
+    severOffer: { route: 'recover' }
+  });
+  assert.equal(view.severOffer, null);
+});
+
+test('severOffer is normalized: malformed/absent → null; only the two valid route literals are admitted', () => {
+  const base = { setUp: true, unlocked: true, vaults: rows };
+  assert.equal(selectVaultView(base).severOffer, null);
+  assert.equal(selectVaultView({ ...base, severOffer: 'recover' }).severOffer, null, 'a bare string is not an object');
+  assert.equal(selectVaultView({ ...base, severOffer: [] }).severOffer, null, 'an array is not admitted');
+  assert.equal(selectVaultView({ ...base, severOffer: { route: 'bogus' } }).severOffer, null, 'an invalid route');
+  assert.deepEqual(selectVaultView({ ...base, severOffer: { route: 'change-master' } }).severOffer, {
+    route: 'change-master'
+  });
+  assert.deepEqual(selectVaultView({ ...base, severOffer: { route: 'recover' } }).severOffer, { route: 'recover' });
 });
 
 // ---------------------------------------------------------------------------
@@ -245,4 +287,180 @@ test('empty vaults → Settings + an empty Vaults group; malformed inputs degrad
     childrenOf(entries).map((e) => e.id),
     ['work']
   );
+});
+
+// ── restoreDestinationOptions: the mapping modal's jar-row "existing" destinations
+// (M18 F3 L4, HAT fix 8) ──
+
+test('restoreDestinationOptions: one option per jar, labeled by vault presence — including a vault-LESS jar (the fresh-adopt fix)', () => {
+  const { options } = restoreDestinationOptions(
+    jars,
+    { personal: { hasVault: true, count: 3 } } // work: no presence entry at all
+  );
+  assert.deepEqual(options, [
+    { vaultId: 'personal', label: 'Personal — 3 secrets' },
+    { vaultId: 'work', label: 'Work — no secrets yet' }
+  ]);
+});
+
+test('restoreDestinationOptions: a hasVault jar with no known count still offers a usable label', () => {
+  const { options } = restoreDestinationOptions([{ id: 'work', name: 'Work' }], { work: { hasVault: true } });
+  assert.deepEqual(options, [{ vaultId: 'work', label: 'Work — has secrets' }]);
+});
+
+test('restoreDestinationOptions: singular "secret" at count 1', () => {
+  const { options } = restoreDestinationOptions([{ id: 'work', name: 'Work' }], { work: { hasVault: true, count: 1 } });
+  assert.equal(options[0].label, 'Work — 1 secret');
+});
+
+test('restoreDestinationOptions: rerun-recovery match is case-insensitive/trimmed and works against a VAULT-LESS destination', () => {
+  const { matched } = restoreDestinationOptions(jars, {}, '  personal  ');
+  assert.deepEqual(matched, { vaultId: 'personal', label: 'Personal — no secrets yet' });
+});
+
+test('restoreDestinationOptions: no name given, or no match found, → matched is undefined', () => {
+  assert.equal(restoreDestinationOptions(jars, {}).matched, undefined);
+  assert.equal(restoreDestinationOptions(jars, {}, 'nonexistent').matched, undefined);
+});
+
+test('restoreDestinationOptions: empty/malformed jar list → empty options, no throw, no match', () => {
+  assert.deepEqual(restoreDestinationOptions([], {}, 'Personal'), { options: [], matched: undefined });
+  assert.deepEqual(restoreDestinationOptions(undefined, undefined, 'Personal'), { options: [], matched: undefined });
+  assert.deepEqual(restoreDestinationOptions([null, { name: 'no id' }, { id: 'work', name: 'Work' }], {}).options, [
+    { vaultId: 'work', label: 'Work — no secrets yet' }
+  ]);
+});
+
+// ---------------------------------------------------------------------------
+// restoreOutcomeLines — the restore completion modal's per-vault outcome
+// display lines (M18 F3 L4, HAT fix 11; RE-KEYED M18 F3 L5 to close the
+// bundle identity leak). Results are keyed by the bundle's opaque
+// `entryHandle`; `labels` (the mapping step's decrypted per-entry identities)
+// is the second argument the join resolves display NAMES from — an
+// entryHandle itself is never rendered. Operator feedback (unchanged):
+// a merge commit's completion surface didn't say whether items actually
+// landed or deduped — this closes that by rendering merge detail whenever a
+// mergeReport rides the outcome.
+// ---------------------------------------------------------------------------
+
+const JAR_LABEL = (entryHandle, name) => ({ entryHandle, identity: { kind: 'jar', name } });
+const GLOBAL_LABEL = (entryHandle) => ({ entryHandle, identity: { kind: 'global' } });
+
+test('restoreOutcomeLines: landed with no mergeReport → plain "restored", name resolved via labels', () => {
+  const labels = [JAR_LABEL('h1', 'personal')];
+  assert.deepEqual(restoreOutcomeLines([{ entryHandle: 'h1', outcome: 'landed', destination: 'personal-1' }], labels), [
+    { entryHandle: 'h1', text: 'personal → personal-1: restored' }
+  ]);
+});
+
+test('restoreOutcomeLines: landed with a mergeReport, zero conflict copies → no trailing copies clause (the operator’s exact dedup case)', () => {
+  const labels = [JAR_LABEL('h1', 'personal')];
+  const lines = restoreOutcomeLines(
+    [
+      {
+        entryHandle: 'h1',
+        outcome: 'landed',
+        destination: 'personal-1',
+        mergeReport: { imported: 0, skippedIdentical: 5, conflictCopies: 0 }
+      }
+    ],
+    labels
+  );
+  assert.deepEqual(lines, [{ entryHandle: 'h1', text: 'personal → personal-1: merged — 0 new, 5 already present' }]);
+});
+
+test('restoreOutcomeLines: landed with a mergeReport AND conflict copies → trailing copies clause appended', () => {
+  const labels = [JAR_LABEL('h1', 'personal')];
+  const lines = restoreOutcomeLines(
+    [
+      {
+        entryHandle: 'h1',
+        outcome: 'landed',
+        destination: 'personal-1',
+        mergeReport: { imported: 2, skippedIdentical: 3, conflictCopies: 1 }
+      }
+    ],
+    labels
+  );
+  assert.deepEqual(lines, [
+    { entryHandle: 'h1', text: 'personal → personal-1: merged — 2 new, 3 already present, 1 kept as copies' }
+  ]);
+});
+
+test('restoreOutcomeLines: skipped → no destination in the line', () => {
+  const labels = [JAR_LABEL('h1', 'work')];
+  assert.deepEqual(restoreOutcomeLines([{ entryHandle: 'h1', outcome: 'skipped' }], labels), [
+    { entryHandle: 'h1', text: 'work: skipped' }
+  ]);
+});
+
+test('restoreOutcomeLines: collision-refused → destination shown, guidance to choose Replace or Merge', () => {
+  const labels = [JAR_LABEL('h1', 'personal')];
+  assert.deepEqual(
+    restoreOutcomeLines([{ entryHandle: 'h1', outcome: 'collision-refused', destination: 'personal-1' }], labels),
+    [
+      {
+        entryHandle: 'h1',
+        text: 'personal → personal-1: not restored (a vault already exists; choose Replace or Merge)'
+      }
+    ]
+  );
+});
+
+test('restoreOutcomeLines: failed → no destination in the line; the global identity resolves to "Global"', () => {
+  const labels = [GLOBAL_LABEL('h1')];
+  assert.deepEqual(restoreOutcomeLines([{ entryHandle: 'h1', outcome: 'failed' }], labels), [
+    { entryHandle: 'h1', text: 'Global: failed' }
+  ]);
+});
+
+test('restoreOutcomeLines: multiple results render in order, one line each', () => {
+  const labels = [JAR_LABEL('ha', 'a'), JAR_LABEL('hb', 'b'), JAR_LABEL('hc', 'c')];
+  const lines = restoreOutcomeLines(
+    [
+      { entryHandle: 'ha', outcome: 'landed', destination: 'a-1' },
+      { entryHandle: 'hb', outcome: 'skipped' },
+      { entryHandle: 'hc', outcome: 'failed' }
+    ],
+    labels
+  );
+  assert.deepEqual(
+    lines.map((l) => l.entryHandle),
+    ['ha', 'hb', 'hc']
+  );
+});
+
+test('restoreOutcomeLines: malformed input degrades safely — non-array, non-object entries, missing entryHandle all drop/no-throw', () => {
+  assert.deepEqual(restoreOutcomeLines(undefined), []);
+  assert.deepEqual(restoreOutcomeLines([]), []);
+  assert.deepEqual(restoreOutcomeLines([null, 'nope', {}, { entryHandle: '' }, { outcome: 'landed' }]), []);
+});
+
+test('restoreOutcomeLines: an entryHandle with NO matching label falls back to "a vault" — never the raw entryHandle', () => {
+  assert.deepEqual(restoreOutcomeLines([{ entryHandle: 'orphan', outcome: 'skipped' }], []), [
+    { entryHandle: 'orphan', text: 'a vault: skipped' }
+  ]);
+  // Malformed/missing labels array degrades the same way — never throws.
+  assert.deepEqual(restoreOutcomeLines([{ entryHandle: 'orphan', outcome: 'skipped' }]), [
+    { entryHandle: 'orphan', text: 'a vault: skipped' }
+  ]);
+});
+
+test('restoreOutcomeLines: mergeReport with non-numeric/missing fields coerces to 0, never NaN/undefined in the text', () => {
+  const labels = [JAR_LABEL('h1', 'personal')];
+  const lines = restoreOutcomeLines(
+    [{ entryHandle: 'h1', outcome: 'landed', destination: 'personal-1', mergeReport: {} }],
+    labels
+  );
+  assert.deepEqual(lines, [{ entryHandle: 'h1', text: 'personal → personal-1: merged — 0 new, 0 already present' }]);
+});
+
+test('restoreOutcomeLines: an unrecognized outcome falls back to echoing the raw value', () => {
+  const labels = [JAR_LABEL('h1', 'x')];
+  assert.deepEqual(restoreOutcomeLines([{ entryHandle: 'h1', outcome: 'weird' }], labels), [
+    { entryHandle: 'h1', text: 'x: weird' }
+  ]);
+  assert.deepEqual(restoreOutcomeLines([{ entryHandle: 'h1', outcome: 123 }], labels), [
+    { entryHandle: 'h1', text: 'x: unknown' }
+  ]);
 });

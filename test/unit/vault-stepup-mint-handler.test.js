@@ -17,6 +17,7 @@ const fs = require('node:fs');
 
 const { registerOverlayIpc } = require('../../src/main/register-overlay-ipc');
 const vaultStoreModule = require('../../src/main/vault/vault-store');
+const { mapVaultSheetError, VAULT_MINT_ACCESS_KEY_CONFIG } = require('../../src/main/vault/vault-sheet-errors');
 
 function makeIpc() {
   const handlers = new Map();
@@ -273,17 +274,18 @@ async function makeRealStoreHarness() {
   });
   await store.setup({ masterPassword: MASTER });
 
-  // The main.js delegate, verbatim shape (squawk 0058): VaultAuthError maps to a bare
-  // { ok:false }; VaultStateError / VaultBusyError map to NON-SECRET reasons; every
+  // The main.js delegate, verbatim shape (squawk 0058) — now composed from the REAL
+  // mapper module (M18 F3 L1, DD9: vault-sheet-errors.js) with main.js's own
+  // VAULT_MINT_ACCESS_KEY_CONFIG, never a transcribed ladder: VaultAuthError maps to a
+  // bare { ok:false }; VaultStateError / VaultBusyError map to NON-SECRET reasons; every
   // other (unknown) failure class propagates and REJECTS the invoke.
   const vaultMintAccessKey = async (buf, target) => {
     try {
       const { secret, keyId } = await store.mintAccessKey(target, { masterPassword: buf });
       return { ok: true, secret, keyId };
     } catch (e) {
-      if (e instanceof vaultStoreModule.VaultAuthError) return { ok: false };
-      if (e instanceof vaultStoreModule.VaultStateError) return { ok: false, reason: 'state' };
-      if (e instanceof vaultStoreModule.VaultBusyError) return { ok: false, reason: 'busy' };
+      const mapped = mapVaultSheetError(e, VAULT_MINT_ACCESS_KEY_CONFIG);
+      if (mapped !== null) return mapped;
       throw e;
     }
   };

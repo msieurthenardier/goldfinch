@@ -1,3 +1,5 @@
+import { VAULT_BLUR_SURVIVAL_MENU_TYPES } from '../../shared/vault-blur-survival.js';
+
 const BLUR_REOPEN_SUPPRESS_MS = 300;
 
 export function buildKebabModel() {
@@ -67,6 +69,12 @@ export function createOverlayMenus({ bridge, states, now, onActivated, onClosed,
     state.open = true;
     /** @type {any} */
     const payload = { menuType, model, anchor, startIndex, token: state.token, ...options };
+    // M18 F3 L1 (DD8): the blur-survival flag, applied HERE — after the ...options spread,
+    // and UNCONDITIONALLY (both true and false) — so no caller-supplied option can ever
+    // override the shared allowlist's verdict in EITHER direction. This is the ONE funnel
+    // every vault sheet open passes through (including the *ForAudit a11y duplicates in
+    // vault-controller.js), so membership can never drift per call site.
+    payload.survivesBlur = VAULT_BLUR_SURVIVAL_MENU_TYPES.has(menuType);
     if (measureSlot) payload.slotBounds = measureSlot(); // squawk 0057 — after the spread: measurement always wins
     bridge.menuOverlayOpen(payload);
     state.ariaTarget()?.setAttribute('aria-expanded', 'true');

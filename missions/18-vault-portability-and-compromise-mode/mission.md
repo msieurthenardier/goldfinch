@@ -1,6 +1,6 @@
 # Mission: Vault Portability & Compromise Mode
 
-**Status**: active
+**Status**: completed
 
 ## Outcome
 
@@ -97,13 +97,13 @@ workflow spanning store + jar registry + IPC/UI.
       transaction's durable commit point; a pre-commit failure surfaces an
       error ("nothing changed; your existing keys remain valid") and shows
       no secret — never printed keys that a rollback then invalidates.
-- [ ] **Whole-profile export.** One export produces a single bundle carrying
+- [x] **Whole-profile export.** One export produces a single bundle carrying
       the global vault and every jar vault, plus jar identity metadata
       (name, appearance) sufficient for a human-readable mapping step after
       the bundle is opened. **Everything in the bundle remains ciphertext**
       — jar metadata included (operator ruling; the current all-ciphertext
       headline is preserved unchanged).
-- [ ] **One restore workflow, explicit mapping, unified with import.**
+- [x] **One restore workflow, explicit mapping, unified with import.**
       Restoring a bundle walks a single workflow — file pick → bundle
       secret → mapping — in which each source vault is explicitly directed
       by the operator to an existing jar, to a new jar created in that
@@ -118,7 +118,7 @@ workflow spanning store + jar registry + IPC/UI.
       through an explicit mechanism — semantics ruled in the owning
       flight's design). *(Refined during Flight 1 alignment, 2026-09-01 —
       observations O1–O3 in the flight log.)*
-- [ ] **Fresh-adopt guarantees extend to multi-vault bundles.** A fresh
+- [x] **Fresh-adopt guarantees extend to multi-vault bundles.** A fresh
       adopt of a multi-vault bundle still forces a recovery-key rotation
       before the profile is usable, and **no admin key is provisioned** —
       the donor's admin access is severed by omission, and an admin key
@@ -131,16 +131,16 @@ workflow spanning store + jar registry + IPC/UI.
       — operator ruling: admin keys are never minted implicitly; extends
       Flight 1 ruling R5 to the restore workflow. Supersedes F4's
       two-key-chain form of this guarantee.)*
-- [ ] **Selective jar transplant.** The operator can bring a chosen subset
+- [x] **Selective jar transplant.** The operator can bring a chosen subset
       of a bundle's vaults into an existing profile, re-keyed under the
       destination's own MRK; a destination collision is never resolved
       silently — the operator explicitly chooses Replace or Merge, per
       vault.
-- [ ] **Master severing offered, never forced.** After any fresh adopt the
+- [x] **Master severing offered, never forced.** After any fresh adopt the
       operator is offered a master-password change that severs the donor's
       master envelope; declining leaves the profile fully usable. The offer
       states what it severs.
-- [ ] **Docs tell the new truth.** The threat model's "already-extracted MRK
+- [x] **Docs tell the new truth.** The threat model's "already-extracted MRK
       survives every rotation" and "donor's master password after adopt"
       bullets are updated to describe the compromise-mode and offered-sever
       answers; portability docs describe the multi-vault bundle and the
@@ -223,7 +223,7 @@ workflow spanning store + jar registry + IPC/UI.
       the secret alone, and sheet cards are sized for a one-line key, not
       an N-row mapping table. The alignment flight (still optional)
       focuses on flow feel and wording, not location.
-- [ ] **The decrypt-before-mapping inversion.** Encrypted jar metadata
+- [x] **The decrypt-before-mapping inversion.** Encrypted jar metadata
       means human-readable mapping labels exist only after the bundle is
       opened, so the flow becomes file pick → secret (sheet) → back to the
       mapping surface with decrypted labels → commit. The main process
@@ -231,18 +231,18 @@ workflow spanning store + jar registry + IPC/UI.
       arbitrary duration — cancellation, idle-autolock, and window-close
       semantics for that held state need explicit design (kin to the F4
       autolock-suppression guard).
-- [ ] Fresh-adopt mapping semantics: whether jar creation must work before
+- [x] Fresh-adopt mapping semantics: whether jar creation must work before
       `isSetUp()` flips true, and the write-ordering invariant ("a failure
       never flips `isSetUp()` true without a vault") re-derived for N
       vaults + jar-registry writes. Includes the degenerate case "fresh
       adopt, skip everything except one jar vault."
-- [ ] **Item-level merge semantics** (from Flight 1 observation O3): what
+- [x] **Item-level merge semantics** (from Flight 1 observation O3): what
       identifies two items as "the same" across vaults (origin + username?
       card fields?), how a conflict between two same-identity items is
       surfaced and resolved, and how merge outcomes are reported per vault.
       A genuine design-decision cluster for the owning flight — potentially
       its own leg.
-- [ ] Multi-vault restore interruption semantics: per-vault atomicity with
+- [x] Multi-vault restore interruption semantics: per-vault atomicity with
       explicitly stated rerun/collision behavior (a half-restored profile
       is recoverable by rerun; full transactionality is reserved for
       compromise mode, where rerun is not a recovery path) — **and the
@@ -251,7 +251,7 @@ workflow spanning store + jar registry + IPC/UI.
       distinguish the interrupted run's own residue from a genuine
       pre-existing collision. A single ok/error result shape forecloses
       this and would force an IPC reshape later.
-- [ ] Whether the offered master-sever is transient (a sheet in the adopt
+- [x] Whether the offered master-sever is transient (a sheet in the adopt
       chain — miss it and it's gone) or persists as a vault-page affordance
       until acted on. If persistent: where the pending-offer flag lives
       (`manager.json` is crypto-only today), and which mechanism serves a
@@ -281,7 +281,7 @@ workflow spanning store + jar registry + IPC/UI.
       only `manager.json` mutations today), surfacing chain extension + its
       hybrid witnessed behavior-test spec. Pre-named divert trigger: the
       transaction layer growing into its own leg cluster.
-- [ ] Flight 3: Multi-vault portability — bundle v2, whole-profile export,
+- [x] Flight 3: Multi-vault portability — bundle v2, whole-profile export,
       the single restore workflow with explicit mapping / create-new-jar /
       skip (create-jar-then-import ordering: the resolver requires the
       destination jar to exist), selective transplant, offered master
