@@ -681,3 +681,21 @@ Runtime decisions, deviations, and anomalies recorded here during execution.
   PR opened with the leg checklist; marked ready-for-review when the flight
   lands after Leg 3.
 
+## 2026-09-09 — Leg 3 design (guided HAT)
+
+### Flight Director Notes
+
+- Draft PR **#208** opened (`flight/01-chrome-password-import` → `main`)
+  with both autonomous legs checked off; marked ready-for-review when the
+  flight lands.
+- **Leg 3 `hat-and-alignment` designed** (`legs/03-hat-and-alignment.md`,
+  12 verification steps S1–S12), status `ready`. Interactive leg: no
+  autonomous cycle; the Flight Director guides the operator one step at a
+  time and fixes inline (fix-vs-feature gate + multi-surface trigger per
+  the methodology). Risk tier: n/a (no code is designed here; any fix rides
+  the inline protocol with its own review call, logged as HAT fix N).
+- Operator prerequisites before S1: the app on this branch (dev profile
+  recommended — the real vault stays untouched), a set-up + unlocked vault
+  with ≥ 1 persistent jar, and a fresh Chrome export (row count noted).
+  The export file is never committed or pasted into artifacts.
+
