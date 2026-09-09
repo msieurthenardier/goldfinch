@@ -34,6 +34,12 @@ function registerBrowserIpc({
   vaultImportFetchLabels,
   vaultImportCommit,
   vaultImportSeverDismiss,
+  // M19 F1 Leg 2 (DD5/DD13): the browser-CSV-import flow's four channels. All optional
+  // (offline register-browser-ipc tests omit them, mirroring the restore group above).
+  browserImportBegin,
+  browserImportSummary,
+  browserImportCancel,
+  browserImportCommit,
   popupVaultIconMenu,
   popupRegistry,
   random = Math.random,
@@ -335,6 +341,37 @@ function registerBrowserIpc({
     registerInternalHandler(ipcMain, 'internal-vault-sever-dismiss', () => {
       vaultImportSeverDismiss();
       return { ok: true };
+    });
+  }
+
+  // Browser-CSV password import (M19 F1 Leg 2 / DD5, DD13). A separate flow from the
+  // restore group above: no secret sheet (a plaintext CSV has no secret to unwrap), no
+  // labels-ready push (the page drives every step itself). Each channel resolves the
+  // OWNING window via chromeForTab(event.sender.id) — the internal vault tab is in
+  // tabViews — and is gated on its own injected delegate.
+  if (browserImportBegin) {
+    registerInternalHandler(ipcMain, 'internal-vault-browser-import-pick', async (event) => {
+      return await browserImportBegin(chromeForTab(event.sender.id)?.id);
+    });
+  }
+  if (browserImportSummary) {
+    registerInternalHandler(ipcMain, 'internal-vault-browser-import-summary', (event) => {
+      return browserImportSummary(chromeForTab(event.sender.id)?.id);
+    });
+  }
+  if (browserImportCancel) {
+    registerInternalHandler(ipcMain, 'internal-vault-browser-import-cancel', (event, handle) => {
+      browserImportCancel(chromeForTab(event.sender.id)?.id, handle);
+      return { ok: true };
+    });
+  }
+  if (browserImportCommit) {
+    registerInternalHandler(ipcMain, 'internal-vault-browser-import-commit', async (event, payload) => {
+      const { handle, target, mode } = payload || {};
+      if (typeof handle !== 'string' || typeof target !== 'string' || typeof mode !== 'string') {
+        return { ok: false, reason: 'state' };
+      }
+      return await browserImportCommit(chromeForTab(event.sender.id)?.id, { handle, target, mode });
     });
   }
 

@@ -338,12 +338,126 @@ function restoreOutcomeLines(results, labels) {
   return lines;
 }
 
+// A fixed label per DD8 skip-reason code (M19 F1 Leg 2 / DD11) — never row content.
+// 'non-web-origin' is handled separately below (it carries the scheme).
+const BROWSER_IMPORT_SKIP_LABELS = {
+  malformed: 'malformed row',
+  'field-too-long': 'a field is too long',
+  'malformed-url': 'unusable URL',
+  'no-password': 'no stored password'
+};
+
+/**
+ * Build the browser-CSV-import destination modal's `<select>` options (M19 F1 Leg 2 /
+ * DD9). The Global row is special-cased OUTSIDE `restoreDestinationOptions` (that
+ * function has no concept of Global) from a THIRD argument, `globalPresence` — the
+ * SAME `{ hasVault, count }` shape as one of `presenceById`'s entries; the caller
+ * builds it from the page's `state.vaults` `'global'` row. Every persistent-jar row
+ * comes verbatim from `restoreDestinationOptions(jars, presenceById).options` — the
+ * same jar-presence-label idiom the restore mapping modal already uses. Never throws;
+ * a malformed `globalPresence` degrades to "no secrets yet".
+ * @param {Array<{ id?: unknown, name?: unknown }>} [jars]
+ * @param {Record<string, { hasVault?: unknown, count?: unknown }>} [presenceById]
+ * @param {{ hasVault?: unknown, count?: unknown }} [globalPresence]
+ * @returns {Array<{ vaultId: string, label: string }>}
+ */
+function browserImportDestinationOptions(jars, presenceById, globalPresence) {
+  const g = globalPresence && typeof globalPresence === 'object' ? globalPresence : {};
+  const hasVault = g.hasVault === true;
+  const count = typeof g.count === 'number' && Number.isFinite(g.count) && g.count >= 0 ? g.count : null;
+  const state = hasVault
+    ? count === null
+      ? 'has secrets'
+      : `${count} secret${count === 1 ? '' : 's'}`
+    : 'no secrets yet';
+  const globalOption = { vaultId: 'global', label: `Global — ${state}` };
+  const { options: jarOptions } = restoreDestinationOptions(jars, presenceById);
+  return [globalOption, ...jarOptions];
+}
+
+/**
+ * Build the browser-CSV-import pick/destination modal's skip-reason display lines (M19
+ * F1 Leg 2 / DD8, DD11) — one fixed label per adapter reason code, never row content.
+ * `non-web-origin` names the captured scheme; an unrecognized code echoes the raw
+ * value rather than vanishing. Malformed entries are dropped, never thrown on.
+ * @param {Array<{ line?: unknown, reason?: unknown, scheme?: unknown }>} [skipped]
+ * @returns {Array<{ line: number, text: string }>}
+ */
+function browserImportSkipLines(skipped) {
+  const list = Array.isArray(skipped) ? skipped : [];
+  /** @type {Array<{ line: number, text: string }>} */
+  const lines = [];
+  for (const s of list) {
+    if (!s || typeof s !== 'object' || typeof s.line !== 'number') continue;
+    const reason = typeof s.reason === 'string' ? s.reason : '';
+    let text;
+    if (reason === 'non-web-origin') {
+      const scheme = typeof s.scheme === 'string' && s.scheme ? s.scheme : '';
+      text = `non-web origin (${scheme}://)`;
+    } else if (Object.prototype.hasOwnProperty.call(BROWSER_IMPORT_SKIP_LABELS, reason)) {
+      text = BROWSER_IMPORT_SKIP_LABELS[/** @type {keyof typeof BROWSER_IMPORT_SKIP_LABELS} */ (reason)];
+    } else {
+      text = reason || 'unknown';
+    }
+    lines.push({ line: s.line, text });
+  }
+  return lines;
+}
+
+/**
+ * Build the browser-CSV-import completion modal's ordered outcome display lines (M19
+ * F1 Leg 2 / DD11) from `summarizeOutcomes`'s `{ imported, duplicate, changed, failed,
+ * unmappable: { total, byReason } }` shape. `imported` always renders (even 0); every
+ * other line is omitted at zero. Every field coerces to a non-negative finite number
+ * (never `NaN`/`undefined` in the rendered text) — a malformed `counts` degrades to
+ * "0 imported" alone rather than throwing.
+ * @param {{ imported?: unknown, duplicate?: unknown, changed?: unknown, failed?: unknown, unmappable?: { total?: unknown, byReason?: Record<string, unknown> } | unknown }} [counts]
+ * @returns {string[]}
+ */
+function browserImportOutcomeLines(counts) {
+  const c = counts && typeof counts === 'object' ? /** @type {any} */ (counts) : {};
+  const num = (/** @type {unknown} */ v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : 0);
+  const imported = num(c.imported);
+  const duplicate = num(c.duplicate);
+  const changed = num(c.changed);
+  const failed = num(c.failed);
+  const unmappable = c.unmappable && typeof c.unmappable === 'object' ? c.unmappable : {};
+  const unmappableTotal = num(unmappable.total);
+  const byReason = unmappable.byReason && typeof unmappable.byReason === 'object' ? unmappable.byReason : {};
+
+  /** @type {string[]} */
+  const lines = [`${imported} imported`];
+  if (duplicate > 0) lines.push(`${duplicate} already present (skipped)`);
+  if (changed > 0) lines.push(`${changed} changed — kept as copies`);
+  if (unmappableTotal > 0) {
+    /** @type {string[]} */
+    const parts = [];
+    for (const [reason, n] of Object.entries(byReason)) {
+      const reasonCount = num(n);
+      if (reasonCount <= 0) continue;
+      const label =
+        reason === 'non-web-origin'
+          ? 'non-web origin'
+          : Object.prototype.hasOwnProperty.call(BROWSER_IMPORT_SKIP_LABELS, reason)
+            ? BROWSER_IMPORT_SKIP_LABELS[/** @type {keyof typeof BROWSER_IMPORT_SKIP_LABELS} */ (reason)]
+            : reason || 'unknown';
+      parts.push(`${reasonCount} ${label}`);
+    }
+    lines.push(`${unmappableTotal} could not be imported: ${parts.join(', ')}`);
+  }
+  if (failed > 0) lines.push(`${failed} failed`);
+  return lines;
+}
+
 export {
   selectVaultView,
   compromiseCardRows,
   vaultNavEntries,
   restoreDestinationOptions,
   restoreOutcomeLines,
+  browserImportDestinationOptions,
+  browserImportSkipLines,
+  browserImportOutcomeLines,
   SETTINGS_ID,
   VAULTS_ID
 };

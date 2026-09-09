@@ -1,6 +1,6 @@
 # Leg: ingest-and-commit-core
 
-**Status**: ready
+**Status**: completed
 **Flight**: [Chrome Password Import](../flight.md)
 
 ## Objective
@@ -313,23 +313,23 @@ What exists before this leg runs (verified 2026-09-09):
 ## Acceptance Criteria
 
 Parser (DD7):
-- [ ] AC1 `parseCsv` round-trips a corpus in which the `note` field carries
+- [x] AC1 `parseCsv` round-trips a corpus in which the `note` field carries
       an embedded comma, an embedded escaped quote (`""`), an embedded LF,
       an embedded CRLF, and a leading BOM on the file — every field
       byte-exact.
-- [ ] AC2 A structurally bad record (unescaped quote in an unquoted field;
+- [x] AC2 A structurally bad record (unescaped quote in an unquoted field;
       closing quote followed by a non-delimiter) is returned `malformed`
       with the parse continuing at the next raw LF; an unterminated quote
       at EOF yields a final `malformed` record; a trailing newline emits no
       empty record; a blank line is skipped. Each malformed record carries
       its 1-based `line`.
-- [ ] AC3 `detectChromeExport` accepts the exact Chrome header
+- [x] AC3 `detectChromeExport` accepts the exact Chrome header
       (case-insensitive, trimmed) and throws
       `BrowserImportFormatError('unrecognized-format')` on any other first
       record (a random CSV, an empty file, a `.gfvaultbundle` JSON blob).
 
 Adapter (DD8, DD12):
-- [ ] AC4 One fixture export containing each row class produces exactly
+- [x] AC4 One fixture export containing each row class produces exactly
       the expected `{ line, reason }` skip per class — `malformed`
       (wrong field count), `field-too-long`, `malformed-url`,
       `non-web-origin` (an `android://` row, `scheme: 'android'`),
@@ -338,17 +338,17 @@ Adapter (DD8, DD12):
       (title falls back to the URL host), a row with an empty `note`
       (`notes` key absent). No row is ever dropped without an entry, and
       the run never throws on row content.
-- [ ] AC5 An `android://` row's `origin` never enters the identity map: two
+- [x] AC5 An `android://` row's `origin` never enters the identity map: two
       such rows with different packages do not dedupe against each other
       (they are both `non-web-origin` skips), and no `"null"` string
       appears in any reason/scheme field.
-- [ ] AC6 `MAX_IMPORT_ITEMS + 1` data records → `BrowserImportFormatError
+- [x] AC6 `MAX_IMPORT_ITEMS + 1` data records → `BrowserImportFormatError
       ('too-many-rows')`; `MAX_IMPORT_ITEMS` exactly → accepted. Exported
       `MAX_IMPORT_ITEMS` from `vault-store.js` equals the adapter's cap
       (one literal, cross-module assert).
 
 Dedupe plan (DD3):
-- [ ] AC7 The trichotomy is pinned in one scenario: against a destination
+- [x] AC7 The trichotomy is pinned in one scenario: against a destination
       holding login A, the incoming set `[A identical, A with a changed
       password, A with only a changed title, B new]` resolves to
       `duplicate`, `changed`, `duplicate`, `new`; `login.example.com`
@@ -357,18 +357,18 @@ Dedupe plan (DD3):
       and an existing login carrying a `totp` secret with an incoming row
       matching its identity/password/notes is `duplicate` (no totp-less
       copy is ever minted).
-- [ ] AC8 Intra-file duplicates: an export with the same `(origin,
+- [x] AC8 Intra-file duplicates: an export with the same `(origin,
       username)` twice — identical → the second is `duplicate`; differing
       password → the second is `changed`.
 
 Store op (DD2, DD4, DD9, DD11):
-- [ ] AC9 `importLogins` into an **uncreated** global vault and into an
+- [x] AC9 `importLogins` into an **uncreated** global vault and into an
       uncreated persistent jar each create the `.gfvault` via the lazy
       branch, cache the key, and `listItems(target)` afterward returns the
       imported logins, every one carrying `matchMode: 'registrable-domain'`,
       a minted `id`, `createdAt`/`updatedAt`, and `notes` only where the
       row had one.
-- [ ] AC10 Exactly ONE vault write per call: an INSTANCE-method
+- [x] AC10 Exactly ONE vault write per call: an INSTANCE-method
       monkeypatch (`store._writeVault = spy` / `store._writeVaultForKey =
       spy`, wrapping the original) records one call for a 50-row import
       — the sole valid technique; `writeFileAtomic` is a destructured CJS
@@ -377,23 +377,23 @@ Store op (DD2, DD4, DD9, DD11):
       exactly once (a second signal: mtime/bytes before vs. after); zero
       calls and byte-identical file when every candidate is
       `duplicate`/`failed` (`written: false`).
-- [ ] AC11 Double-import idempotence: importing the same 10-row candidate
+- [x] AC11 Double-import idempotence: importing the same 10-row candidate
       set twice with `mode: 'merge'` leaves `listItems` at 10 items and the
       second call's results are 10 × `duplicate`, `written: false`.
-- [ ] AC12 `changed` lands as a new item titled `<title> (imported)` with
+- [x] AC12 `changed` lands as a new item titled `<title> (imported)` with
       a fresh id; the pre-existing item is byte-identical to before.
-- [ ] AC13 `mode`: a non-empty destination with no/invalid `mode` throws
+- [x] AC13 `mode`: a non-empty destination with no/invalid `mode` throws
       `VaultStateError` and writes nothing; `replace` on a destination
       holding 3 items (a login, a card, a note) leaves ONLY the imported
       logins, under the SAME vault key (the `.gfvault` `envelopes` are
       byte-identical before/after); `merge` keeps all 3 plus the new
       logins. An empty/uncreated destination accepts a missing `mode`.
-- [ ] AC14 Per-row `failed` (DD11): a monkeypatched `_normalizeItem` that
+- [x] AC14 Per-row `failed` (DD11): a monkeypatched `_normalizeItem` that
       throws for one candidate yields exactly one `{ outcome: 'failed',
       reason }`, the other N-1 `imported`, ONE write. A write-sink throw
       (monkeypatched `_writeVault`) propagates, and `listItems` afterward
       equals the pre-call contents (zero landed).
-- [ ] AC15 Gating + lock: `importLogins` throws `VaultLockedError` when the
+- [x] AC15 Gating + lock: `importLogins` throws `VaultLockedError` when the
       manager is locked (no file created for an uncreated destination);
       throws `VaultBusyError` at entry while the re-key gate is up; refuses
       a burner/unknown target with `VaultStateError` and no file; a
@@ -401,47 +401,47 @@ Store op (DD2, DD4, DD9, DD11):
       (the shape check precedes `_requireMrk`); `vault-rekey-gate.test.js`
       enumerates twelve gated ops including `importLogins`, all four
       count sites updated, and stays green.
-- [ ] AC15b One literal each: `MAX_IMPORT_ITEMS` and `MAX_PAYLOAD_BYTES` are
+- [x] AC15b One literal each: `MAX_IMPORT_ITEMS` and `MAX_PAYLOAD_BYTES` are
       defined only in `browser-import.js` (grep: exactly one `= 10000` /
       one `16 * 1024 * 1024` definition across `src/main/vault/`);
       `vault-store.js` re-exports `MAX_IMPORT_ITEMS` and
       `require('./browser-import')` resolves it to `10000` at load
       (the cycle-free direction, pinned by a require-order test that
       loads `vault-store.js` FIRST in a fresh process/module cache).
-- [ ] AC16 `summarizeOutcomes(skipped, results)` folds a mixed fixture into
+- [x] AC16 `summarizeOutcomes(skipped, results)` folds a mixed fixture into
       `{ imported, duplicate, changed, failed, unmappable: { total,
       byReason } }` with every count correct and every unknown/malformed
       entry coerced (never `NaN`, never a throw).
-- [ ] AC17 No-plaintext byte-scan: after an import into a `name==slug`
+- [x] AC17 No-plaintext byte-scan: after an import into a `name==slug`
       jar (`work`/`work`) and into global, every file under the temp
       `userData` (recursively) is read as bytes and none contains the
       fixture's password, note, username, or title strings.
 
 Held store (DD6):
-- [ ] AC18 `hold` refuses a non-Buffer and an over-`MAX_PAYLOAD_BYTES`
+- [x] AC18 `hold` refuses a non-Buffer and an over-`MAX_PAYLOAD_BYTES`
       payload (throws, nothing held); arms the timer at `HOLD_DROP_MS` on
       hold (injected `setTimeout` observed); a same-window re-hold
       zeroizes + replaces; a second window's record is independent.
-- [ ] AC19 Every exit zeroizes: `clear` (explicit cancel), `dropAll` (lock),
+- [x] AC19 Every exit zeroizes: `clear` (explicit cancel), `dropAll` (lock),
       timer expiry (fake timers), and `drop`-via-re-hold each leave the
       prior payload Buffer all-zero and the window unheld. `take` with the
       correct handle cancels the timer WITHOUT zeroizing and removes the
       record; `take` with a wrong handle returns `null` and leaves the
       record (and its timer) intact.
-- [ ] AC20 `peekSummary` returns `{ handle, summary }` only — assert the
+- [x] AC20 `peekSummary` returns `{ handle, summary }` only — assert the
       returned object has no `payload` key, and a deep `JSON.stringify`
       of it contains none of the fixture's field values.
 
 Boundary (CP4, Leg 1 half):
-- [ ] AC21 `browser-import-boundary.test.js` passes the three pins in
+- [x] AC21 `browser-import-boundary.test.js` passes the three pins in
       ruling 9 (tool-name negative match + unchanged count; grep-AC over
       `src/main/automation/**`; payload read-site source-scan).
 
 Whole-leg:
-- [ ] AC22 Green bar: `npm test` (with `--test-timeout`), `npm run
+- [x] AC22 Green bar: `npm test` (with `--test-timeout`), `npm run
       typecheck`, `npm run lint`, `npm run format:check` all clean; every
       pre-existing vault suite untouched except `vault-rekey-gate.test.js`.
-- [ ] AC23 `flight-log.md` carries this leg's entry (changes, verification,
+- [x] AC23 `flight-log.md` carries this leg's entry (changes, verification,
       the DD8 `blocklist` refinement, any deviation) and the leg is `landed`.
 
 ## Verification Steps

@@ -813,6 +813,51 @@ if (INTERNAL_ORIGINS.has(location.origin)) {
      */
     severDismiss: () => ipcRenderer.invoke('internal-vault-sever-dismiss'),
 
+    // Browser-CSV password import (M19 F1 Leg 2 / DD5, DD6, DD13). A separate flow from the
+    // restore group above: main picks + reads + parses the file and HOLDS the raw payload
+    // (never the page) — no secret sheet, no labels-ready push; the page drives every step
+    // itself. `browserImportCommit` is gated by a NATIVE confirm dialog main-side (DD13) —
+    // it AWAITS the operator's own click before any write, at every tier including admin.
+
+    /**
+     * Pick a Chrome password-export CSV: main runs the open dialog, size-caps + reads the
+     * file as a Buffer, parses + adapts it once, and HOLDS the raw payload (never the parsed
+     * candidates) under this window. Resolves `{ ok, path, handle, summary: { candidateCount,
+     * skipped } }`, `{ canceled }`, or `{ error }` (a coded reason — never row content).
+     * @returns {Promise<{ ok?: boolean, path?: string, handle?: string, summary?: { candidateCount: number, skipped: any[] }, canceled?: boolean, error?: string }>}
+     */
+    browserImportPick: () => ipcRenderer.invoke('internal-vault-browser-import-pick'),
+
+    /**
+     * The page's window-scoped summary read — a NON-SECRET `{ handle, summary }` projection
+     * of this window's held record, or `null` when nothing is held. Call on page load to
+     * resume after a forced modal close.
+     * @returns {Promise<{ handle: string, summary: { candidateCount: number, skipped: any[] } } | null>}
+     */
+    browserImportSummary: () => ipcRenderer.invoke('internal-vault-browser-import-summary'),
+
+    /**
+     * Drop the held record at any step (pick-modal Cancel, or destination-modal Cancel).
+     * Always safe to call. Pass the browserImportPick `handle` so only THIS transaction's
+     * record is dropped.
+     * @param {string} [handle]
+     * @returns {Promise<{ ok: boolean }>}
+     */
+    browserImportCancel: (handle) => ipcRenderer.invoke('internal-vault-browser-import-cancel', handle),
+
+    /**
+     * Commit the held import into `target` (`'global'` or a persistent jar id) with
+     * `mode` (`'merge'` | `'replace'`, always sent — a destination populated since the pick
+     * merges safely). AWAITS a native confirm dialog main-side (DD13) before any write.
+     * Resolves `{ ok: true, target, counts }` (aggregate outcome counts only — no row
+     * content) or a non-secret `{ ok: false, reason }` refusal
+     * (`'declined'|'locked'|'busy'|'state'`).
+     * @param {{ handle: string, target: string, mode: 'merge' | 'replace' }} payload
+     * @returns {Promise<{ ok: boolean, target?: string, counts?: any, reason?: string }>}
+     */
+    browserImportCommit: ({ handle, target, mode }) =>
+      ipcRenderer.invoke('internal-vault-browser-import-commit', { handle, target, mode }),
+
     // Key rotation / recover (M12 Flight 4, Leg 2 / DD3). All three are BARE cross-renderer
     // triggers: main opens the chrome-owned sheet that collects the secret(s) — NO secret ever
     // crosses these channels or enters the page DOM. rotate-recovery + change-master require the

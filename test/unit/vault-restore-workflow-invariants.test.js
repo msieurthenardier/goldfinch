@@ -168,9 +168,7 @@ test('openMappingModal: the color swatch grid prefills the bundle identity color
     'initialColor prefers the bundle identity color, validated with isSafeColor (M18 F3 L5 rename)'
   );
   assert.ok(
-    /JAR_COLOR_PALETTE\.includes\(initialColor\)\s*\?\s*JAR_COLOR_PALETTE\s*:\s*\[\s*\.\.\.JAR_COLOR_PALETTE,\s*initialColor\s*\]/.test(
-      body
-    ),
+    /PALETTE\.includes\(initialColor\)\s*\?\s*PALETTE\s*:\s*\[\s*\.\.\.PALETTE,\s*initialColor\s*\]/.test(body),
     'a non-preset bundle color is appended as a trailing custom swatch — mirrors jars-section-controller.js editColors'
   );
 });

@@ -195,6 +195,9 @@ export default [
       // vault-nav-controller.js (M12 F5 HAT hat-page-sidebar) is vault.js's mirrored
       // master-detail nav rail — a real ES module, the jars-nav-controller.js precedent.
       'src/renderer/pages/vault-nav-controller.js',
+      // vault-browser-import-controller.js (M19 F1 Leg 2 / DD10) is the browser-CSV-import
+      // page UI, built outside vault.js from day one — the same real-ES-module shape.
+      'src/renderer/pages/vault-browser-import-controller.js',
       'src/renderer/menu-overlay.js'
     ],
     languageOptions: { sourceType: 'module' }

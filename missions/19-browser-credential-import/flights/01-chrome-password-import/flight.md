@@ -415,12 +415,12 @@ learning.
 > **Note:** These are tentative suggestions, not commitments. Legs are planned
 > and created one at a time as the flight progresses.
 
-- [ ] `ingest-and-commit-core` - main-side parser (RFC-4180), Chrome-row→login
+- [x] `ingest-and-commit-core` - main-side parser (RFC-4180), Chrome-row→login
       adapter + row taxonomy, content-identity dedupe, batch commit op with
       Replace/Merge, pending-imports plaintext-payload rework, per-entry outcome
       shape, row/byte caps, automation-refusal test. (DD2–DD4, DD6–DD9,
       DD11–DD12)
-- [ ] `import-ui-and-vault-page-decomposition` - vault-page import affordance,
+- [x] `import-ui-and-vault-page-decomposition` - vault-page import affordance,
       file dialog + window-scoped IPC, native-confirm commit gate (DD13),
       mapping-modal + outcome-report reuse, export-file guidance, and the DD10
       vault.js decomposition (squawk 0063 + pure-logic extraction). Import-half

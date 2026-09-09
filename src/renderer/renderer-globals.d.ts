@@ -840,6 +840,33 @@ interface GoldfinchInternalBridge {
   offVaultImportLabelsReady(h: number): void;
   /** Dismiss the DD7 post-fresh-adopt sever offer card. No secret; { ok }. */
   severDismiss(): Promise<{ ok: boolean }>;
+  // Browser-CSV password import (M19 F1 Leg 2 / DD5, DD6, DD13). A separate flow from
+  // restore above: main picks + reads + parses the file and HOLDS the raw payload — no
+  // secret sheet, no labels-ready push. browserImportCommit is gated by a NATIVE confirm
+  // dialog main-side (DD13).
+  /** Pick + hold a Chrome password-export CSV. { ok, path, handle, summary } | { canceled } | { error }. */
+  browserImportPick(): Promise<{
+    ok?: boolean;
+    path?: string;
+    handle?: string;
+    summary?: { candidateCount: number; skipped: Array<{ line: number; reason: string; scheme?: string }> };
+    canceled?: boolean;
+    error?: string;
+  }>;
+  /** This window's held record — a non-secret { handle, summary } projection, or null. */
+  browserImportSummary(): Promise<{
+    handle: string;
+    summary: { candidateCount: number; skipped: Array<{ line: number; reason: string; scheme?: string }> };
+  } | null>;
+  /** Drop the held record at any step. Always safe to call. */
+  browserImportCancel(handle?: string): Promise<{ ok: boolean }>;
+  /** Commit the held import — awaits a native confirm main-side (DD13) before any write. */
+  browserImportCommit(payload: { handle: string; target: string; mode: 'merge' | 'replace' }): Promise<{
+    ok: boolean;
+    target?: string;
+    counts?: any;
+    reason?: string;
+  }>;
   // Key rotation / recover (M12 F4 Leg 2 / DD3). Bare triggers — main opens the chrome-owned
   // sheet that collects the secret(s); NO secret crosses these channels or the page DOM.
   /** Request the recovery-key ROTATION sheet (reuses vault-stepup for a master-pw step-up). */

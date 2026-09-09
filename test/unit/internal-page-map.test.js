@@ -40,8 +40,10 @@ test('createInternalPageMap returns the exact current host/path allowlist', () =
   ]);
   assert.deepEqual(Object.keys(map.vault).sort(), [
     '/',
+    '/jar-page-model.js',
     '/password-generator.js',
     '/safe-color.js',
+    '/vault-browser-import-controller.js',
     '/vault-editor-model.js',
     '/vault-nav-controller.js',
     '/vault-page-model.js',
@@ -57,6 +59,13 @@ test('createInternalPageMap returns the exact current host/path allowlist', () =
   assert.equal(map.vault['/password-generator.js'], '/app/src/main/../shared/password-generator.js');
   assert.equal(map.vault['/safe-color.js'], '/app/src/main/../shared/safe-color.js');
   assert.equal(map.vault['/vault-nav-controller.js'], '/app/src/main/../renderer/pages/vault-nav-controller.js');
+  // Squawk 0063: the jars page's shared PALETTE, allowlisted onto the vault route too.
+  assert.equal(map.vault['/jar-page-model.js'], '/app/src/main/../shared/jar-page-model.js');
+  // M19 F1 Leg 2: the browser-CSV-import page UI, its own controller module.
+  assert.equal(
+    map.vault['/vault-browser-import-controller.js'],
+    '/app/src/main/../renderer/pages/vault-browser-import-controller.js'
+  );
 });
 
 test('the existing resolver serves exact map entries and rejects traversal/wrong paths', () => {
