@@ -676,3 +676,8 @@ Runtime decisions, deviations, and anomalies recorded here during execution.
   real Chrome export) is operator-driven and still ahead; the flight lands
   after it (or on the operator's decision to skip it).
 
+- **Flight commit**: `4d1303d` on `flight/01-chrome-password-import` (both
+  legs + squawk 0063 + docs, one commit after the confirmed review). Draft
+  PR opened with the leg checklist; marked ready-for-review when the flight
+  lands after Leg 3.
+
