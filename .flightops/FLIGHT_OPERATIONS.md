@@ -17,11 +17,11 @@ Each phase of the Flight Control workflow has a crew definition in `.flightops/a
 
 | Crew | Purpose |
 |------|---------|
-| `mission-design.md` | Crew for `/mission` (e.g., Architect validates viability) |
-| `flight-design.md` | Crew for `/flight` (e.g., Architect reviews spec) |
-| `leg-execution.md` | Crew for `/agentic-workflow` (e.g., Developer + Reviewer) |
-| `flight-debrief.md` | Crew for `/flight-debrief` (e.g., Developer provides perspective) |
-| `mission-debrief.md` | Crew for `/mission-debrief` (e.g., Architect provides perspective) |
+| `mission-design.md` | Crew for `/mission-control:mission` (e.g., Architect validates viability) |
+| `flight-design.md` | Crew for `/mission-control:flight` (e.g., Architect reviews spec) |
+| `leg-execution.md` | Crew for `/mission-control:agentic-workflow` (e.g., Developer + Reviewer) |
+| `flight-debrief.md` | Crew for `/mission-control:flight-debrief` (e.g., Developer provides perspective) |
+| `mission-debrief.md` | Crew for `/mission-control:mission-debrief` (e.g., Architect provides perspective) |
 
 Crew files define: roles, models, interaction protocols, prompts, and signals. Customize these to change your project's agent configuration.
 
@@ -31,7 +31,7 @@ Crew files define: roles, models, interaction protocols, prompts, and signals. C
 
 Legs must be implemented by a **separate Developer instance** and reviewed by a **separate Reviewer instance** (or whatever crew is defined in `leg-execution.md`). Mission Control designs legs and orchestrates — it does NOT implement code directly.
 
-The Reviewer has no knowledge of the Developer's reasoning — only the resulting changes. This separation provides objective code review. Use the `/agentic-workflow` skill in mission-control to drive this cycle.
+The Reviewer has no knowledge of the Developer's reasoning — only the resulting changes. This separation provides objective code review. Use the `/mission-control:agentic-workflow` skill to drive this cycle.
 
 ---
 
@@ -100,7 +100,7 @@ Emit at the end of your response, on its own line:
 
 ## Squawks — Small Fixes Outside the Hierarchy
 
-Not every fix deserves a mission. A **squawk** is a standalone artifact for work too small to plan: one defect, or one routine servicing update. It has no parent mission, no flight, no leg, and no debrief. Logged and completed via `/squawk` on the mission-control side; stored per `ARTIFACTS.md` (default `squawks/{id}-{slug}.md`).
+Not every fix deserves a mission. A **squawk** is a standalone artifact for work too small to plan: one defect, or one routine servicing update. It has no parent mission, no flight, no leg, and no debrief. Logged and completed via `/mission-control:squawk`; stored per `ARTIFACTS.md` (default `squawks/{id}-{slug}.md`).
 
 **It's a squawk only if all four hold:**
 
@@ -109,7 +109,7 @@ Not every fix deserves a mission. A **squawk** is a standalone artifact for work
 3. Bounded blast radius — no shared-interface, schema/migration, lifecycle, or security-sensitive changes
 4. Verifiable by an existing test, or one new one
 
-Fail any one, and it's a flight or a mission. **This gate is the whole point** — a squawk that starts growing is marked `escalated` and handed to `/flight` or `/mission`, never quietly expanded. If you are implementing a squawk and the fix spreads beyond the reported surface, stop, revert, and emit `[BLOCKED:exceeds-squawk-scope]`.
+Fail any one, and it's a flight or a mission. **This gate is the whole point** — a squawk that starts growing is marked `escalated` and handed to `/mission-control:flight` or `/mission-control:mission`, never quietly expanded. If you are implementing a squawk and the fix spreads beyond the reported surface, stop, revert, and emit `[BLOCKED:exceeds-squawk-scope]`.
 
 **Types**: `defect` (something is broken) | `servicing` (dependency bump, config, lint rule, doc fix).
 **Severity**: `grounding` (complete before further work in that area) | `routine` (carry to the next turnaround).
@@ -181,7 +181,7 @@ Deferred issues go in the flight log.
 The orchestrator will then:
 - Mark the PR ready for human review
 
-The flight debrief is a separate step run via `/flight-debrief`, which transitions the flight from `landed` to `completed`.
+The flight debrief is a separate step run via `/mission-control:flight-debrief`, which transitions the flight from `landed` to `completed`.
 
 ---
 
@@ -213,13 +213,13 @@ Where things live:
 - **Spec format**: `ARTIFACTS.md`'s "Behavior Test — Spec" section is authoritative.
 - **Spec files**: `tests/behavior/{slug}.md` (or wherever ARTIFACTS.md configures).
 - **Run logs**: `tests/behavior/{slug}/runs/{ts}.md` (committed). Evidence lives at an ephemeral path outside the project tree (`/tmp/behavior-tests/...`), never committed.
-- **Crew (Executor + Validator) prompts**: `.flightops/agent-crews/behavior-tests-execution.md` (project-modifiable scaffolding shipped by `/init-project`).
+- **Crew (Executor + Validator) prompts**: `.flightops/agent-crews/behavior-tests-execution.md` (project-modifiable scaffolding shipped by `/mission-control:init-project`).
 
 Workflow:
 1. During flight or leg planning, identify a verification need that warrants a behavior test (e.g., "the new toggle must persist across page reload AND reach the backend AND survive a process restart").
 2. Author the spec inline using the format in ARTIFACTS.md. Write it to the configured behavior-test directory.
-3. Reference the spec slug in the parent artifact's acceptance criteria — e.g., the leg says "Run `/behavior-test <slug>` to verify acceptance."
-4. The operator (or the agentic-workflow at HAT time) invokes `/behavior-test <slug>` to execute. The skill spawns the live Executor + Validator crew, drives the step loop, and writes a run log with verdict + evidence.
+3. Reference the spec slug in the parent artifact's acceptance criteria — e.g., the leg says "Run `/mission-control:behavior-test <slug>` to verify acceptance."
+4. The operator (or the agentic-workflow at HAT time) invokes `/mission-control:behavior-test <slug>` to execute. The skill spawns the live Executor + Validator crew, drives the step loop, and writes a run log with verdict + evidence.
 
 When NOT to use a behavior test:
 - Pure logic / data transforms → unit tests.
@@ -238,3 +238,5 @@ The behavior-test format is heavyweight (two live agents, evidence directory, ru
 3. **Binary acceptance criteria** — Met or not met
 4. **Log everything** — Decisions, deviations, anomalies
 5. **Signal clearly** — End of response, own line
+6. **Artifacts are the record** — Issues, debt, design gaps, and lessons go in flight logs, debriefs, and mission known-issues, never in Claude Code memory
+7. **Never leak operator identity** — No machine usernames or absolute home paths in artifacts, code, tests, or commit messages; use repo-relative paths or `<username>` placeholders

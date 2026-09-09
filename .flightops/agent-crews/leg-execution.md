@@ -2,26 +2,26 @@
 
 Crew definitions and interaction protocol for implementing flight legs.
 The Flight Director (Mission Control) orchestrates this phase using the
-/agentic-workflow skill.
+/mission-control:agentic-workflow skill.
 
 ## Crew
 
 ### Developer
-- **Context**: {target-project}/
+- **Context**: project root (current working directory)
 - **Model**: Sonnet
 - **Role**: Implements code changes. Also performs design reviews against real
   codebase to validate leg specs before implementation.
 - **Actions**: implement, fix-review-issues, commit, review-leg-design
 
 ### Reviewer
-- **Context**: {target-project}/
+- **Context**: project root (current working directory)
 - **Model**: Sonnet (NEVER Opus)
 - **Role**: Reviews code changes for quality, correctness, and criteria compliance.
   Has NO knowledge of Developer's reasoning — only sees resulting changes.
 - **Actions**: review
 
 ### Accessibility Reviewer (optional)
-- **Context**: {target-project}/
+- **Context**: project root (current working directory)
 - **Model**: Sonnet
 - **Enabled**: false
 - **Role**: Reviews UI changes for accessibility compliance. Evaluates against
@@ -32,7 +32,7 @@ The Flight Director (Mission Control) orchestrates this phase using the
 
 ## Separation Rules
 
-- Developer and Reviewer load the target project's CLAUDE.md and conventions
+- Developer and Reviewer load the project's CLAUDE.md and conventions
 - Reviewer has NO knowledge of Developer's reasoning — only resulting changes
 - Each agent instance gets fresh context (no carryover between legs)
 
@@ -68,7 +68,7 @@ The Flight Director substitutes these variables in prompts at runtime:
 
 | Variable | Description | Available In |
 |----------|-------------|-------------|
-| `{project-slug}` | Project identifier from projects.md | All prompts |
+| `{project-slug}` | Project identifier — the repository directory name, or the name from the git remote | All prompts |
 | `{flight-number}` | Current flight number | All prompts |
 | `{leg-number}` | Current leg number | Leg-scoped prompts |
 | `{leg-artifact-path}` | Path to the leg artifact file | review-leg-design |

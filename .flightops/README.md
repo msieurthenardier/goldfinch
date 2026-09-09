@@ -23,7 +23,7 @@ When working on this project with Flight Control:
 
 | File | Synced? | Notes |
 |------|---------|-------|
-| README.md | Yes | Updated via `/init-project` |
-| FLIGHT_OPERATIONS.md | Yes | Updated via `/init-project` |
+| README.md | Yes | Updated via `/mission-control:init-project` |
+| FLIGHT_OPERATIONS.md | Yes | Updated via `/mission-control:init-project` |
 | ARTIFACTS.md | No | Project-specific, customize freely |
 | agent-crews/*.md | No | Project-specific, customize freely |
