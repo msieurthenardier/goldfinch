@@ -60,6 +60,10 @@ function createInternalPageMap({ baseDir, path }) {
       // Squawk 0063: the swatch-grid palette dedup — vault.js imports the SAME
       // PALETTE the jars page already loads instead of a hand-duplicated copy.
       '/jar-page-model.js': shared('jar-page-model.js'),
+      // jar-page-model.js's own transitive import (BURNER) — squawk-class fix:
+      // every route serving a module must also route that module's relative
+      // imports, or the page's ES-module graph 404s and the page blanks.
+      '/burner.js': shared('burner.js'),
       // Leg 2: the pure editor logic (unchanged-secret assembly + mask/reveal state
       // + http/https origin-link guard) the page imports as a flat ESM specifier.
       '/vault-editor-model.js': shared('vault-editor-model.js'),

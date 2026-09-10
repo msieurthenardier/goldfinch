@@ -40,6 +40,7 @@ test('createInternalPageMap returns the exact current host/path allowlist', () =
   ]);
   assert.deepEqual(Object.keys(map.vault).sort(), [
     '/',
+    '/burner.js',
     '/jar-page-model.js',
     '/password-generator.js',
     '/safe-color.js',
@@ -61,6 +62,9 @@ test('createInternalPageMap returns the exact current host/path allowlist', () =
   assert.equal(map.vault['/vault-nav-controller.js'], '/app/src/main/../renderer/pages/vault-nav-controller.js');
   // Squawk 0063: the jars page's shared PALETTE, allowlisted onto the vault route too.
   assert.equal(map.vault['/jar-page-model.js'], '/app/src/main/../shared/jar-page-model.js');
+  // jar-page-model.js's own transitive import — omitting this blanked goldfinch://vault
+  // (squawk-class fix; see the route-closure regression test in this directory).
+  assert.equal(map.vault['/burner.js'], '/app/src/main/../shared/burner.js');
   // M19 F1 Leg 2: the browser-CSV-import page UI, its own controller module.
   assert.equal(
     map.vault['/vault-browser-import-controller.js'],

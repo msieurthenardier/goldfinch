@@ -119,10 +119,23 @@ test('AC10: the vault route gained exactly two entries (jar-page-model.js, vault
     assert.ok(vaultBody.includes(entry), `new entry present: ${entry}`);
   }
 
+  // Leg 3 HAT fix (post-dates this leg): jar-page-model.js's own transitive import,
+  // './burner.js', had no route on the vault entry, which 404'd the ES-module graph
+  // and blanked goldfinch://vault. That fix adds exactly one further entry on top of
+  // this leg's two — accounted for here rather than re-scoping this leg's own pin.
+  const legThreeHatFix = ["'/burner.js': shared('burner.js')"];
+  for (const entry of legThreeHatFix) {
+    assert.ok(vaultBody.includes(entry), `Leg 3 HAT-fix entry present: ${entry}`);
+  }
+
   // No other route (settings/downloads/jars) changed in this leg — a coarse sanity that
-  // the vault route's entry count is EXACTLY preExisting + added (never a third addition).
+  // the vault route's entry count is EXACTLY preExisting + added + the later HAT fix.
   const entryLines = vaultBody.split('\n').filter((l) => l.includes(': rendererPage(') || l.includes(': shared('));
-  assert.equal(entryLines.length, preExisting.length + added.length, 'exactly two entries added to the vault route');
+  assert.equal(
+    entryLines.length,
+    preExisting.length + added.length + legThreeHatFix.length,
+    'vault route entry count matches this leg’s two additions plus the Leg 3 HAT-fix burner.js route'
+  );
 });
 
 test('AC10: no other internal-page-map.js route was touched by this leg (settings/downloads/jars entry counts unchanged)', () => {

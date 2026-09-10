@@ -699,3 +699,28 @@ Runtime decisions, deviations, and anomalies recorded here during execution.
   with ≥ 1 persistent jar, and a fresh Chrome export (row count noted).
   The export file is never committed or pasted into artifacts.
 
+## 2026-09-10 — Leg 3 guided HAT (in progress)
+
+### HAT fix 1 (grounding) — vault page renders blank
+
+- **Symptom (S1):** `goldfinch://vault` shows only the static "Secrets"
+  heading; the entire JS-rendered body (`#vault-root`, `#vault-nav`) is
+  empty — the signature of the page's ES-module graph failing to load.
+- **Root cause:** squawk 0063 (landed in Leg 2) added the
+  `/jar-page-model.js` route to the vault entry of `internal-page-map.js`
+  but omitted `/burner.js`. `jar-page-model.js` imports `BURNER` from
+  `./burner.js`; with no route, that flat specifier 404s, which fails the
+  whole vault module graph and blanks the page. The sibling `jars` route
+  has always carried BOTH entries together — the dedup copied only one.
+- **Why nothing caught it:** `npm test` never boots the real internal page,
+  and every Leg 2 / squawk-0063 review was a source scan. This is the
+  documented internal-page real-boot hazard (a transitive import needs an
+  exact route), and exactly the risk squawk 0063's own Note flagged
+  ("if it needs any other allowlist/route change … escalate rather than
+  expand"). Recorded as a Leg 2 test-coverage gap for the debrief.
+- **Fix:** add `'/burner.js': shared('burner.js')` to the vault route +
+  a pure regression test asserting the transitive import closure of every
+  internal page's routed modules is fully routed. FIX not FEATURE; touches
+  the internal-page allowlist (main wiring) so implemented with the
+  multi-surface review discipline. Committed as a grounding fix mid-HAT.
+
