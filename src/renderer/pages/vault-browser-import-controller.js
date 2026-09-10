@@ -280,7 +280,10 @@ export function createVaultBrowserImport(deps) {
 
   /**
    * The completion modal (DD11): the ordered outcome lines, then the export-file
-   * deletion guidance. Done closes and refreshes (the restore precedent).
+   * deletion guidance — raised into a bordered/tinted `.vault-info-panel` callout
+   * (HAT enhancement 1) so the reminder stands out instead of blending in as a plain
+   * line; same idiom as `.vault-sever-card`/`.vault-page-notice` in vault.css, `role="note"`
+   * (advisory, not an alert). Done closes and refreshes (the restore precedent).
    * @param {any} counts
    */
   function openCompletionModal(counts) {
@@ -288,9 +291,12 @@ export function createVaultBrowserImport(deps) {
     const list = el('ul', 'vault-outcome-list');
     for (const line of browserImportOutcomeLines(counts)) list.appendChild(el('li', undefined, line));
     body.appendChild(list);
-    body.appendChild(
+    const infoPanel = el('div', 'vault-info-panel');
+    infoPanel.setAttribute('role', 'note');
+    infoPanel.appendChild(
       el('p', 'vault-lede', 'Delete the exported CSV file now — it contains your passwords in plain text.')
     );
+    body.appendChild(infoPanel);
 
     const handle = openModal({
       title: 'Import complete',

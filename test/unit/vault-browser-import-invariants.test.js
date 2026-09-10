@@ -176,6 +176,64 @@ test('AC12: the completion modal contains the "Delete the exported CSV file now"
   assert.ok(CONTROLLER_JS.includes('Delete the exported CSV file now'));
 });
 
+test('HAT enhancement 1: the completion modal wraps the delete-the-export-file reminder in a .vault-info-panel callout', () => {
+  // Non-vacuous: locate openCompletionModal's body, require the exact
+  // `el('div', 'vault-info-panel')` construction, require `role="note"` set on THAT element
+  // (never 'alert' — advisory, not urgent), and require the deletion-reminder text to be
+  // appended to it before the panel itself is appended to the modal body — so the restyle
+  // can't silently regress to the old plain-paragraph-in-body shape while the substring
+  // checks above still pass independently.
+  const start = CONTROLLER_JS.indexOf('function openCompletionModal(counts) {');
+  assert.ok(start !== -1, 'openCompletionModal found');
+  const afterStart = CONTROLLER_JS.slice(start);
+  const endMatch = afterStart.match(/\n {2}\}\n/);
+  assert.ok(endMatch, "openCompletionModal's closing brace found");
+  const body = afterStart.slice(0, /** @type {number} */ (endMatch.index));
+
+  const panelDeclIdx = body.indexOf("el('div', 'vault-info-panel')");
+  assert.ok(panelDeclIdx !== -1, 'a vault-info-panel div is constructed');
+
+  const roleIdx = body.indexOf("infoPanel.setAttribute('role', 'note')", panelDeclIdx);
+  assert.ok(roleIdx !== -1, 'role="note" is set on the info panel (never "alert")');
+  assert.equal(body.includes("setAttribute('role', 'alert')"), false, 'never role="alert" for this advisory panel');
+
+  // Wrap-insensitive (Prettier may re-wrap the call across lines) — CLAUDE.md's
+  // "Regex-target mutation pins" convention: `\s+` between tokens, no exact-literal anchor.
+  const reminderRe =
+    /infoPanel\.appendChild\(\s*el\(\s*'p',\s*'vault-lede',\s*'Delete the exported CSV file now — it contains your passwords in plain text\.'\s*\)\s*\)/;
+  const reminderMatch = reminderRe.exec(body);
+  assert.ok(reminderMatch, 'the deletion-reminder paragraph is appended INTO the info panel');
+  const reminderAppendIdx = /** @type {number} */ (reminderMatch.index);
+  assert.ok(reminderAppendIdx > roleIdx, 'the reminder text is appended after the panel is declared+roled');
+
+  const panelAppendedToBodyIdx = body.indexOf('body.appendChild(infoPanel)');
+  assert.ok(panelAppendedToBodyIdx !== -1, 'the info panel itself is appended to the modal body');
+  assert.ok(
+    panelAppendedToBodyIdx > reminderAppendIdx,
+    'the panel is appended to the modal body only after being filled'
+  );
+});
+
+test('HAT enhancement 1: vault.css defines .vault-info-panel with a border + tinted background (bordered/tinted callout, not a plain line)', () => {
+  const VAULT_CSS_RAW = fs.readFileSync(path.join(REPO_ROOT, 'src/renderer/pages/vault.css'), 'utf8');
+  const VAULT_CSS = VAULT_CSS_RAW.replace(/\/\*[\s\S]*?\*\//g, '');
+  const ruleRe = /([^{}]+)\{([^{}]*)\}/g;
+  let found = false;
+  let match;
+  while ((match = ruleRe.exec(VAULT_CSS))) {
+    const selectors = match[1]
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const body = match[2];
+    if (selectors.includes('.vault-info-panel') && /border\s*:/.test(body) && /background\s*:/.test(body)) {
+      found = true;
+      break;
+    }
+  }
+  assert.ok(found, 'expected a vault.css rule for `.vault-info-panel` declaring both a border and a background');
+});
+
 test("AC12: render()'s body contains no browserImportCancel call and no held-record assignment", () => {
   const start = VAULT_JS.indexOf('function render(state) {');
   assert.ok(start !== -1, 'render(state) found');
