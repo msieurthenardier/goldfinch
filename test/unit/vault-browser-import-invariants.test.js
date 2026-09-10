@@ -275,3 +275,46 @@ test('renderer-globals.d.ts declares the four browserImport* bridge methods on G
     assert.ok(dts.includes(name + '('), `${name} declared on GoldfinchInternalBridge`);
   }
 });
+
+// ---------------------------------------------------------------------------
+// HAT fix (destination modal's "What to do" field stayed visible on an empty jar) —
+// cascade-origin regression pin.
+// ---------------------------------------------------------------------------
+
+test('HAT fix: vault.css carries a `.vault-field[hidden]` rule resolving to display: none', () => {
+  // Root cause (diagnosed live-walk finding, mirrors the pre-existing
+  // `.vault-mapping-*-row[hidden]` overrides a few hundred lines below): `.vault-field {
+  // display: block; }` is an AUTHOR-origin declaration, which always beats the UA stylesheet's
+  // `[hidden] { display: none }` regardless of specificity (cascade ORIGIN is sorted before
+  // specificity). vault-browser-import-controller.js's renderDestinationModal() creates
+  // `modeField` as a plain `.vault-field` and toggles visibility via `modeField.hidden =
+  // !hasItems` in updateModeVisibility() — with no override, that assignment was a silent
+  // no-op and the Replace/Merge control stayed visible even for a destination jar with zero
+  // items. Non-vacuous: this parses vault.css into (selector-list, body) rule pairs and
+  // requires a rule whose selector LIST contains the exact token `.vault-field[hidden]` AND
+  // whose OWN block declares `display: none` — a bare substring grep would pass even if the
+  // override selector and the `display: none` declaration lived in unrelated rules.
+  const VAULT_CSS_RAW = fs.readFileSync(path.join(REPO_ROOT, 'src/renderer/pages/vault.css'), 'utf8');
+  // Strip CSS comments first — otherwise a comment immediately preceding a rule (e.g. this
+  // fix's own explanatory comment) gets swept into the "selector" capture below, since a
+  // comment can itself contain `{`/`}`-free prose with no delimiter of its own.
+  const VAULT_CSS = VAULT_CSS_RAW.replace(/\/\*[\s\S]*?\*\//g, '');
+  const ruleRe = /([^{}]+)\{([^{}]*)\}/g;
+  let found = false;
+  let match;
+  while ((match = ruleRe.exec(VAULT_CSS))) {
+    const selectors = match[1]
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const body = match[2];
+    if (selectors.includes('.vault-field[hidden]') && /display\s*:\s*none\s*;/.test(body)) {
+      found = true;
+      break;
+    }
+  }
+  assert.ok(
+    found,
+    'expected a vault.css rule whose selector list includes `.vault-field[hidden]` and whose own block declares `display: none`'
+  );
+});

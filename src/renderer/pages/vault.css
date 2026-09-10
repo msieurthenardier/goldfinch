@@ -531,6 +531,15 @@ a.vault-item-origin:hover {
   display: block;
   margin-bottom: 14px;
 }
+/* HAT fix (browser-CSV-import destination modal): mirrors the `.vault-mapping-*-row[hidden]`
+   overrides below — an author-origin `display` declaration always beats the UA stylesheet's
+   `[hidden] { display: none }` regardless of specificity (cascade ORIGIN, not specificity).
+   The browser-import destination modal's `modeField` (Replace/Merge) is a plain `.vault-field`
+   toggled via `.hidden` in JS; without this override the field stayed visible even for an
+   empty destination jar. Safe generally: a field that's always visible never carries [hidden]. */
+.vault-field[hidden] {
+  display: none;
+}
 .vault-field-secret {
   display: block;
 }
