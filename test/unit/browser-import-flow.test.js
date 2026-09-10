@@ -441,6 +441,11 @@ test('AC4: the confirm message/detail carry the FRESH destination count, never a
     await commitPromise;
     const first = dialog.captured[dialog.captured.length - 1];
     assert.match(first.detail, /3 item\(s\)/);
+    assert.match(
+      first.detail,
+      /all 3 item\(s\) currently in Work — including any not in this file/,
+      'replace detail must convey deletion of ALL existing items, not just duplicates'
+    );
 
     // A 4th item lands in the destination between begin() and this second commit.
     store.saveItem('work', { type: 'login', title: 'D', username: 'd', password: 'w' });
@@ -450,6 +455,11 @@ test('AC4: the confirm message/detail carry the FRESH destination count, never a
     await commitPromise;
     const second = dialog.captured[dialog.captured.length - 1];
     assert.match(second.detail, /4 item\(s\)/, 'the fresh count, never the stale 3');
+    assert.match(
+      second.detail,
+      /all 4 item\(s\) currently in Work — including any not in this file/,
+      'replace detail must convey deletion of ALL existing items, not just duplicates'
+    );
   } finally {
     rm(dir);
   }

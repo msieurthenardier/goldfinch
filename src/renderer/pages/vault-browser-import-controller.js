@@ -218,7 +218,7 @@ export function createVaultBrowserImport(deps) {
     const modeSelect = /** @type {HTMLSelectElement} */ (el('select', 'vault-settings-select'));
     modeSelect.setAttribute('aria-label', 'Replace or merge');
     appendOption(modeSelect, 'merge', 'Merge — keep existing, add new');
-    appendOption(modeSelect, 'replace', 'Replace — delete existing, then import');
+    appendOption(modeSelect, 'replace', 'Wipe and replace — delete everything here first, then import');
     modeSelect.value = 'merge';
     modeField.appendChild(modeSelect);
     body.appendChild(modeField);

@@ -178,7 +178,7 @@ function createBrowserImportFlow({ getStore, pending, dialog, fs, windowForChrom
       const label = destLabel(target);
       const detail =
         mode === 'replace'
-          ? `This will first delete the ${existingCount} item(s) already in ${label}. ` +
+          ? `Replace first deletes all ${existingCount} item(s) currently in ${label} — including any not in this file — then imports. This can't be undone. ` +
             'Delete the exported CSV file after this import — it contains your passwords in plain text.'
           : `${existingCount} item(s) already there are kept; logins already present are skipped. ` +
             'Delete the exported CSV file after this import — it contains your passwords in plain text.';
