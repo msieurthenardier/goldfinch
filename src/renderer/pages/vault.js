@@ -483,6 +483,9 @@ function init() {
       close();
     }
 
+    const FOCUSABLES_SELECTOR =
+      'button:not([disabled]), select:not([disabled]), input:not([disabled]), textarea:not([disabled]), a[href]';
+
     backdrop.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         e.stopPropagation();
@@ -490,13 +493,7 @@ function init() {
         return;
       }
       if (e.key === 'Tab') {
-        const focusables = /** @type {HTMLElement[]} */ (
-          Array.from(
-            card.querySelectorAll(
-              'button:not([disabled]), select:not([disabled]), input:not([disabled]), textarea:not([disabled]), a[href]'
-            )
-          )
-        );
+        const focusables = /** @type {HTMLElement[]} */ (Array.from(card.querySelectorAll(FOCUSABLES_SELECTOR)));
         if (!focusables.length) return;
         e.preventDefault();
         const i = focusables.indexOf(/** @type {any} */ (document.activeElement));
@@ -519,10 +516,14 @@ function init() {
     };
     activePageModal = handle;
 
-    // Default focus: the first focusable in the body (a select), else Cancel — never <body>.
-    const firstBody = bodyWrap.querySelector('button, select, input, textarea');
-    if (firstBody instanceof HTMLElement) firstBody.focus();
-    else cancelBtn.focus();
+    // Move focus INTO the dialog on open (APG contract; HAT fix 3 — invoker button, outside `backdrop`, kept focus).
+    const focusables = /** @type {HTMLElement[]} */ (Array.from(card.querySelectorAll(FOCUSABLES_SELECTOR)));
+    if (focusables.length) {
+      focusables[0].focus();
+    } else {
+      card.tabIndex = -1;
+      card.focus();
+    }
 
     return handle;
   }

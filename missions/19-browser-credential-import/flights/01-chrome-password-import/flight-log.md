@@ -724,3 +724,24 @@ Runtime decisions, deviations, and anomalies recorded here during execution.
   the internal-page allowlist (main wiring) so implemented with the
   multi-surface review discipline. Committed as a grounding fix mid-HAT.
 
+### HAT step results + operator feedback
+
+- S1 pass (after HAT fix 1); S2 pass; S3 pass (after HAT fix 2); S4 pass;
+  S5 pass (matchMode renders "match any subdomain"); S6 pass; S7 pass;
+  S8 pass (Replace count fresh + Cancel safe).
+- **Operator feedback — S9/S10 are low-value as LIVE steps.** The
+  held-payload drop-on-lock (S9) and drop-on-window-close (S10) security
+  substance is already unit-covered (pending-browser-imports zeroize
+  matrix + browser-import-flow AC3's lock-during-confirm). The live steps
+  add only the page-side modal-close observation. S9 ran (pass); S10
+  skipped by FD recommendation + operator assent — redundant with unit
+  coverage. **Debrief note:** future import-flow HAT specs should not spend
+  live steps re-observing unit-covered cross-process drops; reserve the
+  live budget for the un-unit-testable (real keyboard traversal, on-disk
+  plaintext absence in the real profile).
+- HAT enhancements landed mid-run (operator asks, committed): enhancement 1
+  (delete-export reminder → info panel, c4f7a9c); enhancement 2 (Replace
+  wording made explicit it wipes ALL items, d8513fb). HAT fixes: 1 (blank
+  vault page / burner.js route, a6a0b21); 2 (Replace/Merge hidden for empty
+  destination, fadd782).
+

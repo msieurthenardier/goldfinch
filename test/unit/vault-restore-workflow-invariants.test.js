@@ -388,3 +388,68 @@ test('render(): the pending page notice renders a dismiss control (the "close" i
 test('ICON_PATHS defines a "close" glyph for the page notice\'s dismiss button', () => {
   assert.ok(/close:\s*\[/.test(VAULT_JS), 'a close icon entry exists in ICON_PATHS');
 });
+
+// ---------------------------------------------------------------------------
+// Leg 3 HAT fix 3: openModal moves focus INTO the dialog on open (APG: a dialog receives
+// focus when it opens). Before this fix, document.activeElement stayed on the invoking
+// button — which lives OUTSIDE `backdrop` in #vault-root — so the Escape/Tab-trap keydown
+// handler (bound on `backdrop`) never received the keypress until focus happened to land
+// inside by some other means. The operator hit this live on the browser-import modals
+// (Escape did nothing; Cancel worked). Source-scan invariant — no DOM/jsdom harness exists
+// for this page (this file's own house style above).
+// ---------------------------------------------------------------------------
+
+/** Extract openModal's own function body (up to its matching 2-space-indent closing brace) —
+ * the same technique the ruling-9/openMappingModal tests above use. */
+function openModalBody() {
+  const start = VAULT_JS.indexOf('function openModal(opts) {');
+  assert.ok(start !== -1, 'openModal(opts) found');
+  const afterStart = VAULT_JS.slice(start);
+  const endMatch = afterStart.match(/\n {2}\}\n/);
+  assert.ok(endMatch, "openModal()'s closing brace found");
+  return afterStart.slice(0, /** @type {number} */ (endMatch.index));
+}
+
+test('openModal: a focus-on-open statement exists, positioned AFTER document.body.appendChild(backdrop)', () => {
+  const body = openModalBody();
+  const appendIndex = body.indexOf('document.body.appendChild(backdrop);');
+  assert.ok(appendIndex !== -1, 'sanity: the backdrop append call is found');
+
+  // The on-open move: focus the first FOCUSABLES_SELECTOR match inside `card`, else (nothing
+  // focusable at all) the card itself — never left on the invoker / <body>.
+  const focusOnOpen = /focusables\[0\]\.focus\(\);\s*\}\s*else\s*\{\s*card\.tabIndex\s*=\s*-1;\s*card\.focus\(\);/;
+  const match = focusOnOpen.exec(body);
+  assert.ok(match, 'a focus-on-open statement (first focusable in card, else the card itself) is present');
+  assert.ok(
+    /** @type {number} */ (match.index) > appendIndex,
+    'the focus-on-open statement runs AFTER document.body.appendChild(backdrop) — the dialog must already be in the tree'
+  );
+
+  // Non-vacuous: the pre-fix body ends its own default-focus logic differently (bodyWrap /
+  // firstBody / cancelBtn.focus()) — assert that shape is fully gone, so this test cannot pass
+  // against the old defect.
+  assert.equal(body.includes('firstBody'), false, 'the old bodyWrap-scoped default-focus variable is gone');
+  assert.equal(
+    /else cancelBtn\.focus\(\);/.test(body),
+    false,
+    'the old "first-in-body-else-Cancel" fallback shape is gone'
+  );
+});
+
+test('openModal: the on-open focus move and the Tab-trap query the SAME FOCUSABLES_SELECTOR — one shared definition, no drift', () => {
+  const body = openModalBody();
+  const selectorDecls = [...body.matchAll(/const FOCUSABLES_SELECTOR =/g)];
+  assert.equal(selectorDecls.length, 1, 'exactly one FOCUSABLES_SELECTOR declaration');
+  assert.ok(
+    /'button:not\(\[disabled\]\), select:not\(\[disabled\]\), input:not\(\[disabled\]\), textarea:not\(\[disabled\]\), a\[href\]'/.test(
+      body
+    ),
+    'the shared selector excludes disabled controls and includes real links, matching the APG focusables set'
+  );
+  const queriesOfShared = [...body.matchAll(/card\.querySelectorAll\(FOCUSABLES_SELECTOR\)/g)];
+  assert.equal(
+    queriesOfShared.length,
+    2,
+    'both the Tab-trap and the on-open focus move query card.querySelectorAll(FOCUSABLES_SELECTOR)'
+  );
+});
