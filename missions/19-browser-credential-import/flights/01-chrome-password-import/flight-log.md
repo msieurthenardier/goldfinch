@@ -745,3 +745,14 @@ Runtime decisions, deviations, and anomalies recorded here during execution.
   vault page / burner.js route, a6a0b21); 2 (Replace/Merge hidden for empty
   destination, fadd782).
 
+- S11 (keyboard) pass: after HAT fix 3 (openModal focus-on-open), Escape
+  dismisses the import modals and Tab traps within them correctly. Fix 3's
+  effect on the Escape symptom is now confirmed positive (my static
+  analysis had doubted it — the focus-on-open move was the fix).
+- HAT enhancement 2 follow-up (operator): the "Wipe and replace — delete
+  everything here first, then import" option label overflowed the select
+  (scrollbar, clipped). Shortened to "Replace — delete everything, then
+  import" (keeps the wipes-everything clarity, fits the control). The
+  native confirm's fuller destructive wording is unchanged (a dialog, room
+  to spare). One-string edit, no test pinned it.
+
