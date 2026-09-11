@@ -334,6 +334,27 @@ test('restoreDestinationOptions: empty/malformed jar list → empty options, no 
   ]);
 });
 
+test('squawk 0064: not-set-up mode (selectVaultView vaults: []) with pre-existing vault-less jars — restoreDestinationOptions still offers them as existing destinations, and the name-match prefill picks the matching container', () => {
+  // M18 F3 HAT fix 8's regression case: selectVaultView drops the (empty) vault
+  // list entirely in not-set-up mode, so restoreDestinationOptions must be fed
+  // jarRows independently rather than deriving its options from view.vaults —
+  // otherwise a fresh-adopt profile (no vault ever created) would have nothing
+  // to offer and every bundle row would be forced onto "Create a new jar",
+  // colliding with the same-named seeded container.
+  const view = selectVaultView({ setUp: false, unlocked: false, vaults: [] });
+  assert.equal(view.mode, 'not-set-up');
+  assert.deepEqual(view.vaults, []);
+
+  // jarRows (pre-existing, vault-less containers) come from a separate read —
+  // restoreDestinationOptions is called with them directly, not view.vaults.
+  const { options, matched } = restoreDestinationOptions(jars, {}, 'Work');
+  assert.deepEqual(options, [
+    { vaultId: 'personal', label: 'Personal — no secrets yet' },
+    { vaultId: 'work', label: 'Work — no secrets yet' }
+  ]);
+  assert.deepEqual(matched, { vaultId: 'work', label: 'Work — no secrets yet' });
+});
+
 // ---------------------------------------------------------------------------
 // restoreOutcomeLines — the restore completion modal's per-vault outcome
 // display lines (M18 F3 L4, HAT fix 11; RE-KEYED M18 F3 L5 to close the

@@ -1,10 +1,10 @@
 # Squawk 0065: Document the vault-page-model.js pure-extraction pattern
 
-**Status**: open
+**Status**: completed
 **Type**: servicing
 **Severity**: routine
 **Reported**: 2026-09-11
-**Completed**: —
+**Completed**: 2026-09-11
 
 ## Report
 
@@ -31,17 +31,29 @@ the gap. Write it down so it stops recurring as an undocumented convention.
 
 ## Corrective Action
 
-*(written at completion — expected: add a short "Vault page — pure display
-models" note to CLAUDE.md's Password-vault pattern, or to docs/vault.md, stating
-that page display/decision logic goes in vault-page-model.js as pure functions
-consumed by the controller and unit-tested in vault-page-model.test.js; cite the
-existing exporters as exemplars. Docs only, no code change.)*
+Added a new bullet, **"Vault page — pure display models,"** to CLAUDE.md's
+`### Password vault` pattern section, immediately after the existing "Module
+layout" bullet and before "MRK model": states that page display/decision logic
+for `goldfinch://vault` lives in `src/shared/vault-page-model.js` as pure,
+DOM-free functions consumed by the vault page/controller (which just maps over
+the result) and unit-tested in `test/unit/vault-page-model.test.js` without a
+DOM — names it as the `jar-page-model.js` precedent, and cites
+`restoreDestinationOptions`/`restoreOutcomeLines` (M18 F3) and
+`browserImportDestinationOptions`/`browserImportSkipLines`/
+`browserImportOutcomeLines` (M19 F1) as exemplars. Docs only — no code change.
+Landed in the same CLAUDE.md edit pass as squawk 0066 (different bullets, no
+overlap — confirmed via `git diff CLAUDE.md`).
 
 ## Verification
 
-*(written at completion — expected: the note exists and names the pattern +
-exemplars; format:check green.)*
+The note exists in `CLAUDE.md` (`### Password vault` section, new bullet
+starting "**Vault page — pure display models.**"), naming the pattern, the
+consuming controller relationship, and all five cited exemplar functions.
+`npm run format` made no changes to CLAUDE.md; `npm run format:check` passes
+green as part of the full-suite run.
 
 ## Sign-Off
 
-*(written at completion)*
+**Reviewer**: independent Reviewer (Sonnet)
+**Verdict**: confirmed
+**Commit**: squawk: turnaround 2026-09-11 (Squawks: 0064, 0065, 0066, 0067, 0068)
