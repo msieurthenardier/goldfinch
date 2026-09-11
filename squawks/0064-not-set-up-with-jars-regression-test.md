@@ -1,10 +1,10 @@
 # Squawk 0064: add a not-set-up-with-jars regression test to vault-page-model.test.js
 
-**Status**: open
+**Status**: completed
 **Type**: servicing
 **Severity**: routine
 **Reported**: 2026-09-06
-**Completed**: —
+**Completed**: 2026-09-11
 
 ## Report
 
@@ -35,17 +35,31 @@ dedicated regression pin; add it so the surface can't silently regress.
 
 ## Corrective Action
 
-*(written at completion)*
+Added one new test to `test/unit/vault-page-model.test.js` (after the
+existing `restoreDestinationOptions: empty/malformed jar list …` case,
+before the `restoreOutcomeLines` section): `squawk 0064: not-set-up
+mode (selectVaultView vaults: []) with pre-existing vault-less jars —
+restoreDestinationOptions still offers them as existing destinations,
+and the name-match prefill picks the matching container`. It first
+calls `selectVaultView({ setUp: false, unlocked: false, vaults: [] })`
+and asserts `mode === 'not-set-up'` / `view.vaults` is `[]` (documenting
+that the view itself carries no vault list in this mode), then calls
+`restoreDestinationOptions(jars, {}, 'Work')` against the existing
+`jars` fixture (`personal`/`work`, both vault-less) fed independently
+of `view.vaults` and asserts both jars are offered labeled "— no
+secrets yet" and that `matched` resolves to the `work` option (the
+name-match prefill against `bundleName`). Test-only — no production
+change to `src/shared/vault-page-model.js`.
 
 ## Verification
 
-*(written at completion — expected: a new `vault-page-model.test.js`
-case asserting that in not-set-up mode with pre-existing vault-less
-jars, `restoreDestinationOptions` offers those jars as existing
-destinations labeled "no secrets yet", and the name-match prefill
-picks the matching container; full suite green. Test-only, no
-production change.)*
+`node --test --test-timeout=60000 test/unit/vault-page-model.test.js`
+— 47/47 pass (was 46 before this change), including the new case.
+Also green as part of the full `npm test` run (4433/4433 pass). No
+production files touched.
 
 ## Sign-Off
 
-*(written at completion)*
+**Reviewer**: independent Reviewer (Sonnet)
+**Verdict**: confirmed
+**Commit**: squawk: turnaround 2026-09-11 (Squawks: 0064, 0065, 0066, 0067, 0068)

@@ -1,10 +1,10 @@
 # Squawk 0066: Cite internal-page-route-closure.test.js as a standing internal-page guard
 
-**Status**: open
+**Status**: completed
 **Type**: servicing
 **Severity**: routine
 **Reported**: 2026-09-11
-**Completed**: —
+**Completed**: 2026-09-11
 
 ## Report
 
@@ -31,16 +31,27 @@ by name rather than rediscovering the hazard.
 
 ## Corrective Action
 
-*(written at completion — expected: add one line to CLAUDE.md's internal-page
-pattern / new-shared-module checklist citing
-internal-page-route-closure.test.js as the standing guard for any route/
-allowlist widening. Docs only.)*
+Extended the existing "**Adding an internal page**" bullet in CLAUDE.md's
+`### Internal goldfinch:// pages — trusted-embedder security model` section
+with one added sentence citing `test/unit/internal-page-route-closure.test.js`
+as the standing guard any route/allowlist widening is expected to pass —
+described as walking the transitive relative-import closure of every internal
+page's routed modules and failing if any module in the graph lacks its own
+`internal-page-map.js` route, explicitly drawing the parallel to how
+`csp-pins.test.js` is cited for the chrome-fetch invariant just above it in
+the same section. Docs only — no code change. Landed in the same CLAUDE.md
+edit pass as squawk 0065 (different bullets/sections, no overlap — confirmed
+via `git diff CLAUDE.md`).
 
 ## Verification
 
-*(written at completion — expected: the citation exists in CLAUDE.md; the test
-still passes; format:check green.)*
+The citation exists in `CLAUDE.md`'s "Adding an internal page" bullet.
+`node --test --test-timeout=60000 test/unit/internal-page-route-closure.test.js`
+— 3/3 pass (unmodified by this squawk). `npm run format` made no changes to
+CLAUDE.md; `npm run format:check` passes green as part of the full-suite run.
 
 ## Sign-Off
 
-*(written at completion)*
+**Reviewer**: independent Reviewer (Sonnet)
+**Verdict**: confirmed
+**Commit**: squawk: turnaround 2026-09-11 (Squawks: 0064, 0065, 0066, 0067, 0068)
