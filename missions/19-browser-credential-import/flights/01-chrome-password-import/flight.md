@@ -1,6 +1,6 @@
 # Flight: Chrome Password Import
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Browser Credential Import](../../mission.md)
 
 ## Contributing to Criteria
@@ -429,7 +429,7 @@ learning.
       content main-side) — so a later UX addition cannot silently erode the
       DD5(b) "no secret crosses to the page" boundary CP4 rests on. (DD5, DD10,
       DD13)
-- [ ] `hat-and-alignment` *(optional)* - guided HAT on a real Chrome export with
+- [x] `hat-and-alignment` *(optional)* - guided HAT on a real Chrome export with
       iterative fixes.
 
 ---

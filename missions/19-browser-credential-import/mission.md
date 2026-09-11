@@ -278,7 +278,7 @@ card-deferral rationale (no browser card export) was confirmed accurate.
 > planned and created one at a time as work progresses. This list will evolve
 > based on discoveries during implementation.
 
-- [ ] Flight 1: Chrome password import, end to end — a hand-rolled RFC-4180
+- [x] Flight 1: Chrome password import, end to end — a hand-rolled RFC-4180
       parser → map rows to `login` items (`matchMode`,
       federated/blocklist/empty-password/malformed-row handling) → a **new**
       content-identity dedupe against `listItems(destination)` → a **new**

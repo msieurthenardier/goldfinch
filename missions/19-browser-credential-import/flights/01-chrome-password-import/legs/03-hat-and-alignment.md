@@ -1,6 +1,6 @@
 # Leg: hat-and-alignment
 
-**Status**: ready
+**Status**: completed
 **Flight**: [Chrome Password Import](../flight.md)
 
 ## Objective
@@ -50,60 +50,60 @@ inline.
 
 ## Acceptance Criteria (= verification steps, one at a time)
 
-- [ ] **S1 Affordance + guidance.** On `goldfinch://vault` → Settings →
+- [x] **S1 Affordance + guidance.** On `goldfinch://vault` → Settings →
       Import / Export, an "Import from a browser…" button is present while
       unlocked and ABSENT while locked (lock the vault, check, unlock). The
       pick modal's lede names `chrome://password-manager` and "Export
       passwords".
-- [ ] **S2 Pick + refusals.** Choosing a non-CSV file (e.g. any `.txt`)
+- [x] **S2 Pick + refusals.** Choosing a non-CSV file (e.g. any `.txt`)
       shows "That file isn't a Chrome password export." with Continue
       disabled; choosing the real export shows "N logins found" (+ "M rows
       can't be imported" if any) with Continue enabled. N + M equals
       Chrome's row count.
-- [ ] **S3 Destination modal.** The summary lists skipped rows by line and
+- [x] **S3 Destination modal.** The summary lists skipped rows by line and
       reason (an `android://` row reads "non-web origin (android://)",
       never "null"); the destination select offers Global (preselected)
       and every persistent jar with its "no secrets yet" / "N secrets"
       state; the Replace/Merge select appears ONLY when the chosen
       destination reports ≥ 1 item.
-- [ ] **S4 Native confirm + first import (Merge into an empty jar).** Commit
+- [x] **S4 Native confirm + first import (Merge into an empty jar).** Commit
       raises a NATIVE dialog "Import N login(s) into <jar>?" stating the
       destination and count; "Cancel" leaves the modal open with "Import
       cancelled." and Commit re-enabled; "Import" lands the logins. The
       completion modal reads "N imported", lists unmappable counts with
       reasons, and shows the "Delete the exported CSV file now" line.
-- [ ] **S5 Items look right.** In that jar's Logins list: titles, origins
+- [x] **S5 Items look right.** In that jar's Logins list: titles, origins
       and usernames match Chrome; an item with a note shows it on reveal;
       the empty-username row exists with a blank username; each item's
       match mode reads "registrable domain" in the editor.
-- [ ] **S6 Re-import is idempotent.** Import the SAME file into the SAME
+- [x] **S6 Re-import is idempotent.** Import the SAME file into the SAME
       jar (Merge): the native confirm shows "N item(s) already there are
       kept"; the completion modal reads "0 imported, N already present
       (skipped)"; the item count is unchanged.
-- [ ] **S7 Changed entry surfaces, never overwrites.** Edit one imported
+- [x] **S7 Changed entry surfaces, never overwrites.** Edit one imported
       login's password in the vault editor, re-import (Merge): that entry
       reports "1 changed — kept as copies"; both the edited original and a
       "<title> (imported)" copy exist; a third import reports it "already
       present" (no third copy).
-- [ ] **S8 Replace is explicit and destructive only on confirm.** Import into
+- [x] **S8 Replace is explicit and destructive only on confirm.** Import into
       Global with Replace: the native confirm's detail says "This will
       first delete the M item(s) already in Global." with M matching
       Global's real count; Cancel → nothing changes; Import → only the
       imported logins remain in Global.
-- [ ] **S9 Held record drops on lock.** Pick the file, reach the destination
+- [x] **S9 Held record drops on lock.** Pick the file, reach the destination
       modal, then lock the vault (kebab → Lock, or wait for autolock): the
       modal closes; after unlock, Settings shows NO "Resume browser import…"
       button, and starting again requires a fresh pick.
-- [ ] **S10 Held record drops on window close.** In a second window, pick
+- [~] **S10 Held record drops on window close.** *(skipped — unit-covered; see flight log)* In a second window, pick
       the file and reach the destination modal, then close that window;
       in the first window, Settings shows no resume affordance for it (the
       record was that window's own) and the app is unaffected.
-- [ ] **S11 Keyboard + labels.** Through the three modals with keyboard
+- [x] **S11 Keyboard + labels.** Through the three modals with keyboard
       only: Tab reaches every control in a sensible order, Escape closes
       each modal (and a post-pick Escape drops the record — re-opening
       requires a fresh pick), every control has a visible label, the
       status line updates are announced (role=status).
-- [ ] **S12 No plaintext left behind.** After the HAT, `userData/vaults/`
+- [x] **S12 No plaintext left behind.** After the HAT, `userData/vaults/`
       contains only `.gfvault` files + `manager.json` (no `.csv`, no
       `.json` sidecars), and a `grep -r` for one imported password over
       `userData/` finds nothing. The operator deletes the export file.
@@ -138,12 +138,12 @@ Director records each result in the flight log's Leg 3 entry as it lands.
 
 **Complete ALL steps before signaling `[COMPLETE:leg]`:**
 
-- [ ] All acceptance criteria verified
-- [ ] Tests passing
-- [ ] Update flight-log.md with leg progress entry
-- [ ] Set this leg's status to `completed` (in this file's header)
-- [ ] Check off this leg in flight.md
+- [x] All acceptance criteria verified
+- [x] Tests passing
+- [x] Update flight-log.md with leg progress entry
+- [x] Set this leg's status to `completed` (in this file's header)
+- [x] Check off this leg in flight.md
 - [ ] If final leg of flight:
-  - [ ] Update flight.md status to `landed`
-  - [ ] Check off flight in mission.md
-- [ ] Commit all changes together (code + artifacts)
+  - [x] Update flight.md status to `landed`
+  - [x] Check off flight in mission.md
+- [x] Commit all changes together (code + artifacts)

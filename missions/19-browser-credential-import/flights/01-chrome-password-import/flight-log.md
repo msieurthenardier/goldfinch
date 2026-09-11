@@ -756,3 +756,35 @@ Runtime decisions, deviations, and anomalies recorded here during execution.
   native confirm's fuller destructive wording is unchanged (a dialog, room
   to spare). One-string edit, no test pinned it.
 
+- **S12 (no plaintext on disk) pass.** FD-checked structural half: the dev
+  profile's `vaults/` holds only `.gfvault` ciphertext + `manager.json`,
+  no `.csv` anywhere under the profile, no plaintext sidecar. Operator-run
+  half (their own terminal, secret kept out of session): a recursive grep
+  of the profile for a real imported password returned zero hits. Export
+  file deleted by the operator.
+
+## 2026-09-11 — Leg 3 complete; flight landed
+
+Guided HAT complete on a real Chrome export: S1–S9, S11, S12 pass; S10
+skipped by FD recommendation + operator assent (unit-covered). Six changes
+committed mid-HAT, each with a regression pin and a green bar:
+- HAT fix 1 (grounding) — vault page blank: missing `/burner.js` route
+  (squawk 0063 omission); + a transitive-import-closure regression test
+  for every internal page. `a6a0b21`.
+- HAT fix 2 — Replace/Merge shown for an empty destination: `.vault-field`
+  author `display` beat `[hidden]`; added `.vault-field[hidden]` override.
+  `fadd782`.
+- HAT enhancement 1 — delete-export reminder raised to an info panel.
+  `c4f7a9c`.
+- HAT enhancement 2 — Replace wording made explicit it wipes ALL items.
+  `d8513fb`; option label later shortened to fit the select. `42ef650`.
+- HAT fix 3 — `openModal` now moves focus into the dialog on open (APG);
+  fixed Escape + Tab-trap on the import modals. `672d9e7`.
+
+Debrief carry-forwards: (a) Leg 2 test-coverage gap — no test boots a real
+internal page, so the burner.js route omission and the `[hidden]` cascade
+defect both passed source-scan-only reviews; the new closure test closes
+the route class, the `[hidden]` pin the CSS class. (b) `vault.js` is back
+at its 2820 budget ceiling — the restore-modal controller extraction (M18
+F3 debrief rec 2) remains the durable lever. (c) S9/S10 live steps were
+low-value vs unit coverage.
