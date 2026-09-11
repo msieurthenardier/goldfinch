@@ -99,6 +99,13 @@ function makeHarness(options = {}) {
     hostnameOf: (url) => new URL(url).hostname,
     shields: { active: () => true },
     getVaultHuman: () => human,
+    // M19 F1 Leg 2 (AC7): the browser-CSV-import flow's four channels — optional, threaded
+    // only when a test's options object supplies them (mirrors popupRegistry below), so the
+    // "channel inventory" test's harness (no options) omits them and stays green.
+    browserImportBegin: options.browserImportBegin,
+    browserImportSummary: options.browserImportSummary,
+    browserImportCancel: options.browserImportCancel,
+    browserImportCommit: options.browserImportCommit,
     // M12 F5 HAT batch 1 (I8): the native fill-icon menu delegate. Records its args so a test
     // can assert the bare, no-secret hand-off + that NOTHING is sent to the guest.
     popupVaultIconMenu: (arg) => iconMenuCalls.push(arg),
@@ -397,4 +404,107 @@ test('guest-window-close sanitizes a forged historyLength and tolerates an absen
   const h = makeHarness(); // no popupRegistry at all
   h.listeners.get('guest-window-close')({ sender: { id: 5 } }, { historyLength: 'nope' });
   assert.deepEqual(h.events, [['chrome-send', 'tab-self-close', { wcId: 5, historyLength: 1 }]]);
+});
+
+// ---------------------------------------------------------------------------
+// M19 F1 Leg 2 (AC7): the browser-CSV-import flow's four channels — gated on
+// their own injections, resolving the window via chromeForTab(sender.id).
+// ---------------------------------------------------------------------------
+
+test('browser-import channels register only when their delegate is injected', () => {
+  const bare = makeHarness();
+  assert.equal(bare.internal.has('internal-vault-browser-import-pick'), false);
+  assert.equal(bare.internal.has('internal-vault-browser-import-summary'), false);
+  assert.equal(bare.internal.has('internal-vault-browser-import-cancel'), false);
+  assert.equal(bare.internal.has('internal-vault-browser-import-commit'), false);
+
+  const calls = [];
+  const wired = makeHarness({
+    browserImportBegin: async (chromeId) => {
+      calls.push(['begin', chromeId]);
+      return { ok: true };
+    },
+    browserImportSummary: (chromeId) => {
+      calls.push(['summary', chromeId]);
+      return null;
+    },
+    browserImportCancel: (chromeId, handle) => {
+      calls.push(['cancel', chromeId, handle]);
+    },
+    browserImportCommit: async (chromeId, payload) => {
+      calls.push(['commit', chromeId, payload]);
+      return { ok: true, target: payload.target, counts: {} };
+    }
+  });
+  assert.equal(wired.internal.has('internal-vault-browser-import-pick'), true);
+  assert.equal(wired.internal.has('internal-vault-browser-import-summary'), true);
+  assert.equal(wired.internal.has('internal-vault-browser-import-cancel'), true);
+  assert.equal(wired.internal.has('internal-vault-browser-import-commit'), true);
+});
+
+test('browser-import channels resolve the window via chromeForTab(event.sender.id), not a payload-declared id', async () => {
+  const calls = [];
+  const h = makeHarness({
+    browserImportBegin: async (chromeId) => {
+      calls.push(['begin', chromeId]);
+      return { ok: true };
+    },
+    browserImportSummary: (chromeId) => {
+      calls.push(['summary', chromeId]);
+      return null;
+    },
+    browserImportCancel: (chromeId, handle) => {
+      calls.push(['cancel', chromeId, handle]);
+    },
+    browserImportCommit: async (chromeId, payload) => {
+      calls.push(['commit', chromeId, payload]);
+      return { ok: true, target: payload.target, counts: {} };
+    }
+  });
+
+  await h.internal.get('internal-vault-browser-import-pick')({ sender: { id: 7 } });
+  h.internal.get('internal-vault-browser-import-summary')({ sender: { id: 7 } });
+  h.internal.get('internal-vault-browser-import-cancel')({ sender: { id: 7 } }, 'h1');
+  await h.internal.get('internal-vault-browser-import-commit')(
+    { sender: { id: 7 } },
+    { handle: 'h1', target: 'global', mode: 'merge' }
+  );
+
+  assert.deepEqual(h.chromeForTabCalls, [7, 7, 7, 7]);
+  // Every delegate receives chromeForTab(sender.id)?.id — this harness's chrome
+  // double has no `.id`, so the resolved chromeId is `undefined` for every call
+  // (proving the id comes from chromeForTab's return, never the payload).
+  assert.deepEqual(calls, [
+    ['begin', undefined],
+    ['summary', undefined],
+    ['cancel', undefined, 'h1'],
+    ['commit', undefined, { handle: 'h1', target: 'global', mode: 'merge' }]
+  ]);
+});
+
+test('browser-import commit rejects a malformed payload with { ok:false, reason:"state" } BEFORE delegating', async () => {
+  const calls = [];
+  const h = makeHarness({
+    browserImportCommit: async (chromeId, payload) => {
+      calls.push(['commit', chromeId, payload]);
+      return { ok: true, target: payload.target, counts: {} };
+    }
+  });
+  const handler = h.internal.get('internal-vault-browser-import-commit');
+
+  assert.deepEqual(await handler({ sender: { id: 7 } }, undefined), { ok: false, reason: 'state' });
+  assert.deepEqual(await handler({ sender: { id: 7 } }, {}), { ok: false, reason: 'state' });
+  assert.deepEqual(await handler({ sender: { id: 7 } }, { handle: 'h1', target: 'global' }), {
+    ok: false,
+    reason: 'state'
+  });
+  assert.deepEqual(await handler({ sender: { id: 7 } }, { handle: 1, target: 'global', mode: 'merge' }), {
+    ok: false,
+    reason: 'state'
+  });
+  assert.deepEqual(calls, [], 'the delegate is never called on a malformed payload');
+
+  const ok = await handler({ sender: { id: 7 } }, { handle: 'h1', target: 'global', mode: 'merge' });
+  assert.equal(ok.ok, true);
+  assert.equal(calls.length, 1);
 });

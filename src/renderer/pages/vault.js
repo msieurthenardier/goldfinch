@@ -26,6 +26,10 @@ import { generatePassword, CLASS_NAMES } from './password-generator.js';
 import { isSafeColor } from './safe-color.js';
 // @ts-ignore — serving-path vs disk-path mismatch
 import { createVaultNav } from './vault-nav-controller.js';
+// @ts-ignore — serving-path vs disk-path mismatch
+import { PALETTE } from './jar-page-model.js';
+// @ts-ignore — serving-path vs disk-path mismatch
+import { createVaultBrowserImport } from './vault-browser-import-controller.js';
 
 /**
  * vault.js — the goldfinch://vault internal page controller (M12 Flight 3).
@@ -96,6 +100,13 @@ function init() {
   // matching DD2 ruling 3's fresh-profile destination legality (new-jar/skip/global→global).
   /** @type {Array<{ vaultId: string, label: string }>} */
   let lastViewVaults = [];
+
+  const browserImport = createVaultBrowserImport({
+    bridge,
+    dom: { el, button, iconButton, openModal, appendOption },
+    getPresence: () => ({ jarRows, jarVaultPresence }),
+    refresh
+  });
 
   /**
    * Create an element with a className and text set via textContent (never
@@ -472,6 +483,9 @@ function init() {
       close();
     }
 
+    const FOCUSABLES_SELECTOR =
+      'button:not([disabled]), select:not([disabled]), input:not([disabled]), textarea:not([disabled]), a[href]';
+
     backdrop.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         e.stopPropagation();
@@ -479,13 +493,7 @@ function init() {
         return;
       }
       if (e.key === 'Tab') {
-        const focusables = /** @type {HTMLElement[]} */ (
-          Array.from(
-            card.querySelectorAll(
-              'button:not([disabled]), select:not([disabled]), input:not([disabled]), textarea:not([disabled]), a[href]'
-            )
-          )
-        );
+        const focusables = /** @type {HTMLElement[]} */ (Array.from(card.querySelectorAll(FOCUSABLES_SELECTOR)));
         if (!focusables.length) return;
         e.preventDefault();
         const i = focusables.indexOf(/** @type {any} */ (document.activeElement));
@@ -508,10 +516,14 @@ function init() {
     };
     activePageModal = handle;
 
-    // Default focus: the first focusable in the body (a select), else Cancel — never <body>.
-    const firstBody = bodyWrap.querySelector('button, select, input, textarea');
-    if (firstBody instanceof HTMLElement) firstBody.focus();
-    else cancelBtn.focus();
+    // Move focus INTO the dialog on open (APG contract; HAT fix 3 — invoker button, outside `backdrop`, kept focus).
+    const focusables = /** @type {HTMLElement[]} */ (Array.from(card.querySelectorAll(FOCUSABLES_SELECTOR)));
+    if (focusables.length) {
+      focusables[0].focus();
+    } else {
+      card.tabIndex = -1;
+      card.focus();
+    }
 
     return handle;
   }
@@ -777,34 +789,15 @@ function init() {
     select.appendChild(opt);
   }
 
-  // Preset new-jar colors for the mapping modal's color picker (M18 F3 L4, HAT fix 4) — mirrors
-  // src/shared/jar-page-model.js's PALETTE verbatim so a restored jar's dot matches the jars
-  // page's own swatches. Duplicated rather than imported: goldfinch://vault's flat internal-page
-  // import allowlist has no route to jar-page-model.js, and this fix keeps changes to the page
-  // surface only (vault.js + vault.css + page-model tests) — a shared-module route is a
-  // main-side change (internal-page-map.js) out of scope here.
-  const JAR_COLOR_PALETTE = Object.freeze([
-    '#4caf50',
-    '#2196f3',
-    '#f5c518',
-    '#ff7043',
-    '#ab47bc',
-    '#26a69a',
-    '#ef5350',
-    '#5c6bc0',
-    '#8d6e63',
-    '#78909c',
-    '#ec407a',
-    '#9ccc65'
-  ]);
   const NEW_JAR_FALLBACK_COLOR = '#4a90d9';
 
   /**
    * A dot-swatch color picker (HAT fix 4; collapsed-by-default toggle added at HAT fix 5, a
    * live-walk operator ask) — mirrors the jars page's radiogroup-of-role=radio idiom
    * (`jars-create-controller.js` / `jars-section-controller.js`'s `buildSwatchGrid`),
-   * reimplemented locally here for the same page-surface-only reason as JAR_COLOR_PALETTE
-   * above. `colors` is expected to already carry the prefilled color as a trailing extra
+   * reimplemented locally here (goldfinch://vault has no route to jars-create-controller.js
+   * itself, only to the shared PALETTE data it draws from — squawk 0063). `colors` is
+   * expected to already carry the prefilled color as a trailing extra
    * swatch when it isn't one of the presets — mirroring `jars-section-controller.js`'s
    * `editColors` (append-as-custom-swatch, never a "nearest color" guess). Collapsed state
    * shows only the selected color as a single dot button; clicking it expands the grid inline
@@ -1017,7 +1010,7 @@ function init() {
         buildColorSwatchGrid(
           // Mirrors jars-section-controller.js's editColors: the prefilled bundle color rides
           // as a trailing custom swatch when it isn't already one of the presets.
-          JAR_COLOR_PALETTE.includes(initialColor) ? JAR_COLOR_PALETTE : [...JAR_COLOR_PALETTE, initialColor],
+          PALETTE.includes(initialColor) ? PALETTE : [...PALETTE, initialColor],
           initialColor,
           `${title} — new jar color`,
           (color) => {
@@ -1698,9 +1691,14 @@ function init() {
       );
       section.appendChild(resumeRow);
     }
-
     const row = el('div', 'vault-settings-row');
     row.appendChild(button('Import…', 'vault-btn', () => openImportPickModal()));
+    const held = browserImport.heldRecord();
+    row.appendChild(
+      held
+        ? button('Resume browser import…', 'vault-btn', () => browserImport.openDestinationModal(held))
+        : button('Import from a browser…', 'vault-btn', () => browserImport.openPickModal())
+    );
     row.appendChild(button('Export…', 'vault-btn', () => openExportModal(vaults)));
     section.appendChild(row);
     return section;
@@ -2741,7 +2739,8 @@ function init() {
     Promise.all([
       window.goldfinchInternal.vaultState(),
       Promise.resolve(window.goldfinchInternal.jarsList()).catch(() => []),
-      Promise.resolve(bridge.fetchImportLabels()).catch(() => null)
+      Promise.resolve(bridge.fetchImportLabels()).catch(() => null),
+      browserImport.loadHeld()
     ])
       .then(([state, jars, importRecord]) => {
         jarRows = Array.isArray(jars) ? jars : [];
@@ -2802,6 +2801,7 @@ function init() {
     },
     { once: true }
   );
+  window.addEventListener('pagehide', () => browserImport.dropHeldOnPagehide(), { once: true });
 
   // M12 F3 Leg 5: re-fetch every unlocked vault's access-key list when the window regains
   // focus — the operator has just returned from the chrome-owned mint sheet (there is no

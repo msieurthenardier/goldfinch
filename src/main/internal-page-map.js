@@ -57,6 +57,13 @@ function createInternalPageMap({ baseDir, path }) {
       '/vault.css': rendererPage('vault.css'),
       '/vault.js': rendererPage('vault.js'),
       '/vault-page-model.js': shared('vault-page-model.js'),
+      // Squawk 0063: the swatch-grid palette dedup — vault.js imports the SAME
+      // PALETTE the jars page already loads instead of a hand-duplicated copy.
+      '/jar-page-model.js': shared('jar-page-model.js'),
+      // jar-page-model.js's own transitive import (BURNER) — squawk-class fix:
+      // every route serving a module must also route that module's relative
+      // imports, or the page's ES-module graph 404s and the page blanks.
+      '/burner.js': shared('burner.js'),
       // Leg 2: the pure editor logic (unchanged-secret assembly + mask/reveal state
       // + http/https origin-link guard) the page imports as a flat ESM specifier.
       '/vault-editor-model.js': shared('vault-editor-model.js'),
@@ -66,7 +73,10 @@ function createInternalPageMap({ baseDir, path }) {
       // vault-page-model.js (already routed above); the page also imports the injection-safe
       // color validator (for jar-dot colors) and the mirrored nav controller.
       '/safe-color.js': shared('safe-color.js'),
-      '/vault-nav-controller.js': rendererPage('vault-nav-controller.js')
+      '/vault-nav-controller.js': rendererPage('vault-nav-controller.js'),
+      // M19 F1 Leg 2: the browser-CSV-import page UI, its own controller module
+      // (DD10 — built outside vault.js from day one).
+      '/vault-browser-import-controller.js': rendererPage('vault-browser-import-controller.js')
     }
   };
 }

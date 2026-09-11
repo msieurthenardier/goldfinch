@@ -113,6 +113,17 @@ const VAULT_IMPORT_PREVIEW_CONFIG = {
 /** @type {VaultSheetErrorConfig} */
 const VAULT_RESTORE_COMMIT_CONFIG = { VaultBusyError: 'busy', VaultStateError: 'state' };
 
+// browserImportFlow's commit (M19 F1 Leg 2 / DD13 ruling 1 step 7): the SAME shape as
+// VAULT_RESTORE_COMMIT_CONFIG (a re-key gate up during the batch write, or a stale/dropped
+// held record / an unknown-target resolveTarget refusal) — kept as its own named config
+// (rather than reused) per this module's own convention that a future width change to one
+// delegate can never silently widen a sibling. VaultLockedError is NOT admitted here —
+// browser-import-flow.js pre-checks store.isUnlocked() itself and never lets a locked-store
+// call reach importLogins in the first place (leg ruling 1 step 3), so a VaultLockedError
+// widening this ladder was never needed.
+/** @type {VaultSheetErrorConfig} */
+const VAULT_BROWSER_IMPORT_COMMIT_CONFIG = { VaultBusyError: 'busy', VaultStateError: 'state' };
+
 // vaultUnlock (main.js:1757): the ONLY delegate with a bare-boolean IPC surface (never
 // changed by this leg — AC pins it) — a wrong password maps to bare `false`, not
 // `{ok:false}`. Any other error propagates (the handler still zeroizes in its finally).
@@ -173,6 +184,7 @@ module.exports = {
   mapVaultSheetError,
   VAULT_IMPORT_PREVIEW_CONFIG,
   VAULT_RESTORE_COMMIT_CONFIG,
+  VAULT_BROWSER_IMPORT_COMMIT_CONFIG,
   VAULT_UNLOCK_CONFIG,
   VAULT_MINT_ACCESS_KEY_CONFIG,
   VAULT_COMPROMISE_ROTATE_CONFIG,

@@ -42,6 +42,11 @@ const { writeFileAtomic } = require('./atomic-write');
 // ONLY `recover` today (idempotent load-time recovery in the constructor);
 // beginTransaction/commit are driven by the compromise rotation (leg 3).
 const vtxn = require('./vault-txn');
+// M19 F1 Leg 1 (DD2, DD3): the Chrome-export adapter. `MAX_IMPORT_ITEMS` is
+// OWNED there (leg ruling 5, design review, high) — this store imports and
+// re-exports it rather than defining its own, and `browser-import.js` must
+// never require THIS module (the only cycle-free direction).
+const { MAX_IMPORT_ITEMS, planLogins } = require('./browser-import');
 
 // The global (non-jar) vault's stable id / filename base. Single-sourced in
 // src/shared/reserved-ids.js (M12 F3 DD8) so this sentinel and jars.js's
@@ -518,7 +523,8 @@ function validateImportedKdf(kdf) {
 
 // A bundle's decrypted item array is bounded so a crafted bundle cannot import an
 // absurd count/size. Generous vs. any real vault; a hard ceiling all the same.
-const MAX_IMPORT_ITEMS = 10000;
+// (M19 F1 Leg 1: this constant now lives in `browser-import.js`, imported
+// above — `validateImportedItems` below keeps using the imported name.)
 
 /**
  * Validate the DECRYPTED items of an imported bundle BEFORE any write. The bundle's
@@ -2905,6 +2911,157 @@ class VaultStore {
   }
 
   /**
+   * Batch-commit browser-import CSV candidates into a vault (M19 F1 Leg 1 /
+   * DD2, DD4, DD9, DD11): reads the destination ONCE, applies the DD3 dedupe
+   * plan (merge mode) or discards the destination wholesale (replace mode),
+   * and writes AT MOST once. Mirrors the `saveItem`/`_saveItem` gated-wrapper
+   * split; see `_importLogins` for the full body contract.
+   * @param {string} target  `'global'` or a persistent jar id.
+   * @param {any[]} candidates  `{ line, title, origin, username, password, notes? }` rows
+   *   (the `browser-import.js` `adaptChromeRows` candidate shape).
+   * @param {{ mode?: 'merge' | 'replace' }} [opts]
+   * @returns {{ results: Array<{ line: number, outcome: 'imported'|'duplicate'|'changed'|'failed', reason?: string }>, written: boolean }}
+   */
+  importLogins(target, candidates, opts = {}) {
+    // GATED (M19 F1 Leg 1 / DD2) — the TWELFTH gated op
+    // (test/unit/vault-rekey-gate.test.js). Fully synchronous — entry-check +
+    // drain suffice; see saveItem.
+    const releaseOp = this._enterGatedOp();
+    try {
+      return this._importLogins(target, candidates, opts);
+    } finally {
+      releaseOp();
+    }
+  }
+
+  /**
+   * @param {string} target
+   * @param {any[]} candidates
+   * @param {{ mode?: 'merge' | 'replace' }} opts
+   * @returns {ReturnType<VaultStore['importLogins']>}
+   */
+  _importLogins(target, candidates, opts) {
+    // (1) Pure input-shape check FIRST (leg ruling 7) — no reason to depend
+    // on unlock state for a caller error.
+    if (!Array.isArray(candidates) || candidates.length > MAX_IMPORT_ITEMS) {
+      throw new VaultStateError(
+        'vault-store: importLogins requires candidates to be an array of at most MAX_IMPORT_ITEMS'
+      );
+    }
+    // (2) manager must be unlocked.
+    this._requireMrk();
+    // (3) allowlist-resolve the target — burner/unknown refused, no file created.
+    const vaultId = this._resolveTarget(target);
+    // (4) idle-timer touch.
+    this._touch();
+
+    const doc = this._readVault(vaultId);
+    const mode = opts && opts.mode;
+    const lazy = doc === null;
+
+    /** @type {VaultItem[]} */
+    let destItems = [];
+    /** @type {Buffer | null} */
+    let vaultKey = null;
+    /** @type {any} */
+    let kdf;
+    /** @type {any} */
+    let envelopes;
+
+    if (!lazy) {
+      vaultKey = this._vaultKeyFromDoc(vaultId, doc);
+      destItems = /** @type {VaultItem[]} */ (vc.decryptItems(doc.items, vaultKey));
+      kdf = doc.kdf;
+      envelopes = doc.envelopes;
+      // "Nothing lands without a choice" (DD9): a non-empty destination
+      // requires an explicit mode. An uncreated (lazy) or EMPTY destination
+      // ignores whatever mode was passed.
+      if (destItems.length > 0 && mode !== 'merge' && mode !== 'replace') {
+        throw new VaultStateError('vault-store: importLogins requires mode merge|replace for a non-empty destination');
+      }
+    }
+
+    // Resolve each candidate's plan classification against the destination's
+    // existing items — Replace discards those existing items outright
+    // (ruling 7 — key handling deliberately diverges from restore's Replace,
+    // which swaps to a fresh key; this op keeps the destination's EXISTING
+    // key by necessity, since a CSV import carries none of its own), so it
+    // plans against an empty array; an empty/uncreated destination already
+    // has none. In every case `planLogins` ALSO dedupes intra-file: a
+    // candidate classified 'new' or 'changed' joins the identity map
+    // immediately, so a later same-identity row in the SAME batch is
+    // classified against it too (Leg 1 ruling 6) — routing every case
+    // through `planLogins` (never a bypass that stamps every candidate
+    // 'new') is what keeps that guarantee unconditional.
+    /** @type {Array<{ candidate: any, kind: 'new' | 'duplicate' | 'changed' }>} */
+    const plan = planLogins(candidates, mode === 'replace' ? [] : destItems);
+
+    /** @type {Array<{ line: number, outcome: 'imported'|'duplicate'|'changed'|'failed', reason?: string }>} */
+    const results = [];
+    /** @type {VaultItem[]} */
+    const survivors = mode === 'replace' && !lazy ? [] : destItems.slice();
+    let anyLanded = false;
+
+    for (const { candidate, kind } of plan) {
+      if (kind === 'duplicate') {
+        results.push({ line: candidate.line, outcome: 'duplicate' });
+        continue;
+      }
+      // `changed` (DD3 / the `mergeVaultItems` marking idiom, `:800-806`)
+      // lands as a NEW item titled `${title} (imported)` — the pre-existing
+      // item that diverged is never touched. `new` lands as-is. DD4: every
+      // imported login defaults to matchMode 'registrable-domain'.
+      /** @type {any} */
+      const itemInput = {
+        type: 'login',
+        title: kind === 'changed' ? `${candidate.title} (imported)` : candidate.title,
+        origin: candidate.origin,
+        username: candidate.username,
+        password: candidate.password,
+        ...(candidate.notes !== undefined ? { notes: candidate.notes } : {}),
+        matchMode: 'registrable-domain'
+      };
+      // Per-row try/catch (DD11): `_normalizeItem` throws only on a
+      // non-object or an unknown type, and the candidate built here always
+      // satisfies both — `failed` is defense-in-depth scaffolding under THIS
+      // design (no real row reaches it today), pinned so a future validator
+      // that CAN throw per-row inherits the contract. The batch continues.
+      try {
+        const normalized = this._normalizeItem(itemInput, undefined);
+        survivors.push(normalized);
+        anyLanded = true;
+        results.push({ line: candidate.line, outcome: kind === 'changed' ? 'changed' : 'imported' });
+      } catch (err) {
+        results.push({ line: candidate.line, outcome: 'failed', reason: /** @type {Error} */ (err).message });
+      }
+    }
+
+    if (!anyLanded) {
+      // Nothing to add (every candidate was duplicate/failed, or the
+      // candidate list was empty) — no write, even under Replace: there is
+      // nothing to replace the destination WITH, so the existing items (if
+      // any) are left untouched rather than destroyed for zero gain.
+      return { results, written: false };
+    }
+
+    // Exactly ONE write.
+    if (lazy) {
+      const mrk = this._requireMrk();
+      const freshKey = vc.newVaultKey();
+      this._writeVaultForKey(vaultId, freshKey, mrk, survivors);
+      this.vaultKeys.set(vaultId, freshKey);
+    } else {
+      this._writeVault(vaultId, {
+        kdf,
+        envelopes,
+        items: vc.encryptItems(survivors, /** @type {Buffer} */ (vaultKey))
+      });
+    }
+
+    return { results, written: true };
+  }
+
+  /**
    * List a vault's items (decrypted). Requires the manager unlocked. An
    * uncreated vault lists as empty.
    * @param {string} target
@@ -3519,5 +3676,9 @@ module.exports = {
   // decrypt helper — leg 3's pre-mapping label step consumes this directly;
   // unit-tested here (including the tamper → loud auth/format error case, and
   // the identityPlaintext-tag-smuggling regression pin).
-  decryptIdentity
+  decryptIdentity,
+  // M19 F1 Leg 1 (leg ruling 5): re-exported from `browser-import.js`, the
+  // SOLE definition — never re-typed here. `require('./browser-import')`
+  // resolves this at load, the cycle-free direction (AC15b).
+  MAX_IMPORT_ITEMS
 };

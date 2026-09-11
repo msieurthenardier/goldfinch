@@ -14,6 +14,9 @@ const {
   vaultNavEntries,
   restoreDestinationOptions,
   restoreOutcomeLines,
+  browserImportDestinationOptions,
+  browserImportSkipLines,
+  browserImportOutcomeLines,
   SETTINGS_ID,
   VAULTS_ID
 } = require('../../src/shared/vault-page-model.js');
@@ -463,4 +466,118 @@ test('restoreOutcomeLines: an unrecognized outcome falls back to echoing the raw
   assert.deepEqual(restoreOutcomeLines([{ entryHandle: 'h1', outcome: 123 }], labels), [
     { entryHandle: 'h1', text: 'x: unknown' }
   ]);
+});
+
+// ── browserImportDestinationOptions (M19 F1 Leg 2 / DD9) ────────────────────
+
+test('browserImportDestinationOptions: Global always leads, labeled from globalPresence; jar options come verbatim from restoreDestinationOptions', () => {
+  const options = browserImportDestinationOptions(
+    [{ id: 'work', name: 'Work' }],
+    { work: { hasVault: true, count: 2 } },
+    { hasVault: true, count: 5 }
+  );
+  assert.deepEqual(options, [
+    { vaultId: 'global', label: 'Global — 5 secrets' },
+    { vaultId: 'work', label: 'Work — 2 secrets' }
+  ]);
+});
+
+test('browserImportDestinationOptions: globalPresence hasVault false → "no secrets yet"; a hasVault vault with no count → "has secrets"', () => {
+  assert.equal(
+    browserImportDestinationOptions([], {}, { hasVault: false }).find((o) => o.vaultId === 'global').label,
+    'Global — no secrets yet'
+  );
+  assert.equal(
+    browserImportDestinationOptions([], {}, { hasVault: true }).find((o) => o.vaultId === 'global').label,
+    'Global — has secrets'
+  );
+});
+
+test('browserImportDestinationOptions: singular "secret" at count 1', () => {
+  assert.equal(
+    browserImportDestinationOptions([], {}, { hasVault: true, count: 1 }).find((o) => o.vaultId === 'global').label,
+    'Global — 1 secret'
+  );
+});
+
+test('browserImportDestinationOptions: malformed/absent globalPresence degrades to "no secrets yet", never throws', () => {
+  assert.equal(
+    browserImportDestinationOptions([], {}).find((o) => o.vaultId === 'global').label,
+    'Global — no secrets yet'
+  );
+  assert.equal(
+    browserImportDestinationOptions([], {}, null).find((o) => o.vaultId === 'global').label,
+    'Global — no secrets yet'
+  );
+  assert.equal(
+    browserImportDestinationOptions([], {}, { hasVault: true, count: -1 }).find((o) => o.vaultId === 'global').label,
+    'Global — has secrets'
+  );
+});
+
+// ── browserImportSkipLines (M19 F1 Leg 2 / DD8, DD11) ────────────────────────
+
+test('browserImportSkipLines: every DD8 reason code gets its fixed label', () => {
+  const lines = browserImportSkipLines([
+    { line: 2, reason: 'malformed' },
+    { line: 3, reason: 'field-too-long' },
+    { line: 4, reason: 'malformed-url' },
+    { line: 5, reason: 'no-password' }
+  ]);
+  assert.deepEqual(lines, [
+    { line: 2, text: 'malformed row' },
+    { line: 3, text: 'a field is too long' },
+    { line: 4, text: 'unusable URL' },
+    { line: 5, text: 'no stored password' }
+  ]);
+});
+
+test('browserImportSkipLines: non-web-origin renders the captured scheme, never the raw "null" origin string', () => {
+  assert.deepEqual(browserImportSkipLines([{ line: 9, reason: 'non-web-origin', scheme: 'android' }]), [
+    { line: 9, text: 'non-web origin (android://)' }
+  ]);
+});
+
+test('browserImportSkipLines: an unknown reason code echoes the raw value; malformed entries drop, never throw', () => {
+  assert.deepEqual(browserImportSkipLines([{ line: 1, reason: 'blocklist' }]), [{ line: 1, text: 'blocklist' }]);
+  assert.deepEqual(browserImportSkipLines(undefined), []);
+  assert.deepEqual(browserImportSkipLines([null, 'nope', {}, { line: 'x', reason: 'malformed' }]), []);
+});
+
+// ── browserImportOutcomeLines (M19 F1 Leg 2 / DD11) ──────────────────────────
+
+test('browserImportOutcomeLines: imported always renders even at zero; every other line omitted at zero', () => {
+  assert.deepEqual(
+    browserImportOutcomeLines({
+      imported: 0,
+      duplicate: 0,
+      changed: 0,
+      failed: 0,
+      unmappable: { total: 0, byReason: {} }
+    }),
+    ['0 imported']
+  );
+});
+
+test('browserImportOutcomeLines: a full set of non-zero outcomes renders every line in order, with the unmappable breakdown by reason', () => {
+  const lines = browserImportOutcomeLines({
+    imported: 3,
+    duplicate: 2,
+    changed: 1,
+    failed: 1,
+    unmappable: { total: 3, byReason: { malformed: 2, 'non-web-origin': 1 } }
+  });
+  assert.deepEqual(lines, [
+    '3 imported',
+    '2 already present (skipped)',
+    '1 changed — kept as copies',
+    '3 could not be imported: 2 malformed row, 1 non-web origin',
+    '1 failed'
+  ]);
+});
+
+test('browserImportOutcomeLines: malformed/missing counts coerce to 0, never NaN/undefined — degrades to "0 imported" alone', () => {
+  assert.deepEqual(browserImportOutcomeLines(undefined), ['0 imported']);
+  assert.deepEqual(browserImportOutcomeLines({}), ['0 imported']);
+  assert.deepEqual(browserImportOutcomeLines({ imported: 'nope', duplicate: -5, unmappable: null }), ['0 imported']);
 });

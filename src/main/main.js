@@ -812,6 +812,7 @@ function getVaultStore() {
       // since both route through this one onLock hook).
       onLock: () => {
         _pendingVaultImports.dropAll();
+        _pendingBrowserImports.dropAll();
         closeVaultCredentialSheetsOnLock();
         broadcastVaultLockState();
       },
@@ -885,6 +886,15 @@ function notifyVaultImportLabelsReady() {
 const { createPendingImportStore } = require('./vault/pending-imports');
 const _pendingVaultImports = createPendingImportStore({ mintHandle: () => crypto.randomUUID() });
 
+// M19 F1 Leg 1/2 (DD6): the browser-CSV-import held-PLAINTEXT-payload store — a SIBLING
+// module to pending-imports.js, not a second instance of it (leg 1 ruling 1: restore's
+// hold-record shape and untimed hold are pinned; a browser import's timer arms AT hold,
+// since the read Buffer IS the plaintext from the moment it is held). Dropped on lock
+// (onLock below) and on window close (releaseVaultHoldsForWindow below).
+const { createPendingBrowserImportStore } = require('./vault/pending-browser-imports');
+const { createBrowserImportFlow } = require('./vault/browser-import-flow');
+const _pendingBrowserImports = createPendingBrowserImportStore({ mintHandle: () => crypto.randomUUID() });
+
 // M18 F2 L4 (flight DD5): the ONE refcounted idle-autolock suppression holder —
 // the single authority over the store's `setAutoLockSuspended` flag (flag =
 // holders > 0, a holder being a distinct `(chromeId, reason)` pair). Both
@@ -910,6 +920,7 @@ const _autolockSuppression = createSuppressionHolder({
 function releaseVaultHoldsForWindow(chromeId) {
   if (chromeId == null) return;
   _pendingVaultImports.clear(chromeId);
+  _pendingBrowserImports.clear(chromeId);
   _autolockSuppression.releaseWindow(chromeId);
 }
 
@@ -1260,6 +1271,26 @@ function getVaultHuman() {
     });
   }
   return _vaultHuman;
+}
+
+// M19 F1 Leg 2 (DD5/DD13): the browser-CSV-import flow, memoized like getVaultHuman.
+// windowForChrome resolves the OWNING window's BaseWindow to parent the native confirm
+// dialog on (registry.getWindowForChrome takes a webContents object; a record's `.win`
+// as a dialog parent is the register-download-ipc.js:83 precedent — parentless also
+// works, which the `?? undefined` fallback in the flow relies on).
+let _browserImportFlow = null;
+function getBrowserImportFlow() {
+  if (_browserImportFlow === null) {
+    _browserImportFlow = createBrowserImportFlow({
+      getStore: getVaultStore,
+      pending: _pendingBrowserImports,
+      dialog,
+      fs,
+      windowForChrome: (chromeId) => registry.getWindowForChrome(webContents.fromId(chromeId))?.win ?? null,
+      listJars: () => jars.list()
+    });
+  }
+  return _browserImportFlow;
 }
 
 async function startMcpServerInstance() {
@@ -1765,6 +1796,12 @@ const { rerollSeed } = registerBrowserIpc({
   vaultImportFetchLabels,
   vaultImportCommit,
   vaultImportSeverDismiss,
+  // M19 F1 Leg 2 (DD5/DD13): the browser-CSV-import flow's four IPC-facing methods.
+  // Gated — offline register-browser-ipc tests omit them.
+  browserImportBegin: (chromeId) => getBrowserImportFlow().begin(chromeId),
+  browserImportSummary: (chromeId) => getBrowserImportFlow().summary(chromeId),
+  browserImportCancel: (chromeId, handle) => getBrowserImportFlow().cancel(chromeId, handle),
+  browserImportCommit: (chromeId, payload) => getBrowserImportFlow().commit(chromeId, payload),
   // M12 F5 HAT batch 1 (I8): pop the NATIVE fill-icon context menu (Menu.popup) over the owning
   // window — never a guest-DOM menu. Gated — offline register-browser-ipc tests omit it.
   popupVaultIconMenu,

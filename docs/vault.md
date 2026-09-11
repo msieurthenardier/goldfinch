@@ -538,6 +538,84 @@ modal's pre-leg-3 per-vault source picker alongside the whole-profile default. T
 delete-time "Export this vault first" offer remains a separate, always-single-vault caller of
 `exportVault`, untouched by either leg.
 
+### Browser import (Chrome)
+
+Mission 19's Browser Credential Import (Flight 1) adds a **second, unrelated** import
+surface alongside the portable-bundle restore above: importing a Chrome password-manager
+CSV export (`chrome://password-manager` → Settings → Export passwords) directly into a
+vault. It shares no code, no held-record store, and no page modal with restore — the two
+are deliberately kept apart (a plaintext CSV has no secret to unwrap, so there is no
+chrome-owned secret sheet in this flow at all).
+
+**Mechanism.** The vault page's "Import from a browser…" button (Settings → Import /
+Export, unlocked only) opens a pick modal that runs a main-side `dialog.showOpenDialog`
+(`src/main/vault/browser-import-flow.js`, `createBrowserImportFlow`). The picked file is
+read as a **Buffer** (never a `utf8` string — the read Buffer IS the plaintext credentials
+from the moment it exists) and size-capped before parsing (`MAX_PAYLOAD_BYTES`, 16 MiB,
+`src/main/vault/browser-import.js`); a hand-rolled RFC-4180 parser
+(`src/main/vault/csv-parse.js`) and a header-based Chrome-export detector reject an
+unrecognized or oversized file loudly, never mis-parsing it. Accepted rows adapt into
+`login` candidates via the DD3 content-identity dedupe (origin + username), with
+degenerate rows (a federated/no-password entry, a non-web `android://` origin, a
+malformed row, an over-length field) accounted for as a skip reason — never silently
+dropped, never fatal to the whole import. The operator then picks a destination (Global
+or any persistent jar) and, for a non-empty destination, Replace or Merge — the same
+choice restore's mapping modal offers, reusing `restoreDestinationOptions`
+(`src/shared/vault-page-model.js`) for the jar-row half.
+
+**Held-payload lifetime.** The read Buffer is held main-side in its own store
+(`src/main/vault/pending-browser-imports.js`, `createPendingBrowserImportStore` — a
+SIBLING of the restore held-import store, not a shared instance: the restore store's
+record shape and untimed hold are pinned to their own contract, and a browser import has
+no secret step to arm a timer at, so this store arms its safety-drop timer (5 minutes)
+**at hold**, not later) — never sent to the page. It is dropped, and the payload
+zeroized, on: vault lock (manual or idle), the owning window's close, an explicit
+cancel/dismiss at either the pick or the destination step, the safety-drop timer's
+expiry, and (via the commit's own `finally`) a successful or refused commit. The page's
+own `pagehide` also best-effort drops it (no delivery guarantee — the safety-drop timer
+is the authoritative bound, same idiom as restore).
+
+**The native-confirm commit gate.** Because this flow has no chrome-owned secret sheet,
+it has no equivalent of restore's sheet-as-commit-gate either — so the commit is instead
+gated by an **awaited, main-side native `dialog.showMessageBox`** confirm, stating the
+destination and, for Replace, the exact count of existing items it will delete (a FRESH
+`listItems(target).length` read, taken immediately before the confirm renders — never the
+page's display-only presence snapshot, which can be stale by the time the operator acts
+on it). The confirm is awaited **before** the held record is consumed (`pending.take()`):
+`showMessageBox` does not block the event loop, so a lock or window-close firing while the
+dialog is open must still be able to drop the payload through the normal fan-out — taking
+the record first would strand it, un-timed, in the handler's local scope until the
+operator dismissed. A declined confirm leaves the record held (the operator can pick a
+different destination and retry, bounded by the same 5-minute timer); an accepted one
+re-checks the record is still held (a concurrent lock could have dropped it during the
+await) before proceeding.
+
+**Why the confirm is load-bearing, not cosmetic (mirrors the DD13 automation finding
+below).** Removing the chrome sheet from this flow also removes the sheet's automation
+refusal as an incidental commit gate. Two facts hold instead, at *every* tier including
+admin: (a) the native open-file dialog has no automation surface, so no tier can
+*initiate* an import; (b) a native `dialog.showMessageBox` likewise has no automation
+surface, so no tier can drive the commit's operator-affirmative click — an admin-driven
+`evaluate` in the vault-page realm can read the held handle and call the commit IPC
+directly, but the write still will not proceed without a real click on the native dialog.
+Credentials never leaving main (the plaintext payload is held main-side and never crosses
+to the page) is the read-side half of this guarantee; the native confirm is the write-side
+half.
+
+**The plaintext-file bounded exception.** Unlike every other vault surface, this feature's
+whole *point* is to read an operator-supplied plaintext-credential file from disk — the
+vault's "goldfinch writes no plaintext" guarantee is about what goldfinch **produces**, not
+about the export file Chrome already wrote. The completion modal's final line states this
+plainly: "Delete the exported CSV file now — it contains your passwords in plain text."
+Goldfinch itself never writes a plaintext copy of it anywhere; the read Buffer lives only
+in memory, zeroized on every exit path above.
+
+**Automation refusal.** No MCP tool can name this feature (the tool-name boundary test
+asserts no tool matches `/import|csv|chrome|browser/i`, excluding the pre-existing
+`getChromeTarget`), and `src/main/automation/**` contains zero references to the flow
+module or its four IPC channel names — the same structural, at-every-tier refusal the
+DD13 discussion above describes for the confirm gate.
+
 ## Rotation & recovery
 
 The four **single-slot** rotations require the manager unlocked and a **step-up re-auth**,
@@ -677,6 +755,13 @@ no plaintext key and adding no fourth recovery route.
   the exposure window, not a defense against in-process compromise.
 - **A keylogger at master entry.** Capturing the master password as the human types it into
   the sheet is outside the vault's control.
+- **The exported CSV file itself, once the operator leaves it on disk (M19 F1).** A Chrome
+  password export is plaintext by construction — goldfinch reads it, imports it, and holds
+  the read Buffer only in memory (zeroized on every exit path), but it never touches the
+  file on disk and cannot delete it for the operator. The completion modal's final line
+  ("Delete the exported CSV file now — it contains your passwords in plain text.") is the
+  full extent of the mitigation; a forgotten export file remains a genuine plaintext-secret
+  exposure on that disk until the operator removes it.
 - **A party that already extracted the MRK — answered by compromise mode (M18), with a
   stated scope.** Single-slot rotation re-wraps envelopes and never re-keys the MRK, so it
   cannot revoke an extracted MRK. **Compromise-mode rotation now exists for exactly this
