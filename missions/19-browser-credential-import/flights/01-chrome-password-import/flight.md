@@ -1,6 +1,6 @@
 # Flight: Chrome Password Import
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Browser Credential Import](../../mission.md)
 
 ## Contributing to Criteria

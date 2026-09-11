@@ -196,10 +196,10 @@ the new suites also follow. Slowest suites (none new to this flight):
       squawk.
 - [ ] `vault.js` restore-modal extraction — its own maintenance flight (needs
       design; thrice-named debt).
-- [ ] Document the `vault-page-model.js` pure-extraction pattern — candidate
-      squawk (servicing/doc).
+- [ ] Document the `vault-page-model.js` pure-extraction pattern — logged as
+      **squawk 0065** (servicing/doc).
 - [ ] Cite `internal-page-route-closure.test.js` in CLAUDE.md's internal-page
-      pattern — candidate squawk (servicing/doc).
+      pattern — logged as **squawk 0066** (servicing/doc).
 - [ ] Flight 2: generalize `detectChromeExport` to a known-header table with a
       source tag (or per-browser adapters over the shared parser/dedupe/commit);
       activate the dormant `blocklist` reason code if Edge emits such rows;
