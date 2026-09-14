@@ -1,6 +1,6 @@
 # Mission: Browser Credential Import
 
-**Status**: active
+**Status**: completed
 
 ## Outcome
 
