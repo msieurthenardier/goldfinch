@@ -291,7 +291,7 @@ card-deferral rationale (no browser card export) was confirmed accurate.
       dedupe, the new commit path, and the plaintext-hold rework. The dedupe
       identity is the linchpin, a likely leg. Pre-named divert trigger: the
       dedupe/identity work growing into its own leg cluster.
-- [ ] Flight 2: Chromium family breadth — Edge and other format-compatible
+- [x] Flight 2: Chromium family breadth — Edge and other format-compatible
       Chromium browsers on the same pipeline, source identification, and the
       per-browser export-guidance UX ("how to produce your export"). Depends
       on Flight 1's pipeline; the seam is a genuine "see Chrome working before

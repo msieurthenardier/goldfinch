@@ -1,11 +1,11 @@
 # Flight: Chromium Family Breadth
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Browser Credential Import](../../mission.md)
 
 ## Contributing to Criteria
-- [ ] The Chromium family comes in on the same path (Edge verified; source generalized)
-- [ ] Docs tell the new truth (the Chromium-family half)
+- [x] The Chromium family comes in on the same path (Edge verified; source generalized)
+- [x] Docs tell the new truth (the Chromium-family half)
 
 ---
 
@@ -179,7 +179,7 @@ export, per the Flight 1 HAT shape (the debrief's "spend HAT budget on the
 un-unit-testable" guidance).
 
 ### Checkpoints
-- [ ] CP1: Leg 1 — the restore/export modals live in
+- [x] CP1: Leg 1 — the restore/export modals live in
       `vault-restore-controller.js`; `pendingImportRecord` is controller-owned
       (getter/loader, no bare-variable access from `vault.js`); `vault.js` is
       under budget with real headroom and `VAULT_PAGE_LINE_BUDGET` lowered to
@@ -189,10 +189,10 @@ un-unit-testable" guidance).
       one-time manual open-the-app spot check of pick → mapping → completion (+
       export) modals (there is no DOM/jsdom harness for this page — Architect
       suggestion).
-- [ ] CP2: Leg 2 — no Chrome-specific user-facing string remains (grep-AC); a
+- [x] CP2: Leg 2 — no Chrome-specific user-facing string remains (grep-AC); a
       unit test proves the Edge-shaped header is accepted and the generalized
       refusal copy renders; `docs/vault.md` + CLAUDE.md say "Chromium".
-- [ ] CP3: Leg 3 (if taken) — a real Edge export imports end-to-end; dedupe,
+- [x] CP3: Leg 3 (if taken) — a real Edge export imports end-to-end; dedupe,
       outcome report, and the android/federated/empty-username rows behave; the
       generalized guidance reads right for a non-Chrome source.
 
@@ -233,7 +233,7 @@ un-unit-testable" guidance).
       refusal copy, and detector naming/contract to the Chromium family
       (generalized guidance, no source picker); confirm the pipeline accepts the
       Edge header; update docs. (DD1–DD3)
-- [ ] `hat-edge-import` *(optional)* - guided HAT: a live Edge import on a real
+- [x] `hat-edge-import` *(optional)* - guided HAT: a live Edge import on a real
       export, per the Flight 1 HAT shape. (DD5)
 
 ---
@@ -241,13 +241,13 @@ un-unit-testable" guidance).
 ## Post-Flight
 
 ### Completion Checklist
-- [ ] All legs completed
-- [ ] Code merged
-- [ ] Tests passing (green bar: test / typecheck / lint / format:check)
-- [ ] Documentation updated (`docs/vault.md` §"Browser import" incl. its several
+- [x] All legs completed
+- [x] Code merged
+- [x] Tests passing (green bar: test / typecheck / lint / format:check)
+- [x] Documentation updated (`docs/vault.md` §"Browser import" incl. its several
       Chrome mentions at `:544-545,:556,:608` + CLAUDE.md's Browser-import
       bullet → "Chromium browsers")
-- [ ] `vault.js` under budget with headroom, and `VAULT_PAGE_LINE_BUDGET`
+- [x] `vault.js` under budget with headroom, and `VAULT_PAGE_LINE_BUDGET`
       LOWERED to the post-extraction count + a small buffer (lock in the
       headroom rather than leave 2820 as a re-accretion ceiling — the explicit
       Architect-flagged call). The new `vault-restore-controller.js` gets NO

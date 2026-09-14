@@ -356,3 +356,33 @@ Flight status planning → ready.
   Edge import + the CP1 restore-flow spot-check) is operator-driven next; HAT
   fixes ride their own commits (Flight 1 precedent), then flight completion.
 
+
+## 2026-09-14 — Leg 3 guided HAT complete; flight landed
+
+All 7 HAT steps PASS on the running app, no HAT fixes needed:
+- HE1–HE4 (Edge import): the generalized guidance reads browser-generic; the
+  refusal is browser-generic; a real Edge export imports end-to-end into an
+  empty jar with a true completion report; the android/federated/empty-username
+  rows report correctly; re-import dedupes (0 imported). The mission criterion
+  "the Chromium family comes in on the same path" is verified live on a real
+  Edge export.
+- HR1–HR3 (restore-flow spot-check, CP1 — leg 1's extraction is behavior-
+  preserving): the export modal works and its page notice shows ("Exported
+  Work." — the `setNotice` handoff); the restore pick → secret → mapping
+  (destinations, Replace/Merge, dot-swatch picker) → completion flow renders and
+  behaves identically to pre-extraction; the lock-force-close → "Resume
+  restore…" → re-open-from-held-record affordance works (the `pendingImportRecord`
+  controller-ownership handoff across the vault.js↔controller boundary). No
+  regression from the extraction.
+
+### Flight Director Notes
+
+- Anomaly (FD self-inflicted, no impact): an errant `git checkout main -- .`
+  briefly reverted the working tree between the leg-2 commit and the HAT launch;
+  caught immediately, `git reset --hard HEAD` restored cc877d0 exactly (vault.js
+  2102, controller + route present), no work lost. The first HAT app launch ran
+  the reverted code and was discarded; the app was relaunched from the correct
+  flight code before HE1.
+- Leg 3 completed; flight status landed; Flight 2 checked off in the mission.
+  PR #211 marked ready for review. Debrief is the separate next step
+  (`/mission-control:flight-debrief`).
