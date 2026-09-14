@@ -56,6 +56,12 @@ function createWindowFactory(deps) {
     popupRegistry,
     releaseVaultHoldsForWindow,
     defer,
+    // Squawk 0073: arms the continuous session-snapshot debounce (built + owned in
+    // main.js) on new-window creation — low-value on its own (a window with zero
+    // tabs is dropped from the snapshot by buildSessionSnapshot), but listed
+    // explicitly as a topology-changing site to cover. Optional-chained so an
+    // offline harness that omits it stays unaffected.
+    scheduleSnapshot,
     logger
   } = deps;
 
@@ -356,6 +362,9 @@ function createWindowFactory(deps) {
       htmlFullscreen.handleWindowResize(record);
       sendToOwnChrome('trigger-send-bounds');
     });
+
+    // Squawk 0073: a new window is new topology — debounced snapshot re-arm.
+    scheduleSnapshot?.();
 
     return record;
   }

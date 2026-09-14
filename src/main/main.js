@@ -86,6 +86,15 @@ const { createVaultHuman } = require('./vault/vault-human');
 // (leg 2) + the pure burner-allowlist snapshot builder (leg 2), wired here (leg 3).
 const sessionStore = require('./session-store');
 const { buildSessionSnapshot } = require('./session-snapshot');
+// Squawk 0073: the continuous, debounced session-snapshot writer — the on-disk
+// snapshot used to be written ONLY at before-quit / per-window close, so a hard kill
+// (installer Stop-Process, a crash, power loss, taskkill /F — none of which fire
+// close/before-quit) relaunched into whatever the last graceful quit had written.
+const {
+  createSessionSnapshotScheduler,
+  isRestorePending,
+  createDedupedSnapshotWriter
+} = require('./session-snapshot-scheduler');
 const { createManager } = require('./downloads-manager');
 const { buildRegisterRecord, buildProgressPayload, buildDonePayload } = require('./downloads-payload');
 const { registerInternalHandler } = require('./internal-ipc');
@@ -327,6 +336,38 @@ const registry = createWindowRegistry();
 // Invariant: the terminal on-disk snapshot = the windows alive at the FIRST
 // quit-initiating event.
 let sessionQuitting = false;
+
+// Squawk 0073: the continuous session-snapshot scheduler. Built here (module scope,
+// right beside the registry it reads) so every deps object constructed below —
+// createWindowFactory, createGuestWiring, registerTabIpc, registerAppLifecycle — can
+// thread a reference to it via the same late-bound-closure idiom already used for
+// mcpServer/historyRecorder/downloadsManager (those are assigned further down too; the
+// accessor closures below are safe to hand out now because nothing CALLS them until the
+// app is actually running).
+//
+// The dedupe writer + isRestorePending gate are the Electron-free, independently unit-
+// tested halves (session-snapshot-scheduler.js); this composition — the restoreSession
+// setting gate, the appDb-open guard, and re-arming when the boot-restore gate is still
+// pending — is main.js's own untested wiring, same as every other IPC/event handler body
+// in this file.
+const writeSessionSnapshotDeduped = createDedupedSnapshotWriter({
+  buildSnapshot: () => {
+    if (settings.get('restoreSession') !== true) return null;
+    if (!appDb.isOpen()) return null;
+    const records = registry.records();
+    if (!records.length) return null;
+    return buildSessionSnapshot({ windows: records, jarsList: jars.list() });
+  },
+  persist: (snapshot) => sessionStore.write(snapshot)
+});
+const sessionSnapshotScheduler = createSessionSnapshotScheduler({
+  write: writeSessionSnapshotDeduped,
+  isPending: () => isRestorePending(registry.records(), Date.now()),
+  setTimeout,
+  clearTimeout,
+  logger: console
+});
+const scheduleSessionSnapshot = () => sessionSnapshotScheduler.schedule();
 
 // DD8 accessor interim: the LAST-FOCUSED record's chrome webContents (membership-
 // validated in the registry, first-record fallback), or null when no window exists.
@@ -1623,6 +1664,7 @@ const { createWindow } = createWindowFactory({
   // re-holds at the next chrome boot.
   releaseVaultHoldsForWindow,
   defer: setImmediate,
+  scheduleSnapshot: scheduleSessionSnapshot,
   logger: console
 });
 
@@ -1653,6 +1695,7 @@ const { wireGuestContents, wireTabViewEvents } = createGuestWiring({
   // popup teardown path (self-close / direct destroy) resolve-cancels through
   // it before deregistering.
   cancelChallengesForPopup,
+  scheduleSnapshot: scheduleSessionSnapshot,
   logger: console
 });
 
@@ -1881,6 +1924,7 @@ registerTabIpc({
   popupRegistry,
   schedule: setTimeout,
   cancelScheduled: clearTimeout,
+  scheduleSnapshot: scheduleSessionSnapshot,
   logger: console
 });
 
@@ -2496,6 +2540,9 @@ registerAppLifecycle({
   },
   buildSessionSnapshot,
   appDb,
+  // Squawk 0073: flush() the continuous-snapshot debounce timer at before-quit so
+  // nothing fires after appDb.close() at will-quit.
+  flushSessionSnapshotScheduler: () => sessionSnapshotScheduler.flush(),
   // M14 F1 L2 (DD2): the pending-challenge store behind app.on('login').
   authChallenges,
   // M18 F2 L4 (H2 resurface): a chrome just served window-boot-config — re-key any

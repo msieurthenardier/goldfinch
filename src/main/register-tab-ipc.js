@@ -41,6 +41,13 @@ function registerTabIpc(deps) {
     popupRegistry,
     schedule: setTimeout,
     cancelScheduled: clearTimeout,
+    // Squawk 0073: arms the continuous session-snapshot debounce (built + owned in
+    // main.js) — called from every site below that changes tab topology or the
+    // active-tab flag, so the on-disk snapshot tracks live browsing instead of only
+    // the last graceful quit. Fire-and-forget by design (the scheduler itself owns
+    // the gate/dedupe/error handling); optional-chained so an offline harness that
+    // omits it stays unaffected.
+    scheduleSnapshot,
     logger
   } = deps;
 
@@ -145,6 +152,8 @@ function registerTabIpc(deps) {
 
     const wcId = view.webContents.id;
     rec.tabViews.set(wcId, { view, partition: trusted ? INTERNAL_PARTITION : partition, trusted, active: false });
+    // Squawk 0073: a new tab is new topology — debounced snapshot re-arm.
+    scheduleSnapshot?.();
 
     // Explicit construction-time wiring: web-contents-created fires synchronously
     // during new WebContentsView(), so the global handler cannot identify the view yet.
@@ -232,6 +241,8 @@ function registerTabIpc(deps) {
       entry.view.webContents.destroy();
     }
     owner.tabViews.delete(wcId);
+    // Squawk 0073: a closed tab is new topology — debounced snapshot re-arm.
+    scheduleSnapshot?.();
     getHistoryRecorder()?.forgetTab(wcId);
     // Mission 13 Flight 1 / Leg 1: drop this tab's favicon-fetch sequence entry
     // beside the history recorder's forgetTab — same teardown site, same reason
@@ -492,6 +503,11 @@ function registerTabIpc(deps) {
     // out, its vacuity guard failed loudly as designed, and forced this re-anchor.
     source.tabViews.delete(p.wcId);
     target.tabViews.set(p.wcId, entry);
+    // Squawk 0073: a tab re-parented across windows is new topology in BOTH windows'
+    // records — debounced snapshot re-arm. One call covers all four move entry points
+    // (menu move-to-new-window, keyboard move-to-window, drag tear-off, drag adopt)
+    // since they all funnel through this shared core.
+    scheduleSnapshot?.();
     entry.active = true;
     if (source.activeTabWcId === p.wcId) source.activeTabWcId = null;
     // M14 F2 L1 (step 3b): re-key this tab's popups to the DESTINATION record —
@@ -854,6 +870,8 @@ function registerTabIpc(deps) {
     }
     entry.active = false;
     if (owner.activeTabWcId === wcId) owner.activeTabWcId = null;
+    // Squawk 0073: `active` is part of the snapshot — debounced snapshot re-arm.
+    scheduleSnapshot?.();
   });
 
   ipcMain.on('tab-navigate', (event, { wcId, verb, args }) => {
@@ -1027,6 +1045,8 @@ function registerTabIpc(deps) {
     }
     const captionChanged = owner.activeTabWcId !== wcId;
     owner.activeTabWcId = wcId;
+    // Squawk 0073: `active` is part of the snapshot — debounced snapshot re-arm.
+    scheduleSnapshot?.();
     // M14 F1 L2 (DD2 re-present trigger): a background tab's held auth challenge
     // presents when its tab activates. Strictly AFTER the activeTabWcId write —
     // presentation eligibility reads it — and after the sheet close family above
