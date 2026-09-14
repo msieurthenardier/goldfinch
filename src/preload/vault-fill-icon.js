@@ -319,9 +319,42 @@ function createVaultIconController({
     placeVaultIcons();
   }
 
-  function positionIcon(icon, rect) {
-    const top = rect.top + (win.scrollY || 0) + (rect.height - 16) / 2;
-    const left = rect.left + (win.scrollX || 0) + rect.width - 20;
+  // Walk up from `startEl` (inclusive) looking for the nearest ancestor whose
+  // computed `position` is not `static` — the CSS containing block an icon
+  // appended IN-TREE (see placeVaultIcons) would resolve its `position:absolute`
+  // against. Stops at body/documentElement WITHOUT checking them (reaching either
+  // means "no positioned ancestor" — positionIcon's body-relative fallback already
+  // handles that case correctly). Requires `window.getComputedStyle`; callers gate
+  // on its presence first (squawk 0072 — a hand-rolled test double that omits it
+  // must fall back to the original body-relative behavior wholesale, not throw).
+  function nearestPositionedAncestor(startEl) {
+    let node = startEl;
+    while (node && node !== doc.body && node !== doc.documentElement) {
+      const cs = win.getComputedStyle(node);
+      if (cs && cs.position && cs.position !== 'static') return node;
+      node = node.parentElement || null;
+    }
+    return null;
+  }
+
+  // Position the icon at the field's trailing edge, vertically centered.
+  // `ancestor`, when given, is the nearest non-static positioned ancestor of the
+  // icon's in-tree parent (nearestPositionedAncestor above) — offsets are relative
+  // to ITS border box, minus clientTop/clientLeft (the border width) to land in
+  // its padding box, the actual `position:absolute` containing block. Absent an
+  // ancestor (none found, or the icon is body-placed), fall back to the original
+  // scroll-relative math — which is already correct for a body-placed icon.
+  function positionIcon(icon, rect, ancestor) {
+    let top;
+    let left;
+    if (ancestor && typeof ancestor.getBoundingClientRect === 'function') {
+      const aRect = ancestor.getBoundingClientRect();
+      top = rect.top - aRect.top - (ancestor.clientTop || 0) + (rect.height - 16) / 2;
+      left = rect.left - aRect.left - (ancestor.clientLeft || 0) + rect.width - 20;
+    } else {
+      top = rect.top + (win.scrollY || 0) + (rect.height - 16) / 2;
+      left = rect.left + (win.scrollX || 0) + rect.width - 20;
+    }
     icon.style.top = `${Math.max(0, top)}px`;
     icon.style.left = `${Math.max(0, left)}px`;
   }
@@ -365,8 +398,8 @@ function createVaultIconController({
   // observer / scroll-resize reflow so the shown icon tracks layout.
   function placeVaultIcons() {
     if (!getEnabled()) return;
-    const parent = doc.body || doc.documentElement;
-    if (!parent) return;
+    const bodyOrHtml = doc.body || doc.documentElement;
+    if (!bodyOrHtml) return;
 
     const activeAnchors = new Set();
     const kind = focusedField ? anchorKinds().get(focusedField) : undefined;
@@ -374,6 +407,19 @@ function createVaultIconController({
       const rect = isFieldVisible(focusedField);
       if (rect) {
         activeAnchors.add(focusedField);
+        // IN-TREE PLACEMENT (squawk 0072): append into the field's OWN
+        // parentElement instead of <body>. A body-level icon reads as an
+        // OUTSIDE click to a site's dismiss-on-outside-pointerdown drawer/modal
+        // (verified live — the page's CAPTURE-phase handler runs before the
+        // icon's own stopPropagation could ever help), so clicking the icon
+        // silently closed the very form it was meant to fill. Resolving a
+        // positioned ancestor needs `window.getComputedStyle`; its absence
+        // (only a hand-rolled test double lacks it) falls back to the
+        // original body placement + body-relative math wholesale, not a
+        // half-migrated state.
+        const fieldParent = focusedField.parentElement || null;
+        const inTree = !!fieldParent && typeof win.getComputedStyle === 'function';
+        const appendTarget = inTree ? fieldParent : bodyOrHtml;
         let icon = iconByAnchor.get(focusedField);
         if (!icon || !icon.isConnected) {
           icon = createIcon(kind);
@@ -381,9 +427,9 @@ function createVaultIconController({
           iconByAnchor.set(focusedField, icon);
           iconNodes.add(icon);
           placedIcons.add(icon);
-          parent.appendChild(icon);
+          appendTarget.appendChild(icon);
         }
-        positionIcon(icon, rect);
+        positionIcon(icon, rect, inTree ? nearestPositionedAncestor(fieldParent) : null);
       }
     }
 

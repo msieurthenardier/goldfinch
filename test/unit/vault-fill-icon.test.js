@@ -448,6 +448,84 @@ test('disabled controller (not eligible / not top-frame) never injects an icon',
   assert.equal(bodyIcon(doc), null, 'no icon when the controller is disabled');
 });
 
+// --- in-tree placement (squawk 0072) ---------------------------------------
+
+test("the icon is inserted inside the focused field's parent element, not <body>, and positioned relative to the nearest positioned ancestor", () => {
+  const pass = new FakeInput('password', 'password');
+  const doc = makeDoc([new FakeForm([pass])]);
+
+  // Field parent chain: pass -> innerDiv (static) -> positionedDiv (relative) -> body.
+  // A site's dismiss-on-outside-pointerdown drawer treats a body-appended icon as
+  // an outside click (squawk 0072) — the icon must land INSIDE the field's own
+  // subtree instead, positioned relative to the nearest non-static ancestor.
+  const positionedDiv = new FakeElement('div');
+  positionedDiv._rect = { top: 50, left: 20, width: 1000, height: 800 };
+  positionedDiv.getBoundingClientRect = () => positionedDiv._rect;
+  positionedDiv.clientTop = 2;
+  positionedDiv.clientLeft = 3;
+  positionedDiv.parentElement = doc.body;
+
+  const innerDiv = new FakeElement('div');
+  innerDiv.parentElement = positionedDiv;
+
+  pass._rect = { top: 230, left: 1052, width: 336, height: 32 };
+  pass.parentElement = innerDiv;
+
+  const styles = new Map([
+    [innerDiv, { position: 'static' }],
+    [positionedDiv, { position: 'relative' }]
+  ]);
+
+  const ctl = createVaultIconController({
+    document: doc,
+    window: {
+      scrollX: 0,
+      scrollY: 0,
+      getComputedStyle: (el) => styles.get(el) || { position: 'static' }
+    },
+    ipcRenderer: { send() {} },
+    isTrustedGet: { call: (e) => !!e.isTrusted },
+    findAllLoginFields,
+    getEnabled: () => true
+  });
+
+  ctl.handleFocusIn({ target: pass });
+
+  // Not on <body> — inside the field's own parentElement instead.
+  assert.equal(bodyIcon(doc), null, 'no icon lands on <body> when the field has an in-tree parent');
+  const icon = innerDiv.children.find((c) => c.getAttribute(ICON_ATTR) !== null);
+  assert.ok(icon, "the icon is appended inside the field's parentElement");
+
+  // top = fieldRect.top - ancestorRect.top - ancestor.clientTop + (fieldRect.height - 16) / 2
+  //     = 230 - 50 - 2 + (32 - 16) / 2 = 186
+  // left = fieldRect.left - ancestorRect.left - ancestor.clientLeft + fieldRect.width - 20
+  //      = 1052 - 20 - 3 + 336 - 20 = 1345
+  assert.equal(icon.style.top, '186px', 'top relative to the nearest positioned ancestor');
+  assert.equal(icon.style.left, '1345px', 'left relative to the nearest positioned ancestor');
+});
+
+test('no window.getComputedStyle (a plain test double) falls back to body placement wholesale, even with an in-tree parentElement', () => {
+  const pass = new FakeInput('password', 'password');
+  const doc = makeDoc([new FakeForm([pass])]);
+
+  const innerDiv = new FakeElement('div');
+  innerDiv.parentElement = doc.body;
+  pass.parentElement = innerDiv;
+  pass._rect = { top: 100, left: 200, width: 180, height: 24 };
+
+  // makeController's window has no getComputedStyle — the original body-relative
+  // behavior must be preserved wholesale (append target AND math), not a
+  // half-migrated in-tree-append-with-wrong-math state.
+  const ctl = makeController(doc, []);
+  ctl.handleFocusIn({ target: pass });
+
+  assert.equal(innerDiv.children.length, 0, 'no icon appended into the in-tree parent');
+  const icon = bodyIcon(doc);
+  assert.ok(icon, 'falls back to appending on <body>');
+  assert.equal(icon.style.top, `${100 + (24 - 16) / 2}px`, 'body-relative top math unchanged');
+  assert.equal(icon.style.left, `${200 + 180 - 20}px`, 'body-relative left math unchanged');
+});
+
 test('honeypot / zero-rect focused field gets NO icon', () => {
   const user = new FakeInput('text', 'username');
   const pass = new FakeInput('password', 'password');
