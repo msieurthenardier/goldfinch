@@ -1,6 +1,6 @@
 # Flight: Chromium Family Breadth
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Browser Credential Import](../../mission.md)
 
 ## Contributing to Criteria

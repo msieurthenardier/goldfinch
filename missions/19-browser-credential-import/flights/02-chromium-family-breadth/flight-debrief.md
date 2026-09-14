@@ -182,10 +182,10 @@ Wall-clock flat in the mission's standing 5.2–5.8s band.
 
 - [ ] Real-boot internal-page smoke check — needs design; a maintenance-flight /
       design item (also open from Flight 1).
-- [ ] Give `vault-restore-controller.js` a line budget — candidate squawk
-      (servicing).
-- [ ] Document the page-controller extraction pattern in CLAUDE.md — candidate
-      squawk (servicing/doc); note the canonical getter shape.
+- [ ] Give `vault-restore-controller.js` a line budget — logged as **squawk
+      0069** (servicing).
+- [ ] Document the page-controller extraction pattern in CLAUDE.md — logged as
+      **squawk 0070** (servicing/doc); note the canonical getter shape.
 - [ ] Reconcile the two controllers' getter-dep shape — debrief recommendation
       (small follow-on code touch).
 - [ ] Mission 19: the operator judged it complete — close via
