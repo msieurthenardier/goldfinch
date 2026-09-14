@@ -48,6 +48,7 @@ test('createInternalPageMap returns the exact current host/path allowlist', () =
     '/vault-editor-model.js',
     '/vault-nav-controller.js',
     '/vault-page-model.js',
+    '/vault-restore-controller.js',
     '/vault.css',
     '/vault.js'
   ]);
@@ -69,6 +70,11 @@ test('createInternalPageMap returns the exact current host/path allowlist', () =
   assert.equal(
     map.vault['/vault-browser-import-controller.js'],
     '/app/src/main/../renderer/pages/vault-browser-import-controller.js'
+  );
+  // Flight 2 Leg 1 (DD4): the restore/export modal cluster, extracted out of vault.js.
+  assert.equal(
+    map.vault['/vault-restore-controller.js'],
+    '/app/src/main/../renderer/pages/vault-restore-controller.js'
   );
 });
 

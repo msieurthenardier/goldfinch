@@ -13,6 +13,14 @@ const REPO_ROOT = path.join(__dirname, '../..');
 const MAIN_JS = fs.readFileSync(path.join(REPO_ROOT, 'src/main/main.js'), 'utf8');
 const OVERLAY_IPC_JS = fs.readFileSync(path.join(REPO_ROOT, 'src/main/register-overlay-ipc.js'), 'utf8');
 const VAULT_JS = fs.readFileSync(path.join(REPO_ROOT, 'src/renderer/pages/vault.js'), 'utf8');
+// Flight 2 Leg 1 (DD4): the restore/export modal cluster (openMappingModal, buildColorSwatchGrid,
+// openExportModal) moved out of vault.js into this sibling controller — the scans that used to
+// read those functions BY NAME in vault.js now read this source instead (a mechanical retarget of
+// the pins, not a deletion; render()/openModal stay on vault.js since neither function moved).
+const VAULT_RESTORE_JS = fs.readFileSync(
+  path.join(REPO_ROOT, 'src/renderer/pages/vault-restore-controller.js'),
+  'utf8'
+);
 const VAULT_CSS = fs.readFileSync(path.join(REPO_ROOT, 'src/renderer/pages/vault.css'), 'utf8');
 const RENDERER_JS_PATH = path.join(REPO_ROOT, 'src/renderer/renderer.js');
 const JARS_SECTION_CONTROLLER_JS = fs.readFileSync(
@@ -79,12 +87,15 @@ test('the vault page Export modal calls BOTH exportProfile (whole-profile, defau
   // (leg 4, HAT fix 1): the modal now offers a source choice again, so vault.js gains back a
   // bridge.exportVault caller — the jars page's delete-time offer is no longer the ONLY one,
   // just the one exempt from ever being retired.
+  // Flight 2 Leg 1 (DD4): openExportModal itself moved to vault-restore-controller.js — this
+  // scan retargets there (a citation the leg's own audit missed; caught getting this suite
+  // green, same discipline as the browser-import invariants' AC13 retarget).
   assert.ok(
-    /bridge\.exportVault\s*\(\s*select\.value/.test(VAULT_JS),
+    /bridge\.exportVault\s*\(\s*select\.value/.test(VAULT_RESTORE_JS),
     'the Export modal calls exportVault(select.value, …) for a single-vault source'
   );
   assert.ok(
-    /bridge\.exportProfile\s*\(/.test(VAULT_JS),
+    /bridge\.exportProfile\s*\(/.test(VAULT_RESTORE_JS),
     'exportProfile is still called for the whole-profile (default) source'
   );
   assert.ok(
@@ -130,9 +141,9 @@ test("ruling 9: render()'s forced closeActivePageModal() never drops the held im
 /** Extract openMappingModal's own function body (up to its matching 2-space-indent closing
  * brace) — the same technique the ruling-9 test above uses for render(). */
 function openMappingModalBody() {
-  const start = VAULT_JS.indexOf('function openMappingModal(record, existingVaults) {');
+  const start = VAULT_RESTORE_JS.indexOf('function openMappingModal(record, existingVaults) {');
   assert.ok(start !== -1, 'openMappingModal(record, existingVaults) found');
-  const afterStart = VAULT_JS.slice(start);
+  const afterStart = VAULT_RESTORE_JS.slice(start);
   const endMatch = afterStart.match(/\n {2}\}\n/);
   assert.ok(endMatch, "openMappingModal()'s closing brace found");
   return afterStart.slice(0, /** @type {number} */ (endMatch.index));
@@ -175,11 +186,11 @@ test('openMappingModal: the color swatch grid prefills the bundle identity color
 
 test('buildColorSwatchGrid: a radiogroup of role=radio dot buttons — the jars-page swatch-grid idiom, reimplemented locally (goldfinch://vault has no route to jars-create-controller.js)', () => {
   assert.ok(
-    /function buildColorSwatchGrid\(colors, initialColor, ariaLabel, onSelect\) \{/.test(VAULT_JS),
+    /function buildColorSwatchGrid\(colors, initialColor, ariaLabel, onSelect\) \{/.test(VAULT_RESTORE_JS),
     'buildColorSwatchGrid helper defined'
   );
-  const start = VAULT_JS.indexOf('function buildColorSwatchGrid(colors, initialColor, ariaLabel, onSelect) {');
-  const afterStart = VAULT_JS.slice(start);
+  const start = VAULT_RESTORE_JS.indexOf('function buildColorSwatchGrid(colors, initialColor, ariaLabel, onSelect) {');
+  const afterStart = VAULT_RESTORE_JS.slice(start);
   const endMatch = afterStart.match(/\n {2}\}\n/);
   assert.ok(endMatch, "buildColorSwatchGrid()'s closing brace found");
   const body = afterStart.slice(0, /** @type {number} */ (endMatch.index));
@@ -293,8 +304,8 @@ test('openMappingModal: a stale hasVault probe reply can never overwrite a row t
 });
 
 test('buildColorSwatchGrid: collapsed by default behind a dot toggle button with aria-expanded, expanding the radiogroup on click', () => {
-  const start = VAULT_JS.indexOf('function buildColorSwatchGrid(colors, initialColor, ariaLabel, onSelect) {');
-  const afterStart = VAULT_JS.slice(start);
+  const start = VAULT_RESTORE_JS.indexOf('function buildColorSwatchGrid(colors, initialColor, ariaLabel, onSelect) {');
+  const afterStart = VAULT_RESTORE_JS.slice(start);
   const endMatch = afterStart.match(/\n {2}\}\n/);
   assert.ok(endMatch, "buildColorSwatchGrid()'s closing brace found");
   const body = afterStart.slice(0, /** @type {number} */ (endMatch.index));
@@ -317,16 +328,19 @@ test('buildColorSwatchGrid: collapsed by default behind a dot toggle button with
 // wait for the next render() to go away.
 // ---------------------------------------------------------------------------
 
-test('openExportModal: a successful single-vault export sets pendingNotice naming the exported vault, mirroring the whole-profile branch', () => {
-  const start = VAULT_JS.indexOf('function openExportModal(vaults) {');
+test('openExportModal: a successful single-vault export sets a notice naming the exported vault, mirroring the whole-profile branch', () => {
+  // Flight 2 Leg 1 (DD4): openExportModal moved to vault-restore-controller.js, and its
+  // former bare `pendingNotice = …` writes now go through the injected setNotice(text)
+  // callback (design review HIGH — the second state coupling vault.js's render() reads).
+  const start = VAULT_RESTORE_JS.indexOf('function openExportModal(vaults) {');
   assert.ok(start !== -1, 'openExportModal(vaults) found');
-  const afterStart = VAULT_JS.slice(start);
+  const afterStart = VAULT_RESTORE_JS.slice(start);
   const endMatch = afterStart.match(/\n {2}\}\n/);
   assert.ok(endMatch, "openExportModal()'s closing brace found");
   const body = afterStart.slice(0, /** @type {number} */ (endMatch.index));
   assert.ok(
-    /pendingNotice = `Exported \$\{select\.selectedOptions\[0\]\.textContent\}\.`/.test(body),
-    "the single-vault success branch sets a pendingNotice naming the selected option's own label"
+    /setNotice\(`Exported \$\{select\.selectedOptions\[0\]\.textContent\}\.`\)/.test(body),
+    "the single-vault success branch calls setNotice naming the selected option's own label"
   );
   assert.equal(
     /Single-vault result keeps its OLD/.test(body),
@@ -341,9 +355,9 @@ test('openExportModal: a successful single-vault export sets pendingNotice namin
 // that paints pendingNotice) never ran for it. Fixed by hoisting a single shared
 // handle.close(); refresh(); out of the if/else so both success paths reach it exactly once.
 test('openExportModal: both export success branches reach a single shared handle.close()+refresh(), not their own', () => {
-  const start = VAULT_JS.indexOf('function openExportModal(vaults) {');
+  const start = VAULT_RESTORE_JS.indexOf('function openExportModal(vaults) {');
   assert.ok(start !== -1, 'openExportModal(vaults) found');
-  const afterStart = VAULT_JS.slice(start);
+  const afterStart = VAULT_RESTORE_JS.slice(start);
   const endMatch = afterStart.match(/\n {2}\}\n/);
   assert.ok(endMatch, "openExportModal()'s closing brace found");
   const body = afterStart.slice(0, /** @type {number} */ (endMatch.index));
@@ -353,7 +367,7 @@ test('openExportModal: both export success branches reach a single shared handle
   const okBlock = body.slice(okStart);
 
   assert.ok(
-    /\} else \{\s*pendingNotice = `Exported \$\{select\.selectedOptions\[0\]\.textContent\}\.`;.*\n\s*\}\n\s*\/\/[^\n]*\n\s*handle\.close\(\);\s*\n\s*refresh\(\);\s*\n\s*return;/s.test(
+    /\} else \{\s*setNotice\(`Exported \$\{select\.selectedOptions\[0\]\.textContent\}\.`\);.*\n\s*\}\n\s*\/\/[^\n]*\n\s*handle\.close\(\);\s*\n\s*refresh\(\);\s*\n\s*return;/s.test(
       okBlock
     ),
     'after the if/else, a single shared handle.close(); refresh(); runs before the return — the ' +

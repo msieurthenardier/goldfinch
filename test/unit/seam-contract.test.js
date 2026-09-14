@@ -190,7 +190,17 @@ const BOOKMARKS_BAR_LINE_BUDGET = 1100;
 // renderer.js the CLAUDE.md house rule targets). Landed at 2556 lines (this test's own
 // split-array metric); budget = landed + 10%, rounded to a clean number. A future leg that
 // needs more room bumps this explicitly, named, same discipline as the renderer pin.
-const VAULT_PAGE_LINE_BUDGET = 2820;
+//
+// LOWERED (M19 F2 Leg 1 / DD4): the restore/export modal cluster was extracted out of
+// vault.js into the sibling vault-restore-controller.js (the M18 F3 debt, paid here),
+// which is what bought the headroom in the first place — leaving the 2820 ceiling in place
+// would have thrown that headroom away as re-accretion room instead of locking it in. Landed
+// at 2102 lines post-extraction (this test's own split-array metric); budget = landed + a
+// small buffer (~30-50 lines), rounded to a clean number, same "lock in headroom, don't
+// leave slack" discipline as the BOOKMARKS_BAR_LINE_BUDGET pin above. The new
+// vault-restore-controller.js gets NO budget of its own (the vault-browser-import-
+// controller.js sibling precedent — it has none either).
+const VAULT_PAGE_LINE_BUDGET = 2150;
 
 const SEAM_ANCHOR = 'Object.assign(/** @type {any} */ (globalThis), {';
 const IDENTIFIER_RE = /^[A-Za-z_$][\w$]*$/;

@@ -52,6 +52,14 @@ test('AC3: detectChromeExport throws BrowserImportFormatError("unrecognized-form
   throwsUnrecognized([{ line: 1, malformed: true, reason: 'unexpected-quote' }]); // malformed first record
 });
 
+test('M19 F2 Leg 2 / DD1: detectChromeExport accepts the exact Edge password-export header (byte-identical to Chrome)', () => {
+  // A real Edge export's header is `name,url,username,password,note` — identical to
+  // Chrome's. This pins DD1's "Edge comes in on the same detector, unchanged" claim: the
+  // header is the shared Chromium-family format, not something Edge needed its own path for.
+  const EDGE_HEADER = 'name,url,username,password,note\n';
+  assert.doesNotThrow(() => detectChromeExport(recordsFor(EDGE_HEADER)));
+});
+
 // ---------------------------------------------------------------------------
 // AC4 — one fixture, every row class
 // ---------------------------------------------------------------------------

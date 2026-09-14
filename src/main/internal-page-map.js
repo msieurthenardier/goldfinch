@@ -76,7 +76,10 @@ function createInternalPageMap({ baseDir, path }) {
       '/vault-nav-controller.js': rendererPage('vault-nav-controller.js'),
       // M19 F1 Leg 2: the browser-CSV-import page UI, its own controller module
       // (DD10 — built outside vault.js from day one).
-      '/vault-browser-import-controller.js': rendererPage('vault-browser-import-controller.js')
+      '/vault-browser-import-controller.js': rendererPage('vault-browser-import-controller.js'),
+      // Flight 2 Leg 1 (DD4): the portable-bundle restore + export modal cluster, extracted
+      // out of vault.js to pay down the M18 F3 line-budget debt.
+      '/vault-restore-controller.js': rendererPage('vault-restore-controller.js')
     }
   };
 }

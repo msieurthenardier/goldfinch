@@ -16,6 +16,12 @@ const CONTROLLER_JS = fs.readFileSync(
   path.join(REPO_ROOT, 'src/renderer/pages/vault-browser-import-controller.js'),
   'utf8'
 );
+// Flight 2 Leg 1 (DD4): the restore/export modal cluster (incl. the swatch-grid PALETTE call
+// site AC13 pins) moved out of vault.js into this sibling controller.
+const VAULT_RESTORE_JS = fs.readFileSync(
+  path.join(REPO_ROOT, 'src/renderer/pages/vault-restore-controller.js'),
+  'utf8'
+);
 const MAIN_JS = fs.readFileSync(path.join(REPO_ROOT, 'src/main/main.js'), 'utf8');
 const INTERNAL_PAGE_MAP_JS = fs.readFileSync(path.join(REPO_ROOT, 'src/main/internal-page-map.js'), 'utf8');
 const AUTOMATION_DIR = path.join(REPO_ROOT, 'src/main/automation');
@@ -128,13 +134,23 @@ test('AC10: the vault route gained exactly two entries (jar-page-model.js, vault
     assert.ok(vaultBody.includes(entry), `Leg 3 HAT-fix entry present: ${entry}`);
   }
 
+  // Flight 2 Leg 1 (DD4, post-dates this leg): the restore/export modal cluster's own
+  // controller module, extracted out of vault.js — adds exactly one further entry on top
+  // of the above, same accounting discipline as the Leg 3 HAT fix above.
+  const flight2Leg1 = ["'/vault-restore-controller.js': rendererPage('vault-restore-controller.js')"];
+  for (const entry of flight2Leg1) {
+    assert.ok(vaultBody.includes(entry), `Flight 2 Leg 1 entry present: ${entry}`);
+  }
+
   // No other route (settings/downloads/jars) changed in this leg — a coarse sanity that
-  // the vault route's entry count is EXACTLY preExisting + added + the later HAT fix.
+  // the vault route's entry count is EXACTLY preExisting + added + the later HAT fix + the
+  // later restore-controller extraction.
   const entryLines = vaultBody.split('\n').filter((l) => l.includes(': rendererPage(') || l.includes(': shared('));
   assert.equal(
     entryLines.length,
-    preExisting.length + added.length + legThreeHatFix.length,
-    'vault route entry count matches this leg’s two additions plus the Leg 3 HAT-fix burner.js route'
+    preExisting.length + added.length + legThreeHatFix.length + flight2Leg1.length,
+    'vault route entry count matches this leg’s two additions plus the Leg 3 HAT-fix burner.js route ' +
+      'plus the Flight 2 Leg 1 restore-controller route'
   );
 });
 
@@ -167,9 +183,30 @@ test('AC12: the "Import from a browser…" button is appended only inside buildI
   assert.ok(callSiteWindow.includes('buildImportExportSection(view.vaults)'));
 });
 
-test('AC12: the pick modal lede names chrome://password-manager and "Export passwords"', () => {
-  assert.ok(CONTROLLER_JS.includes('chrome://password-manager'));
+test('AC12: the pick modal lede names Chromium browsers (Chrome, Edge) and "Export passwords"', () => {
+  assert.ok(CONTROLLER_JS.includes('Chromium browsers'));
+  assert.ok(CONTROLLER_JS.includes('Chrome'));
+  assert.ok(CONTROLLER_JS.includes('Edge'));
   assert.ok(CONTROLLER_JS.includes('Export passwords'));
+});
+
+test('M19 F2 Leg 2 / AC1, AC2: the pick modal lede is browser-generic Chromium guidance, no per-browser steps', () => {
+  // Ruling 1 — the lede names the Chromium family without a chrome://password-manager-style
+  // per-browser walkthrough.
+  assert.ok(!CONTROLLER_JS.includes('chrome://password-manager'));
+  assert.ok(!CONTROLLER_JS.includes('In Chrome,'));
+});
+
+test('M19 F2 Leg 2 / AC2: the unrecognized-format refusal maps to the browser-generic copy', () => {
+  // Non-vacuous: pins the exact code -> copy mapping so the flow's `unrecognized-format`
+  // error (browser-import-flow.js's `begin()`) is proven, at the source-scan level, to
+  // render the new browser-generic string rather than the retired Chrome-specific one.
+  assert.ok(
+    CONTROLLER_JS.includes(
+      "if (code === 'unrecognized-format') return \"That file isn't a recognized browser password export.\";"
+    )
+  );
+  assert.ok(!CONTROLLER_JS.includes("That file isn't a Chrome password export."));
 });
 
 test('AC12: the completion modal contains the "Delete the exported CSV file now" line', () => {
@@ -283,9 +320,19 @@ test('AC13: JAR_COLOR_PALETTE no longer appears anywhere in vault.js (code or co
 });
 
 test('AC13: PALETTE is imported from ./jar-page-model.js and the swatch-grid call site references it', () => {
-  assert.ok(/import\s*\{\s*PALETTE\s*\}\s*from\s*'\.\/jar-page-model\.js'/.test(VAULT_JS));
+  // Flight 2 Leg 1 (DD4): openMappingModal (the swatch-grid call site) and its PALETTE import
+  // both moved to vault-restore-controller.js — vault.js's own PALETTE import is now DEAD and
+  // was dropped (this AC's original vault.js half retired, not just retargeted).
+  assert.ok(/import\s*\{\s*PALETTE\s*\}\s*from\s*'\.\/jar-page-model\.js'/.test(VAULT_RESTORE_JS));
   assert.ok(
-    /PALETTE\.includes\(initialColor\)\s*\?\s*PALETTE\s*:\s*\[\s*\.\.\.PALETTE,\s*initialColor\s*\]/.test(VAULT_JS)
+    /PALETTE\.includes\(initialColor\)\s*\?\s*PALETTE\s*:\s*\[\s*\.\.\.PALETTE,\s*initialColor\s*\]/.test(
+      VAULT_RESTORE_JS
+    )
+  );
+  assert.equal(
+    /import\s*\{\s*PALETTE\s*\}\s*from\s*'\.\/jar-page-model\.js'/.test(VAULT_JS),
+    false,
+    'vault.js no longer imports PALETTE — its only use (openMappingModal) moved out'
   );
 });
 
