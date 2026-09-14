@@ -198,6 +198,9 @@ export default [
       // vault-browser-import-controller.js (M19 F1 Leg 2 / DD10) is the browser-CSV-import
       // page UI, built outside vault.js from day one — the same real-ES-module shape.
       'src/renderer/pages/vault-browser-import-controller.js',
+      // vault-restore-controller.js (Flight 2 Leg 1 / DD4) is the restore/export modal
+      // cluster extracted out of vault.js — the same real-ES-module shape.
+      'src/renderer/pages/vault-restore-controller.js',
       'src/renderer/menu-overlay.js'
     ],
     languageOptions: { sourceType: 'module' }

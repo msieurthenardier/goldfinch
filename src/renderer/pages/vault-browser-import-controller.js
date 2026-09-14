@@ -51,7 +51,7 @@ export function createVaultBrowserImport(deps) {
 
   /** A coded `begin`/adapter refusal → its fixed, non-technical message (never raw). */
   function errorMessage(code) {
-    if (code === 'unrecognized-format') return "That file isn't a Chrome password export.";
+    if (code === 'unrecognized-format') return "That file isn't a recognized browser password export.";
     if (code === 'too-large') return 'That file is too large.';
     if (code === 'too-many-rows') return 'Too many rows.';
     return 'Could not read that file.';
@@ -75,8 +75,8 @@ export function createVaultBrowserImport(deps) {
   }
 
   /**
-   * The pick modal (mirrors `openImportPickModal`): a Chrome-export guidance lede, a
-   * read-only path field + folder button running `browserImportPick()`. On a successful
+   * The pick modal (mirrors `openImportPickModal`): a Chromium-browser-export guidance
+   * lede, a read-only path field + folder button running `browserImportPick()`. On a successful
    * pick, Continue opens the destination modal directly (no intermediate hop — unlike
    * restore, there is no secret sheet in the middle).
    */
@@ -88,8 +88,8 @@ export function createVaultBrowserImport(deps) {
       el(
         'p',
         'vault-lede',
-        'In Chrome, open the password manager (chrome://password-manager), open Settings, and choose ' +
-          'Export passwords. Chrome asks for your device password and saves a CSV file. Choose that file here.'
+        "In your browser's password manager (Chrome, Edge, and other Chromium browsers), open " +
+          'Settings and choose Export passwords, which saves a CSV file. Choose that file here.'
       )
     );
 

@@ -538,14 +538,16 @@ modal's pre-leg-3 per-vault source picker alongside the whole-profile default. T
 delete-time "Export this vault first" offer remains a separate, always-single-vault caller of
 `exportVault`, untouched by either leg.
 
-### Browser import (Chrome)
+### Browser import (Chromium browsers)
 
-Mission 19's Browser Credential Import (Flight 1) adds a **second, unrelated** import
-surface alongside the portable-bundle restore above: importing a Chrome password-manager
-CSV export (`chrome://password-manager` → Settings → Export passwords) directly into a
-vault. It shares no code, no held-record store, and no page modal with restore — the two
-are deliberately kept apart (a plaintext CSV has no secret to unwrap, so there is no
-chrome-owned secret sheet in this flow at all).
+Mission 19's Browser Credential Import (Flight 1, generalized to the Chromium family in
+Flight 2) adds a **second, unrelated** import surface alongside the portable-bundle
+restore above: importing a Chromium-family password-manager CSV export (Chrome, Edge, or
+another Chromium browser's password manager → Settings → Export passwords) directly into
+a vault. It shares no code, no held-record store, and no page modal with restore — the
+two are deliberately kept apart (a plaintext CSV has no secret to unwrap, so there is no
+chrome-owned secret sheet in this flow at all — "chrome-owned" there is goldfinch's own
+window-chrome, unrelated to the browser).
 
 **Mechanism.** The vault page's "Import from a browser…" button (Settings → Import /
 Export, unlocked only) opens a pick modal that runs a main-side `dialog.showOpenDialog`
@@ -553,8 +555,12 @@ Export, unlocked only) opens a pick modal that runs a main-side `dialog.showOpen
 read as a **Buffer** (never a `utf8` string — the read Buffer IS the plaintext credentials
 from the moment it exists) and size-capped before parsing (`MAX_PAYLOAD_BYTES`, 16 MiB,
 `src/main/vault/browser-import.js`); a hand-rolled RFC-4180 parser
-(`src/main/vault/csv-parse.js`) and a header-based Chrome-export detector reject an
-unrecognized or oversized file loudly, never mis-parsing it. Accepted rows adapt into
+(`src/main/vault/csv-parse.js`) and a header-based export detector reject an unrecognized
+or oversized file loudly, never mis-parsing it. The detector (internally still named
+`detectChromeExport`/`CHROME_HEADER` — an acceptable, non-user-facing naming choice, M19
+F2 DD2) keys on the exact header `name,url,username,password,note`, which is the header
+the whole Chromium family shares — a real Edge export was verified byte-identical to
+Chrome's (M19 F2 DD1), so it passes the same detector unchanged. Accepted rows adapt into
 `login` candidates via the DD3 content-identity dedupe (origin + username), with
 degenerate rows (a federated/no-password entry, a non-web `android://` origin, a
 malformed row, an over-length field) accounted for as a skip reason — never silently
@@ -605,7 +611,7 @@ half.
 **The plaintext-file bounded exception.** Unlike every other vault surface, this feature's
 whole *point* is to read an operator-supplied plaintext-credential file from disk — the
 vault's "goldfinch writes no plaintext" guarantee is about what goldfinch **produces**, not
-about the export file Chrome already wrote. The completion modal's final line states this
+about the export file the browser already wrote. The completion modal's final line states this
 plainly: "Delete the exported CSV file now — it contains your passwords in plain text."
 Goldfinch itself never writes a plaintext copy of it anywhere; the read Buffer lives only
 in memory, zeroized on every exit path above.
@@ -755,8 +761,9 @@ no plaintext key and adding no fourth recovery route.
   the exposure window, not a defense against in-process compromise.
 - **A keylogger at master entry.** Capturing the master password as the human types it into
   the sheet is outside the vault's control.
-- **The exported CSV file itself, once the operator leaves it on disk (M19 F1).** A Chrome
-  password export is plaintext by construction — goldfinch reads it, imports it, and holds
+- **The exported CSV file itself, once the operator leaves it on disk (M19 F1, generalized
+  M19 F2).** A Chromium-browser password export is plaintext by construction — goldfinch
+  reads it, imports it, and holds
   the read Buffer only in memory (zeroized on every exit path), but it never touches the
   file on disk and cannot delete it for the operator. The completion modal's final line
   ("Delete the exported CSV file now — it contains your passwords in plain text.") is the

@@ -57,7 +57,7 @@ const { mapVaultSheetError, VAULT_BROWSER_IMPORT_COMMIT_CONFIG } = require('./va
  */
 function createBrowserImportFlow({ getStore, pending, dialog, fs, windowForChrome, listJars }) {
   /**
-   * Pick a Chrome password-export CSV, read + parse + adapt it ONCE, and HOLD the raw
+   * Pick a Chromium-browser password-export CSV, read + parse + adapt it ONCE, and HOLD the raw
    * payload (never the parsed candidates — DD6 best-effort: the parsed strings are
    * dropped on return) main-side under the picking window's chrome id.
    * @param {number} chromeId

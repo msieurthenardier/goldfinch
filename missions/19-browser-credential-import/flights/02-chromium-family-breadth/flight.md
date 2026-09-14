@@ -1,6 +1,6 @@
 # Flight: Chromium Family Breadth
 
-**Status**: ready
+**Status**: in-flight
 **Mission**: [Browser Credential Import](../../mission.md)
 
 ## Contributing to Criteria
@@ -223,13 +223,13 @@ un-unit-testable" guidance).
 > **Note:** Tentative; planned and created one at a time as the flight
 > progresses.
 
-- [ ] `restore-modal-extraction` - move the restore + export modals (incl.
+- [x] `restore-modal-extraction` - move the restore + export modals (incl.
       `openExportModal`) from `vault.js` into a new injected-deps
       `vault-restore-controller.js`; `pendingImportRecord` becomes
       controller-owned (getter/loader); add the internal-page route; retarget
       the source-scan invariants; behavior-preserving; `vault.js` under budget,
       `VAULT_PAGE_LINE_BUDGET` lowered. (DD4)
-- [ ] `chromium-generalization` - generalize the Chrome-specific guidance,
+- [x] `chromium-generalization` - generalize the Chrome-specific guidance,
       refusal copy, and detector naming/contract to the Chromium family
       (generalized guidance, no source picker); confirm the pipeline accepts the
       Edge header; update docs. (DD1–DD3)
