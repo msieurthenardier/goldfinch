@@ -53,7 +53,9 @@ class FakeElement {
     // Squawk 0020: keep the raw markup so tests can assert on the jar-color
     // dot's style attribute (isSafeColor guard), same as every real innerHTML sink.
     this._rawHTML = value;
-    for (const selector of ['.tab-title', '.tab-close', '.tab-fav'])
+    // Mission 20 F1 Leg 2 (AC4): .tab-status joins the resolvable selector set —
+    // without it every load-failure strip-state assertion would resolve `null`.
+    for (const selector of ['.tab-title', '.tab-close', '.tab-fav', '.tab-status'])
       this._parts.set(selector, new FakeElement(selector));
   }
   get innerHTML() {
@@ -219,7 +221,11 @@ function createHarness() {
     // M16 F2 Leg 1 (DD1/DD7): the welcome-panel toggle — tracked so tests can
     // pin that activateTab/onViewCreated drive it correctly.
     showWelcomePanel: (tab) => calls.push(['showWelcomePanel', tab && tab.id]),
-    hideWelcomePanel: () => calls.push(['hideWelcomePanel'])
+    hideWelcomePanel: () => calls.push(['hideWelcomePanel']),
+    // Mission 20 F1 Leg 2 (AC3): the load-failure panel toggle — same
+    // tracked-wrapper shape as the welcome pair above.
+    showLoadFailurePanel: (tab) => calls.push(['showLoadFailurePanel', tab && tab.id]),
+    hideLoadFailurePanel: () => calls.push(['hideLoadFailurePanel'])
   };
   return {
     deps,
@@ -392,6 +398,103 @@ test('the welcome panel hides when switching to an ordinary tab and re-shows whe
   h.calls.length = 0;
   controller.activateTab(web.id);
   assert.ok(h.calls.some(([name]) => name === 'hideWelcomePanel'));
+});
+
+// ---------------------------------------------------------------------------
+// Mission 20 F1 Leg 2 (DD1/AC3/AC4/AC8): the load-failure surface projection,
+// strip state, and census fields.
+// ---------------------------------------------------------------------------
+
+test('activating a background-failed tab shows the load-failure panel; switching to a healthy tab hides it', async () => {
+  const h = createHarness();
+  const controller = await loadController(h);
+  const failed = controller.createTab('https://a.test/');
+  const healthy = controller.createTab('https://b.test/');
+  await settle();
+  failed.loadFailure = { code: -105, name: 'ERR_NAME_NOT_RESOLVED', url: 'https://a.test/' };
+  h.calls.length = 0;
+
+  controller.activateTab(failed.id);
+  assert.ok(h.calls.some(([name, id]) => name === 'showLoadFailurePanel' && id === failed.id));
+  assert.ok(h.calls.some(([name]) => name === 'hideWelcomePanel'));
+  assert.ok(!h.calls.some(([name]) => name === 'showWelcomePanel'));
+
+  h.calls.length = 0;
+  controller.activateTab(healthy.id);
+  assert.ok(h.calls.some(([name]) => name === 'hideLoadFailurePanel'));
+  assert.ok(!h.calls.some(([name]) => name === 'showLoadFailurePanel'));
+});
+
+test('the welcome branch wins over a (structurally-impossible) loadFailure on the same record', async () => {
+  const h = createHarness();
+  const controller = await loadController(h);
+  const welcome = controller.openWelcomeTab({ reasons: ['home'] });
+  welcome.loadFailure = { code: -1, name: 'ERR_X', url: 'x' }; // defensive-only: never happens in practice (no guest)
+  h.calls.length = 0;
+
+  controller.activateTab(welcome.id);
+  assert.ok(h.calls.some(([name, id]) => name === 'showWelcomePanel' && id === welcome.id));
+  assert.ok(h.calls.some(([name]) => name === 'hideLoadFailurePanel'));
+  assert.ok(!h.calls.some(([name]) => name === 'showLoadFailurePanel'));
+});
+
+test('the tab-row template gains a hidden .tab-status span before .tab-title (AC4)', async () => {
+  const h = createHarness();
+  const controller = await loadController(h);
+  const tab = controller.createTab('https://example.test/');
+  await settle();
+  assert.match(
+    tab.btn.innerHTML,
+    /<span class="tab-status" hidden aria-hidden="true"><\/span><span class="tab-title">/
+  );
+  // The strip-mutation half (data-load-state, the glyph, host title, aria-label)
+  // is applyStripState's own responsibility, unit-pinned in
+  // load-failure-controller.test.js on the same .tab-status/.tab-title/.tab-close
+  // selectors this harness now resolves (the FakeElement innerHTML setter change
+  // above) — this test only pins the template shape tab-controller.js owns.
+  assert.ok(tab.loadFailure === null, 'a fresh tab record starts with loadFailure: null');
+});
+
+test('listTabs() census reports loadState/loadError per tab (AC8)', async () => {
+  const h = createHarness();
+  const controller = await loadController(h);
+  const ok = controller.createTab('https://ok.test/');
+  const failed = controller.createTab('https://failed.test/');
+  await settle();
+  failed.loadFailure = { code: -105, name: 'ERR_NAME_NOT_RESOLVED', url: 'https://failed.test/' };
+
+  // @ts-ignore — the automation hook (window.__goldfinchAutomation) is chrome-renderer-only
+  const rows = h.deps.window.__goldfinchAutomation.listTabs();
+  const okRow = rows.find((r) => r.wcId === ok.wcId);
+  const failedRow = rows.find((r) => r.wcId === failed.wcId);
+  assert.equal(okRow.loadState, 'ok');
+  assert.equal(okRow.loadError, null);
+  assert.equal(failedRow.loadState, 'failed');
+  assert.deepEqual(failedRow.loadError, { code: -105, name: 'ERR_NAME_NOT_RESOLVED' });
+});
+
+test('F2: listTabs() census title on a failed tab is the same host-derived label the strip shows', async () => {
+  const h = createHarness();
+  const controller = await loadController(h);
+  const ok = controller.createTab('https://ok.test/');
+  const failed = controller.createTab('https://failed.test/path');
+  await settle();
+  // Simulate what a re-navigated/reopened failed tab's stale page title looks
+  // like in the wild (F2's finding: 'New tab' / a stale previous title / '') —
+  // the census must ignore it entirely once loadFailure is set.
+  failed.title = '';
+  failed.loadFailure = { code: -105, name: 'ERR_NAME_NOT_RESOLVED', url: 'https://failed.test/path' };
+
+  // @ts-ignore — the automation hook (window.__goldfinchAutomation) is chrome-renderer-only
+  const rows = h.deps.window.__goldfinchAutomation.listTabs();
+  const okRow = rows.find((r) => r.wcId === ok.wcId);
+  const failedRow = rows.find((r) => r.wcId === failed.wcId);
+  assert.equal(okRow.title, ok.title, 'an ok tab keeps reporting its own title, unaffected');
+  assert.equal(
+    failedRow.title,
+    'failed.test',
+    'a failed tab reports the host-derived label, never the stale/empty title'
+  );
 });
 
 test('openWelcomeTab resolves a burner jar when the resolver yields none', async () => {

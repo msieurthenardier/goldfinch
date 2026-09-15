@@ -951,6 +951,36 @@ THE FULL SPEC:
 Signal `[READY]` now.
 ```
 
+- **WSL2 mirrored networking never refuses an unbound `127.0.0.1` port**
+  (`.wslconfig` `networkingMode=mirrored`): SYNs are dropped, `curl` times
+  out, Chromium sits in connect (later `ERR_NETWORK_CHANGED`, never
+  `ERR_CONNECTION_REFUSED`). `127.0.0.2` / `127.1.1.1` / `[::1]` refuse at
+  0 ms; `python3 -u -m http.server --bind 127.0.0.2` serves and refuses cleanly
+  after stop; the URL host must match the bind — see
+  `tests/behavior/navigation-failure-surface/runs/2026-09-15-15-01-54.md`
+  (Orchestrator Notes / Executor closing).
+- **`captureWindow` paints a HIDDEN guest over chrome-DOM panels on Wayland**:
+  `grabWindow`'s composite fallback draws the active guest's `capturePage()`
+  at its bounds unconditionally, so a failed tab's hidden guest is drawn
+  white over the load-failure panel. Use `captureScreenshot(chromeWcId)` +
+  the chrome a11y tree as the rendered observable for chrome-DOM surfaces;
+  the composite is faithful only for a VISIBLE guest. Also transient
+  `chrome window unavailable` ~0.5–1 s after a failure lands or a tab
+  activates — retry once after 1.5 s (succeeded every time); mid-connect it
+  times out on the guest capture instead — same run.
+- **`document.hasFocus()` is false on the chrome document under automation
+  on WSLg** — `:focus`/`:focus-visible` never match, so no focus ring can
+  paint even when `activeElement` and the a11y tree agree; keyboard
+  evidence on this rig is activeElement + a11y `focused=true`; a rendered
+  ring is a HAT-only observable — same run (checkpoint 8).
+- **`python3 -m http.server` with stdout redirected never flushes its
+  "Serving HTTP" banner** (block-buffered); gate readiness on `ss -ltn` + a
+  curl 200, or run with `python3 -u` — same run (checkpoint 6). Shell
+  gotcha: `cd … && VAR=… && nohup … &` backgrounds the whole chain.
+- **Failed-tab census rows**: `loadState`/`loadError` are authoritative; a
+  reopened/restored failed tab reports `loadState: "ok"` for ~250 ms before
+  the failure lands — poll until it does. The `navigate` tool returns a
+  load failure as an `isError` result carrying the code string — same run.
 - **Vault-page click targets (upgrades the coordinates law)**: the vault
   page scrolls *smoothly* — `getBoundingClientRect` after a bare
   `scrollTo(0,0)` reads mid-animation coordinates and a `click` result of

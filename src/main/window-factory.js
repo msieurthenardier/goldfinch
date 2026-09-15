@@ -219,7 +219,10 @@ function createWindowFactory(deps) {
       getTabContents,
       isFindableTab: (wcId) => {
         const entry = record.tabViews.get(wcId);
-        return !!entry && !entry.trusted && !entry.view.webContents.isDestroyed();
+        // Mission 20 Flight 1 (DD6/AC8): a failed tab has nothing to search — its
+        // guest is hidden under the visibility invariant, and the failure surface
+        // is the chrome panel, not the page.
+        return !!entry && !entry.trusted && !entry.loadFailure && !entry.view.webContents.isDestroyed();
       },
       notifyChrome: sendToOwnChrome
     });

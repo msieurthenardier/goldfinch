@@ -352,6 +352,9 @@ contextBridge.exposeInMainWorld('goldfinch', {
   onTabLoading: (cb) => ipcRenderer.on('tab-loading', (_e, d) => cb(d)),
   onTabDidFinishLoad: (cb) => ipcRenderer.on('tab-did-finish-load', (_e, d) => cb(d)),
   onTabDomReady: (cb) => ipcRenderer.on('tab-dom-ready', (_e, d) => cb(d)),
+  // Mission 20 Flight 1 (DD2/AC10): the owner-routed push for a failed/cleared
+  // top-frame navigation — `failure: null` on the clear transition.
+  onTabLoadFailure: (cb) => ipcRenderer.on('tab-load-failure', (_e, d) => cb(d)),
   onTabMediaList: (cb) => ipcRenderer.on('tab-media-list', (_e, d) => cb(d)),
   onTabPrivacyFp: (cb) => ipcRenderer.on('tab-privacy-fp', (_e, d) => cb(d)),
   // Guest self-close request (issue #119): window.close() in a page, forwarded

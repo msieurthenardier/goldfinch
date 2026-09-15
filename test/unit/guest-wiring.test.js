@@ -26,6 +26,10 @@ class FakeContents extends EventEmitter {
     this.openHandler = null;
     this.printCalls = 0;
     this.execCalls = [];
+    // Mission 20 Flight 1 Leg 3 (HAT H7): settable via the field directly —
+    // defaults false (the common case: nothing focuses a fake guest unless a
+    // test says so).
+    this.focused = false;
     this.navigationHistory = {
       canGoBack: () => true,
       canGoForward: () => false
@@ -36,6 +40,9 @@ class FakeContents extends EventEmitter {
   }
   isDestroyed() {
     return this.destroyed;
+  }
+  isFocused() {
+    return this.focused;
   }
   getURL() {
     return this.url;
@@ -58,9 +65,24 @@ class FakeContents extends EventEmitter {
 function setup() {
   const sends = [];
   const calls = [];
+  // Mission 20 Flight 1 (AC3): a THIRD, independent log — additive only, so no
+  // legacy `h.calls`/`h.sends` exact-match assertion is affected. It exists
+  // solely so the new failure/clear tests can pin the RELATIVE ORDER between a
+  // chrome send and the applyGuestVisibility/findOverlay.hide recording fakes,
+  // which otherwise land in two separate arrays with no shared sequence.
+  const events = [];
   const chrome = {
-    focus: () => calls.push('focus-chrome'),
-    send: (channel, payload) => sends.push([channel, payload])
+    focus: () => {
+      calls.push('focus-chrome');
+      // Mission 20 Flight 1 Leg 3 (HAT H7): additive to `events` too, so the
+      // new focus-reassert tests can pin its order relative to the
+      // tab-load-failure send via the same shared sequence log AC3 uses.
+      events.push(['focus']);
+    },
+    send: (channel, payload) => {
+      sends.push([channel, payload]);
+      events.push(['send', channel, payload]);
+    }
   };
   const records = new Map();
   const registry = {
@@ -128,12 +150,20 @@ function setup() {
     // M14 F2 L2 (DD1f seam): a recording fake — the popup teardown must route
     // its resolve-cancel through THIS seam (main.js's cancelForTab delegation).
     cancelChallengesForPopup: (popupWcId) => calls.push(['popup-cancel', popupWcId]),
+    // Mission 20 Flight 1 (DD1/AC3/AC4): a RECORDING fake, not the real
+    // register-tab-ipc.js helper — this suite asserts guest-wiring's CALL
+    // POINT and its ordering relative to sendToChrome/findOverlay.hide; the
+    // real two-axis semantics are pinned by register-tab-ipc.test.js and the
+    // grep-AC in guest-visibility-invariant.test.js.
+    applyGuestVisibility: (entry) =>
+      events.push(['apply-visibility', { active: entry.active, loadFailure: entry.loadFailure }]),
     logger: { warn() {} }
   });
   return {
     wiring,
     sends,
     calls,
+    events,
     records,
     chrome,
     fullscreenIds,
@@ -958,4 +988,319 @@ test('did-start-navigation cancels the tab pending auth challenges — main-fram
     1,
     'subframe and same-document navigations never cancel'
   );
+});
+
+// ---------------------------------------------------------------------------
+// Mission 20 Flight 1 (DD1/DD2/DD4/AC3/AC4/AC6): the did-fail-load handler,
+// the did-start-navigation clear, and effectiveUrl in the did-navigate push.
+// ---------------------------------------------------------------------------
+
+function makeFailureRecord(
+  h,
+  wcId,
+  entry,
+  { active = true, findOverlay = { hide: () => h.events.push(['find-hide']) } } = {}
+) {
+  const tabViews = new Map([[wcId, entry]]);
+  const record = { activeTabWcId: active ? wcId : null, tabViews, findOverlay };
+  h.records.set(wcId, record);
+  return record;
+}
+
+test('AC3: did-fail-load records the failure, hides, closes find, then tells the chrome — in that order (active tab)', () => {
+  const h = setup();
+  const wc = new FakeContents(40);
+  const view = { webContents: wc };
+  const entry = { view, active: true, loadFailure: null, lastRequestedUrl: 'http://127.0.0.1:1/' };
+  makeFailureRecord(h, 40, entry);
+  h.wiring.wireTabViewEvents(view, 40, 'persist:jar-a');
+
+  wc.emit('did-fail-load', {}, -102, 'ERR_CONNECTION_REFUSED', 'http://127.0.0.1:1/', true);
+
+  assert.deepEqual(entry.loadFailure, { code: -102, name: 'ERR_CONNECTION_REFUSED', url: 'http://127.0.0.1:1/' });
+  assert.equal(entry.lastRequestedUrl, 'http://127.0.0.1:1/');
+  const order = h.events.map((e) => e[0]);
+  const applyIdx = order.indexOf('apply-visibility');
+  const findIdx = order.indexOf('find-hide');
+  const sendIdx = order.indexOf('send');
+  assert.ok(applyIdx !== -1 && findIdx !== -1 && sendIdx !== -1, 'all three effects fired');
+  assert.ok(applyIdx < findIdx, 'hide runs before find-overlay hide');
+  assert.ok(findIdx < sendIdx, 'find-overlay hide runs before the chrome push');
+  assert.deepEqual(h.sends.at(-1), [
+    'tab-load-failure',
+    { wcId: 40, failure: { code: -102, name: 'ERR_CONNECTION_REFUSED', url: 'http://127.0.0.1:1/' } }
+  ]);
+});
+
+test('AC3 edge case: failure on an INACTIVE tab records + pushes only — no hide, no find-close', () => {
+  const h = setup();
+  const wc = new FakeContents(41);
+  const view = { webContents: wc };
+  const entry = { view, active: false, loadFailure: null, lastRequestedUrl: 'http://x.invalid/' };
+  makeFailureRecord(h, 41, entry, { active: false });
+  h.wiring.wireTabViewEvents(view, 41, 'persist:jar-a');
+
+  wc.emit('did-fail-load', {}, -105, 'ERR_NAME_NOT_RESOLVED', 'http://x.invalid/', true);
+
+  assert.deepEqual(entry.loadFailure, { code: -105, name: 'ERR_NAME_NOT_RESOLVED', url: 'http://x.invalid/' });
+  assert.deepEqual(
+    h.events.filter((e) => e[0] === 'apply-visibility' || e[0] === 'find-hide'),
+    [],
+    'an inactive tab is neither hidden (already hidden) nor find-closed (not the active tab)'
+  );
+  assert.deepEqual(h.sends, [
+    ['tab-load-failure', { wcId: 41, failure: { code: -105, name: 'ERR_NAME_NOT_RESOLVED', url: 'http://x.invalid/' } }]
+  ]);
+});
+
+// ---------------------------------------------------------------------------
+// Mission 20 Flight 1 Leg 3 (HAT H7): the error document's own commit steals
+// OS focus into the now-hidden guest — reasserted at both did-fail-load and
+// did-finish-load, each gated on active-tab + guest-focused + no-open-sheet.
+// ---------------------------------------------------------------------------
+
+test('HAT H7: did-fail-load reasserts chrome focus when the active guest currently holds OS focus, before the chrome push', () => {
+  const h = setup();
+  const wc = new FakeContents(60);
+  wc.focused = true;
+  const view = { webContents: wc };
+  const entry = { view, active: true, loadFailure: null, lastRequestedUrl: 'http://x.invalid/' };
+  makeFailureRecord(h, 60, entry);
+
+  h.wiring.wireTabViewEvents(view, 60, 'persist:jar-a');
+  wc.emit('did-fail-load', {}, -105, 'ERR_NAME_NOT_RESOLVED', 'http://x.invalid/', true);
+
+  assert.ok(h.calls.includes('focus-chrome'), 'chrome.focus() called');
+  const order = h.events.map((e) => e[0]);
+  const focusIdx = order.indexOf('focus');
+  const sendIdx = order.indexOf('send');
+  assert.ok(
+    focusIdx !== -1 && sendIdx !== -1 && focusIdx < sendIdx,
+    'focus reassert precedes the tab-load-failure send'
+  );
+});
+
+test('HAT H7: did-fail-load does NOT reassert focus when the guest is not currently OS-focused', () => {
+  const h = setup();
+  const wc = new FakeContents(61);
+  wc.focused = false;
+  const view = { webContents: wc };
+  const entry = { view, active: true, loadFailure: null, lastRequestedUrl: 'http://x.invalid/' };
+  makeFailureRecord(h, 61, entry);
+
+  h.wiring.wireTabViewEvents(view, 61, 'persist:jar-a');
+  wc.emit('did-fail-load', {}, -105, 'ERR_NAME_NOT_RESOLVED', 'http://x.invalid/', true);
+
+  assert.equal(h.calls.includes('focus-chrome'), false, 'no reassert when the guest never held focus');
+});
+
+test('HAT H7: did-fail-load on a BACKGROUND tab never reasserts focus', () => {
+  const h = setup();
+  const wc = new FakeContents(62);
+  wc.focused = true;
+  const view = { webContents: wc };
+  const entry = { view, active: false, loadFailure: null, lastRequestedUrl: 'http://x.invalid/' };
+  makeFailureRecord(h, 62, entry, { active: false });
+
+  h.wiring.wireTabViewEvents(view, 62, 'persist:jar-a');
+  wc.emit('did-fail-load', {}, -105, 'ERR_NAME_NOT_RESOLVED', 'http://x.invalid/', true);
+
+  assert.equal(h.calls.includes('focus-chrome'), false, 'a background tab failure never touches focus');
+});
+
+test('HAT H7: did-fail-load with an open sheet menu never reasserts focus (DD1 — the menu owns focus)', () => {
+  const h = setup();
+  const wc = new FakeContents(63);
+  wc.focused = true;
+  const view = { webContents: wc };
+  const entry = { view, active: true, loadFailure: null, lastRequestedUrl: 'http://x.invalid/' };
+  const record = makeFailureRecord(h, 63, entry);
+  record.sheet = { isMenuOpen: () => true };
+
+  h.wiring.wireTabViewEvents(view, 63, 'persist:jar-a');
+  wc.emit('did-fail-load', {}, -105, 'ERR_NAME_NOT_RESOLVED', 'http://x.invalid/', true);
+
+  assert.equal(h.calls.includes('focus-chrome'), false, "an open sheet menu is the operator's — never stolen back");
+});
+
+test('HAT H7: did-finish-load reasserts chrome focus while a failure is recorded, the guest is focused, and no sheet is open', () => {
+  const h = setup();
+  const wc = new FakeContents(64);
+  wc.focused = true;
+  const view = { webContents: wc };
+  const entry = {
+    view,
+    active: true,
+    loadFailure: { code: -105, name: 'ERR_NAME_NOT_RESOLVED', url: 'http://x.invalid/' },
+    lastRequestedUrl: 'http://x.invalid/'
+  };
+  makeFailureRecord(h, 64, entry);
+
+  h.wiring.wireTabViewEvents(view, 64, 'persist:jar-a');
+  wc.emit('did-finish-load');
+
+  assert.ok(h.calls.includes('focus-chrome'), "the error document's own commit re-triggers the reassert");
+  assert.equal(entry.loadFailure.code, -105, 'did-finish-load never mutates loadFailure');
+});
+
+test('HAT H7: did-finish-load does NOT reassert focus when there is no recorded failure (ordinary successful loads)', () => {
+  const h = setup();
+  const wc = new FakeContents(65);
+  wc.focused = true;
+  const view = { webContents: wc };
+  const entry = { view, active: true, loadFailure: null, lastRequestedUrl: 'https://ok.test/' };
+  makeFailureRecord(h, 65, entry);
+
+  h.wiring.wireTabViewEvents(view, 65, 'persist:jar-a');
+  wc.emit('did-finish-load');
+
+  assert.equal(h.calls.includes('focus-chrome'), false, 'an ordinary successful load never touches focus');
+});
+
+test('AC3/DD2: subframe failures are ignored entirely — no state, no push', () => {
+  const h = setup();
+  const wc = new FakeContents(42);
+  const view = { webContents: wc };
+  const entry = { view, active: true, loadFailure: null, lastRequestedUrl: 'http://ok.test/' };
+  makeFailureRecord(h, 42, entry);
+  h.wiring.wireTabViewEvents(view, 42, 'persist:jar-a');
+
+  wc.emit('did-fail-load', {}, -105, 'ERR_NAME_NOT_RESOLVED', 'http://iframe.invalid/', false);
+
+  assert.equal(entry.loadFailure, null);
+  assert.deepEqual(h.sends, []);
+  assert.deepEqual(h.events, []);
+});
+
+test('AC3/DD2: ERR_ABORTED (-3) is ignored entirely — no state, no push', () => {
+  const h = setup();
+  const wc = new FakeContents(43);
+  const view = { webContents: wc };
+  const entry = { view, active: true, loadFailure: null, lastRequestedUrl: 'http://ok.test/' };
+  makeFailureRecord(h, 43, entry);
+  h.wiring.wireTabViewEvents(view, 43, 'persist:jar-a');
+
+  wc.emit('did-fail-load', {}, -3, 'ERR_ABORTED', 'http://ok.test/', true);
+
+  assert.equal(entry.loadFailure, null);
+  assert.deepEqual(h.sends, []);
+  assert.deepEqual(h.events, []);
+});
+
+test('edge case: did-fail-load arriving after the entry is gone from tabViews drops silently (never throws)', () => {
+  const h = setup();
+  const wc = new FakeContents(44);
+  const view = { webContents: wc };
+  // Owner record exists (teardown-in-progress), but its tabViews entry for
+  // this wcId is already gone.
+  h.records.set(44, { activeTabWcId: null, tabViews: new Map(), findOverlay: null });
+  h.wiring.wireTabViewEvents(view, 44, 'persist:jar-a');
+
+  assert.doesNotThrow(() => wc.emit('did-fail-load', {}, -105, 'ERR_NAME_NOT_RESOLVED', 'http://x.invalid/', true));
+  assert.deepEqual(h.sends, []);
+});
+
+test('edge case: an empty validatedURL keeps the prior lastRequestedUrl', () => {
+  const h = setup();
+  const wc = new FakeContents(45);
+  const view = { webContents: wc };
+  const entry = { view, active: true, loadFailure: null, lastRequestedUrl: 'http://kept.test/' };
+  makeFailureRecord(h, 45, entry);
+  h.wiring.wireTabViewEvents(view, 45, 'persist:jar-a');
+
+  wc.emit('did-fail-load', {}, -105, 'ERR_NAME_NOT_RESOLVED', '', true);
+
+  assert.equal(entry.lastRequestedUrl, 'http://kept.test/');
+  assert.deepEqual(entry.loadFailure, { code: -105, name: 'ERR_NAME_NOT_RESOLVED', url: '' });
+});
+
+test('AC4: did-start-navigation clears a recorded failure on the next real navigation — shows, pushes null', () => {
+  const h = setup();
+  const wc = new FakeContents(46);
+  const view = { webContents: wc };
+  const entry = {
+    view,
+    active: true,
+    loadFailure: { code: -105, name: 'ERR_NAME_NOT_RESOLVED', url: 'http://x.invalid/' },
+    lastRequestedUrl: 'http://x.invalid/'
+  };
+  makeFailureRecord(h, 46, entry);
+  h.wiring.wireTabViewEvents(view, 46, 'persist:jar-a');
+
+  wc.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false, url: 'https://retry.test/' });
+
+  assert.equal(entry.loadFailure, null);
+  assert.equal(entry.lastRequestedUrl, 'https://retry.test/');
+  assert.deepEqual(
+    h.events.filter((e) => e[0] === 'apply-visibility'),
+    [['apply-visibility', { active: true, loadFailure: null }]]
+  );
+  assert.deepEqual(h.sends, [['tab-load-failure', { wcId: 46, failure: null }]]);
+});
+
+test('AC4: a did-start-navigation whose URL is chrome-error: changes nothing (the error commit must not erase its own failure)', () => {
+  const h = setup();
+  const wc = new FakeContents(47);
+  const view = { webContents: wc };
+  const failure = { code: -105, name: 'ERR_NAME_NOT_RESOLVED', url: 'http://x.invalid/' };
+  const entry = { view, active: true, loadFailure: failure, lastRequestedUrl: 'http://x.invalid/' };
+  makeFailureRecord(h, 47, entry);
+  h.wiring.wireTabViewEvents(view, 47, 'persist:jar-a');
+
+  wc.emit('did-start-navigation', {
+    isMainFrame: true,
+    isSameDocument: false,
+    url: 'chrome-error://chromewebdata/'
+  });
+
+  assert.equal(entry.loadFailure, failure, 'loadFailure is untouched — still the SAME object');
+  assert.equal(entry.lastRequestedUrl, 'http://x.invalid/', 'lastRequestedUrl is untouched');
+  assert.deepEqual(h.sends, []);
+  assert.deepEqual(h.events, []);
+});
+
+test('AC4: did-start-navigation with no recorded failure only stamps lastRequestedUrl — no spurious push', () => {
+  const h = setup();
+  const wc = new FakeContents(48);
+  const view = { webContents: wc };
+  const entry = { view, active: true, loadFailure: null, lastRequestedUrl: null };
+  makeFailureRecord(h, 48, entry);
+  h.wiring.wireTabViewEvents(view, 48, 'persist:jar-a');
+
+  wc.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false, url: 'https://ok.test/' });
+
+  assert.equal(entry.lastRequestedUrl, 'https://ok.test/');
+  assert.deepEqual(h.sends, []);
+});
+
+test('AC6: did-navigate substitutes the intended address when the live URL is chrome-error: (effectiveUrl)', () => {
+  const h = setup();
+  const wc = new FakeContents(49);
+  wc.url = 'chrome-error://chromewebdata/';
+  const view = { webContents: wc };
+  const entry = { view, active: true, loadFailure: null, lastRequestedUrl: 'http://127.0.0.1:1/' };
+  makeFailureRecord(h, 49, entry);
+  h.wiring.wireTabViewEvents(view, 49, 'persist:jar-a');
+
+  wc.emit('did-navigate');
+
+  assert.deepEqual(h.sends[0], ['tab-did-navigate', { wcId: 49, url: 'http://127.0.0.1:1/' }]);
+  assert.ok(
+    h.calls.some((x) => Array.isArray(x) && x[0] === 'history-nav' && x[1].url === 'http://127.0.0.1:1/'),
+    'the history recorder receives the SAME substituted url'
+  );
+});
+
+test('AC6: did-navigate passes the live URL through unchanged when it is not chrome-error:', () => {
+  const h = setup();
+  const wc = new FakeContents(50);
+  wc.url = 'https://real-page.test/';
+  const view = { webContents: wc };
+  const entry = { view, active: true, loadFailure: null, lastRequestedUrl: 'https://real-page.test/' };
+  makeFailureRecord(h, 50, entry);
+  h.wiring.wireTabViewEvents(view, 50, 'persist:jar-a');
+
+  wc.emit('did-navigate');
+
+  assert.deepEqual(h.sends[0], ['tab-did-navigate', { wcId: 50, url: 'https://real-page.test/' }]);
 });

@@ -22,7 +22,8 @@ export function createShortcutController(deps) {
     orderedTabIds,
     activateTab,
     keydownToAction,
-    handleBookmarkStarActivate
+    handleBookmarkStarActivate,
+    focusLoadFailureHeading
   } = deps;
   /* --------------------------------------------------------------- shortcuts */
 
@@ -205,6 +206,15 @@ export function createShortcutController(deps) {
         return true;
       // F6 / Shift+F6 (M17 F1 L1, DD1/DD4) — chrome↔content focus-cycling.
       case 'focus-content':
+        // Mission 20 F1 Leg 2 (DD6): a failed active tab has no focusable
+        // guest — land in the load-failure panel's heading instead. The
+        // chrome already holds tab.loadFailure from the push, so this
+        // resolves synchronously with no main round-trip; main's
+        // tab-focus-guest refusal (DD1) remains the backstop.
+        if (activeTab()?.loadFailure) {
+          focusLoadFailureHeading();
+          return true;
+        }
         // No wcId argument — main resolves the sender window's OWN active
         // tab (tab-focus-guest). Fire-and-forget from this handler's point
         // of view; the resolved boolean isn't actionable here (no UI to

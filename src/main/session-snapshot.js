@@ -18,11 +18,21 @@
 // (e.g. an active burner) leaves NO surviving tab marked active, exactly as intended.
 
 const { resolvePersistJar } = require('./persist-jar-gate');
+// Mission 20 Flight 1 (DD4): a failed tab's snapshot entry carries the INTENDED
+// address, never the `chrome-error://chromewebdata/` document — so restore
+// retries it at boot instead of reopening a blank error page.
+const { effectiveUrl } = require('./tab-entry-url');
 
 /**
  * @param {{
  *   windows: Array<{
- *     tabViews: Map<number, { view: { webContents: any }, partition: string, trusted: boolean }>,
+ *     tabViews: Map<number, {
+ *       view: { webContents: any },
+ *       partition: string,
+ *       trusted: boolean,
+ *       loadFailure?: { code: number, name: string, url: string } | null,
+ *       lastRequestedUrl?: string | null
+ *     }>,
  *     activeTabWcId: number | null
  *   }>,
  *   jarsList: Array<{ id: string, partition: string }>
@@ -38,7 +48,7 @@ function buildSessionSnapshot({ windows, jarsList }) {
       if (!jar) continue; // burner / internal — dropped by the positive allowlist
       const wc = entry.view.webContents;
       if (!wc || wc.isDestroyed()) continue; // uncapturable — nothing left to read
-      tabs.push({ url: wc.getURL(), jarId: jar.id, active: wcId === rec.activeTabWcId });
+      tabs.push({ url: effectiveUrl(entry), jarId: jar.id, active: wcId === rec.activeTabWcId });
     }
     if (tabs.length > 0) outWindows.push({ tabs }); // drop a zero-surviving-tab window
   }

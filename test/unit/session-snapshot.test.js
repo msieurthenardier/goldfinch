@@ -25,8 +25,14 @@ function makeWc({ url = 'https://example.com/', destroyed = false } = {}) {
   return { isDestroyed: () => destroyed, getURL: () => url };
 }
 
-function makeEntry({ partition = 'persist:jar-work', trusted = false, wc = makeWc() } = {}) {
-  return { view: { webContents: wc }, partition, trusted, active: false };
+function makeEntry({
+  partition = 'persist:jar-work',
+  trusted = false,
+  wc = makeWc(),
+  loadFailure = null,
+  lastRequestedUrl = null
+} = {}) {
+  return { view: { webContents: wc }, partition, trusted, active: false, loadFailure, lastRequestedUrl };
 }
 
 // A window record: tabViews is a Map<wcId, entry> (insertion order) + activeTabWcId.
@@ -200,4 +206,30 @@ test('stamps version:1 and emits jarId === jar.id (the resolved id, not the part
   assert.equal(out.version, 1);
   assert.equal(out.windows[0].tabs[0].jarId, 'work');
   assert.notEqual(out.windows[0].tabs[0].jarId, 'persist:jar-work');
+});
+
+// --- Mission 20 Flight 1 (DD4/AC6): a failed tab's snapshot carries the intended URL ---
+
+test('AC6: a failed tab snapshots its lastRequestedUrl, never the live chrome-error: document', () => {
+  const win = makeWindow([
+    [
+      1,
+      makeEntry({
+        partition: 'persist:jar-work',
+        wc: makeWc({ url: 'chrome-error://chromewebdata/' }),
+        loadFailure: { code: -102, name: 'ERR_CONNECTION_REFUSED', url: 'http://127.0.0.1:1/' },
+        lastRequestedUrl: 'http://127.0.0.1:1/'
+      })
+    ]
+  ]);
+  const out = buildSessionSnapshot({ windows: [win], jarsList: JARS });
+  assert.equal(out.windows[0].tabs[0].url, 'http://127.0.0.1:1/');
+});
+
+test('AC6: a healthy tab (no failure) still snapshots the live URL as before', () => {
+  const win = makeWindow([
+    [1, makeEntry({ partition: 'persist:jar-work', wc: makeWc({ url: 'https://healthy.example/' }) })]
+  ]);
+  const out = buildSessionSnapshot({ windows: [win], jarsList: JARS });
+  assert.equal(out.windows[0].tabs[0].url, 'https://healthy.example/');
 });

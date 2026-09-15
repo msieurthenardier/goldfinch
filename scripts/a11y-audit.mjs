@@ -417,6 +417,16 @@ async function main() {
       await sleep(200);
       allViolations.push(...(await runAxe(client, wcId, axeSource, 'downloads-button')));
 
+      // 5c) Load-failure surface (Mission 20 F1 Leg 2, DD13/AC11). Navigating
+      // to a restricted port is instant and deterministic (no port probing,
+      // no network dependency) — ERR_UNSAFE_PORT fires synchronously.  Placed
+      // LAST in the chrome-mode sequence (design review): nothing after it
+      // needs a loaded guest, so no navigate-back and no media re-scan timing
+      // risk.
+      await evaluate(client, wcId, `navigate(${JSON.stringify('http://127.0.0.1:1/')})`);
+      await sleep(1000);
+      allViolations.push(...(await runAxe(client, wcId, axeSource, 'load-failure')));
+
       // 6-10) Menu-overlay SHEET states — SKIPPED BY RULING, not run (squawk 0045).
       // Every popup menu renders in the transparent sheet WebContentsView. This
       // array is kept as the RECORD of what is not covered (each state's would-be

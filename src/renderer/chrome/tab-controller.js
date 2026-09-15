@@ -1,3 +1,9 @@
+// LOAD_STATES (Mission 20 F1 Leg 2, AC8): the census enum's single source —
+// listTabs()'s automation hook reports each tab's loadState/loadError.
+// failedTabTitle (post-acceptance fix pass F2): the SAME host-derived label
+// the strip shows, so census title can never drift from it on a failed tab.
+import { LOAD_STATES, failedTabTitle } from '../../shared/load-failure.js';
+
 /**
  * @typedef {{
  *   id: string,
@@ -17,7 +23,8 @@
  *   scriptOpened?: boolean,
  *   welcome?: { reasons: Set<string>, pendingQuery: string | null } | null,
  *   attaching?: boolean,
- *   pendingUrl?: string | null
+ *   pendingUrl?: string | null,
+ *   loadFailure?: { code: number, name: string, url: string } | null
  * }} Tab
  */
 
@@ -65,7 +72,11 @@ export function createTabController(deps) {
     // forwarding functions — welcome-controller.js is constructed after this
     // one, the renderer.js `let controller` idiom).
     showWelcomePanel,
-    hideWelcomePanel
+    hideWelcomePanel,
+    // Mission 20 F1 Leg 2 (DD1/AC3): the load-failure panel, same late-bound
+    // wrapper-function shape as the welcome pair above.
+    showLoadFailurePanel,
+    hideLoadFailurePanel
   } = deps;
   // Trusted-tab pseudo-jar display name (Leg 3, ownership ruling from the Leg 1
   // design review — folded into DD3): every trusted internal tab used to hardcode
@@ -110,7 +121,8 @@ export function createTabController(deps) {
       selected: new Set(),
       wcId: null,
       privacy: blankPrivacy(),
-      container: jar
+      container: jar,
+      loadFailure: null
     };
     tabs.set(id, tab);
 
@@ -148,7 +160,11 @@ export function createTabController(deps) {
     // favicon <img draggable="false"> (M09 F11 Leg 2): the native tab drag owns the
     // gesture — grabbing the favicon must drag the TAB, never start an image drag
     // (mirrors the lightbox img.draggable=false idiom).
-    btn.innerHTML = `<span class="tab-row">${dot}<img class="tab-fav hidden" alt="" draggable="false" /><span class="tab-title">New tab</span><button class="tab-close" tabindex="-1" aria-label="Close tab: New tab">✕</button></span>`;
+    // .tab-status (Mission 20 F1 Leg 2, AC4): hidden warning-glyph span,
+    // written ONLY by load-failure-controller.js's applyStripState — occupies
+    // the favicon's own slot (same width, styles.css) so no new @container
+    // disclosure stage is needed.
+    btn.innerHTML = `<span class="tab-row">${dot}<img class="tab-fav hidden" alt="" draggable="false" /><span class="tab-status" hidden aria-hidden="true"></span><span class="tab-title">New tab</span><button class="tab-close" tabindex="-1" aria-label="Close tab: New tab">✕</button></span>`;
     // Native HTML5 DnD source (M09 F11 Leg 2): every tab is draggable at rest; the
     // dragstart/dragend handlers below own reorder + tear-off + the Leg 3 cross-window seam.
     btn.draggable = true;
@@ -884,11 +900,23 @@ export function createTabController(deps) {
       t.btn.tabIndex = isActive ? 0 : -1;
     }
 
-    // Welcome-panel toggle (M16 F2 Leg 1, DD1/DD7): driven from every
-    // activation-class event, mirrors onViewCreated's own toggle so the panel
-    // never lags a tab switch.
-    if (tab.welcome) showWelcomePanel(tab);
-    else hideWelcomePanel();
+    // Surface projection (Mission 20 F1 Leg 2, DD1/AC3): a tab is either a
+    // viewless welcome record OR a real tab that may be failed — never both
+    // (a welcome record has no guest, so it can never carry a load failure).
+    // Exactly one of #welcome-surface / #load-failure-surface / neither is
+    // ever visible; driven from every activation-class event, mirroring
+    // onViewCreated's own welcome-panel toggle so neither surface lags a tab
+    // switch.
+    if (tab.welcome) {
+      hideLoadFailurePanel();
+      showWelcomePanel(tab);
+    } else if (tab.loadFailure) {
+      hideWelcomePanel();
+      showLoadFailurePanel(tab);
+    } else {
+      hideWelcomePanel();
+      hideLoadFailurePanel();
+    }
 
     els.address.value = tab.url || '';
     updateAddressChip(tab);
@@ -1173,9 +1201,16 @@ export function createTabController(deps) {
       return [...tabs.values()].map((t) => ({
         wcId: t.wcId, // null until dom-ready
         url: t.url,
-        title: t.title,
+        // F2 (post-acceptance fix pass): a failed tab reports the same
+        // host-derived label the strip shows — never the stale/empty page
+        // title the guest's error document may have set.
+        title: t.loadFailure ? failedTabTitle(t) : t.title,
         jarId: t.container ? t.container.id : null,
-        active: t.id === ctx.activeTabId
+        active: t.id === ctx.activeTabId,
+        // Mission 20 F1 Leg 2 (AC8): renderer-sourced census fields — the
+        // renderer holds the failure the moment main pushes it, no new drive op.
+        loadState: t.loadFailure ? LOAD_STATES.FAILED : LOAD_STATES.OK,
+        loadError: t.loadFailure ? { code: t.loadFailure.code, name: t.loadFailure.name } : null
       }));
     },
     openTab(url, jarId) {

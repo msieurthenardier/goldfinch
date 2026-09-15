@@ -108,7 +108,7 @@ const { createPopupRegistry } = require('./popup-registry');
 const { createHtmlFullscreen } = require('./html-fullscreen');
 const { createAuthChallenges } = require('./auth-challenges');
 const { createSessionRuntime } = require('./session-runtime');
-const { registerTabIpc } = require('./register-tab-ipc');
+const { registerTabIpc, applyGuestVisibility } = require('./register-tab-ipc');
 const { registerOverlayIpc } = require('./register-overlay-ipc');
 const { registerDownloadIpc } = require('./register-download-ipc');
 const { registerSettingsIpc } = require('./register-settings-ipc');
@@ -1696,6 +1696,10 @@ const { wireGuestContents, wireTabViewEvents } = createGuestWiring({
   // it before deregistering.
   cancelChallengesForPopup,
   scheduleSnapshot: scheduleSessionSnapshot,
+  // Mission 20 Flight 1 (DD1/AC7): the ONE two-axis visibility helper, owned by
+  // register-tab-ipc.js — threaded here so guest-wiring's own failure/clear
+  // transitions call the SAME helper every other guest-show site does.
+  applyGuestVisibility,
   logger: console
 });
 

@@ -45,7 +45,12 @@ or download **v0.16.4** directly:
   built-in viewer — links that force a download still download. **OAuth-style
   popups work**: a sized/named `window.open` opens a real floating popup
   window in the opener's cookie jar with a live `window.opener` handle —
-  sign-in result delivery and popup self-close included.
+  sign-in result delivery and popup self-close included. A navigation that
+  **fails to load** (DNS, connection refused, timeout, a blocked/unsafe
+  address, and — until certificate errors get their own interstitial — an
+  untrusted certificate) never leaves a blank tab: Goldfinch shows an
+  explanatory page with the address you tried, the reason, and a **Retry**
+  button.
 - **Frameless window**: Goldfinch runs in a custom frameless window —
   minimize / maximize-restore / close controls live at the right end of the tab
   bar on Windows and Linux; macOS keeps its native traffic-light controls.

@@ -18,6 +18,10 @@
 // mission's burner boundary has ONE definition two suites cannot drift on.
 
 const { resolvePersistJar } = require('./persist-jar-gate');
+// Mission 20 Flight 1 (DD4): a failed tab's closed-tab entry carries the
+// INTENDED address, never the `chrome-error://chromewebdata/` document — a
+// reopen retries it, exactly like the session snapshot.
+const { effectiveUrl } = require('./tab-entry-url');
 
 /**
  * `stripIndex` append sentinel (M09 F4): "position unknown / not this strip" —
@@ -50,7 +54,13 @@ const APPEND_SENTINEL = -1;
  * allowlist on its own). A destroyed webContents is uncapturable (nothing left
  * to read) and resolves `null` too.
  * @param {{
- *   tabEntry: { view: { webContents: any }, partition: string, trusted: boolean },
+ *   tabEntry: {
+ *     view: { webContents: any },
+ *     partition: string,
+ *     trusted: boolean,
+ *     loadFailure?: { code: number, name: string, url: string } | null,
+ *     lastRequestedUrl?: string | null
+ *   },
  *   jarsList: Array<{ id: string, partition: string }>,
  *   stripIndex: number,
  *   windowId: number
@@ -63,7 +73,7 @@ function captureClosedTabEntry({ tabEntry, jarsList, stripIndex, windowId }) {
   const wc = tabEntry.view.webContents;
   if (!wc || wc.isDestroyed()) return null;
   return {
-    url: wc.getURL(),
+    url: effectiveUrl(tabEntry),
     title: wc.getTitle(),
     jarId: jar.id,
     stripIndex,

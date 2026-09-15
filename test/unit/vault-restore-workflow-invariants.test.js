@@ -70,10 +70,18 @@ test('vault-adminkey-show: every live send/registration is the rotate-admin PROV
 
 test('renderer.js is untouched by this leg (DD11: no renderer.js change, or a named bump)', () => {
   const lines = fs.readFileSync(RENDERER_JS_PATH, 'utf8').split(/\r?\n/).length;
-  // Mirrors seam-contract.test.js's own RENDERER_LINE_BUDGET pin (1836, the same split-array
-  // counting convention) — this leg's AC is that the budget itself needed no bump; asserting
-  // the exact landed count keeps that honest here too.
-  assert.equal(lines, 1836, 'renderer.js line count unchanged from the pre-leg working tree');
+  // Mirrors seam-contract.test.js's own RENDERER_LINE_BUDGET pin (the same split-array
+  // counting convention) — this leg's OWN AC was that the budget needed no bump for ITS
+  // scope; asserting the exact landed count kept that honest here too. Retargeted (Mission 20
+  // F1 Leg 2, load-failure-surface-chrome): that leg legitimately grew renderer.js (1835 → 1857
+  // by this same metric, RENDERER_LINE_BUDGET bumped in lockstep in seam-contract.test.js) —
+  // this pin is source-scan maintenance for a THEN-current snapshot, not a standing guarantee
+  // that no later leg ever touches renderer.js again; widened to the new landed count rather
+  // than deleted, same discipline as squawk 0073's regex-target pin updates (flight-log-recorded).
+  // Retargeted again (Mission 20 F1 post-acceptance fix pass, F1): 1857 → 1858, the single
+  // `updateAddressChip` dep line added to loadFailureController's construction call — see
+  // seam-contract.test.js's RENDERER_LINE_BUDGET comment for the full accounting.
+  assert.equal(lines, 1858, 'renderer.js line count matches the current landed source');
 });
 
 test('no inline VaultStore error-class check outside the vault-sheet-errors.js mapper (zero inline ladders)', () => {

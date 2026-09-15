@@ -19,6 +19,11 @@ const PDF_VIEWER_EXTENSION_ID = 'mhjfbmdgcfjbbpaeojofohoefgiehjai';
 // no cycle (it never requires this module).
 const { onWindowClosed } = require('./window-factory');
 const { isBurnerPartition } = require('../shared/burner');
+// Mission 20 Flight 1 (DD2/DD4): the shared classification predicates and the
+// entry-URL substitution helper — both Electron-free, both required at the
+// established main-side CJS-of-ESM pattern (`settings-store.js:24` et al.).
+const { shouldRecordLoadFailure, isChromeErrorUrl } = require('../shared/load-failure');
+const { effectiveUrl } = require('./tab-entry-url');
 
 /**
  * M14 F2 L1 — the DD3 popup predicate (pure, exported for the unit matrix),
@@ -76,6 +81,11 @@ function createGuestWiring(deps) {
     // navigation, not just tab creation/close/activation. Optional-chained so an
     // offline harness that omits it stays unaffected.
     scheduleSnapshot,
+    // Mission 20 Flight 1 (DD1/AC7): the ONE two-axis visibility helper, defined
+    // top-level in `register-tab-ipc.js` and threaded here via `main.js` deps
+    // (rather than a direct require) — the unit suite injects a RECORDING fake so
+    // AC3's call-order assertion is a real order test, not a side-effect inference.
+    applyGuestVisibility,
     // M14 F2 L2 (DD1f seam, real wiring): the SAME delegation main.js hands the
     // popup registry — cancelForTab(popupWcId, 'tab-close'). Called from the
     // popup teardown below so a SELF-closed/destroyed popup (guest-window-close,
@@ -442,6 +452,12 @@ function createGuestWiring(deps) {
       (...args) => {
         if (!wc.isDestroyed()) fn(...args);
       };
+    // Mission 20 Flight 1: both new handlers below (and the did-navigate push)
+    // need the owning record's own tabViews entry for this wcId — the SAME entry
+    // register-tab-ipc.js created (`entry.view === view`). Optional-chained: a
+    // record with no `tabViews` (offline test fakes that never touch this leg's
+    // fields) or a torn-down/absent record both resolve `undefined`, never throw.
+    const resolveEntry = () => registry.getWindowForGuest(wcId)?.tabViews?.get(wcId);
 
     // M14 F1 L2 (DD2): navigation-away is a pending-auth-challenge RESOLUTION
     // trigger — main-frame, non-same-document navigations only (a hash change
@@ -452,18 +468,80 @@ function createGuestWiring(deps) {
       'did-start-navigation',
       guard((e) => {
         if (e.isMainFrame && !e.isSameDocument) authChallenges.cancelForTab(wcId, 'navigated');
+        // Mission 20 Flight 1 (DD2/AC4): a real, page-initiated main-frame navigation
+        // stamps the intended address and — if a failure was recorded — clears it.
+        // The error document's OWN `chrome-error:` commit must NEVER erase the
+        // failure it is reporting (whether it even raises this event at all is
+        // spike check (d); this guard is safe either way).
+        if (e.isMainFrame && !e.isSameDocument && !isChromeErrorUrl(e.url)) {
+          const entry = resolveEntry();
+          if (entry) {
+            entry.lastRequestedUrl = e.url;
+            if (entry.loadFailure) {
+              entry.loadFailure = null;
+              applyGuestVisibility(entry);
+              sendToChrome('tab-load-failure', { wcId, failure: null });
+            }
+          }
+        }
+      })
+    );
+    // Mission 20 Flight 1 (DD2/AC3): the failure signal itself. Recorded only for
+    // top-frame failures that are not ERR_ABORTED (user-cancelled navigations and
+    // downloads fire -3 and are not failures) — `shouldRecordLoadFailure` is the
+    // single source for that guard. A torn-down entry (edge case: the failure
+    // arrives mid-teardown, after the tab's own tabViews entry is already gone)
+    // drops silently — never throws.
+    wc.on(
+      'did-fail-load',
+      guard((_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+        if (!shouldRecordLoadFailure({ errorCode, isMainFrame })) return;
+        const owner = registry.getWindowForGuest(wcId);
+        const entry = owner?.tabViews?.get(wcId);
+        if (!owner || !entry) return;
+        entry.loadFailure = { code: errorCode, name: errorDescription, url: validatedURL };
+        // Edge case: an empty validatedURL (some engine paths) keeps the prior
+        // lastRequestedUrl — `failure.url` above already carries whatever the
+        // engine handed back, empty or not.
+        if (validatedURL) entry.lastRequestedUrl = validatedURL;
+        // Pinned order (DD1): record → hide (if active) → close find (if active) →
+        // tell the chrome. The sheet is left alone — an open menu is the
+        // operator's, not the page's.
+        if (owner.activeTabWcId === wcId) {
+          applyGuestVisibility(entry);
+          owner.findOverlay?.hide();
+        }
+        // Mission 20 Flight 1 Leg 3 (HAT H7, focus logger-confirmed): Chromium
+        // is about to commit its own `chrome-error://chromewebdata/` document
+        // into this now-hidden guest, and that commit steals OS input focus
+        // into it — hidden + focused means keystrokes go nowhere, and the
+        // chrome's own `heading.focus()` call (triggered by the send below)
+        // becomes a DOM-only focus in an unfocused window (F6/Tab silently
+        // land on the hidden guest). Reassert OS focus onto the chrome NOW,
+        // while it still holds it, before the error document has a chance to
+        // take it. Gated on the guest CURRENTLY holding focus (a background
+        // failure — activeTabWcId mismatch — never touches focus) and on no
+        // sheet menu being open (DD1: an open menu is the operator's focus to
+        // keep, the same posture as the findOverlay.hide() gate above).
+        if (owner.activeTabWcId === wcId && wc.isFocused() && !owner.sheet?.isMenuOpen()) chromeForTab(wcId)?.focus();
+        sendToChrome('tab-load-failure', { wcId, failure: entry.loadFailure });
       })
     );
     wc.on(
       'did-navigate',
       guard(() => {
-        sendToChrome('tab-did-navigate', { wcId, url: wc.getURL() });
+        // Mission 20 Flight 1 (DD4): substitute the intended address for a live
+        // chrome-error: URL — the census, the address bar, and history must never
+        // see the error document's own URL.
+        const entry = resolveEntry();
+        const url = entry ? effectiveUrl(entry) : wc.getURL();
+        sendToChrome('tab-did-navigate', { wcId, url });
         sendToChrome('tab-nav-state', {
           wcId,
           canGoBack: wc.navigationHistory.canGoBack(),
           canGoForward: wc.navigationHistory.canGoForward()
         });
-        getHistoryRecorder()?.handleNavigation({ wcId, partition, url: wc.getURL() });
+        getHistoryRecorder()?.handleNavigation({ wcId, partition, url });
         // Squawk 0073: the URL changed — debounced snapshot re-arm.
         scheduleSnapshot?.();
       })
@@ -530,6 +608,20 @@ function createGuestWiring(deps) {
           canGoBack: wc.navigationHistory.canGoBack(),
           canGoForward: wc.navigationHistory.canGoForward()
         });
+        // Mission 20 Flight 1 Leg 3 (HAT H7): this handler fires AGAIN for the
+        // error document's own commit — that second commit is when the OS-
+        // focus steal into the hidden guest actually happens (the did-fail-load
+        // reassert above already lost that race once, since the error document
+        // hadn't committed yet). Reassert only while a failure is still
+        // recorded for this tab, it's the active tab, the guest currently
+        // holds OS focus, and no sheet menu is open (DD1 — an open menu is the
+        // operator's). Never mutates `entry.loadFailure` or sends anything
+        // else; a background tab's failure never touches focus.
+        const owner = registry.getWindowForGuest(wcId);
+        const entry = owner?.tabViews?.get(wcId);
+        if (entry?.loadFailure && owner?.activeTabWcId === wcId && wc.isFocused() && !owner?.sheet?.isMenuOpen()) {
+          chromeForTab(wcId)?.focus();
+        }
       })
     );
     wc.on(
