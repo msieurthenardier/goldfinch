@@ -694,3 +694,8 @@ still-uncommitted leg 1/2 tree.
   mechanism. Legs 1 and 2 → `completed`; committed as one flight commit; draft PR opened
   with the leg checklist. Leg 3 (HAT) stays `ready` for the operator — it commits on its own
   when the walk completes; the flight lands after it.
+- **2026-09-15 — committed `b0d9e0d`, pushed; draft PR #215 opened with the leg checklist.**
+  Rig torn down (app, TLS fixture, held key file). Leg 3 `hat-and-alignment` is `ready` and
+  waits for the operator at the window: the FD presents H1–H10 one at a time and fixes
+  inline; the HAT commits on its own (this branch), then the flight lands and the PR is
+  marked ready for review.
