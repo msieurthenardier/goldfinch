@@ -1,6 +1,6 @@
 # Flight: The Failure Surface and Navigation Errors
 
-**Status**: landed
+**Status**: completed
 **Mission**: [No Silent Failures](../../mission.md)
 
 ## Contributing to Criteria
