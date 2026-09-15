@@ -19,6 +19,7 @@
 // This module drives it via executeInRenderer (executeJavaScript under the hood).
 
 const { resolveContents, isInternalContents } = require('./resolve');
+const { LOAD_STATES } = require('../../shared/load-failure'); // Mission 20 F1 Leg 2 (AC8): census defaults
 
 /**
  * Map a raw per-tab array from the renderer hook's listTabs() into the
@@ -33,9 +34,9 @@ const { resolveContents, isInternalContents } = require('./resolve');
  * engine (allowInternal:true) KEEPS the internal goldfinch://settings tab in the
  * enumeration; jar/default engines drop it.
  *
- * @param {Array<{wcId: number|null, url: string, title: string, jarId: string|null, active: boolean}>|null} rawTabs
+ * @param {Array<{wcId: number|null, url: string, title: string, jarId: string|null, active: boolean, loadState?: string, loadError?: {code: number, name: string}|null}>|null} rawTabs
  * @param {{ fromId: (id: number) => any, chromeContents?: any, allowInternal?: boolean }} deps
- * @returns {{ wcId: number, url: string, title: string, jarId: string|null, active: boolean }[]}
+ * @returns {{ wcId: number, url: string, title: string, jarId: string|null, active: boolean, loadState: string, loadError: {code: number, name: string}|null }[]}
  */
 function mapEnumeratedTabs(rawTabs, { fromId, allowInternal = false }) {
   const out = [];
@@ -49,7 +50,17 @@ function mapEnumeratedTabs(rawTabs, { fromId, allowInternal = false }) {
     }
     if (!wc || wc.isDestroyed?.()) continue; // gone / destroyed
     if (!allowInternal && isInternalContents(wc)) continue; // DD5/DD6: internal dropped unless admin
-    out.push({ wcId: t.wcId, url: t.url, title: t.title, jarId: t.jarId, active: !!t.active });
+    out.push({
+      wcId: t.wcId,
+      url: t.url,
+      title: t.title,
+      jarId: t.jarId,
+      active: !!t.active,
+      // Mission 20 F1 Leg 2 (AC8): renderer-sourced; defaulted for any raw row
+      // predating this field (a mid-boot window's cached hook, if one exists).
+      loadState: t.loadState || LOAD_STATES.OK,
+      loadError: t.loadError || null
+    });
   }
   return out;
 }

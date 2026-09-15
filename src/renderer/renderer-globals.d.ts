@@ -498,6 +498,9 @@ interface GoldfinchBridge {
   onTabLoading(cb: (d: { wcId: number; loading: boolean }) => void): void;
   onTabDidFinishLoad(cb: (d: { wcId: number }) => void): void;
   onTabDomReady(cb: (d: { wcId: number }) => void): void;
+  onTabLoadFailure(
+    cb: (d: { wcId: number; failure: { code: number; name: string; url: string } | null }) => void
+  ): void;
   onTabMediaList(cb: (d: { wcId: number; mediaList: any[] }) => void): void;
   onTabPrivacyFp(cb: (d: { wcId: number; fpCounts: any }) => void): void;
   onTabSelfClose(cb: (d: { wcId: number; historyLength: number }) => void): void;

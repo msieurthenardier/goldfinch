@@ -166,7 +166,38 @@ const SEAM_COUNT = 36;
 // open() rides the chrome-measured #webviews slot rect so main can place the
 // sheet when the active tab is a viewless welcome record — the findTabByWcId
 // one-dep-line precedent; all rationale lives in overlay-menus.js.
-const RENDERER_LINE_BUDGET = 1836;
+// Mission 20 F1 Leg 2 (load-failure-surface-chrome): +22 (1835 → 1857) for the
+// load-failure panel's construction glue — all business logic stays in the new
+// load-failure-controller.js. Counted: 2 import lines (createLoadFailureController,
+// classifyLoadFailure); 1 `let loadFailureController` declaration; 2 dep lines
+// (showLoadFailurePanel/hideLoadFailurePanel) added to tab-controller.js's deps
+// object; the 6-line showLoadFailurePanel/hideLoadFailurePanel wrapper-function
+// pair (Prettier always expands a `function` declaration's body onto its own
+// line — a bare `function f() { return x; }` is reformatted to three lines,
+// which is why this pair costs 6 lines rather than the leg's Context-section
+// pre-implementation estimate of "2-4"); the 8-line loadFailureController
+// construction call (six named deps, each forced onto its own line — the
+// object's single-line form is well over the 120-char print width regardless
+// of identifier choice); 1 dep line into the shortcut controller
+// (focusLoadFailureHeading); and the 1-line onTabTitle title-clobber guard.
+// Deviation (flagged for review): the leg's Context arithmetic estimated
+// "about +14, landing near 1849" and set 1850 as the divert ceiling; the
+// measured total is +22 (1857), 7 over that ceiling. The gap is exactly the
+// two items above the pre-implementation estimate could not have gotten
+// right without running Prettier: the wrapper-function pair's true 6-line
+// cost (not 2-4), and the tab-controller.js deps-object growth (2 lines) the
+// Context's itemized list omitted entirely. No architectural extraction
+// boundary is at fault — every line here is either an import, a hoisted
+// wrapper function (AC3 requires two, "never the controller object"), or one
+// named entry in a deps object AC1 specifies exactly — zero-headroom policy,
+// same as every prior entry in this history.
+// Post-acceptance fix pass (F1, 2026-09-15): +1 (1857 → 1858) for the single
+// `updateAddressChip` dep line added to the loadFailureController construction
+// call (renderer.js's own `updateAddressChip` function, injected so the
+// controller can sync the address bar/chip on an active-tab failure push —
+// see load-failure-controller.js). No other renderer.js line changed. Zero
+// headroom, same policy as every prior entry.
+const RENDERER_LINE_BUDGET = 1858;
 
 // Bookmarks-bar line budget (squawk 0025, M15 debrief finding F25): bar/
 // overflow rendering, measurement, and dispatch business logic lives in

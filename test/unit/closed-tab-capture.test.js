@@ -40,8 +40,14 @@ function makeWc({
   };
 }
 
-function makeTabEntry({ partition = 'persist:jar-work', trusted = false, wc = makeWc() } = {}) {
-  return { view: { webContents: wc }, partition, trusted, active: false };
+function makeTabEntry({
+  partition = 'persist:jar-work',
+  trusted = false,
+  wc = makeWc(),
+  loadFailure = null,
+  lastRequestedUrl = null
+} = {}) {
+  return { view: { webContents: wc }, partition, trusted, active: false, loadFailure, lastRequestedUrl };
 }
 
 const JARS = [
@@ -206,4 +212,33 @@ test('reopenStripIndex passes the append sentinel through unchanged for whole-wi
 
 test('APPEND_SENTINEL is -1 (the renderer treats any negative insertAt as append)', () => {
   assert.equal(APPEND_SENTINEL, -1);
+});
+
+// --- Mission 20 Flight 1 (DD4/AC6): a failed tab's closed-tab entry carries ---
+// --- the intended URL, never the live chrome-error: document -----------------
+
+test('AC6: a failed tab captures its lastRequestedUrl, never the live chrome-error: document', () => {
+  const wc = makeWc({ url: 'chrome-error://chromewebdata/' });
+  const entry = captureClosedTabEntry({
+    tabEntry: makeTabEntry({
+      wc,
+      loadFailure: { code: -105, name: 'ERR_NAME_NOT_RESOLVED', url: 'http://nonexistent-host-abc123xyz.invalid/' },
+      lastRequestedUrl: 'http://nonexistent-host-abc123xyz.invalid/'
+    }),
+    jarsList: JARS,
+    stripIndex: 2,
+    windowId: 1
+  });
+  assert.ok(entry);
+  assert.equal(entry.url, 'http://nonexistent-host-abc123xyz.invalid/');
+});
+
+test('AC6: a healthy tab (no failure) still captures the live URL as before', () => {
+  const entry = captureClosedTabEntry({
+    tabEntry: makeTabEntry({ wc: makeWc({ url: 'https://healthy.example/' }) }),
+    jarsList: JARS,
+    stripIndex: 0,
+    windowId: 1
+  });
+  assert.equal(entry.url, 'https://healthy.example/');
 });

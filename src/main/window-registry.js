@@ -32,6 +32,13 @@
 /**
  * @typedef {{ id: number, [k: string]: any }} WinLike
  * @typedef {{ webContents: any, [k: string]: any }} ChromeViewLike
+ * A `tabViews` entry (Mission 20 Flight 1, DD2/AC2) additionally carries
+ * `loadFailure: { code: number, name: string, url: string } | null` (the
+ * recorded `did-fail-load` args, or `null` once cleared) and
+ * `lastRequestedUrl: string | null` (the most recently requested address,
+ * stamped at every request site — `tab-entry-url.js`'s `effectiveUrl`
+ * substitutes it for a live `chrome-error:` URL).
+ *
  * @typedef {{
  *   win: WinLike,
  *   chromeView: ChromeViewLike,

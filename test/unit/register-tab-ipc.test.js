@@ -1241,3 +1241,149 @@ test("AC8: the drop navigation dies at the REAL gate — tab-navigate's trust-br
   assert.equal(h.log.filter((x) => x[0] === 'load' && x[1] === 101).length, 1, 'the legitimate bookmark url loads');
   void guest;
 });
+
+// ---------------------------------------------------------------------------
+// Mission 20 Flight 1 (DD1/DD2/AC2/AC5/AC7/AC9): entry fields, the two-axis
+// visibility/focus invariant, and the adopt-time failure re-push.
+// ---------------------------------------------------------------------------
+
+test('AC2: tab-create seeds loadFailure: null and lastRequestedUrl from the loadURL argument', async () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  const wcId = await h.ipcMain.invoke('tab-create', source.chromeView.webContents, {
+    url: 'https://example.test/page',
+    partition: 'persist:jar-a',
+    trusted: false
+  });
+  const entry = source.tabViews.get(wcId);
+  assert.equal(entry.loadFailure, null);
+  assert.equal(entry.lastRequestedUrl, 'https://example.test/page');
+});
+
+test('AC2: tab-create restore branch seeds lastRequestedUrl from the active history entry', async () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  const wcId = await h.ipcMain.invoke('tab-create', source.chromeView.webContents, {
+    url: 'https://ignored.test/',
+    partition: 'persist:jar-a',
+    trusted: false,
+    restoreHistory: {
+      entries: [{ url: 'https://first.test/' }, { url: 'https://second.test/' }],
+      index: 1
+    }
+  });
+  const entry = source.tabViews.get(wcId);
+  assert.equal(entry.loadFailure, null);
+  assert.equal(entry.lastRequestedUrl, 'https://second.test/');
+});
+
+test('AC7: tab-set-active hides (never shows) an incoming tab carrying a load failure, and never focuses it', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  h.addTab(record, 101);
+  const incoming = h.addTab(record, 102);
+  incoming.webContents.destroyed = false;
+  record.tabViews.get(102).loadFailure = { code: -105, name: 'ERR_NAME_NOT_RESOLVED', url: 'http://x.invalid/' };
+  record.activeTabWcId = 101;
+  h.log.length = 0;
+  h.ipcMain.send('tab-set-active', record.chromeView.webContents, {
+    wcId: 102,
+    bounds: { x: 0, y: 0, width: 900, height: 700 }
+  });
+  assert.deepEqual(
+    h.log.filter((x) => x[0] === 'visible' && x[1] === 102),
+    [['visible', 102, false]],
+    'applyGuestVisibility hides a failed incoming tab'
+  );
+  assert.deepEqual(
+    h.log.filter((x) => x[0] === 'focus-wc' && x[1] === 102),
+    [],
+    'a failed incoming tab never receives OS focus, even when the outgoing tab was page-focused'
+  );
+  assert.equal(record.tabViews.get(102).active, true, 'entry.active is still set — the tab IS active, just hidden');
+});
+
+test('AC7: tab-set-active shows a clean incoming tab as before (no regression)', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  h.addTab(record, 101);
+  h.addTab(record, 102);
+  record.activeTabWcId = 101;
+  h.log.length = 0;
+  h.ipcMain.send('tab-set-active', record.chromeView.webContents, {
+    wcId: 102,
+    bounds: { x: 0, y: 0, width: 900, height: 700 }
+  });
+  assert.deepEqual(
+    h.log.filter((x) => x[0] === 'visible' && x[1] === 102),
+    [['visible', 102, true]]
+  );
+});
+
+test('AC7: tab-focus-guest refuses a failed active tab without calling focus()', async () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  h.addTab(record, 101);
+  record.tabViews.get(101).loadFailure = { code: -102, name: 'ERR_CONNECTION_REFUSED', url: 'http://127.0.0.1:1/' };
+  record.activeTabWcId = 101;
+  h.log.length = 0;
+  const ok = await h.ipcMain.invoke('tab-focus-guest', record.chromeView.webContents);
+  assert.equal(ok, false);
+  assert.deepEqual(
+    h.log.filter((e) => e[0] === 'focus-wc'),
+    []
+  );
+});
+
+test('AC5: tab-navigate loadURL stamps lastRequestedUrl on the entry before issuing the load', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  h.addTab(record, 101);
+  h.ipcMain.send('tab-navigate', record.chromeView.webContents, {
+    wcId: 101,
+    verb: 'loadURL',
+    args: ['https://retried.test/']
+  });
+  assert.equal(record.tabViews.get(101).lastRequestedUrl, 'https://retried.test/');
+});
+
+test('AC9: a move re-pushes tab-load-failure to the target AFTER adopt-tab when the moved entry carries a failure', () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  const target = h.makeRecord(2);
+  h.addTab(source, 101);
+  const failure = { code: -105, name: 'ERR_NAME_NOT_RESOLVED', url: 'http://x.invalid/' };
+  source.tabViews.get(101).loadFailure = failure;
+
+  const result = h.ipcMain.invoke('tab-move-to-window', source.chromeView.webContents, { wcId: 101, windowId: 2 });
+  assert.deepEqual(result, { ok: true, windowId: 2 });
+
+  const targetChromeId = target.chromeView.webContents.id;
+  const sends = h.log.filter((x) => x[0] === 'send' && x[1] === targetChromeId);
+  const adoptIdx = sends.findIndex((x) => x[2] === 'adopt-tab');
+  const failureIdx = sends.findIndex((x) => x[2] === 'tab-load-failure');
+  assert.ok(adoptIdx !== -1, 'adopt-tab was sent');
+  assert.ok(failureIdx !== -1, 'tab-load-failure was re-pushed');
+  assert.ok(failureIdx > adoptIdx, 'the re-push lands strictly AFTER the adopt payload');
+  assert.deepEqual(sends[failureIdx][3], { wcId: 101, failure });
+  // The moved guest stays hidden across the re-parent (AC7).
+  assert.deepEqual(
+    h.log.filter((x) => x[0] === 'visible' && x[1] === 101),
+    [['visible', 101, false]]
+  );
+});
+
+test('AC9: a move of a clean (non-failed) entry sends no tab-load-failure re-push', () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  const target = h.makeRecord(2);
+  h.addTab(source, 101);
+  h.ipcMain.invoke('tab-move-to-window', source.chromeView.webContents, { wcId: 101, windowId: 2 });
+  const targetChromeId = target.chromeView.webContents.id;
+  const sends = h.log.filter((x) => x[0] === 'send' && x[1] === targetChromeId && x[2] === 'tab-load-failure');
+  assert.deepEqual(sends, []);
+  assert.deepEqual(
+    h.log.filter((x) => x[0] === 'visible' && x[1] === 101),
+    [['visible', 101, true]]
+  );
+});

@@ -304,6 +304,22 @@ html.platform-darwin #window-controls {
   flex: none;
   border-radius: 3px;
 }
+/* Load-failure strip state (Mission 20 F1 Leg 2, DD6/AC4): the glyph occupies
+   the favicon's own slot (same width) — no new @container disclosure stage is
+   needed, the existing title-hide/close-hide/padding-compress stages apply
+   unchanged. .tab-status is the ONLY writer target load-failure-controller.js
+   touches on the strip (applyStripState). */
+.tab .tab-status {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  text-align: center;
+  line-height: 14px;
+  font-size: 12px;
+}
+.tab[data-load-state='failed'] .tab-fav {
+  display: none;
+}
 .tab .tab-close {
   flex: none;
   width: 16px;
@@ -879,6 +895,63 @@ a:focus-visible {
 #welcome-surface .muted {
   color: var(--wl-fg-dim);
   font-size: 13px;
+}
+
+/* Load-failure surface (Mission 20 F1 Leg 2, DD1/DD10): a CSS child of
+   #webviews, the same "no rect measurement, no resize wiring" position as
+   #welcome-surface immediately above — a failed tab's guest is hidden
+   main-side, so nothing composites over this either (the two panels are
+   mutually exclusive per DD1, hence duplicated tokens rather than a shared
+   selector spanning both independently-hidden sections). No
+   transition/animation on anything here — the guest slot itself is
+   unchanged, this is a sibling overlay (native-surface invariant). */
+#load-failure-surface {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  --lf-bg: #ffffff;
+  --lf-fg: #1e1f25;
+  --lf-fg-dim: #5c5f6b;
+  --lf-accent: var(--accent);
+  color: var(--lf-fg);
+  background: var(--lf-bg);
+}
+#load-failure-surface.hidden {
+  display: none;
+}
+.load-failure-column {
+  max-width: 480px;
+  margin: 80px auto 0;
+  padding: 0 24px;
+  text-align: center;
+}
+#load-failure-heading {
+  margin: 0 0 12px;
+}
+#load-failure-body {
+  margin: 0 0 16px;
+  color: var(--lf-fg-dim);
+}
+#load-failure-url,
+#load-failure-code {
+  margin: 0 0 4px;
+  font-size: 13px;
+  color: var(--lf-fg-dim);
+  word-break: break-all;
+}
+#load-failure-retry {
+  margin-top: 16px;
+  padding: 8px 20px;
+  border-radius: 6px;
+  border: none;
+  background: var(--lf-accent);
+  color: var(--accent-fg);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+#load-failure-retry.hidden {
+  display: none;
 }
 
 .welcome-column {

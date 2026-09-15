@@ -145,8 +145,8 @@ the `LOAD_STATES` enum (`ok`, `failed` in this flight; Flights 2 and 3 append
 `ERR_EMPTY_RESPONSE`), `cert` (every `ERR_CERT_*`), `tls`
 (`ERR_SSL_PROTOCOL_ERROR`, `ERR_SSL_VERSION_OR_CIPHER_MISMATCH`), `blocked`
 (`ERR_BLOCKED_BY_CLIENT`, `ERR_BLOCKED_BY_RESPONSE`), `redirect-loop`
-(`ERR_TOO_MANY_REDIRECTS`), `scheme` (`ERR_UNKNOWN_URL_SCHEME`), `unknown`
-(everything else). Match on the `name` string first (stable across Chromium),
+(`ERR_TOO_MANY_REDIRECTS`), `scheme` (`ERR_UNKNOWN_URL_SCHEME`), `unsafe-port` (`ERR_UNSAFE_PORT`, added
+at leg 2 after the spike), `unknown` (everything else). Match on the `name` string first (stable across Chromium),
 code second. Title/body strings live in the model; the raw name and the
 intended address render as separate `textContent` lines.
 - Rationale: the `page-context-model.js` / `tab-context-model.js` precedent —
@@ -273,7 +273,11 @@ handled deliberately.
 - Read paths cited: `tabs.js:52` row shape (+ new fields), `captureWindow`
   admin tool, `getChromeTarget` → chrome wcId.
 
-**DD12 — Fixtures: nothing new on disk.** Refused → `http://127.0.0.1:1/`.
+**DD12 — Fixtures: nothing new on disk.** Refused → `http://127.0.0.1:{P}/`
+with nothing listening on the bind-probed free port `{P}` (amended after the
+leg-1 spike: `http://127.0.0.1:1/` fails as `ERR_UNSAFE_PORT`, code -312,
+Chromium's restricted-port list — it exercises the panel but not the
+`refused` kind; the a11y audit keeps port 1 for exactly that reason, DD13).
 DNS → `http://nonexistent-host-abc123xyz.invalid/`. Certificate →
 `tests/behavior/fixtures/web-compat/serve-tls.mjs` (throwaway CA) with the
 app launched WITHOUT `--insecure-tls-fixtures` → `ERR_CERT_AUTHORITY_INVALID`.
@@ -348,8 +352,8 @@ new finding is a real finding; no `ACCEPTED` entry is pre-added.
 
 ### Checkpoints
 
-- [ ] CP1 — Spike findings logged (DD2/DD4/DD5 premises settled on the rig)
-- [ ] CP2 — Model + main wiring landed; `npm test` green; a failed tab's
+- [x] CP1 — Spike findings logged (DD2/DD4/DD5 premises settled on the rig)
+- [x] CP2 — Model + main wiring landed; `npm test` green; a failed tab's
       guest is hidden and its snapshot/closed-tab URL is the intended one
 - [ ] CP3 — Chrome surface renders for refused/DNS/cert on the live rig;
       census reports `failed` + code; retry recovers
@@ -382,13 +386,13 @@ new finding is a real finding; no `ACCEPTED` entry is pre-added.
 > and created one at a time as the flight progresses. This list will evolve
 > based on discoveries during implementation.
 
-- [ ] `load-failure-model-and-main-wiring` — spike (CP1), shared
+- [x] `load-failure-model-and-main-wiring` — spike (CP1), shared
       classification model + enum, registry fields, `did-fail-load` handler
       and clear, visibility invariant, `effectiveUrl` in the three consumers,
       find exclusion, adopt re-push, `tab-load-failure` preload/typing, unit
       tests. Ends with a failed tab whose guest is hidden and whose census
       URL, snapshot, and closed-tab entry all carry the intended address.
-- [ ] `load-failure-surface-chrome` — the controller, markup, CSS, strip
+- [x] `load-failure-surface-chrome` — the controller, markup, CSS, strip
       state, address-bar preservation, retry, census fields + tool docs, a11y
       state, README/CLAUDE.md updates; runs `navigation-failure-surface` and
       `npm run a11y` as its acceptance gate.

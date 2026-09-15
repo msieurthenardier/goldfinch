@@ -90,6 +90,38 @@ test('mapEnumeratedTabs: valid guest tab is kept and shaped correctly', () => {
   assert.equal(tab.active, true);
 });
 
+// ---------------------------------------------------------------------------
+// Mission 20 F1 Leg 2 (AC8): loadState / loadError pass-through + defaults
+// ---------------------------------------------------------------------------
+
+test('mapEnumeratedTabs: loadState/loadError pass through unchanged when present', () => {
+  const wc = makeGuestWc(11);
+  const rawTabs = [
+    {
+      wcId: 11,
+      url: 'http://127.0.0.1:1/',
+      title: 'New tab',
+      jarId: 'default',
+      active: true,
+      loadState: 'failed',
+      loadError: { code: -312, name: 'ERR_UNSAFE_PORT' }
+    }
+  ];
+  const result = mapEnumeratedTabs(rawTabs, { fromId: makeFakeFromId({ 11: wc }), chromeContents: null });
+  assert.equal(result.length, 1);
+  assert.equal(result[0].loadState, 'failed');
+  assert.deepEqual(result[0].loadError, { code: -312, name: 'ERR_UNSAFE_PORT' });
+});
+
+test('mapEnumeratedTabs: loadState defaults to ok and loadError to null when absent from the raw row', () => {
+  const wc = makeGuestWc(12);
+  const rawTabs = [{ wcId: 12, url: 'https://example.com', title: 'Example', jarId: 'default', active: false }];
+  const result = mapEnumeratedTabs(rawTabs, { fromId: makeFakeFromId({ 12: wc }), chromeContents: null });
+  assert.equal(result.length, 1);
+  assert.equal(result[0].loadState, 'ok');
+  assert.equal(result[0].loadError, null);
+});
+
 test('mapEnumeratedTabs: null wcId (tab not yet at dom-ready) is dropped', () => {
   const rawTabs = [{ wcId: null, url: 'https://example.com', title: 'Loading', jarId: 'default', active: false }];
   const result = mapEnumeratedTabs(rawTabs, { fromId: makeFakeFromId({}), chromeContents: null });

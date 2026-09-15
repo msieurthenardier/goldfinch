@@ -41,6 +41,8 @@ import { createShortcutController } from './chrome/shortcut-controller.js';
 import { createTabController } from './chrome/tab-controller.js';
 import { createWindowController } from './chrome/window-controller.js';
 import { createWelcomeController } from './chrome/welcome-controller.js';
+import { createLoadFailureController } from './chrome/load-failure-controller.js';
+import { classifyLoadFailure } from '../shared/load-failure.js'; // Mission 20 F1 Leg 2
 import {
   buildKebabModel,
   chromePointToSheet as convertChromePointToSheet,
@@ -99,6 +101,7 @@ let shortcutController;
 let pageActions;
 let bookmarksBarController;
 let welcomeController;
+let loadFailureController;
 const jarsClient = createJarsClient({
   bridge: window.goldfinch,
   ctx,
@@ -184,7 +187,9 @@ tabController = createTabController({
   setDevtoolsPressed,
   refreshBookmarksSurfaces,
   showWelcomePanel,
-  hideWelcomePanel
+  hideWelcomePanel,
+  showLoadFailurePanel,
+  hideLoadFailurePanel
 });
 
 const {
@@ -212,6 +217,12 @@ function showWelcomePanel(tab) {
 function hideWelcomePanel() {
   return welcomeController.hide();
 } // M16 F2 Leg 1
+function showLoadFailurePanel(tab) {
+  return loadFailureController.show(tab);
+} // Mission 20 F1 Leg 2
+function hideLoadFailurePanel() {
+  return loadFailureController.hide();
+} // Mission 20 F1 Leg 2
 function updateAddressChip(tab) {
   return navigationController.updateAddressChip(tab);
 }
@@ -629,6 +640,15 @@ welcomeController = createWelcomeController({
   currentHomePage,
   normalizeHomePageInput // M16 F2 Leg 2 (DD7) / F3 Leg 2 (HAT item 5): engine block data + attach/gating reads + the domain-normalize rule
 });
+loadFailureController = createLoadFailureController({
+  document,
+  els,
+  bridge: window.goldfinch,
+  findTabByWcId,
+  isActiveTab: (tab) => tab.id === ctx.activeTabId,
+  classifyLoadFailure, // Mission 20 F1 Leg 2 (DD1)
+  updateAddressChip // F1 fix pass: sync the bar on an active-tab failure push
+});
 
 shortcutController = createShortcutController({
   window,
@@ -653,7 +673,8 @@ shortcutController = createShortcutController({
   // Ctrl+D (M15 F1 Leg 2, flight DD5): behaves exactly like a star click — the
   // one shared handler (star click / Ctrl+D / page-context "Bookmark this
   // page" all funnel through it).
-  handleBookmarkStarActivate
+  handleBookmarkStarActivate,
+  focusLoadFailureHeading: loadFailureController.focusHeading // Mission 20 F1 Leg 2, DD6: F6 routing
 });
 
 // Static kebab model — labels rendered via textContent in the sheet (DD8).
@@ -1569,6 +1590,7 @@ window.goldfinch.onTabTitle(({ wcId, title }) => {
   const tab = findTabByWcId(wcId);
   if (!tab) return;
   tab.title = title;
+  if (tab.loadFailure) return; // Mission 20 F1 L2 (AC5): a late/empty error-document title must not clobber the strip's host title.
   tab.btn.querySelector('.tab-title').textContent = title || tab.url;
   tab.btn.title = title || '';
   const name = title || tab.url;

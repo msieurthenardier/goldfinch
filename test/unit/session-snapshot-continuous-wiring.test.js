@@ -99,8 +99,12 @@ test('register-tab-ipc.js destructures scheduleSnapshot from deps', () => {
 // trailing `// Squawk 0073: …` comment + `scheduleSnapshot?.();` call (dropped) — `\s*`
 // between every token so a Prettier re-wrap of the (sometimes very long) anchor statement
 // can't silently stale the match, and no code is re-typed in the replacement string.
+// Mission 20 Flight 1 (AC2): the object literal grew two fields (`loadFailure`,
+// `lastRequestedUrl`) — the anchor now matches through `lastRequestedUrl: …` rather
+// than stopping dead at `active: false`, so a further field added later stays
+// wrap-insensitive too.
 const TAB_CREATE_ARM_RE =
-  /(rec\.tabViews\.set\(\s*wcId,\s*\{\s*view,\s*partition:\s*trusted\s*\?\s*INTERNAL_PARTITION\s*:\s*partition,\s*trusted,\s*active:\s*false\s*\}\s*\);)\s*\/\/[^\n]*\n\s*scheduleSnapshot\?\.\(\);/;
+  /(rec\.tabViews\.set\(\s*wcId,\s*\{\s*view,\s*partition:\s*trusted\s*\?\s*INTERNAL_PARTITION\s*:\s*partition,\s*trusted,\s*active:\s*false,\s*loadFailure:\s*null,\s*lastRequestedUrl:\s*initialLastRequestedUrl\s*\}\s*\);)\s*\/\/[^\n]*\n\s*scheduleSnapshot\?\.\(\);/;
 const TAB_CLOSE_ARM_RE = /(owner\.tabViews\.delete\(\s*wcId\s*\);)\s*\/\/[^\n]*\n\s*scheduleSnapshot\?\.\(\);/;
 // tab-hide and tab-set-active share BYTE-IDENTICAL Squawk 0073 comment text ("`active` is
 // part of the snapshot — …") — disambiguation comes entirely from each regex's own anchor
@@ -230,8 +234,14 @@ test('guest-wiring.js destructures scheduleSnapshot from deps', () => {
 // with a negative lookahead against a subsequent `wc.on(` registration, so if a handler's
 // own arm site were ever missing, the non-greedy middle section could not silently walk
 // forward into the NEXT handler's call and match there instead.
+// Mission 20 Flight 1 (DD4/AC6): did-navigate's own handleNavigation call now reads
+// the effectiveUrl-substituted local `url` (never a bare `wc.getURL()` — the census/
+// history must never see a live chrome-error: document); did-navigate-in-page is
+// UNCHANGED (AC6 — an in-page navigation cannot land on an error document), still
+// `url: wc.getURL()`, which is exactly what disambiguates the two sibling anchors now
+// that both are no longer byte-identical past their own `wc.on(` prefix.
 const DID_NAVIGATE_ARM_RE =
-  /(wc\.on\(\s*'did-navigate',(?:(?!\n\s*wc\.on\()[\s\S])*?getHistoryRecorder\(\)\?\.handleNavigation\(\{\s*wcId,\s*partition,\s*url:\s*wc\.getURL\(\)\s*\}\);)\s*\/\/[^\n]*\n\s*scheduleSnapshot\?\.\(\);/;
+  /(wc\.on\(\s*'did-navigate',(?:(?!\n\s*wc\.on\()[\s\S])*?getHistoryRecorder\(\)\?\.handleNavigation\(\{\s*wcId,\s*partition,\s*url\s*\}\);)\s*\/\/[^\n]*\n\s*scheduleSnapshot\?\.\(\);/;
 const DID_NAVIGATE_IN_PAGE_ARM_RE =
   /(wc\.on\(\s*'did-navigate-in-page',(?:(?!\n\s*wc\.on\()[\s\S])*?getHistoryRecorder\(\)\?\.handleNavigation\(\{\s*wcId,\s*partition,\s*url:\s*wc\.getURL\(\)\s*\}\);)\s*\/\/[^\n]*\n\s*scheduleSnapshot\?\.\(\);/;
 

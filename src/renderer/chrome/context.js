@@ -69,7 +69,10 @@ const IDS = {
   bookmarksOverflow: 'bookmarks-overflow',
   // Welcome surface (M16 F2 Leg 1, DD1): the chrome-rendered panel a viewless
   // welcome tab shows in the guest slot; welcome-controller.js owns its content.
-  welcomeSurface: 'welcome-surface'
+  welcomeSurface: 'welcome-surface',
+  // Load-failure surface (Mission 20 F1 Leg 2, DD1): the chrome-rendered panel
+  // a failed tab shows in the guest slot; load-failure-controller.js owns it.
+  loadFailureSurface: 'load-failure-surface'
 };
 
 export function createChromeContext({ document, goldfinch }) {

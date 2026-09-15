@@ -4,6 +4,24 @@
 const { isBurnerPartition } = require('../shared/burner');
 
 /**
+ * Mission 20 Flight 1 (DD1/AC7): the ONE two-axis visibility/focus invariant
+ * for a guest view — a guest is visible iff its tab is active AND its entry
+ * carries no load failure. TOP-LEVEL (not nested in `registerTabIpc(deps)`'s
+ * closure like `queueChromeSend`/`ownsTab`): it needs no injected deps, and
+ * `guest-wiring.js` — a different module — reaches it via `main.js` deps
+ * threading (`createGuestWiring`'s deps object), not a direct require, so the
+ * guest-wiring unit suite can inject a recording fake for the AC3 call-order
+ * assertion. Every guest SHOW site in this file calls it; a guest never
+ * receives OS focus while its entry carries a load failure (the two call
+ * sites below and `tab-focus-guest` each enforce the focus half themselves).
+ * @param {{ view: { webContents: any, setVisible: (v: boolean) => void }, active?: boolean, loadFailure?: any } | null | undefined} entry
+ */
+function applyGuestVisibility(entry) {
+  if (!entry || !entry.view || entry.view.webContents.isDestroyed()) return;
+  entry.view.setVisible(!!entry.active && !entry.loadFailure);
+}
+
+/**
  * Register the complete tab lifecycle and cross-window move surface.
  * Electron constructors and every ownership authority are injected.
  * @param {any} deps
@@ -151,7 +169,23 @@ function registerTabIpc(deps) {
     view.setVisible(false);
 
     const wcId = view.webContents.id;
-    rec.tabViews.set(wcId, { view, partition: trusted ? INTERNAL_PARTITION : partition, trusted, active: false });
+    // Mission 20 Flight 1 (DD2/AC2): `loadFailure` starts unset; `lastRequestedUrl`
+    // seeds from whichever request is about to fire below — the restored entry's
+    // own URL at its active index on the restore branch (`navigationHistory.restore()`
+    // may not raise `did-start-navigation` the same way a fresh load does), else the
+    // `loadURL` argument itself.
+    const initialLastRequestedUrl =
+      restoreHistory && Array.isArray(restoreHistory.entries)
+        ? (restoreHistory.entries[restoreHistory.index]?.url ?? null)
+        : (url ?? null);
+    rec.tabViews.set(wcId, {
+      view,
+      partition: trusted ? INTERNAL_PARTITION : partition,
+      trusted,
+      active: false,
+      loadFailure: null,
+      lastRequestedUrl: initialLastRequestedUrl
+    });
     // Squawk 0073: a new tab is new topology — debounced snapshot re-arm.
     scheduleSnapshot?.();
 
@@ -485,7 +519,14 @@ function registerTabIpc(deps) {
     // stale rect for one frame; the target's adopt-tab → activateTab → tab-set-active
     // re-sends the real bounds, which is the same correction every activation makes.
     entry.view.setBounds(guestBounds);
-    entry.view.setVisible(true);
+    // Mission 20 Flight 1 (DD1/AC7): `entry.active = true` moves HERE, before the
+    // visibility helper call — it was previously set after the tabViews delete/set
+    // pair below (a plain field reassignment outside that pair, so the DD1 synchrony
+    // invariant is untouched either way). `applyGuestVisibility` replaces the unconditional
+    // guest show call: a moved tab carrying a load failure stays hidden across the window
+    // re-parent.
+    entry.active = true;
+    applyGuestVisibility(entry);
 
     // Move the tabViews entry between records + update activeTabWcId both sides.
     // Event-time class-3 routing (DD2) makes the per-tab main→chrome fan re-bind
@@ -508,7 +549,6 @@ function registerTabIpc(deps) {
     // (menu move-to-new-window, keyboard move-to-window, drag tear-off, drag adopt)
     // since they all funnel through this shared core.
     scheduleSnapshot?.();
-    entry.active = true;
     if (source.activeTabWcId === p.wcId) source.activeTabWcId = null;
     // M14 F2 L1 (step 3b): re-key this tab's popups to the DESTINATION record —
     // DD1f closes popups with their CURRENT owning window, so a popup whose
@@ -593,6 +633,13 @@ function registerTabIpc(deps) {
     // payload's main-authoritative url/title and the nav-state read off the live
     // wc at DELIVERY time.
     queueChromeSend(target, () => ['adopt-tab', buildAdoptPayload(p, wc)]);
+    // Mission 20 Flight 1 (DD8/AC9): the adopting window's chrome has no record of
+    // a failure recorded before the move — re-push it, queued on the SAME boot-gated
+    // path so it lands right after the adopt payload. The moved guest already stays
+    // hidden (AC7, above); this only re-syncs the adopting chrome's own record/panel.
+    if (entry.loadFailure) {
+      queueChromeSend(target, () => ['tab-load-failure', { wcId: p.wcId, failure: entry.loadFailure }]);
+    }
     queueChromeSend(target, () => [
       'tab-nav-state',
       {
@@ -892,6 +939,10 @@ function registerTabIpc(deps) {
       const isInternal = entry ? entry.trusted : isInternalContents(wc);
       const safe = isInternal ? isInternalPageUrl(args[0]) : isSafeTabUrl(args[0]);
       if (!safe) return;
+      // Mission 20 Flight 1 (DD2/AC5): stamp the requested address BEFORE issuing the
+      // load — the `did-start-navigation` clear (guest-wiring.js) covers page-initiated
+      // navigations; this covers the chrome-initiated ones (address bar, Retry).
+      if (entry) entry.lastRequestedUrl = args[0];
       wc.loadURL(args[0]).catch((err) => {
         logger.warn('[tab-navigate] loadURL rejected:', err && (err.code || err.message || err));
       });
@@ -922,7 +973,10 @@ function registerTabIpc(deps) {
     const wcId = rec.activeTabWcId;
     if (wcId == null) return false;
     const entry = rec.tabViews.get(wcId);
-    if (!entry || entry.view.webContents.isDestroyed()) return false;
+    // Mission 20 Flight 1 (DD1/AC7): a failed active tab refuses the F6 gesture —
+    // the guest never receives OS focus while its entry carries a load failure; the
+    // chrome moves focus into the panel instead (its own responsibility, DD6).
+    if (!entry || entry.view.webContents.isDestroyed() || entry.loadFailure) return false;
     entry.view.webContents.focus();
     return true;
   });
@@ -952,7 +1006,7 @@ function registerTabIpc(deps) {
     // guest's before-input-event; AC5 strip nav / find / sheet are preserved untouched.
     // getTabContents already null-guards a missing/destroyed guest.
     const wasPageFocused = owner.activeTabWcId != null && !!getTabContents(owner.activeTabWcId)?.isFocused();
-    // Atomic: set-bounds → setVisible(true) incoming → setVisible(false) outgoing
+    // Atomic: set-bounds → show incoming (via applyGuestVisibility) → setVisible(false) outgoing
     const entry = owner.tabViews.get(wcId);
     if (entry) {
       // Hoisted rounded bounds so the guest setBounds and the overlay bounds-sync below
@@ -972,10 +1026,11 @@ function registerTabIpc(deps) {
           entry.view.setBounds(rounded);
         }
       }
-      if (!entry.view.webContents.isDestroyed()) {
-        entry.view.setVisible(true);
-      }
+      // Mission 20 Flight 1 (DD1/AC7): `entry.active = true` set BEFORE the visibility
+      // helper call — `applyGuestVisibility` replaces the unconditional guest show so a
+      // failed incoming tab stays hidden.
       entry.active = true;
+      applyGuestVisibility(entry);
       // Raise the active guest view to the top so page input works.
       if (!owner.win.isDestroyed()) {
         owner.win.contentView.addChildView(entry.view);
@@ -984,7 +1039,9 @@ function registerTabIpc(deps) {
       // page-focused (captured above), so a page-content Ctrl+#/Ctrl+Tab does not orphan OS
       // focus. Internal/trusted incoming tabs are focused too (deliberate: cycling INTO a
       // goldfinch:// page must not re-orphan focus).
-      if (wasPageFocused && !entry.view.webContents.isDestroyed()) {
+      // Mission 20 Flight 1 (DD1/AC7): the re-arm is skipped for a failed incoming
+      // tab — the guest never receives OS focus while its entry carries a failure.
+      if (wasPageFocused && !entry.view.webContents.isDestroyed() && !entry.loadFailure) {
         entry.view.webContents.focus();
       }
       // Find-overlay z-order re-assert (DD2 invariant): strictly AFTER the guest re-add
@@ -1110,4 +1167,4 @@ function registerTabIpc(deps) {
   });
 }
 
-module.exports = { registerTabIpc };
+module.exports = { registerTabIpc, applyGuestVisibility };

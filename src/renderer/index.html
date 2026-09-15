@@ -358,6 +358,11 @@
              absolutely-inset children) — no rect measurement, no resize
              wiring. Content is built/updated by welcome-controller.js. -->
         <section id="welcome-surface" class="hidden" aria-labelledby="welcome-heading"></section>
+        <!-- Load-failure surface (Mission 20 F1 Leg 2, DD1): the chrome-rendered
+             panel shown while the active tab's own navigation has failed (the
+             guest is hidden main-side — CLAUDE.md's WebContentsView z-order
+             note). Content is built/updated by load-failure-controller.js. -->
+        <section id="load-failure-surface" class="hidden" aria-labelledby="load-failure-heading"></section>
       </div>
 
       <aside id="media-panel" class="collapsed" aria-label="Media panel">
