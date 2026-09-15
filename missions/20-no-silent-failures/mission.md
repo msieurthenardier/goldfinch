@@ -67,13 +67,13 @@ Open Questions below.
 
 ## Success Criteria
 
-- [ ] **A failed navigation never renders an empty document.** Any
+- [x] **A failed navigation never renders an empty document.** Any
   non-certificate failure (unresolvable host, refused connection, timeout,
   offline) shows a surface naming the target address and the failure
   reason as reported by the engine, with a retry action that re-attempts
   the same address. *(behavior-test-backed: live fixtures for each failure
   class, judged on the rendered surface and the census)*
-- [ ] **Failure is visible from the tab strip.** A failed, crashed, or hung
+- [x] **Failure is visible from the tab strip.** A failed, crashed, or hung
   tab is identifiable in the strip without switching to it, and the address
   bar keeps showing the intended address, not an internal error address.
 - [ ] **Untrusted certificates get an interstitial, not a blank.** Navigating
@@ -233,7 +233,15 @@ Open Questions below.
 
 Emergent blockers and issues discovered during execution.
 
-- (none yet)
+- [ ] **#216 — a failed typed navigation strands keyboard focus.** The chrome
+      view loses OS focus ~7 ms after Enter (before the failure lands) and never
+      regains it, so the panel's heading focus is inert and F6/Tab go to the
+      hidden guest. Found at Flight 1's HAT (H7), invisible to the automation
+      apparatus (keys are injected into the chrome wcId). Affects the
+      "keyboard-operable" half of success criterion 10 and DD6's
+      focus-on-failure rule; a diagnosis/design pass is needed (not a squawk).
+      Discovered in Flight 1, affects Flights 2 and 3 (every hidden-guest
+      surface).
 
 ## Flights
 
@@ -241,7 +249,7 @@ Emergent blockers and issues discovered during execution.
 > planned and created one at a time as work progresses. This list will
 > evolve based on discoveries during implementation.
 
-- [ ] Flight 1: **The failure surface and navigation errors** (#163) —
+- [x] Flight 1: **The failure surface and navigation errors** (#163) — landed 2026-09-15 (PR #215); H7 → #216 —
   decide the surface mechanism (the mission's one hard-to-reverse
   decision); wire load-failure events; classify failures into
   operator-facing copy via a pure model; retry; tab-strip failed state;

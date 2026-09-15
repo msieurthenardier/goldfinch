@@ -1,6 +1,6 @@
 # Leg: hat-and-alignment
 
-**Status**: ready
+**Status**: completed
 **Flight**: [The Failure Surface and Navigation Errors](../flight.md)
 
 ## Objective
@@ -55,39 +55,39 @@ and every look-and-feel issue found is fixed inline before the flight lands.
 
 Each is an operator-performed step; the operator's verdict is the record.
 
-- [ ] **H1 — Refused, in the foreground.** Type `http://{L}:{P}/` in
+- [x] **H1 — Refused, in the foreground.** Type `http://{L}:{P}/` in
       the address bar, Enter (`{L}` = a loopback host that refuses —
       `127.0.0.2` on this rig; `127.0.0.1` never refuses under WSL2 mirrored
       networking, see the run log). Verdict on: the panel appears promptly; the
       copy reads right; the address and code lines are legible; the strip
       shows the glyph and host; focus is on the panel heading (screen
       reader users hear it) and NOT stranded.
-- [ ] **H2 — DNS.** Navigate the same tab to
+- [x] **H2 — DNS.** Navigate the same tab to
       `http://nonexistent-host-abc123xyz.invalid/`. Verdict on the
       re-render and the wording for a name failure.
-- [ ] **H3 — Background failure.** Open a second tab, then from the first
+- [x] **H3 — Background failure.** Open a second tab, then from the first
       tab's context (or a bookmark/middle-click) cause the first tab to
       fail while the second is active. Verdict on: the inactive strip entry
       is identifiable at a glance; nothing about the active tab changed.
-- [ ] **H4 — Projection on activation.** Click the failed background tab.
+- [x] **H4 — Projection on activation.** Click the failed background tab.
       Verdict on: the panel is shown immediately, no flash of a blank or
       stale guest, the address bar shows the intended address.
-- [ ] **H5 — Retry.** Start the fixture server on `{P}`, click Retry.
+- [x] **H5 — Retry.** Start the fixture server on `{P}`, click Retry.
       Verdict on: the page loads, the panel disappears cleanly, the strip
       restores its favicon and title, Reload/Stop glyph behaves.
-- [ ] **H6 — Certificate class.** Navigate to `https://127.0.0.1:{T}/`.
+- [x] **H6 — Certificate class.** Navigate to `https://127.0.0.1:{T}/`.
       Verdict on: the generic panel's certificate wording is honest for a
       surface that (until Flight 2) offers no override.
-- [ ] **H7 — Keyboard-only.** From the address bar with a failed tab
+- [ ] **H7 — Keyboard-only.** *(FAILED 2026-09-15 → issue #216; not re-verified)* From the address bar with a failed tab
       active: F6 lands on the panel heading; Tab reaches Retry; Enter on
       Retry retries; Shift+F6 returns to the chrome. Ctrl+F on a failed tab
       opens nothing dead.
-- [ ] **H8 — Second window.** Move the failed tab to a new window (tab
+- [x] **H8 — Second window.** Move the failed tab to a new window (tab
       context menu → Move to new window). Verdict on: the new window shows
       the panel and strip state; the old window is clean.
-- [ ] **H9 — Reopen.** Close the failed tab, Ctrl+Shift+T. Verdict on: it
+- [x] **H9 — Reopen.** Close the failed tab, Ctrl+Shift+T. Verdict on: it
       reopens at the intended address (and fails again, honestly).
-- [ ] **H10 — Look and feel, window-wide.** With the panel showing: resize
+- [x] **H10 — Look and feel, window-wide.** With the panel showing: resize
       the window, open the media panel, toggle the bookmarks bar, open the
       kebab menu over it. Verdict on layout, palette against the chrome,
       and that nothing animates the guest slot.
@@ -125,12 +125,12 @@ step is diagnosed and fixed inline, then re-verified before moving on.
 
 **Complete ALL steps before signaling `[COMPLETE:leg]`:**
 
-- [ ] All acceptance criteria verified
-- [ ] Tests passing
-- [ ] Update flight-log.md with leg progress entry
-- [ ] Set this leg's status to `completed` (in this file's header)
-- [ ] Check off this leg in flight.md
-- [ ] If final leg of flight:
-  - [ ] Update flight.md status to `landed`
-  - [ ] Check off flight in mission.md
-- [ ] Commit all changes together (code + artifacts)
+- [x] All acceptance criteria verified (H7 failed → issue #216, accepted as a known issue by the operator)
+- [x] Tests passing
+- [x] Update flight-log.md with leg progress entry
+- [x] Set this leg's status to `completed` (in this file's header)
+- [x] Check off this leg in flight.md
+- [x] If final leg of flight:
+  - [x] Update flight.md status to `landed`
+  - [x] Check off flight in mission.md
+- [x] Commit all changes together (code + artifacts)

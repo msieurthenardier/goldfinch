@@ -49,6 +49,24 @@ export function createLoadFailureController(deps) {
   /** @type {any} */
   let currentTab = null;
 
+  // formatFailureCode(failure): the code line reads "<name> (<code>)" when
+  // both are present (HAT H1 fix 1 — the operator needs the numeric net-error
+  // code alongside the engine name for reporting/lookup, e.g.
+  // "ERR_CONNECTION_REFUSED (-102)"); a missing name falls back to "(<code>)",
+  // a missing/non-finite code falls back to the bare name, and both missing
+  // renders nothing. The name stays verbatim and FIRST so the behavior spec's
+  // raw-name substring assertion keeps passing.
+  /** @param {any} failure
+   *  @returns {string} */
+  function formatFailureCode(failure) {
+    const name = failure && typeof failure.name === 'string' && failure.name ? failure.name : null;
+    const code = failure && typeof failure.code === 'number' && Number.isFinite(failure.code) ? failure.code : null;
+    if (name && code !== null) return `${name} (${code})`;
+    if (code !== null) return `(${code})`;
+    if (name) return name;
+    return '';
+  }
+
   // render(tab): reads classifyLoadFailure(tab.loadFailure) and writes every
   // line via textContent only — engine strings (the raw `name`) and the
   // intended address are user/page-adjacent data, never markup (house rule).
@@ -59,7 +77,7 @@ export function createLoadFailureController(deps) {
     heading.textContent = classification.title;
     body.textContent = classification.body;
     urlLine.textContent = (failure && failure.url) || (tab && tab.url) || '';
-    codeLine.textContent = (failure && failure.name) || '';
+    codeLine.textContent = formatFailureCode(failure);
     retry.classList.toggle('hidden', !classification.retryable);
   }
 

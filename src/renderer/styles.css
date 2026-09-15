@@ -913,6 +913,11 @@ a:focus-visible {
   --lf-fg: #1e1f25;
   --lf-fg-dim: #5c5f6b;
   --lf-accent: var(--accent);
+  /* HAT fix (H1, finding 2): a darkened gold for a focus outline that reads
+     against this panel's white background — raw --accent is too
+     low-contrast for that on white (same rationale as
+     #welcome-surface's --wl-accent-strong immediately above). */
+  --lf-accent-strong: color-mix(in srgb, var(--accent) 65%, black);
   color: var(--lf-fg);
   background: var(--lf-bg);
 }
@@ -952,6 +957,20 @@ a:focus-visible {
 }
 #load-failure-retry.hidden {
   display: none;
+}
+/* HAT fix (H1, finding 2): explicit, panel-scoped keyboard-focus rings. The
+   operator couldn't tell where focus landed — the heading (`tabindex="-1"`,
+   the F6/typed-Enter-failure target) and Retry both rendered with no visible
+   ring on Tab. A 3px solid outline in the panel's strong accent, offset so
+   it never crowds the text/button border; contrast-checked against the
+   panel's white background. Bare id selectors (1,0,0 each) already out-
+   specify any bare-type/class :focus-visible rule elsewhere in this file, so
+   no `!important` is needed. Scoped to this panel only — squawk 0044 tracks
+   the SAME gap on the chrome toolbar separately; do not "fix" that here. */
+#load-failure-heading:focus-visible,
+#load-failure-retry:focus-visible {
+  outline: 3px solid var(--lf-accent-strong);
+  outline-offset: 2px;
 }
 
 .welcome-column {

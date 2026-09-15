@@ -586,6 +586,103 @@ still-uncommitted leg 1/2 tree.
 
 ---
 
+### Leg 3: hat-and-alignment — HAT H1 fixes (2026-09-15)
+
+Two inline fixes from operator HAT finding H1, confined to the panel
+(`load-failure-controller.js` + `styles.css`), no contract-id renames/removals,
+no `hidden`-toggling changes.
+
+- **Fix 1 — numeric error code now shown.** `#load-failure-code` previously
+  rendered only the engine `name` (e.g. `ERR_CONNECTION_REFUSED`), dropping the
+  numeric `code` (e.g. `-102`) the failure object already carries. Added
+  `formatFailureCode(failure)` in `load-failure-controller.js`: `"<name>
+  (<code>)"` when both are present, `"(<code>)"` when `name` is missing,
+  bare `name` when `code` isn't a finite number, and `''` when both are
+  missing — name stays first and verbatim so the behavior spec's raw-name
+  substring assertion is unaffected. Four new cases in
+  `load-failure-controller.test.js` cover all four shapes.
+- **Fix 2 — visible keyboard focus on the panel.** The Witnessed run measured
+  `outline-style: none` on `#load-failure-retry` when Tab moved focus there,
+  and the heading (`#load-failure-heading`, the F6/orphan-focus target) had no
+  visible ring either. Added a `--lf-accent-strong` token to
+  `#load-failure-surface` (same darkened-gold formula as
+  `#welcome-surface`'s `--wl-accent-strong`) and one panel-scoped rule,
+  `#load-failure-heading:focus-visible, #load-failure-retry:focus-visible {
+  outline: 3px solid var(--lf-accent-strong); outline-offset: 2px; }`. Checked
+  `styles.css` for any rule that could out-specify or shadow it first: no
+  global `button`/`*` outline reset exists in this file (the nearest is
+  `#address`'s own `outline: none`, scoped to that id only), so the gap was a
+  missing rule, not an override to fight — the two bare-id selectors here
+  (specificity 1,0,0 each) are already the highest in the file short of
+  another id rule or `!important`, neither of which exists for these two ids
+  elsewhere. Scoped strictly to `#load-failure-surface`'s two elements; does
+  NOT touch the chrome toolbar's separate, already-tracked focus-ring gap
+  (squawk 0044).
+- **Gates**: `npm run format` (no changes needed — both edits already matched
+  Prettier style); `npm test -- --test-timeout=20000` — 4559/4559 pass (4 new
+  cases added, no budget/line-count pins touched — no renderer.js change in
+  this leg); `npm run lint` clean; `npm run typecheck` clean; `npm run
+  format:check` clean.
+- Touched only `src/renderer/chrome/load-failure-controller.js`,
+  `src/renderer/styles.css`, and `test/unit/load-failure-controller.test.js`
+  (`test/unit/load-failure-surface-contract.test.js` was read but needed no
+  change — it doesn't assert the code line's rendered text or any focus
+  style). No app relaunch performed; the Flight Director owns the running
+  instance.
+
+### Leg 3: hat-and-alignment — HAT H7 fix (2026-09-15)
+
+OS focus returned to the chrome on failure. Operator HAT finding H7,
+confirmed with a focus logger: after a typed navigation fails, the address
+bar blurs and ~7 ms later the chrome document loses OS focus and never
+regains it. **Mechanism**: Chromium commits its own
+`chrome-error://chromewebdata/` document into the guest after
+`did-fail-load`, and that commit steals OS input focus into the guest — which
+`applyGuestVisibility` has already hidden. Hidden + OS-focused means the
+chrome's own `heading.focus()` call (fired by the `tab-load-failure` send) is
+DOM-only focus in an unfocused window: F6/Tab silently land on the hidden
+guest instead.
+
+- **Fix.** Two guarded reasserts in `src/main/guest-wiring.js`'s
+  `wireTabViewEvents`, both following the existing focus-then-send idiom
+  (`chromeForTab(wcId)?.focus()` before any send that expects the chrome to
+  hold keyboard input — CLAUDE.md's "Cross-view focus + tab-type idioms"):
+  (1) in `did-fail-load`, after the existing active-tab
+  `applyGuestVisibility`/`findOverlay.hide()` block and before the
+  `tab-load-failure` send — catches the case where the guest still holds
+  focus at failure time; (2) the SAME guarded reassert added to
+  `did-finish-load` — that handler fires again for the error document's own
+  commit, which is the moment the steal actually happens (the did-fail-load
+  reassert alone loses that race, since the error document hasn't committed
+  yet at that point). Both sites gate on the same three conditions: the tab
+  is the active tab, the guest currently holds OS focus (`wc.isFocused()`),
+  and no sheet menu is open (`!owner.sheet?.isMenuOpen()` — DD1: an open menu
+  is the operator's focus to keep, mirroring the `findOverlay.hide()` gate).
+  A background tab's failure never touches focus. The `did-finish-load` site
+  additionally requires `entry.loadFailure` still be set, and never mutates
+  `loadFailure` or sends anything else.
+- **Tests** (`test/unit/guest-wiring.test.js`): added `isFocused()` to
+  `FakeContents` (default `false`, settable via `wc.focused`) and logged the
+  chrome fake's `focus()` into the shared `events` order log alongside
+  `send()`. Six new cases: did-fail-load reasserts and precedes the
+  `tab-load-failure` send (active + guest-focused + no sheet); no reassert
+  when the guest isn't focused; no reassert on a background tab; no reassert
+  with an open sheet menu (DD1); did-finish-load reasserts while a failure is
+  recorded, the guest is focused, and no sheet is open (and never mutates
+  `loadFailure`); did-finish-load does NOT reassert on an ordinary successful
+  load (no recorded failure). 4565/4565 pass before → after (6 new,
+  4559 → 4565); `guest-visibility-invariant.test.js` re-run standalone,
+  unaffected (its greps match `setVisible(true)` and
+  `applyGuestVisibility(entry);` only, neither touched).
+- **Gates**: `npm run format` (reformatted only the new test block's line
+  wraps); `npm test -- --test-timeout=20000` — 4565/4565 pass; `npm run lint`
+  clean; `npm run typecheck` clean; `npm run format:check` clean.
+- Touched only `src/main/guest-wiring.js` and
+  `test/unit/guest-wiring.test.js`. No app relaunch performed; the Flight
+  Director owns the running instance.
+
+---
+
 ## Flight Director Notes
 
 - **2026-09-15 — flight start.** Phase file `.flightops/agent-crews/leg-execution.md`
@@ -699,3 +796,31 @@ still-uncommitted leg 1/2 tree.
   waits for the operator at the window: the FD presents H1–H10 one at a time and fixes
   inline; the HAT commits on its own (this branch), then the flight lands and the PR is
   marked ready for review.
+
+### Leg 3: hat-and-alignment — HAT walk (2026-09-15, operator present)
+
+**Status**: in-flight (paused after H7). Rig: WSLg, canonical admin dev launch, refusing
+loopback host `127.0.0.2`, TLS fixture on 40303, retry server on 40300 for H5 only.
+
+| Step | Verdict | Notes |
+|---|---|---|
+| H1 refused, foreground | pass after 2 inline fixes | (a) code line now `NAME (code)` — operator wanted the number; (b) `:focus-visible` outlines added for the heading and Retry (none existed). Focus itself still stranded → H7. |
+| H2 DNS | pass | re-render, wording, strip title, address bar all correct |
+| H3 background failure | pass | driven over MCP (openTab + background navigate); strip marked, active tab untouched |
+| H4 projection on activation | pass | panel immediate, address bar intended |
+| H5 Retry | pass | server started mid-step; panel cleared, strip restored, Reload/Stop fine |
+| H6 certificate class | pass | copy judged honest for a no-override surface |
+| H7 keyboard-only | **FAIL → #216** | no outline after a typed failure; Tab and F6 inert. A chrome-document logger showed `window-blur` 7 ms after Enter, before `did-fail-load`, and no `focusin` on the heading ever. Design-reviewed fix (main-side `chrome.focus()` reassert in `did-fail-load` + `did-finish-load`, gated on `wc.isFocused()`/active/no sheet, 6 tests) did NOT change the behavior. Kept (harmless, pinned); operator elected to log the defect rather than continue diagnosing. Not a squawk (needs a focus-tracing diagnosis + design). |
+| H8–H10 | not yet run | |
+
+Fix-vs-feature classification: H1(a)/(b) fixes (panel-only). H7's reassert: multi-surface
+→ lightweight design review taken before implementation (approve with changes: add the
+`did-finish-load` site). Tests 4555 → 4565; all gates green on the tree.
+| H8 second window | pass | new window shows panel + strip state; old window clean |
+| H9 reopen | pass | reopens at the intended address and fails honestly |
+| H10 look and feel | pass | resize, media panel, bookmarks bar, kebab over the panel — no guest-slot animation |
+
+**HAT outcome**: 9/10 steps pass; H7 failed → issue #216 (operator ruling: log, don't keep
+diagnosing). Leg 3 `completed`; flight `landed`; Flight 1 checked off in `mission.md`
+with criteria 1 and 2 checked and criterion 10 left open on #216. PR #215 marked ready
+for review. Rig torn down. Next: `/mission-control:flight-debrief`.

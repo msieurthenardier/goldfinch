@@ -26,6 +26,10 @@ class FakeContents extends EventEmitter {
     this.openHandler = null;
     this.printCalls = 0;
     this.execCalls = [];
+    // Mission 20 Flight 1 Leg 3 (HAT H7): settable via the field directly —
+    // defaults false (the common case: nothing focuses a fake guest unless a
+    // test says so).
+    this.focused = false;
     this.navigationHistory = {
       canGoBack: () => true,
       canGoForward: () => false
@@ -36,6 +40,9 @@ class FakeContents extends EventEmitter {
   }
   isDestroyed() {
     return this.destroyed;
+  }
+  isFocused() {
+    return this.focused;
   }
   getURL() {
     return this.url;
@@ -65,7 +72,13 @@ function setup() {
   // which otherwise land in two separate arrays with no shared sequence.
   const events = [];
   const chrome = {
-    focus: () => calls.push('focus-chrome'),
+    focus: () => {
+      calls.push('focus-chrome');
+      // Mission 20 Flight 1 Leg 3 (HAT H7): additive to `events` too, so the
+      // new focus-reassert tests can pin its order relative to the
+      // tab-load-failure send via the same shared sequence log AC3 uses.
+      events.push(['focus']);
+    },
     send: (channel, payload) => {
       sends.push([channel, payload]);
       events.push(['send', channel, payload]);
@@ -1038,6 +1051,110 @@ test('AC3 edge case: failure on an INACTIVE tab records + pushes only — no hid
   assert.deepEqual(h.sends, [
     ['tab-load-failure', { wcId: 41, failure: { code: -105, name: 'ERR_NAME_NOT_RESOLVED', url: 'http://x.invalid/' } }]
   ]);
+});
+
+// ---------------------------------------------------------------------------
+// Mission 20 Flight 1 Leg 3 (HAT H7): the error document's own commit steals
+// OS focus into the now-hidden guest — reasserted at both did-fail-load and
+// did-finish-load, each gated on active-tab + guest-focused + no-open-sheet.
+// ---------------------------------------------------------------------------
+
+test('HAT H7: did-fail-load reasserts chrome focus when the active guest currently holds OS focus, before the chrome push', () => {
+  const h = setup();
+  const wc = new FakeContents(60);
+  wc.focused = true;
+  const view = { webContents: wc };
+  const entry = { view, active: true, loadFailure: null, lastRequestedUrl: 'http://x.invalid/' };
+  makeFailureRecord(h, 60, entry);
+
+  h.wiring.wireTabViewEvents(view, 60, 'persist:jar-a');
+  wc.emit('did-fail-load', {}, -105, 'ERR_NAME_NOT_RESOLVED', 'http://x.invalid/', true);
+
+  assert.ok(h.calls.includes('focus-chrome'), 'chrome.focus() called');
+  const order = h.events.map((e) => e[0]);
+  const focusIdx = order.indexOf('focus');
+  const sendIdx = order.indexOf('send');
+  assert.ok(
+    focusIdx !== -1 && sendIdx !== -1 && focusIdx < sendIdx,
+    'focus reassert precedes the tab-load-failure send'
+  );
+});
+
+test('HAT H7: did-fail-load does NOT reassert focus when the guest is not currently OS-focused', () => {
+  const h = setup();
+  const wc = new FakeContents(61);
+  wc.focused = false;
+  const view = { webContents: wc };
+  const entry = { view, active: true, loadFailure: null, lastRequestedUrl: 'http://x.invalid/' };
+  makeFailureRecord(h, 61, entry);
+
+  h.wiring.wireTabViewEvents(view, 61, 'persist:jar-a');
+  wc.emit('did-fail-load', {}, -105, 'ERR_NAME_NOT_RESOLVED', 'http://x.invalid/', true);
+
+  assert.equal(h.calls.includes('focus-chrome'), false, 'no reassert when the guest never held focus');
+});
+
+test('HAT H7: did-fail-load on a BACKGROUND tab never reasserts focus', () => {
+  const h = setup();
+  const wc = new FakeContents(62);
+  wc.focused = true;
+  const view = { webContents: wc };
+  const entry = { view, active: false, loadFailure: null, lastRequestedUrl: 'http://x.invalid/' };
+  makeFailureRecord(h, 62, entry, { active: false });
+
+  h.wiring.wireTabViewEvents(view, 62, 'persist:jar-a');
+  wc.emit('did-fail-load', {}, -105, 'ERR_NAME_NOT_RESOLVED', 'http://x.invalid/', true);
+
+  assert.equal(h.calls.includes('focus-chrome'), false, 'a background tab failure never touches focus');
+});
+
+test('HAT H7: did-fail-load with an open sheet menu never reasserts focus (DD1 — the menu owns focus)', () => {
+  const h = setup();
+  const wc = new FakeContents(63);
+  wc.focused = true;
+  const view = { webContents: wc };
+  const entry = { view, active: true, loadFailure: null, lastRequestedUrl: 'http://x.invalid/' };
+  const record = makeFailureRecord(h, 63, entry);
+  record.sheet = { isMenuOpen: () => true };
+
+  h.wiring.wireTabViewEvents(view, 63, 'persist:jar-a');
+  wc.emit('did-fail-load', {}, -105, 'ERR_NAME_NOT_RESOLVED', 'http://x.invalid/', true);
+
+  assert.equal(h.calls.includes('focus-chrome'), false, "an open sheet menu is the operator's — never stolen back");
+});
+
+test('HAT H7: did-finish-load reasserts chrome focus while a failure is recorded, the guest is focused, and no sheet is open', () => {
+  const h = setup();
+  const wc = new FakeContents(64);
+  wc.focused = true;
+  const view = { webContents: wc };
+  const entry = {
+    view,
+    active: true,
+    loadFailure: { code: -105, name: 'ERR_NAME_NOT_RESOLVED', url: 'http://x.invalid/' },
+    lastRequestedUrl: 'http://x.invalid/'
+  };
+  makeFailureRecord(h, 64, entry);
+
+  h.wiring.wireTabViewEvents(view, 64, 'persist:jar-a');
+  wc.emit('did-finish-load');
+
+  assert.ok(h.calls.includes('focus-chrome'), "the error document's own commit re-triggers the reassert");
+  assert.equal(entry.loadFailure.code, -105, 'did-finish-load never mutates loadFailure');
+});
+
+test('HAT H7: did-finish-load does NOT reassert focus when there is no recorded failure (ordinary successful loads)', () => {
+  const h = setup();
+  const wc = new FakeContents(65);
+  wc.focused = true;
+  const view = { webContents: wc };
+  const entry = { view, active: true, loadFailure: null, lastRequestedUrl: 'https://ok.test/' };
+  makeFailureRecord(h, 65, entry);
+
+  h.wiring.wireTabViewEvents(view, 65, 'persist:jar-a');
+  wc.emit('did-finish-load');
+
+  assert.equal(h.calls.includes('focus-chrome'), false, 'an ordinary successful load never touches focus');
 });
 
 test('AC3/DD2: subframe failures are ignored entirely — no state, no push', () => {

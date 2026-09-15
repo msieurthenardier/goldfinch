@@ -1,19 +1,19 @@
 # Flight: The Failure Surface and Navigation Errors
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [No Silent Failures](../../mission.md)
 
 ## Contributing to Criteria
 
-- [ ] A failed navigation never renders an empty document (address + reason +
+- [x] A failed navigation never renders an empty document (address + reason +
       retry; behavior-test-backed)
-- [ ] Failure is visible from the tab strip; the address bar keeps the intended
+- [x] Failure is visible from the tab strip; the address bar keeps the intended
       address
-- [ ] New surfaces are safe and accessible — text-only rendering of engine
+- [ ] *(partial — keyboard focus after a typed failure is stranded, issue #216)* New surfaces are safe and accessible — text-only rendering of engine
       strings, keyboard-operable, a11y-audited, and the automation census
       reports each tab's load state (this flight introduces the field with
       `ok` / `failed`; Flights 2 and 3 add their values)
-- [ ] *(partial, until Flight 2)* Certificate failures reach the same generic
+- [x] *(partial, until Flight 2)* Certificate failures reach the same generic
       surface — no navigation fails blank on a certificate error
 
 ---
@@ -321,7 +321,7 @@ new finding is a real finding; no `ACCEPTED` entry is pre-added.
 
 - [x] All open questions resolved
 - [x] Design decisions documented
-- [ ] Prerequisites verified
+- [x] Prerequisites verified
 - [x] Validation approach defined
 - [x] Legs defined
 
@@ -355,11 +355,11 @@ new finding is a real finding; no `ACCEPTED` entry is pre-added.
 - [x] CP1 — Spike findings logged (DD2/DD4/DD5 premises settled on the rig)
 - [x] CP2 — Model + main wiring landed; `npm test` green; a failed tab's
       guest is hidden and its snapshot/closed-tab URL is the intended one
-- [ ] CP3 — Chrome surface renders for refused/DNS/cert on the live rig;
+- [x] CP3 — Chrome surface renders for refused/DNS/cert on the live rig;
       census reports `failed` + code; retry recovers
-- [ ] CP4 — `navigation-failure-surface` behavior run: pass; `npm run a11y`
+- [x] CP4 — `navigation-failure-surface` behavior run: pass; `npm run a11y`
       green with the new state
-- [ ] CP5 — HAT walk complete; flight `landed`
+- [x] CP5 — HAT walk complete; flight `landed`
 
 ### Adaptation Criteria
 
@@ -396,7 +396,7 @@ new finding is a real finding; no `ACCEPTED` entry is pre-added.
       state, address-bar preservation, retry, census fields + tool docs, a11y
       state, README/CLAUDE.md updates; runs `navigation-failure-surface` and
       `npm run a11y` as its acceptance gate.
-- [ ] `hat-and-alignment` *(optional, operator-elected)* — guided walk:
+- [x] `hat-and-alignment` *(optional, operator-elected)* — guided walk:
       refused, DNS, cert, background-tab failure, retry, closed-tab reopen,
       keyboard-only reach of Retry; inline fixes; contract changes to DD10 are
       spec re-authors.
@@ -407,11 +407,11 @@ new finding is a real finding; no `ACCEPTED` entry is pre-added.
 
 ### Completion Checklist
 
-- [ ] All legs completed
-- [ ] Code merged
-- [ ] Tests passing (`npm test`, `npm run lint`, `npm run typecheck`,
+- [x] All legs completed
+- [ ] Code merged (PR #215 ready for review)
+- [x] Tests passing (`npm test`, `npm run lint`, `npm run typecheck`,
       `npm run format:check`, `npm run a11y`)
-- [ ] Documentation updated (`docs/mcp-automation.md`, README error-page
+- [x] Documentation updated (`docs/mcp-automation.md`, README error-page
       claim, CLAUDE.md tab-strip/surface notes)
 
 ### Verification

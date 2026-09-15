@@ -387,6 +387,58 @@ test('Retry navigates the shown tab with the recorded intended address', async (
   assert.deepEqual(h.calls[0], ['tabNavigate', { wcId: 10, verb: 'loadURL', args: ['http://127.0.0.1:1/'] }]);
 });
 
+test('HAT H1 fix 1: the code line renders "<name> (<code>)" when both are present', async () => {
+  const h = createHarness();
+  const tab = { id: 'tab-1', wcId: 10, url: 'http://x/', title: 'New tab', btn: makeBtn(), loadFailure: null };
+  h.addTab(tab);
+  h.setActive('tab-1');
+  await loadController(h);
+
+  h.pushFailure({ wcId: 10, failure: { code: -102, name: 'ERR_CONNECTION_REFUSED', url: 'http://x/' } });
+
+  const codeLine = findById(h, 'load-failure-code');
+  assert.equal(codeLine.textContent, 'ERR_CONNECTION_REFUSED (-102)');
+});
+
+test('HAT H1 fix 1: the code line renders just "(<code>)" when `name` is missing', async () => {
+  const h = createHarness();
+  const tab = { id: 'tab-1', wcId: 10, url: 'http://x/', title: 'New tab', btn: makeBtn(), loadFailure: null };
+  h.addTab(tab);
+  h.setActive('tab-1');
+  await loadController(h);
+
+  h.pushFailure({ wcId: 10, failure: { code: -102, url: 'http://x/' } });
+
+  const codeLine = findById(h, 'load-failure-code');
+  assert.equal(codeLine.textContent, '(-102)');
+});
+
+test('HAT H1 fix 1: the code line renders just the name when `code` is not a finite number', async () => {
+  const h = createHarness();
+  const tab = { id: 'tab-1', wcId: 10, url: 'http://x/', title: 'New tab', btn: makeBtn(), loadFailure: null };
+  h.addTab(tab);
+  h.setActive('tab-1');
+  await loadController(h);
+
+  h.pushFailure({ wcId: 10, failure: { code: NaN, name: 'ERR_CONNECTION_REFUSED', url: 'http://x/' } });
+
+  const codeLine = findById(h, 'load-failure-code');
+  assert.equal(codeLine.textContent, 'ERR_CONNECTION_REFUSED');
+});
+
+test('HAT H1 fix 1: the code line renders nothing when both `name` and `code` are missing', async () => {
+  const h = createHarness();
+  const tab = { id: 'tab-1', wcId: 10, url: 'http://x/', title: 'New tab', btn: makeBtn(), loadFailure: null };
+  h.addTab(tab);
+  h.setActive('tab-1');
+  await loadController(h);
+
+  h.pushFailure({ wcId: 10, failure: { url: 'http://x/' } });
+
+  const codeLine = findById(h, 'load-failure-code');
+  assert.equal(codeLine.textContent, '');
+});
+
 test('a non-retryable classification hides the Retry button', async () => {
   const h = createHarness();
   const tab = { id: 'tab-1', wcId: 10, url: 'http://x/', title: 'New tab', btn: makeBtn(), loadFailure: null };

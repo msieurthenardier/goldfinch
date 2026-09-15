@@ -511,6 +511,19 @@ function createGuestWiring(deps) {
           applyGuestVisibility(entry);
           owner.findOverlay?.hide();
         }
+        // Mission 20 Flight 1 Leg 3 (HAT H7, focus logger-confirmed): Chromium
+        // is about to commit its own `chrome-error://chromewebdata/` document
+        // into this now-hidden guest, and that commit steals OS input focus
+        // into it — hidden + focused means keystrokes go nowhere, and the
+        // chrome's own `heading.focus()` call (triggered by the send below)
+        // becomes a DOM-only focus in an unfocused window (F6/Tab silently
+        // land on the hidden guest). Reassert OS focus onto the chrome NOW,
+        // while it still holds it, before the error document has a chance to
+        // take it. Gated on the guest CURRENTLY holding focus (a background
+        // failure — activeTabWcId mismatch — never touches focus) and on no
+        // sheet menu being open (DD1: an open menu is the operator's focus to
+        // keep, the same posture as the findOverlay.hide() gate above).
+        if (owner.activeTabWcId === wcId && wc.isFocused() && !owner.sheet?.isMenuOpen()) chromeForTab(wcId)?.focus();
         sendToChrome('tab-load-failure', { wcId, failure: entry.loadFailure });
       })
     );
@@ -595,6 +608,20 @@ function createGuestWiring(deps) {
           canGoBack: wc.navigationHistory.canGoBack(),
           canGoForward: wc.navigationHistory.canGoForward()
         });
+        // Mission 20 Flight 1 Leg 3 (HAT H7): this handler fires AGAIN for the
+        // error document's own commit — that second commit is when the OS-
+        // focus steal into the hidden guest actually happens (the did-fail-load
+        // reassert above already lost that race once, since the error document
+        // hadn't committed yet). Reassert only while a failure is still
+        // recorded for this tab, it's the active tab, the guest currently
+        // holds OS focus, and no sheet menu is open (DD1 — an open menu is the
+        // operator's). Never mutates `entry.loadFailure` or sends anything
+        // else; a background tab's failure never touches focus.
+        const owner = registry.getWindowForGuest(wcId);
+        const entry = owner?.tabViews?.get(wcId);
+        if (entry?.loadFailure && owner?.activeTabWcId === wcId && wc.isFocused() && !owner?.sheet?.isMenuOpen()) {
+          chromeForTab(wcId)?.focus();
+        }
       })
     );
     wc.on(
