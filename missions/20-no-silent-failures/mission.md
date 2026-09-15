@@ -256,10 +256,14 @@ Emergent blockers and issues discovered during execution.
   census load-state; a11y; behavior spec per failure class. Certificate
   failures reach this generic surface until Flight 2 specialises them.
 - [ ] Flight 2: **TLS trust: interstitial, override, indicator, viewer**
-  (#143) — `certificate-error` through the auth-challenge-store pattern;
-  interstitial specialising the Flight 1 surface; per-origin session-only
-  override memory; "not secure" chip state for `http:` and overridden
-  origins; read-only certificate viewer; self-signed-fixture behavior spec.
+  (#143) — `certificate-error` answered at once (refuse-or-remembered; the
+  held-callback auth-challenge model was considered and rejected at Flight 2
+  planning — a certificate refusal has a fail-then-retry shape), the
+  interstitial specialising the Flight 1 surface, a human-only proceed on
+  the menu-overlay sheet; per-jar per-origin session-only override memory;
+  "not secure" chip/popup/census state for `http:` and overridden origins;
+  read-only certificate viewer fed by a session verification observer;
+  throwaway-CA fixture behavior spec.
 - [ ] Flight 3: **Crash and hang resilience** (#133 + hung renderers) —
   guest crash surface with reload; chrome-view reload-and-reconcile from
   the registry with a multi-crash storm guard; `unresponsive` wait-or-kill;
