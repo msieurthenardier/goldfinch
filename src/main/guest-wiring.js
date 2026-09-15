@@ -71,6 +71,11 @@ function createGuestWiring(deps) {
     faviconFetcher,
     popupRegistry,
     webPreloadPath,
+    // Squawk 0073: arms the continuous session-snapshot debounce (built + owned in
+    // main.js) on a URL change — the snapshot's `url` field must track live
+    // navigation, not just tab creation/close/activation. Optional-chained so an
+    // offline harness that omits it stays unaffected.
+    scheduleSnapshot,
     // M14 F2 L2 (DD1f seam, real wiring): the SAME delegation main.js hands the
     // popup registry — cancelForTab(popupWcId, 'tab-close'). Called from the
     // popup teardown below so a SELF-closed/destroyed popup (guest-window-close,
@@ -459,6 +464,8 @@ function createGuestWiring(deps) {
           canGoForward: wc.navigationHistory.canGoForward()
         });
         getHistoryRecorder()?.handleNavigation({ wcId, partition, url: wc.getURL() });
+        // Squawk 0073: the URL changed — debounced snapshot re-arm.
+        scheduleSnapshot?.();
       })
     );
     wc.on(
@@ -471,6 +478,8 @@ function createGuestWiring(deps) {
           canGoForward: wc.navigationHistory.canGoForward()
         });
         getHistoryRecorder()?.handleNavigation({ wcId, partition, url: wc.getURL() });
+        // Squawk 0073: the URL changed — debounced snapshot re-arm.
+        scheduleSnapshot?.();
       })
     );
     wc.on(

@@ -78,6 +78,11 @@ function registerAppLifecycle({
   env,
   platform,
   stdout,
+  // Squawk 0073: the continuous-snapshot scheduler's flush(), threaded from main.js
+  // (which owns construction — every dep the scheduler's write callback needs is
+  // already in scope there). Optional/no-op default so offline harnesses that don't
+  // care about the continuous-snapshot feature stay unaffected.
+  flushSessionSnapshotScheduler = () => {},
   logger = console
 }) {
   app.on('session-created', sessionRuntime.onSessionCreated);
@@ -149,6 +154,11 @@ function registerAppLifecycle({
     const rec = registry.getWindowForChrome(event.sender);
     if (!rec) return { bootTab: true };
     rec.bootConfigServed = true;
+    // Squawk 0073: timestamp the boot-config serve so isRestorePending's settle timeout
+    // (session-snapshot-scheduler.js) has a reference point — a saved URL that never
+    // arrives (rejected by isSafeTabUrl at tab-create) must not gate the continuous
+    // snapshot forever.
+    rec.bootConfigServedAt = Date.now();
     const queued = rec.pendingChromeSends.splice(0);
     const chrome = rec.chromeView.webContents;
     for (const buildMessage of queued) {
@@ -307,6 +317,17 @@ function registerAppLifecycle({
 
   app.on('before-quit', () => {
     setSessionQuitting(true);
+    // Squawk 0073: cancel the continuous-snapshot debounce timer FIRST — otherwise a
+    // timer armed by recent browsing could still be pending when will-quit closes
+    // appDb, firing a write against a closed database. flush() performs any pending
+    // debounced write now (through its own restore-pending gate) and cancels the
+    // timer; the existing unconditional write immediately below is UNCHANGED and
+    // stays the authoritative quit-time snapshot.
+    try {
+      flushSessionSnapshotScheduler();
+    } catch (error) {
+      logger.error('[session-snapshot-scheduler] before-quit flush failed:', error);
+    }
     try {
       if (settings.get('restoreSession') === true && registry.records().length) {
         sessionStore.write(buildSessionSnapshot({ windows: registry.records(), jarsList: listJars() }));
