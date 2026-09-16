@@ -3,13 +3,16 @@
 // access, unit-testable offline (test/unit/insecure-tls-flag.test.js).
 //
 // WHY: the client-cert behavior fixture serves TLS from a throwaway CA that
-// Chromium will never trust, and goldfinch deliberately has no
-// `certificate-error` handler. The ONLY sanctioned way to reach Chromium's
-// `--ignore-certificate-errors` switch is this explicit flag on the dev/
-// automation launch script — packaged builds launch the binary directly and
-// never run dev-launch.mjs, so the bypass is dev-scoped by construction. The
-// switch literal lives HERE and nowhere else (source-pinned): no flag → no
-// switch, structurally.
+// Chromium will never trust. Mission 20 Flight 2 added a `certificate-error`
+// handler (`src/main/cert-trust.js`) that answers the engine at once — refuse,
+// or allow when the origin is remembered — and never suppresses the
+// interstitial itself; a fixture that needs Chromium to skip TLS verification
+// ENTIRELY (rather than exercise the interstitial/override flow) still needs
+// Chromium's own `--ignore-certificate-errors` switch. The ONLY sanctioned way
+// to reach it is this explicit flag on the dev/automation launch script —
+// packaged builds launch the binary directly and never run dev-launch.mjs, so
+// the bypass is dev-scoped by construction. The switch literal lives HERE and
+// nowhere else (source-pinned): no flag → no switch, structurally.
 //
 // The flag is STRIPPED from the argv forwarded to Electron (dev-launch spreads
 // process.argv.slice(2) verbatim; an unknown `--insecure-tls-fixtures` reaching

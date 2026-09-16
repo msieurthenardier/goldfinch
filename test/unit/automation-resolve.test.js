@@ -191,6 +191,35 @@ test('sheet gate (AC1): admitted ONLY when allowSheet AND the current menuType i
   }
 });
 
+// Mission 20 Flight 2 Leg 4 (DD10): NAMED positive-admission tests for the
+// two menuTypes this leg adds — the generic loop above already covers them
+// (it iterates AUTOMATABLE_MENU_TYPES), but a named test survives a future
+// re-shuffle of that loop and documents intent per-menuType.
+test('sheet gate (DD10): site-info is admitted for the three read ops, including at admin', () => {
+  const sheet = makeGuestWc(67);
+  const deps = sheetDeps(sheet, { menu: { menuType: 'site-info', token: 1 }, allowSheet: true });
+  assert.equal(resolveContents(67, deps), sheet);
+  assert.equal(resolveContents(67, { ...deps, allowInternal: true }), sheet);
+});
+
+test('sheet gate (DD10): cert-viewer is admitted for the three read ops, including at admin', () => {
+  const sheet = makeGuestWc(68);
+  const deps = sheetDeps(sheet, { menu: { menuType: 'cert-viewer', token: 1 }, allowSheet: true });
+  assert.equal(resolveContents(68, deps), sheet);
+  assert.equal(resolveContents(68, { ...deps, allowInternal: true }), sheet);
+});
+
+test('sheet gate (DD10): site-info/cert-viewer are STILL refused for a non-read op (allowSheet: false)', () => {
+  const sheet = makeGuestWc(69);
+  for (const menuType of ['site-info', 'cert-viewer']) {
+    assert.throws(
+      () => resolveContents(69, sheetDeps(sheet, { menu: { menuType, token: 1 }, allowSheet: false })),
+      /automation: secret-sheet/,
+      menuType + ' must stay refused for a non-read op'
+    );
+  }
+});
+
 test('sheet gate (AC1): an opted-in op is STILL refused under a non-allowlisted menuType — allowlist, never denylist (DD1d)', () => {
   const sheet = makeGuestWc(61);
   assert.throws(
@@ -207,6 +236,26 @@ test('sheet gate (AC1): an opted-in op is STILL refused under a non-allowlisted 
       ),
     /automation: secret-sheet/
   );
+});
+
+test('sheet gate (DD10): cert-override is refused for EVERY op, including the three read ops, at admin (Mission 20 F2 L3, AC3 negative)', () => {
+  const sheet = makeGuestWc(66);
+  // Every read op (allowSheet: true) AND every non-read op (allowSheet: false,
+  // the ordinary shape) — cert-override is on neither side of the fence: it
+  // never joins AUTOMATABLE_MENU_TYPES at all (DD3/DD10 — this menuType is
+  // NEVER admitted, unlike bookmarks-overflow/bookmark-edit above).
+  assert.equal(AUTOMATABLE_MENU_TYPES.has('cert-override'), false);
+  for (const allowSheet of [false, true]) {
+    assert.throws(
+      () =>
+        resolveContents(
+          66,
+          sheetDeps(sheet, { menu: { menuType: 'cert-override', token: 1 }, allowSheet, allowInternal: true })
+        ),
+      /automation: secret-sheet/,
+      'cert-override must be refused at admin regardless of the op (allowSheet=' + allowSheet + ')'
+    );
+  }
 });
 
 test('sheet gate (AC1): the predicate is FAIL-CLOSED IN SHAPE — an absent sheetMenuFor injection REFUSES, it does not throw a TypeError', () => {

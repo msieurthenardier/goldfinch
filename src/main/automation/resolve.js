@@ -50,7 +50,13 @@ function isInternalContents(wc) {
  * menu-overlay-manager.js's `menu-overlay:close` → the sheet's report.silence() +
  * menuController.closeAll()) still runs on every close path.
  */
-const AUTOMATABLE_MENU_TYPES = new Set(['bookmarks-overflow', 'bookmark-edit']);
+// Mission 20 Flight 2 Leg 4 (DD10): 'site-info' and 'cert-viewer' join the
+// allowlist — both are display-only, non-secret models (the address chip's
+// info popup; the read-only certificate summary card). 'cert-override'
+// deliberately NEVER joins (DD3/DD10 — the flight's one security-decision
+// channel; automating the proceed decision is the exact hazard this
+// allowlist exists to prevent).
+const AUTOMATABLE_MENU_TYPES = new Set(['bookmarks-overflow', 'bookmark-edit', 'site-info', 'cert-viewer']);
 
 /**
  * Returns 'chrome' when wc is a chrome renderer contents, 'guest' otherwise.

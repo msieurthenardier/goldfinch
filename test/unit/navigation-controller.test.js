@@ -837,3 +837,120 @@ test('refreshStar: hidden on internal tabs / burner tabs / no live wcId; synchro
   assert.equal(h.els.star.attributes.get('aria-pressed'), 'true');
   assert.equal(h.els.star.classList.contains('starred'), true);
 });
+
+// ---------------------------------------------------------------------------
+// Mission 20 Flight 2 Leg 4 (DD8/AC1/DD16): updateAddressChip's data-security
+// vocabulary — chip data-security/aria-label/title, all sourced from the
+// shared site-security.js helpers.
+// ---------------------------------------------------------------------------
+
+test('updateAddressChip: neutral default (no URL / about:blank) clears data-security and title', async () => {
+  const h = harness();
+  const controller = await create(h);
+  controller.updateAddressChip({ url: 'about:blank' });
+  assert.equal(h.els.addressChip.attributes.has('data-state'), false);
+  assert.equal(h.els.addressChip.attributes.has('data-security'), false);
+  assert.equal(h.els.addressChip.attributes.has('title'), false);
+  assert.equal(h.els.addressChip.attributes.get('aria-label'), 'Site information');
+});
+
+test('updateAddressChip: internal page never carries data-security', async () => {
+  const h = harness();
+  const controller = await create(h);
+  controller.updateAddressChip({ url: 'goldfinch://settings' });
+  assert.equal(h.els.addressChip.attributes.get('data-state'), 'internal');
+  assert.equal(h.els.addressChip.attributes.has('data-security'), false);
+  assert.equal(h.els.addressChip.attributes.has('title'), false);
+  assert.equal(h.els.addressChip.attributes.get('aria-label'), 'Secure Goldfinch page');
+});
+
+test('updateAddressChip: security=secure — no "not secure" wording, no certificate mention', async () => {
+  const h = harness();
+  const controller = await create(h);
+  controller.updateAddressChip({ url: 'https://a.example/', security: 'secure' });
+  assert.equal(h.els.addressChip.attributes.get('data-state'), 'web');
+  assert.equal(h.els.addressChip.attributes.get('data-security'), 'secure');
+  assert.equal(h.els.addressChip.attributes.get('aria-label'), 'Site information, a.example');
+  assert.equal(h.els.addressChip.attributes.get('title'), 'Site information, a.example');
+});
+
+test('updateAddressChip: security=insecure — "not secure", never mentions the certificate', async () => {
+  const h = harness();
+  const controller = await create(h);
+  controller.updateAddressChip({ url: 'http://a.example/', security: 'insecure' });
+  assert.equal(h.els.addressChip.attributes.get('data-security'), 'insecure');
+  const label = h.els.addressChip.attributes.get('aria-label');
+  assert.match(label, /not secure/);
+  assert.doesNotMatch(label, /certificate/i);
+  assert.equal(h.els.addressChip.attributes.get('title'), label);
+});
+
+test('updateAddressChip: security=overridden — "not secure" AND names the certificate; distinct from insecure', async () => {
+  const h = harness();
+  const controller = await create(h);
+  controller.updateAddressChip({ url: 'https://a.example/', security: 'overridden' });
+  assert.equal(h.els.addressChip.attributes.get('data-security'), 'overridden');
+  const label = h.els.addressChip.attributes.get('aria-label');
+  assert.match(label, /not secure/);
+  assert.match(label, /certificate/i);
+  assert.equal(h.els.addressChip.attributes.get('title'), label);
+});
+
+// Acceptance-run fix pass, F4 (tls-trust-surface checkpoint 9, 2026-09-16): a
+// brand-new https: tab used to show a GREEN closed lock (data-security=
+// 'secure') from first paint until the first tab-security push landed
+// ~1s after commit — including for an origin whose certificate was
+// OVERRIDDEN (the push then corrected it). Root cause: updateAddressChip fell
+// back to a scheme rule (/^https:/ → secure, else insecure) whenever
+// tab.security was not a known state, asserting trust the connection had not
+// yet established. Fix: an unknown/unset tab.security renders NONE — the
+// neutral chip — for every scheme, http or https alike.
+test('chip is neutral until main pushes a security state (tls-trust-surface checkpoint 9)', async () => {
+  const h = harness();
+  const controller = await create(h);
+  controller.updateAddressChip({ url: 'https://a.example/' });
+  assert.equal(h.els.addressChip.attributes.get('data-security'), 'none');
+  let label = h.els.addressChip.attributes.get('aria-label');
+  assert.doesNotMatch(label, /secure/i);
+
+  controller.updateAddressChip({ url: 'http://a.example/' });
+  assert.equal(h.els.addressChip.attributes.get('data-security'), 'none');
+  label = h.els.addressChip.attributes.get('aria-label');
+  assert.doesNotMatch(label, /secure/i);
+
+  // The pushed states still map exactly as before once they land.
+  controller.updateAddressChip({ url: 'https://a.example/', security: 'secure' });
+  assert.equal(h.els.addressChip.attributes.get('data-security'), 'secure');
+  controller.updateAddressChip({ url: 'https://a.example/', security: 'overridden' });
+  assert.equal(h.els.addressChip.attributes.get('data-security'), 'overridden');
+  controller.updateAddressChip({ url: 'http://a.example/', security: 'insecure' });
+  assert.equal(h.els.addressChip.attributes.get('data-security'), 'insecure');
+});
+
+test('updateAddressChip: DD16 — a failed/cert-blocked tab reports none, never "secure", even with a stale prior tab.security', async () => {
+  const h = harness();
+  const controller = await create(h);
+  controller.updateAddressChip({
+    url: 'https://a.example/',
+    security: 'secure', // stale — left over from a prior successful commit
+    loadFailure: { code: -202, name: 'ERR_CERT_AUTHORITY_INVALID', url: 'https://a.example/', cert: { error: 'X' } }
+  });
+  assert.equal(h.els.addressChip.attributes.get('data-security'), 'none');
+  const label = h.els.addressChip.attributes.get('aria-label');
+  assert.doesNotMatch(label, /secure/i);
+});
+
+test('updateAddressChip: unparseable web URL falls back to the neutral default (no data-security)', async () => {
+  const h = harness();
+  const controller = await create(h);
+  controller.updateAddressChip({ url: 'not a url' });
+  assert.equal(h.els.addressChip.attributes.has('data-state'), false);
+  assert.equal(h.els.addressChip.attributes.has('data-security'), false);
+  assert.equal(h.els.addressChip.attributes.get('aria-label'), 'Site information');
+});
+
+test('grep-AC: data-secure never appears in src/', () => {
+  const { execSync } = require('node:child_process');
+  const out = execSync('grep -rn "data-secure" src/ || true', { cwd: path.join(__dirname, '../..') }).toString();
+  assert.equal(out.trim(), '', 'data-secure must be fully replaced by data-security across src/');
+});

@@ -68,6 +68,10 @@ function createHarness(options = {}) {
       this._id = nextWindowId++;
       this.opts = opts;
       this.destroyed = false;
+      // Mission 20 Flight 2 Leg 1 (#216): the chrome-blur reassert listener
+      // gates on win.isFocused() (a real app-switch must never pull focus
+      // back) — settable directly by a test (`rec.win._focused = false`).
+      this._focused = true;
       this.contentSize = null;
       this.contentBounds = { width: opts.width, height: opts.height };
       this.children = [];
@@ -101,6 +105,9 @@ function createHarness(options = {}) {
     }
     focus() {
       this.emit('focus');
+    }
+    isFocused() {
+      return this._focused;
     }
   }
 
@@ -145,6 +152,12 @@ function createHarness(options = {}) {
         ? {
             closeMenuOverlay(reason) {
               log.push(`sheet-close:${reason}`);
+            },
+            // Mission 20 Flight 2 Leg 1 (#216): the chrome-blur reassert listener
+            // reads this to keep an open menu's focus (DD1 posture) — a test
+            // overrides `rec.sheet = { isMenuOpen: () => true }` directly.
+            isMenuOpen() {
+              return false;
             },
             teardown() {
               log.push('sheet-teardown');

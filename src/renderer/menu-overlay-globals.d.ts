@@ -166,6 +166,13 @@ interface MenuOverlayBridge {
    * the only party that can still evaluate it.
    * Optional so an older preload degrades to an inert sheet rather than throwing. */
   sheetDrag?(payload: { token: number; phase: 'start' | 'end'; index?: number }): void;
+  /** sheet → main: the DEDICATED cert-override proceed channel (Mission 20 Flight 2
+   * Leg 3, flight DD3) — the flight's ONE security-decision invoke. Payload carries
+   * ONLY the open token; the override key and re-navigation target are both derived
+   * main-side from the active tab's entry, never from anything sent here. Returns
+   * { ok }; true means main already closed the sheet (proceeded); false ('sender' |
+   * 'token' | 'menu-type' | 'entry') keeps the card open with the status line. */
+  certOverrideProceed(payload: { token: number }): Promise<{ ok: boolean; reason?: string }>;
 }
 
 interface Window {

@@ -407,6 +407,87 @@ body {
   position: absolute;
 }
 
+/* ---------- cert-override template (Mission 20 Flight 2 Leg 3, flight DD3) ----------
+   The flight's ONE security-decision channel — proceed despite a TLS
+   certificate error. Centered backdrop + .new-container-inner card chrome
+   (the auth-basic/vault-unlock shape) — the anchor is ignored. Back to safety
+   is styled PRIMARY (gold, `.text-btn.primary`); Proceed is deliberately a
+   plain `.text-btn` — visually secondary, never colour alone. */
+#sheet-cert-override {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cert-override-inner {
+  max-width: 380px;
+}
+.cert-override-heading {
+  font-weight: 600;
+  font-size: 14px;
+}
+.cert-override-lede {
+  font-size: 12px;
+  opacity: 0.8;
+  margin: 0;
+}
+.cert-override-code {
+  font-family: monospace;
+  font-size: 11px;
+  opacity: 0.7;
+  margin: 0;
+  overflow-wrap: anywhere; /* the raw engine error name can be long */
+}
+.cert-override-status {
+  font-size: 12px;
+  color: #ff6b6b;
+  min-height: 15px; /* reserve the line so the card doesn't jump on a failed proceed */
+  line-height: 15px;
+}
+.cert-override-status:empty {
+  color: transparent;
+}
+
+/* ---------- cert-viewer template (Mission 20 Flight 2 Leg 4, DD9) ----------
+   A READ-ONLY certificate summary — centered backdrop + .new-container-inner
+   card chrome (the cert-override/auth-basic shape), wider to hold longer
+   rows, with a scrollable rows region under a fixed status line (the
+   container-picker max-height + overflow-y idiom, :90 above). Rows reuse
+   .si-row/.si-label/.si-value from the info-popup template — one visual
+   language across the sheet's two read-only dialogs. */
+#sheet-cert-viewer {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cert-viewer-inner {
+  min-width: 320px;
+  max-width: 440px;
+}
+.cert-viewer-status {
+  font-weight: 600;
+  font-size: 13px;
+}
+.cert-viewer-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: min(320px, calc(100vh - 160px));
+  overflow-y: auto;
+}
+.cert-viewer-rows .si-row {
+  align-items: flex-start;
+}
+.cert-viewer-rows .si-value {
+  text-align: right;
+  overflow-wrap: anywhere; /* fingerprints/SANs/long DNs can be long */
+}
+
 /* ---------- vault-set + vault-recovery-show templates (M12 Flight 3 Leg 4 first-run-
    setup, DD5) ----------
    Both reuse the input-dialog card chrome (.new-container-inner / -input / .text-btn) +

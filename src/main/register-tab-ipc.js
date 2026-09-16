@@ -184,7 +184,20 @@ function registerTabIpc(deps) {
       trusted,
       active: false,
       loadFailure: null,
-      lastRequestedUrl: initialLastRequestedUrl
+      lastRequestedUrl: initialLastRequestedUrl,
+      // Mission 20 Flight 2 Leg 1 (#216, DD12): armed at tab-navigate's loadURL
+      // branch when the sender chrome held focus, disarmed at did-navigate /
+      // did-fail-load (guest-wiring.js) — see the tab-navigate handler below.
+      chromeNavPending: false,
+      // Mission 20 Flight 2 Leg 2 (DD1/DD2/DD6/DD7): certificate-trust and
+      // security-state fields, all seeded unset. `certFailure`/`certOverride`
+      // are transient decision stamps (cert-trust.js, cleared at the next
+      // non-error main-frame did-start-navigation); `certificate`/`security`
+      // are the durable per-tab copies (guest-wiring.js's did-navigate).
+      certFailure: null,
+      certOverride: null,
+      certificate: null,
+      security: null
     });
     // Squawk 0073: a new tab is new topology — debounced snapshot re-arm.
     scheduleSnapshot?.();
@@ -378,6 +391,33 @@ function registerTabIpc(deps) {
     };
   });
 
+  // Mission 20 Flight 2 Leg 4 (DD9): the read-only certificate summary behind
+  // the cert-viewer sheet card. requireChrome + ownsTab — the SAME shape
+  // tab-navigate uses (:951 below), not tab-history-snapshot's bare
+  // requireChrome (that channel reads an arbitrary wcId; this one acts on
+  // the sender's OWN tab, named by wcId). `entry.certificate` is the
+  // OBSERVER's wrapper `{ verificationResult, errorCode, isIssuedByKnownRoot,
+  // summary }` (cert-observer.js), NEVER the summary itself — a wrapper with
+  // a null summary counts as absent. Never returns a `data`/PEM field — every
+  // value here traces back to certificate-summary.js's strings-only output.
+  ipcMain.handle('tab-certificate-get', (event, { wcId }) => {
+    const owner = ownsTab(event, wcId);
+    if (!owner) return null;
+    const entry = owner.tabViews.get(wcId);
+    if (!entry) return null;
+    // A cert-blocked interstitial's own folded failure — already stamped
+    // `status: 'untrusted'` by cert-trust.js's summarizeCertificate call.
+    if (entry.loadFailure?.cert?.summary) return entry.loadFailure.cert.summary;
+    const summary = entry.certificate?.summary;
+    if (!summary) return null;
+    const status = entry.security === 'overridden' ? 'overridden' : 'trusted';
+    return {
+      ...summary,
+      status,
+      error: status === 'overridden' ? (entry.certOverride?.error ?? summary.error) : undefined
+    };
+  });
+
   // Read-only closed-tab-stack size — since F6 leg 3 (DD6) this is the push-cache's
   // BOOT SEED only: the renderer invokes it once at chrome load, and every later
   // update arrives via the closed-tab-stack-changed push (which always wins the
@@ -542,6 +582,9 @@ function registerTabIpc(deps) {
     // name, never a line number (F7 logged 4 different ones). Leg 1 anchored it on
     // the `'tab-move-to-new-window'` callback; F8 leg 3's factoring moved the pair
     // out, its vacuity guard failed loudly as designed, and forced this re-anchor.
+    // Mission 20 Flight 2 Leg 2: the SAME entry object moves by reference, so
+    // certFailure/certOverride/certificate/security travel with it for free —
+    // a future field-by-field rebuild of this move must not silently drop them.
     source.tabViews.delete(p.wcId);
     target.tabViews.set(p.wcId, entry);
     // Squawk 0073: a tab re-parented across windows is new topology in BOTH windows'
@@ -639,6 +682,15 @@ function registerTabIpc(deps) {
     // hidden (AC7, above); this only re-syncs the adopting chrome's own record/panel.
     if (entry.loadFailure) {
       queueChromeSend(target, () => ['tab-load-failure', { wcId: p.wcId, failure: entry.loadFailure }]);
+    }
+    // Mission 20 Flight 2 Leg 2 (DD7 FD amendment): the adopting window's
+    // chrome has no record of this tab's security state either — re-push it
+    // on the SAME boot-gated path, right beside the load-failure re-push.
+    // Deliberately NOT a replay of `tab-did-navigate` (its chrome handler
+    // resets media/privacy/suggestions) — `tab-security` is its own channel
+    // for exactly this reason.
+    if (entry.security) {
+      queueChromeSend(target, () => ['tab-security', { wcId: p.wcId, security: entry.security }]);
     }
     queueChromeSend(target, () => [
       'tab-nav-state',
@@ -939,10 +991,25 @@ function registerTabIpc(deps) {
       const isInternal = entry ? entry.trusted : isInternalContents(wc);
       const safe = isInternal ? isInternalPageUrl(args[0]) : isSafeTabUrl(args[0]);
       if (!safe) return;
-      // Mission 20 Flight 1 (DD2/AC5): stamp the requested address BEFORE issuing the
-      // load — the `did-start-navigation` clear (guest-wiring.js) covers page-initiated
-      // navigations; this covers the chrome-initiated ones (address bar, Retry).
-      if (entry) entry.lastRequestedUrl = args[0];
+      // Mission 20 Flight 2 Leg 1 (#216, DD12 H2/H3): a chrome-initiated navigation
+      // that starts while the chrome holds OS focus is the ONE case the leg-1 live
+      // diagnostic run found responsible — the navigating guest's WebContentsView
+      // asserts itself as the window's focused child view a few ms into the
+      // navigation (well before did-fail-load/did-finish-load, observed live as a
+      // `focus`/`blur` cycle on the guest's webContents), which is asynchronous
+      // relative to this synchronous handler, so a one-shot reassert issued right
+      // here would race and lose. Arming a pending flag here and reacting to the
+      // CHROME's own `blur` (window-factory.js) instead catches the steal whenever
+      // it actually lands, however many times it repeats. Only chrome-initiated
+      // navigations arrive on this channel (tab-navigate is the address bar /
+      // Retry / the future cert-override proceed path) — automation's `navigate`
+      // op calls `wc.loadURL` directly and never touches this flag (out of #216's
+      // scope: the chrome never held focus on that path, diagnostic run item (h')).
+      if (entry) {
+        entry.lastRequestedUrl = args[0];
+        const chromeWc = owner.chromeView.webContents;
+        entry.chromeNavPending = !chromeWc.isDestroyed() && chromeWc.isFocused();
+      }
       wc.loadURL(args[0]).catch((err) => {
         logger.warn('[tab-navigate] loadURL rejected:', err && (err.code || err.message || err));
       });

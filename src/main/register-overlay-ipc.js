@@ -110,7 +110,20 @@ function registerOverlayIpc({
   // comment. A plain optional reference (leg 2's jar-ipc.js precedent, not a
   // getVaultStore-style accessor): offline overlay tests that don't inject
   // it get the pre-fix no-consultation shape, byte-unchanged.
-  list
+  list,
+  // M20 F2 L3 (flight DD2/DD3): the cert-override proceed handler's deps —
+  // gated-optional (offline overlay tests that omit `certTrust` never
+  // register the channel, the `validateBookmarkEdit` idiom above).
+  // `certTrust.allow` is called from EXACTLY this handler (AC2's grep-pin,
+  // inverting leg 2's "no caller yet" pin); `keyFor` derives the override key
+  // from the ENTRY, never a payload field; `getTabContents` resolves the live
+  // (non-destroyed) guest to re-navigate; `isSafeTabUrl` re-validates the
+  // entry's own recorded intended address before it is ever handed to
+  // loadURL (the register-tab-ipc.js tab-navigate precedent).
+  certTrust,
+  keyFor,
+  getTabContents,
+  isSafeTabUrl
 }) {
   function recordForOverlaySender(sender, key) {
     if (!sender) return null;
@@ -853,6 +866,94 @@ function registerOverlayIpc({
     rec.sheet.closeMenuOverlay('activated', token);
     chromeForAttachment(rec.win)?.send('bookmark-overflow-drop', { index });
   });
+
+  // M20 F2 L3 (flight DD2/DD3): the cert-override sheet's PROCEED invoke — the
+  // flight's ONE security-decision channel, and the ONE place in this
+  // codebase that grants a remembered certTrust override (AC2's grep-pin on
+  // the literal call below — inverts leg 2's "allow() has no caller yet"
+  // pin). Registered ONLY when certTrust is injected (the
+  // validateBookmarkEdit-gated-registration idiom above).
+  //
+  // ⚠ FOUR GUARDS, NAMED HERE AS PREDICATES, IN ORDER — this channel does
+  // something no sibling channel does (grants a standing trust override and
+  // re-navigates a guest), so it earns a guard the three-guard
+  // bookmarks-overflow precedent above does not need:
+  //   1. recordForSheetSender(event.sender) — the sender IS this window's
+  //      sheet webContents, never a payload-declared identity ('sender').
+  //   2. token freshness against getCurrentMenu() — a stale open, OR no menu
+  //      open at all (collapsed into this same reason; no fifth string),
+  //      cannot proceed ('token').
+  //   3. current.menuType === 'cert-override' — the sheet is ONE persistent
+  //      document shared by every menuType (DD1/DD1a); a proceed sent while
+  //      a DIFFERENT card (vault-unlock, bookmark-edit, …) is current must
+  //      never fire ('menu-type').
+  //   4. the ENTRY gate — the window's active tab must carry an entry that is
+  //      not `trusted`, whose loadFailure.cert is overridable with a string
+  //      host/fingerprint, whose lastRequestedUrl passes isSafeTabUrl, and
+  //      whose guest webContents is still live. The override key and the
+  //      re-navigation target are BOTH derived from THIS entry — never from
+  //      any payload field, so a forged/stale payload has nothing to steer
+  //      ('entry').
+  //
+  // Why this surface is closed to every automation tier, at every op, at
+  // every key tier (stated here, not only in the flight spec): automation's
+  // click/pressKey/typeText dispatch sendInputEvent to the RESOLVED
+  // webContents BY WCID (automation/input.js), never by screen coordinate, so
+  // a chrome-targeted input can never land on the sheet's overlapping region;
+  // admin `evaluate` on the chrome wcId runs in the CHROME's own realm
+  // (window.goldfinch.* only) — window.menuOverlay.certOverrideProceed lives
+  // in the SHEET's own preload/webContents, unreachable from there; the sheet
+  // wcId itself is refused to every op while cert-override is current
+  // (resolve.js's AUTOMATABLE_MENU_TYPES never gains this menuType — DD10);
+  // and recordForSheetSender compares webContents IDENTITY, never a
+  // payload-declared id.
+  if (certTrust) {
+    ipcMain.handle('menu-overlay:cert-override-proceed', (event, payload) => {
+      const rec = recordForSheetSender(event.sender);
+      if (!rec || !rec.sheet) return { ok: false, reason: 'sender' };
+
+      const { token } = payload || {};
+      const current = rec.sheet.getCurrentMenu();
+      if (typeof token !== 'number' || !current || token !== current.token) {
+        return { ok: false, reason: 'token' };
+      }
+      if (current.menuType !== 'cert-override') return { ok: false, reason: 'menu-type' };
+
+      const entry = rec.activeTabWcId != null && rec.tabViews ? rec.tabViews.get(rec.activeTabWcId) : null;
+      const cert = entry && entry.loadFailure && entry.loadFailure.cert;
+      const wc = entry ? getTabContents(rec.activeTabWcId) : null;
+      const entryOk =
+        !!entry &&
+        !entry.trusted &&
+        !!cert &&
+        cert.overridable === true &&
+        typeof cert.host === 'string' &&
+        typeof cert.fingerprint === 'string' &&
+        typeof entry.lastRequestedUrl === 'string' &&
+        isSafeTabUrl(entry.lastRequestedUrl) &&
+        !!wc;
+      if (!entryOk) return { ok: false, reason: 'entry' };
+
+      certTrust.allow(keyFor(entry.partition, cert.host, cert.port, cert.fingerprint));
+      rec.sheet.closeMenuOverlay('activated', token);
+      // Design review (HIGH): closeMenuOverlay('activated') has JUST
+      // synchronously focused this window's chrome (focusChrome() —
+      // menu-overlay-manager.js's close path). Setting this TRUE — never
+      // false — arms the SAME #216-fix reassert net tab-navigate arms
+      // (register-tab-ipc.js), so the guest's asynchronous self-focus,
+      // landing a few ms into the loadURL below, cannot steal focus back
+      // with the net disarmed. Accepted consequence: after a SUCCESSFUL
+      // proceed, OS focus rests on the chrome (F6/Tab reach the page; the
+      // HAT judges the feel). Disarms itself at the resulting
+      // did-navigate/did-fail-load like every other chrome-initiated
+      // navigation.
+      entry.chromeNavPending = true;
+      wc.loadURL(entry.lastRequestedUrl).catch((err) => {
+        console.warn('[cert-override-proceed] loadURL rejected:', err && (err.code || err.message || err));
+      });
+      return { ok: true };
+    });
+  }
 
   // M15 F3 Leg 5b (AC3): the bookmarks-overflow sheet's DRAG-LIFECYCLE channel —
   // the reverse direction, where the sheet's rows are the drag SOURCE. The chrome

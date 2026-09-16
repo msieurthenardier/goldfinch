@@ -508,17 +508,21 @@ a:focus-visible {
 }
 
 /* Secure HTTPS web tab: green closed lock */
-.addr-chip[data-state='web'][data-secure='true'] {
+.addr-chip[data-state='web'][data-security='secure'] {
   color: #6dff8f;
 }
 
-/* Insecure HTTP web tab: red broken/open lock.
+/* Insecure HTTP web tab, AND an overridden-certificate HTTPS tab (DD8 — the
+   two "not secure" states share the broken lock SHAPE, distinguished only by
+   words in the label/title, never colour/shape alone): red broken/open lock.
    The ::after shackle is shifted right and rotated to read as ajar/broken —
    a distinct SHAPE from the closed shackle, so security state is not color-alone. */
-.addr-chip[data-state='web'][data-secure='false'] {
+.addr-chip[data-state='web'][data-security='insecure'],
+.addr-chip[data-state='web'][data-security='overridden'] {
   color: #ff6b6b;
 }
-.addr-chip[data-state='web'][data-secure='false']::after {
+.addr-chip[data-state='web'][data-security='insecure']::after,
+.addr-chip[data-state='web'][data-security='overridden']::after {
   transform: translateX(2px) rotate(30deg);
   border-bottom: none;
 }

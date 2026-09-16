@@ -203,6 +203,29 @@ function createWindowFactory(deps) {
       authChallenges?.notifyWindowFocused(record);
     });
 
+    // Mission 20 Flight 2 Leg 1 (#216, DD12 H2/H3): the leg-1 live diagnostic run
+    // found the stranded-focus defect's mechanism — the navigating GUEST
+    // asserting itself as the window's focused child view a few ms into a
+    // chrome-initiated navigation —
+    // asynchronous relative to the tab-navigate handler, so a one-shot reassert
+    // issued there raced the steal and lost. Reacting to the CHROME's own
+    // `blur` instead catches the steal the instant it lands, however many
+    // times it repeats. Gated on: (1) `entry.chromeNavPending` — armed ONLY for
+    // a chrome-initiated `tab-navigate` that started while the chrome held
+    // focus (register-tab-ipc.js), disarmed at `did-navigate`/`did-fail-load`
+    // (guest-wiring.js); (2) `win.isFocused()` — a real app-switch (alt-tab to
+    // another application) must never pull focus back, the same posture as the
+    // menu-overlay sheet's keep-focus reassert (CLAUDE.md "Keep-focus opens");
+    // (3) no sheet menu open — an open menu is the operator's focus to keep
+    // (DD1's `findOverlay.hide()` posture).
+    chromeView.webContents.on('blur', () => {
+      if (!win.isFocused()) return;
+      const entry = record.activeTabWcId != null ? record.tabViews.get(record.activeTabWcId) : null;
+      if (!entry?.chromeNavPending) return;
+      if (record.sheet?.isMenuOpen()) return;
+      if (!chromeView.webContents.isDestroyed()) chromeView.webContents.focus();
+    });
+
     const sendToOwnChrome = (channel, payload) => {
       const cc = chromeView.webContents;
       if (!cc.isDestroyed()) cc.send(channel, payload);

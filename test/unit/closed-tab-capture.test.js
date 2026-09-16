@@ -81,6 +81,21 @@ test('captureClosedTabEntry captures a persist-jar tab with windowId and the giv
   assert.equal(typeof entry.closedAt, 'number');
 });
 
+// --- Mission 20 Flight 2 Leg 2 (DD2/AC7): object-shape pin ---------------------
+
+test('AC7: object-shape pin — captured entry never carries cert/security fields even when the source tabEntry has them', () => {
+  const tabEntry = makeTabEntry();
+  tabEntry.certFailure = { url: 'https://bad.test/', host: 'bad.test' };
+  tabEntry.certOverride = { host: 'bad.test', port: 443 };
+  tabEntry.certificate = { verificationResult: 'net::OK' };
+  tabEntry.security = 'overridden';
+  const entry = captureClosedTabEntry({ tabEntry, jarsList: JARS, stripIndex: 0, windowId: 1 });
+  assert.deepEqual(
+    Object.keys(entry).sort(),
+    ['closedAt', 'jarId', 'navEntries', 'navIndex', 'stripIndex', 'title', 'url', 'windowId'].sort()
+  );
+});
+
 test('captureClosedTabEntry excludes burner partitions (positive allowlist — no jar match)', () => {
   const entry = captureClosedTabEntry({
     tabEntry: makeTabEntry({ partition: 'burner:1' }),

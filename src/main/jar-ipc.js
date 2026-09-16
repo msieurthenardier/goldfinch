@@ -22,7 +22,9 @@ const { registerJarDataIpc } = require('./jar-data-ipc');
  *   broadcast: (channel: string, payload: unknown) => void,
  *   historyStore: typeof import('./history-store'),
  *   getVaultStore?: () => any,
- *   bookmarksStore?: typeof import('./bookmarks-store')
+ *   bookmarksStore?: typeof import('./bookmarks-store'),
+ *   certTrust?: any,
+ *   certObserver?: any
  * }} deps
  */
 function registerJarIpc({
@@ -35,7 +37,11 @@ function registerJarIpc({
   broadcast,
   historyStore,
   getVaultStore,
-  bookmarksStore
+  bookmarksStore,
+  // Mission 20 Flight 2 Leg 2 (DD2/DD6/AC9): threaded straight through to
+  // createJarDataLifecycle's wipeJarData — the sole place these clears run.
+  certTrust,
+  certObserver
 }) {
   const cookieSeen = appDb.createCookieSeenStore();
 
@@ -53,7 +59,9 @@ function registerJarIpc({
     session,
     rerollSeed,
     historyStore,
-    cookieSeen
+    cookieSeen,
+    certTrust,
+    certObserver
   });
 
   registerJarRegistryIpc({

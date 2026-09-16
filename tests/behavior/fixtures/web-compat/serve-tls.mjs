@@ -11,10 +11,15 @@
 // bind only; JSONL log format matches serve.mjs (presence booleans only —
 // never certificate contents).
 //
-// Usage: node serve-tls.mjs --port <port> [--log <path>]
+// Usage: node serve-tls.mjs --port <port> [--log <path>] [--cert-set untrusted|trusted]
+// `--cert-set` (Mission 20 Flight 2 Leg 4, DD14) selects which fixture cert
+// set to present: `untrusted` (default, unchanged — CA #1, never imported as
+// a trust anchor) or `trusted` (CA #2 — `server-trusted.pem`, trusted ONLY
+// after `node import-trust-anchor.mjs --import`).
 // Verify (per the leg's Verification Steps, from ./certs/):
 //   curl -k --cert client.pem --key client-key.pem https://127.0.0.1:<port>/   → authenticated marker
 //   curl -k https://127.0.0.1:<port>/                                          → unauthenticated state
+//   curl --cacert trusted-ca.pem https://127.0.0.1:<port>/  (--cert-set trusted) → succeeds WITHOUT -k
 
 import https from 'node:https';
 import fs from 'node:fs';
@@ -25,19 +30,24 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const certsDir = path.join(here, 'certs');
 
 function parseArgs(argv) {
-  const args = { port: null, log: null };
+  const args = { port: null, log: null, certSet: 'untrusted' };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--port') args.port = Number(argv[++i]);
     else if (argv[i] === '--log') args.log = argv[++i];
+    else if (argv[i] === '--cert-set') args.certSet = argv[++i];
   }
   if (!args.port) {
-    console.error('Usage: node serve-tls.mjs --port <port> [--log <path>]');
+    console.error('Usage: node serve-tls.mjs --port <port> [--log <path>] [--cert-set untrusted|trusted]');
+    process.exit(1);
+  }
+  if (args.certSet !== 'untrusted' && args.certSet !== 'trusted') {
+    console.error('serve-tls: --cert-set must be "untrusted" (default) or "trusted"');
     process.exit(1);
   }
   return args;
 }
 
-const { port, log: logPath } = parseArgs(process.argv.slice(2));
+const { port, log: logPath, certSet } = parseArgs(process.argv.slice(2));
 
 if (logPath) fs.writeFileSync(logPath, '');
 function appendLog(entry) {
@@ -55,9 +65,23 @@ function readCert(name) {
   }
 }
 
-const key = readCert('server-key.pem');
-const cert = readCert('server.pem');
-const ca = readCert('ca.pem');
+// Mission 20 Flight 2 Leg 4 (DD14): the trusted set is byte-identical in
+// SHAPE to the default (same SAN, same server cert role) — only the signing
+// CA differs, so serve-tls.mjs's own request handling never branches on
+// certSet again below this point.
+const key = readCert(certSet === 'trusted' ? 'server-trusted-key.pem' : 'server-key.pem');
+const leafCert = readCert(certSet === 'trusted' ? 'server-trusted.pem' : 'server.pem');
+const ca = readCert(certSet === 'trusted' ? 'trusted-ca.pem' : 'ca.pem');
+// Mission 20 Flight 2 Leg 4 (live-discovered, TLS-trust behavior spec): `cert`
+// carries the FULL CHAIN (leaf + issuing CA), not the leaf alone. A bare leaf
+// PEM (the shape every prior fixture use needed) never gives Chromium a chain
+// to report at all — `tls`'s own `cert` option accepts "the PEM formatted
+// certificate ... followed by the PEM formatted intermediate certificates"
+// concatenated, exactly what the TLS-trust behavior spec's certificate-viewer
+// rows need to exercise a real two-level chain (server → CA). `ca` keeps its
+// existing, UNRELATED role below (verifying a PRESENTED client certificate,
+// client-cert leg F1 L3) — unaffected by what the server now sends the peer.
+const cert = Buffer.concat([leafCert, ca]);
 
 function page(authState) {
   return `<!doctype html>
@@ -93,5 +117,7 @@ const server = https.createServer(
 );
 
 server.listen(port, '127.0.0.1', () => {
-  console.log(`web-compat TLS fixture server listening on https://127.0.0.1:${port} (requestCert: true)`);
+  console.log(
+    `web-compat TLS fixture server listening on https://127.0.0.1:${port} (requestCert: true, --cert-set ${certSet})`
+  );
 });

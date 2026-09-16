@@ -1,88 +1,17 @@
 'use strict';
 
 // Mission 20 F1 Leg 2 (AC2/AC4/AC6): behavioral coverage for
-// load-failure-controller.js on a minimal fake-DOM harness. tab-controller.js's
-// FakeElement/FakeDocument classes are NOT exported (no module.exports in
-// tab-controller.test.js), so this is a LIFTED minimal copy of just the bits
-// this controller needs (createElement, classList, dataset, querySelector,
-// setAttribute/getAttribute, addEventListener/dispatch) — noted per the leg's
-// AC2 instruction (see the flight log's leg-2 entry).
+// load-failure-controller.js on the shared fake-DOM harness
+// (test/unit/helpers/fake-dom.js, squawk 0077 — this file's local
+// FakeClassList/FakeElement copies are gone).
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { pathToFileURL } = require('node:url');
 const path = require('node:path');
+const { FakeElement, createFakeDocument } = require('./helpers/fake-dom');
 
 const moduleUrl = pathToFileURL(path.join(__dirname, '../../src/renderer/chrome/load-failure-controller.js')).href;
-
-class FakeClassList {
-  constructor() {
-    this.values = new Set();
-  }
-  add(...names) {
-    names.forEach((name) => this.values.add(name));
-  }
-  remove(...names) {
-    names.forEach((name) => this.values.delete(name));
-  }
-  contains(name) {
-    return this.values.has(name);
-  }
-  toggle(name, force) {
-    const next = force === undefined ? !this.values.has(name) : !!force;
-    if (next) this.values.add(name);
-    else this.values.delete(name);
-    return next;
-  }
-}
-
-class FakeElement {
-  constructor(name = 'div') {
-    this.name = name;
-    this.children = [];
-    this.dataset = {};
-    this.classList = new FakeClassList();
-    this.listeners = new Map();
-    this.attributes = new Map();
-    this._text = '';
-    this.focused = false;
-  }
-  set className(value) {
-    value
-      .split(/\s+/)
-      .filter(Boolean)
-      .forEach((n) => this.classList.add(n));
-  }
-  set textContent(value) {
-    this._text = value;
-  }
-  get textContent() {
-    return this._text;
-  }
-  setAttribute(name, value) {
-    this.attributes.set(name, String(value));
-  }
-  getAttribute(name) {
-    return this.attributes.get(name) ?? null;
-  }
-  addEventListener(name, fn) {
-    this.listeners.set(name, fn);
-  }
-  appendChild(child) {
-    this.children.push(child);
-    return child;
-  }
-  querySelector(selector) {
-    return this._parts ? this._parts.get(selector) || null : null;
-  }
-  click() {
-    const fn = this.listeners.get('click');
-    if (fn) fn();
-  }
-  focus() {
-    this.focused = true;
-  }
-}
 
 // Minimal strip-button double: only the pieces applyStripState touches
 // (.tab-title / .tab-status / .tab-close via querySelector, dataset, title,
@@ -108,23 +37,15 @@ function createHarness() {
   const els = { loadFailureSurface: root, address };
   const addressChipCalls = [];
   const updateAddressChip = (tab) => addressChipCalls.push(tab);
-  const created = [];
-  const document = {
-    createElement: (name) => {
-      const el = new FakeElement(name);
-      created.push(el);
-      return el;
-    },
-    activeElement: null,
-    body: { isBody: true },
-    __created: created
-  };
+  const document = createFakeDocument();
   const tabsByWcId = new Map();
   const findTabByWcId = (wcId) => tabsByWcId.get(wcId) || null;
   let activeTabId = null;
   const isActiveTab = (tab) => !!tab && tab.id === activeTabId;
   const subscribers = [];
   const calls = [];
+  const advancedCalls = [];
+  const viewCertificateCalls = [];
   const bridge = {
     onTabLoadFailure(cb) {
       subscribers.push(cb);
@@ -150,6 +71,10 @@ function createHarness() {
     updateAddressChip,
     addressChipCalls,
     calls,
+    advancedCalls,
+    viewCertificateCalls,
+    onAdvanced: (tab) => advancedCalls.push(tab),
+    onViewCertificate: (tab) => viewCertificateCalls.push(tab),
     addTab(tab) {
       tabsByWcId.set(tab.wcId, tab);
     },
@@ -171,7 +96,9 @@ async function loadController(h) {
     findTabByWcId: h.findTabByWcId,
     isActiveTab: h.isActiveTab,
     classifyLoadFailure: h.classifyLoadFailure,
-    updateAddressChip: h.updateAddressChip
+    updateAddressChip: h.updateAddressChip,
+    onAdvanced: h.onAdvanced,
+    onViewCertificate: h.onViewCertificate
   });
 }
 
@@ -314,7 +241,10 @@ test('F1: a failure push on a BACKGROUND tab never touches the address bar', asy
   assert.equal(h.addressChipCalls.length, 0);
 });
 
-test('F1: a failure push on the active tab skips the address sync while the operator is typing there', async () => {
+test('F1: a failure push on the active tab skips the address VALUE sync while the operator is typing there, but still updates the chip', async () => {
+  // Acceptance-run fix pass (tls-trust-surface checkpoint 2): only the value
+  // write is guarded by activeElement — the security chip must never lag
+  // behind a real load-failure state, focus or no.
   const h = createHarness();
   const tab = {
     id: 'tab-1',
@@ -336,7 +266,78 @@ test('F1: a failure push on the active tab skips the address sync while the oper
   });
 
   assert.equal(h.els.address.value, 'still typing this', 'in-progress typing must never be clobbered');
-  assert.equal(h.addressChipCalls.length, 0);
+  assert.equal(h.addressChipCalls.length, 1, 'the chip must still be refreshed even while the address bar has focus');
+  assert.equal(h.addressChipCalls[0], tab);
+});
+
+test('chip updates even while the address bar has focus (tls-trust-surface checkpoint 2)', async () => {
+  // Root cause: a new tab autofocuses #address, so document.activeElement is
+  // ALREADY els.address the moment the tab-load-failure push for a
+  // cert-blocked navigation arrives — the exact scenario where the chip must
+  // not be allowed to lag and show a stale green lock over the interstitial.
+  const h = createHarness();
+  const tab = {
+    id: 'tab-1',
+    wcId: 10,
+    url: 'https://bad.test/',
+    title: 'New tab',
+    btn: makeBtn(),
+    loadFailure: null
+  };
+  h.addTab(tab);
+  h.setActive('tab-1');
+  h.els.address.value = 'https://bad.test/';
+  h.document.activeElement = h.els.address; // address bar holds focus (new-tab autofocus)
+  await loadController(h);
+
+  h.pushFailure({
+    wcId: 10,
+    failure: {
+      code: -202,
+      name: 'ERR_CERT_AUTHORITY_INVALID',
+      url: 'https://bad.test/',
+      cert: { host: 'bad.test', port: 443, error: 'ERR_CERT_AUTHORITY_INVALID', overridable: true, summary: {} }
+    }
+  });
+
+  assert.equal(h.addressChipCalls.length, 1, 'updateAddressChip must run even while the address bar has focus');
+  assert.equal(h.addressChipCalls[0], tab);
+  assert.equal(h.els.address.value, 'https://bad.test/', 'the value write stays guarded and must not be overwritten');
+
+  // Sanity check on the other side of the guard: with focus elsewhere, both
+  // the value and the chip update (pre-existing behaviour, unchanged).
+  const h2 = createHarness();
+  const tab2 = {
+    id: 'tab-1',
+    wcId: 10,
+    url: 'https://old.test/',
+    title: 'Old',
+    btn: makeBtn(),
+    loadFailure: null
+  };
+  h2.addTab(tab2);
+  h2.setActive('tab-1');
+  h2.els.address.value = 'https://old.test/';
+  h2.document.activeElement = h2.document.body; // no chrome control holds focus
+  await loadController(h2);
+
+  h2.pushFailure({
+    wcId: 10,
+    failure: {
+      code: -202,
+      name: 'ERR_CERT_AUTHORITY_INVALID',
+      url: 'https://bad.test/',
+      cert: { host: 'bad.test', port: 443, error: 'ERR_CERT_AUTHORITY_INVALID', overridable: true, summary: {} }
+    }
+  });
+
+  assert.equal(h2.addressChipCalls.length, 1);
+  assert.equal(h2.addressChipCalls[0], tab2);
+  assert.equal(
+    h2.els.address.value,
+    'https://bad.test/',
+    'with focus elsewhere the value syncs too (unchanged behaviour)'
+  );
 });
 
 test('a push for an unknown wcId is a no-op', async () => {
@@ -439,6 +440,182 @@ test('HAT H1 fix 1: the code line renders nothing when both `name` and `code` ar
   assert.equal(codeLine.textContent, '');
 });
 
+// ---------------------------------------------------------------------------
+// Mission 20 Flight 2 Leg 2 (DD4/AC3): the cert branch — classifyCertError's
+// title/body, Retry always shown, data-failure-kind="cert" on the root.
+// ---------------------------------------------------------------------------
+
+test('DD4: a folded cert failure renders classifyCertError copy, keeps the unchanged code line, always shows Retry, and stamps data-failure-kind', async () => {
+  const h = createHarness();
+  const tab = { id: 'tab-1', wcId: 10, url: 'https://bad.test/', title: 'New tab', btn: makeBtn(), loadFailure: null };
+  h.addTab(tab);
+  h.setActive('tab-1');
+  await loadController(h);
+
+  h.pushFailure({
+    wcId: 10,
+    failure: {
+      code: -202,
+      name: 'ERR_CERT_AUTHORITY_INVALID',
+      url: 'https://bad.test/',
+      cert: { host: 'bad.test', port: 443, error: 'ERR_CERT_AUTHORITY_INVALID', overridable: true, summary: {} }
+    }
+  });
+
+  const heading = findById(h, 'load-failure-heading');
+  const body = findById(h, 'load-failure-body');
+  const codeLine = findById(h, 'load-failure-code');
+  const retry = findById(h, 'load-failure-retry');
+  assert.equal(heading.textContent, "This connection isn't private");
+  assert.ok(body.textContent.length > 0);
+  assert.equal(codeLine.textContent, 'ERR_CERT_AUTHORITY_INVALID (-202)');
+  assert.equal(retry.classList.contains('hidden'), false, 'Retry is always shown for a cert failure');
+  assert.equal(h.els.loadFailureSurface.dataset.failureKind, 'cert');
+});
+
+test('DD4: data-failure-kind is absent for a non-cert failure and cleared again on recovery', async () => {
+  const h = createHarness();
+  const tab = { id: 'tab-1', wcId: 10, url: 'http://x/', title: 'New tab', btn: makeBtn(), loadFailure: null };
+  h.addTab(tab);
+  h.setActive('tab-1');
+  await loadController(h);
+
+  h.pushFailure({
+    wcId: 10,
+    failure: {
+      code: -202,
+      name: 'ERR_CERT_AUTHORITY_INVALID',
+      url: 'https://bad.test/',
+      cert: { host: 'bad.test', port: 443, error: 'ERR_CERT_AUTHORITY_INVALID', overridable: true, summary: {} }
+    }
+  });
+  assert.equal(h.els.loadFailureSurface.dataset.failureKind, 'cert');
+
+  h.pushFailure({ wcId: 10, failure: { code: -105, name: 'ERR_NAME_NOT_RESOLVED', url: 'http://x/' } });
+  assert.equal(h.els.loadFailureSurface.dataset.failureKind, undefined);
+});
+
+// ---------------------------------------------------------------------------
+// Mission 20 Flight 2 Leg 3 (DD3/DD4/AC5): the Advanced hook — shown ONLY for
+// an overridable cert failure; click → onAdvanced(tab).
+// ---------------------------------------------------------------------------
+
+test('AC5: Advanced is HIDDEN by default and for a non-cert failure', async () => {
+  const h = createHarness();
+  const tab = { id: 'tab-1', wcId: 10, url: 'http://x/', title: 'New tab', btn: makeBtn(), loadFailure: null };
+  h.addTab(tab);
+  h.setActive('tab-1');
+  await loadController(h);
+  const advanced = findById(h, 'load-failure-advanced');
+  assert.equal(advanced.classList.contains('hidden'), true, 'hidden before any failure renders');
+
+  h.pushFailure({ wcId: 10, failure: { code: -105, name: 'ERR_NAME_NOT_RESOLVED', url: 'http://x/' } });
+  assert.equal(advanced.classList.contains('hidden'), true, 'hidden for a non-cert failure');
+});
+
+test('AC5: Advanced is SHOWN for every overridable cert kind (authority/name/date/weak/other)', async () => {
+  const overridableErrors = [
+    'ERR_CERT_AUTHORITY_INVALID',
+    'ERR_CERT_COMMON_NAME_INVALID',
+    'ERR_CERT_DATE_INVALID',
+    'ERR_CERT_WEAK_SIGNATURE_ALGORITHM',
+    'ERR_CERT_SOME_FUTURE_NAME' // unrecognized ERR_CERT_* → 'other', overridable
+  ];
+  for (const error of overridableErrors) {
+    const h = createHarness();
+    const tab = {
+      id: 'tab-1',
+      wcId: 10,
+      url: 'https://bad.test/',
+      title: 'New tab',
+      btn: makeBtn(),
+      loadFailure: null
+    };
+    h.addTab(tab);
+    h.setActive('tab-1');
+    await loadController(h);
+    h.pushFailure({
+      wcId: 10,
+      failure: {
+        code: -202,
+        name: error,
+        url: 'https://bad.test/',
+        cert: { host: 'bad.test', port: 443, error, overridable: true, fingerprint: 'AA', summary: {} }
+      }
+    });
+    const advanced = findById(h, 'load-failure-advanced');
+    assert.equal(advanced.classList.contains('hidden'), false, error + ' must show Advanced');
+  }
+});
+
+test('AC5: Advanced is HIDDEN for every non-overridable cert kind (revoked/pinned/invalid) — the body already says it cannot be bypassed', async () => {
+  const nonOverridableErrors = [
+    'ERR_CERT_REVOKED',
+    'ERR_SSL_PINNED_KEY_NOT_IN_CERT_CHAIN',
+    'ERR_CERT_KNOWN_INTERCEPTION_BLOCKED',
+    'ERR_CERT_INVALID',
+    'ERR_CERT_CONTAINS_ERRORS'
+  ];
+  for (const error of nonOverridableErrors) {
+    const h = createHarness();
+    const tab = {
+      id: 'tab-1',
+      wcId: 10,
+      url: 'https://bad.test/',
+      title: 'New tab',
+      btn: makeBtn(),
+      loadFailure: null
+    };
+    h.addTab(tab);
+    h.setActive('tab-1');
+    await loadController(h);
+    h.pushFailure({
+      wcId: 10,
+      failure: {
+        code: -202,
+        name: error,
+        url: 'https://bad.test/',
+        cert: { host: 'bad.test', port: 443, error, overridable: false, summary: {} }
+      }
+    });
+    const advanced = findById(h, 'load-failure-advanced');
+    assert.equal(advanced.classList.contains('hidden'), true, error + ' must hide Advanced');
+  }
+});
+
+test("AC5/DD3: clicking Advanced calls onAdvanced with the panel's current tab", async () => {
+  const h = createHarness();
+  const tab = { id: 'tab-1', wcId: 10, url: 'https://bad.test/', title: 'New tab', btn: makeBtn(), loadFailure: null };
+  h.addTab(tab);
+  h.setActive('tab-1');
+  await loadController(h);
+  h.pushFailure({
+    wcId: 10,
+    failure: {
+      code: -202,
+      name: 'ERR_CERT_AUTHORITY_INVALID',
+      url: 'https://bad.test/',
+      cert: { host: 'bad.test', port: 443, error: 'ERR_CERT_AUTHORITY_INVALID', overridable: true, summary: {} }
+    }
+  });
+
+  const advanced = findById(h, 'load-failure-advanced');
+  advanced.click();
+  assert.equal(h.advancedCalls.length, 1);
+  assert.equal(h.advancedCalls[0], tab);
+});
+
+test('clicking Advanced while no cert failure is current is a no-op', async () => {
+  const h = createHarness();
+  const tab = { id: 'tab-1', wcId: 10, url: 'http://x/', title: 'New tab', btn: makeBtn(), loadFailure: null };
+  h.addTab(tab);
+  h.setActive('tab-1');
+  await loadController(h);
+  const advanced = findById(h, 'load-failure-advanced');
+  advanced.click();
+  assert.equal(h.advancedCalls.length, 0);
+});
+
 test('a non-retryable classification hides the Retry button', async () => {
   const h = createHarness();
   const tab = { id: 'tab-1', wcId: 10, url: 'http://x/', title: 'New tab', btn: makeBtn(), loadFailure: null };
@@ -463,3 +640,98 @@ function findById(h, id) {
   }
   return null;
 }
+
+// ---------------------------------------------------------------------------
+// Mission 20 Flight 2 Leg 4 (DD9): View certificate — shown for ANY cert
+// failure (overridable or not, unlike Advanced); click → onViewCertificate.
+// DOM order: heading → Retry → View certificate → Advanced.
+// ---------------------------------------------------------------------------
+
+test('DD9: View certificate is HIDDEN by default and for a non-cert failure', async () => {
+  const h = createHarness();
+  const tab = { id: 'tab-1', wcId: 10, url: 'http://x/', title: 'New tab', btn: makeBtn(), loadFailure: null };
+  h.addTab(tab);
+  h.setActive('tab-1');
+  await loadController(h);
+  const viewCert = findById(h, 'load-failure-view-cert');
+  assert.equal(viewCert.classList.contains('hidden'), true, 'hidden before any failure renders');
+
+  h.pushFailure({ wcId: 10, failure: { code: -105, name: 'ERR_NAME_NOT_RESOLVED', url: 'http://x/' } });
+  assert.equal(viewCert.classList.contains('hidden'), true, 'hidden for a non-cert failure');
+});
+
+test('DD9: View certificate is SHOWN for both overridable AND non-overridable cert failures', async () => {
+  for (const overridable of [true, false]) {
+    const h = createHarness();
+    const tab = {
+      id: 'tab-1',
+      wcId: 10,
+      url: 'https://bad.test/',
+      title: 'New tab',
+      btn: makeBtn(),
+      loadFailure: null
+    };
+    h.addTab(tab);
+    h.setActive('tab-1');
+    await loadController(h);
+    h.pushFailure({
+      wcId: 10,
+      failure: {
+        code: -202,
+        name: 'ERR_CERT_AUTHORITY_INVALID',
+        url: 'https://bad.test/',
+        cert: { host: 'bad.test', port: 443, error: 'ERR_CERT_AUTHORITY_INVALID', overridable, summary: {} }
+      }
+    });
+    const viewCert = findById(h, 'load-failure-view-cert');
+    assert.equal(viewCert.classList.contains('hidden'), false, `overridable=${overridable} must show View certificate`);
+  }
+});
+
+test("DD9: clicking View certificate calls onViewCertificate with the panel's current tab", async () => {
+  const h = createHarness();
+  const tab = { id: 'tab-1', wcId: 10, url: 'https://bad.test/', title: 'New tab', btn: makeBtn(), loadFailure: null };
+  h.addTab(tab);
+  h.setActive('tab-1');
+  await loadController(h);
+  h.pushFailure({
+    wcId: 10,
+    failure: {
+      code: -202,
+      name: 'ERR_CERT_AUTHORITY_INVALID',
+      url: 'https://bad.test/',
+      cert: { host: 'bad.test', port: 443, error: 'ERR_CERT_AUTHORITY_INVALID', overridable: true, summary: {} }
+    }
+  });
+
+  const viewCert = findById(h, 'load-failure-view-cert');
+  viewCert.click();
+  assert.equal(h.viewCertificateCalls.length, 1);
+  assert.equal(h.viewCertificateCalls[0], tab);
+});
+
+test('clicking View certificate while no cert failure is current is a no-op', async () => {
+  const h = createHarness();
+  const tab = { id: 'tab-1', wcId: 10, url: 'http://x/', title: 'New tab', btn: makeBtn(), loadFailure: null };
+  h.addTab(tab);
+  h.setActive('tab-1');
+  await loadController(h);
+  const viewCert = findById(h, 'load-failure-view-cert');
+  viewCert.click();
+  assert.equal(h.viewCertificateCalls.length, 0);
+});
+
+test('DD9: DOM order is heading-column children Retry → View certificate → Advanced', async () => {
+  const h = createHarness();
+  const tab = { id: 'tab-1', wcId: 10, url: 'http://x/', title: 'New tab', btn: makeBtn(), loadFailure: null };
+  h.addTab(tab);
+  h.setActive('tab-1');
+  await loadController(h);
+  const retry = findById(h, 'load-failure-retry');
+  const viewCert = findById(h, 'load-failure-view-cert');
+  const advanced = findById(h, 'load-failure-advanced');
+  const column = retry.parent;
+  const order = column.children.map((c) => c.id);
+  assert.ok(order.indexOf(retry.id) < order.indexOf(viewCert.id), 'Retry precedes View certificate');
+  assert.ok(order.indexOf(viewCert.id) < order.indexOf(advanced.id), 'View certificate precedes Advanced');
+});

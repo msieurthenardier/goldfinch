@@ -176,13 +176,19 @@ export function createChromePageActions({
   function siteInfoModel(tab = activeTab()) {
     const info = deriveSiteInfo(tab, siteInfoInternalFlag(tab));
     if (info.internal === true) return [{ type: 'note', variant: 'secure', text: info.note }];
-    return [
+    /** @type {Array<{ type: string, variant?: string, text?: string, label?: string, value?: string, id?: string }>} */
+    const items = [
       { type: 'note', variant: 'host', text: info.host },
       { type: 'row', label: 'Connection', value: info.connection },
       { type: 'row', label: 'Trackers blocked', value: String(info.trackers) },
-      { type: 'row', label: 'Permissions', value: String(info.permissions) },
-      { type: 'action', id: 'site-settings', label: 'Site settings →' }
+      { type: 'row', label: 'Permissions', value: String(info.permissions) }
     ];
+    // Mission 20 Flight 2 Leg 4 (DD8): ONE conditional push, before
+    // site-settings — the return TYPE is unchanged, the same row/action item
+    // shapes the info-popup template already renders.
+    if (info.showCertificate) items.push({ type: 'action', id: 'certificate', label: 'Certificate' });
+    items.push({ type: 'action', id: 'site-settings', label: 'Site settings →' });
+    return items;
   }
 
   async function createContainerAndOpenTab(rawName) {

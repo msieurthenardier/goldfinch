@@ -151,7 +151,14 @@ function makeHarness(
     // M15 F2 Leg 2 (DD9): optional plain reference (not an accessor) — omitted by
     // default so every EXISTING test's broadcast/event sequence is byte-unchanged
     // (injection-gated precedent, same shape as getVaultStore).
-    bookmarksStore = undefined
+    bookmarksStore = undefined,
+    // Mission 20 Flight 2 Leg 2 (DD2/DD6/AC9): recording fakes, threaded
+    // through to createJarDataLifecycle's wipeJarData via registerJarIpc.
+    // Every EXISTING test omits `storagePaths`, so `partitionFromStoragePath`
+    // resolves null and these fakes are simply never called — byte-unchanged
+    // behavior for every pre-leg-2 test.
+    certTrust: certTrustOverride = undefined,
+    certObserver: certObserverOverride = undefined
   } = {}
 ) {
   appDb.open('', { memory: true });
@@ -211,6 +218,12 @@ function makeHarness(
   const broadcast = (channel, payload) =>
     events.push({ fn: 'broadcast', channel, payload: structuredClone(payload), raw: payload });
   const historyStore = makeFakeHistoryStore({ throws: historyThrows });
+  const certTrust = certTrustOverride || {
+    clearPartition: (partition) => events.push({ fn: 'certTrust.clearPartition', partition })
+  };
+  const certObserver = certObserverOverride || {
+    clearPartition: (partition) => events.push({ fn: 'certObserver.clearPartition', partition })
+  };
 
   const result = registerJarIpc({
     ipcMain,
@@ -222,7 +235,9 @@ function makeHarness(
     broadcast,
     historyStore,
     getVaultStore,
-    bookmarksStore
+    bookmarksStore,
+    certTrust,
+    certObserver
   });
 
   const invoke = (channel, payload) => handlers.get(channel)({}, payload);

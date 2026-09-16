@@ -34,9 +34,9 @@ const { LOAD_STATES } = require('../../shared/load-failure'); // Mission 20 F1 L
  * engine (allowInternal:true) KEEPS the internal goldfinch://settings tab in the
  * enumeration; jar/default engines drop it.
  *
- * @param {Array<{wcId: number|null, url: string, title: string, jarId: string|null, active: boolean, loadState?: string, loadError?: {code: number, name: string}|null}>|null} rawTabs
+ * @param {Array<{wcId: number|null, url: string, title: string, jarId: string|null, active: boolean, loadState?: string, loadError?: {code: number, name: string}|null, security?: string}>|null} rawTabs
  * @param {{ fromId: (id: number) => any, chromeContents?: any, allowInternal?: boolean }} deps
- * @returns {{ wcId: number, url: string, title: string, jarId: string|null, active: boolean, loadState: string, loadError: {code: number, name: string}|null }[]}
+ * @returns {{ wcId: number, url: string, title: string, jarId: string|null, active: boolean, loadState: string, loadError: {code: number, name: string}|null, security: string }[]}
  */
 function mapEnumeratedTabs(rawTabs, { fromId, allowInternal = false }) {
   const out = [];
@@ -59,7 +59,10 @@ function mapEnumeratedTabs(rawTabs, { fromId, allowInternal = false }) {
       // Mission 20 F1 Leg 2 (AC8): renderer-sourced; defaulted for any raw row
       // predating this field (a mid-boot window's cached hook, if one exists).
       loadState: t.loadState || LOAD_STATES.OK,
-      loadError: t.loadError || null
+      loadError: t.loadError || null,
+      // Mission 20 Flight 2 Leg 2 (AC4): the DD7 security enum, renderer-
+      // sourced; defaulted to 'none' for any raw row predating this field.
+      security: t.security || 'none'
     });
   }
   return out;

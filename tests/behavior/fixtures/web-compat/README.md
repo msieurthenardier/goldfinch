@@ -118,3 +118,53 @@ Chromium won't trust the throwaway CA and goldfinch has no
 script only, stripped before argv forwarding) appends Chromium's
 `ignore-certificate-errors` switch. Packaged builds never run the dev-launch
 script; there is no production path to the switch.
+
+**This flag suppresses the `certificate-error` event entirely** — it exists
+for the client-cert leg above, which has nothing to do with TLS trust
+decisions. The TLS-trust behavior spec (Mission 20 Flight 2) launches the app
+**WITHOUT** it, so `certificate-error` fires for real.
+
+## Second CA: the trusted fixture (Mission 20 Flight 2 Leg 4, DD14)
+
+`gen-certs.mjs` also writes a SECOND throwaway CA (`trusted-ca.pem`/
+`trusted-ca-key.pem`, subject `CN=Goldfinch Fixture Trusted CA`) and a server
+cert signed by it (`server-trusted.pem`/`server-trusted-key.pem`, same
+SAN/validity shape as the default set) — everything still under `./certs/`,
+still gitignored. The TLS-trust behavior spec needs BOTH an untrusted row
+(`ERR_CERT_AUTHORITY_INVALID`, the existing CA) and a trusted row reachable
+in the SAME session, with no mid-run trust-store change.
+
+```
+node gen-certs.mjs                                          # writes both CA/cert pairs
+node serve-tls.mjs --port <T>                                # untrusted (default, unchanged)
+node serve-tls.mjs --port <T2> --cert-set trusted             # trusted — needs the import below
+```
+
+- **`serve-tls.mjs --cert-set trusted`** serves `server-trusted.pem` signed
+  by the trusted CA (`--cert-set untrusted`, the default, is byte-identical
+  to the pre-Leg-4 behavior). Verify with `curl --cacert trusted-ca.pem
+  https://127.0.0.1:<T2>/` — succeeds **without** `-k`, once the anchor below
+  is imported (before that, it fails exactly like the untrusted set does).
+- **`import-trust-anchor.mjs`** (beside `import-client-cert.mjs`, the SAME
+  `certutil`/`~/.pki/nssdb` precheck shape) installs/removes the trusted CA
+  as an NSS user trust anchor:
+  ```
+  node import-trust-anchor.mjs --import   # certutil -A -n "Goldfinch Fixture Trusted CA" -t "C,," -i trusted-ca.pem -d sql:$HOME/.pki/nssdb
+  node import-trust-anchor.mjs --remove   # certutil -D -d sql:$HOME/.pki/nssdb -n "Goldfinch Fixture Trusted CA"
+  ```
+  `-t "C,,"` marks the CA trusted for SSL-server certificates only (the two
+  trailing trust-flag positions — email, object-signing — are left unset).
+  **This mutates the operator's `~/.pki/nssdb`** — the same disclosure as the
+  client-cert import above; `--remove` fully reverses it and is **idempotent**
+  (a missing nickname prints a note and exits 0, never a failure — covers a
+  crashed prior run leaving the anchor behind). Verify either state directly:
+  `certutil -L -d sql:$HOME/.pki/nssdb` (lists every nickname; the trusted
+  anchor's presence/absence is the ground truth, not this script's own exit
+  code alone).
+- **Import BEFORE launch, remove AT TEARDOWN** — an anchor imported mid-session
+  does not retroactively change decisions Chromium's network service already
+  cached for that origin in the current run; always import first, then launch
+  the app.
+- Electron 44 on Linux was confirmed (Mission 20 Flight 2 Leg 1 spike, finding
+  (g)) to honour NSS user trust anchors with no other configuration — no
+  external-host fallback is needed for the trusted row.

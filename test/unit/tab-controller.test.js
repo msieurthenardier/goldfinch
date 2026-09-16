@@ -7,92 +7,13 @@ const path = require('node:path');
 
 const moduleUrl = pathToFileURL(path.join(__dirname, '../../src/renderer/chrome/tab-controller.js')).href;
 
-class FakeClassList {
-  constructor() {
-    this.values = new Set();
-  }
-  add(...names) {
-    names.forEach((name) => this.values.add(name));
-  }
-  remove(...names) {
-    names.forEach((name) => this.values.delete(name));
-  }
-  contains(name) {
-    return this.values.has(name);
-  }
-  toggle(name, force) {
-    const next = force === undefined ? !this.values.has(name) : !!force;
-    if (next) this.values.add(name);
-    else this.values.delete(name);
-    return next;
-  }
-}
-
-class FakeElement {
-  constructor(name = 'div') {
-    this.name = name;
-    this.children = [];
-    this.dataset = {};
-    this.style = {};
-    this.classList = new FakeClassList();
-    this.listeners = new Map();
-    this.attributes = new Map();
-    this.parent = null;
-    this.disabled = false;
-    this.value = '';
-    this.tabIndex = 0;
-    this._parts = new Map();
-  }
-  set className(value) {
-    value
-      .split(/\s+/)
-      .filter(Boolean)
-      .forEach((name) => this.classList.add(name));
-  }
-  set innerHTML(value) {
-    // Squawk 0020: keep the raw markup so tests can assert on the jar-color
-    // dot's style attribute (isSafeColor guard), same as every real innerHTML sink.
-    this._rawHTML = value;
-    // Mission 20 F1 Leg 2 (AC4): .tab-status joins the resolvable selector set —
-    // without it every load-failure strip-state assertion would resolve `null`.
-    for (const selector of ['.tab-title', '.tab-close', '.tab-fav', '.tab-status'])
-      this._parts.set(selector, new FakeElement(selector));
-  }
-  get innerHTML() {
-    return this._rawHTML || '';
-  }
-  setAttribute(name, value) {
-    this.attributes.set(name, String(value));
-  }
-  getAttribute(name) {
-    return this.attributes.get(name) ?? null;
-  }
-  addEventListener(name, fn) {
-    this.listeners.set(name, fn);
-  }
-  appendChild(child) {
-    child.parent = this;
-    this.children.push(child);
-    return child;
-  }
-  insertBefore(child, reference) {
-    this.children = this.children.filter((item) => item !== child);
-    const index = reference == null ? -1 : this.children.indexOf(reference);
-    child.parent = this;
-    if (index < 0) this.children.push(child);
-    else this.children.splice(index, 0, child);
-  }
-  remove() {
-    if (this.parent) this.parent.children = this.parent.children.filter((item) => item !== this);
-    this.parent = null;
-  }
-  querySelector(selector) {
-    return this._parts.get(selector) || null;
-  }
-  getBoundingClientRect() {
-    return { x: 10, y: 20, left: 10, top: 20, right: 210, bottom: 120, width: 200, height: 100 };
-  }
-}
+// Squawk 0077: the shared fake-DOM harness (test/unit/helpers/fake-dom.js) —
+// this file's local FakeClassList/FakeElement copies are gone; the shared
+// FakeElement's `innerHTML` setter auto-populates `.tab-title`/`.tab-close`/
+// `.tab-fav`/`.tab-status` by default (Mission 20 F1 Leg 2, AC4 — load-bearing
+// for tab-controller.js's `innerHTML`-built strip button), matching this
+// file's prior local behavior exactly.
+const { FakeElement } = require('./helpers/fake-dom');
 
 function createHarness() {
   const tabs = new Map();
@@ -471,6 +392,24 @@ test('listTabs() census reports loadState/loadError per tab (AC8)', async () => 
   assert.equal(okRow.loadError, null);
   assert.equal(failedRow.loadState, 'failed');
   assert.deepEqual(failedRow.loadError, { code: -105, name: 'ERR_NAME_NOT_RESOLVED' });
+});
+
+test('Mission 20 F2 Leg 4 (design review, belt-and-suspenders): census security is none for any tab with a loadFailure, regardless of a stale prior value', async () => {
+  const h = createHarness();
+  const controller = await loadController(h);
+  const ok = controller.createTab('https://ok.test/');
+  const failed = controller.createTab('https://failed.test/');
+  await settle();
+  ok.security = 'secure';
+  failed.security = 'secure'; // stale — the tab loaded fine before this failure
+  failed.loadFailure = { code: -202, name: 'ERR_CERT_AUTHORITY_INVALID', url: 'https://failed.test/' };
+
+  // @ts-ignore — the automation hook (window.__goldfinchAutomation) is chrome-renderer-only
+  const rows = h.deps.window.__goldfinchAutomation.listTabs();
+  const okRow = rows.find((r) => r.wcId === ok.wcId);
+  const failedRow = rows.find((r) => r.wcId === failed.wcId);
+  assert.equal(okRow.security, 'secure');
+  assert.equal(failedRow.security, 'none');
 });
 
 test('F2: listTabs() census title on a failed tab is the same host-derived label the strip shows', async () => {

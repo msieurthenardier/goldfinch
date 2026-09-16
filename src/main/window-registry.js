@@ -33,11 +33,21 @@
  * @typedef {{ id: number, [k: string]: any }} WinLike
  * @typedef {{ webContents: any, [k: string]: any }} ChromeViewLike
  * A `tabViews` entry (Mission 20 Flight 1, DD2/AC2) additionally carries
- * `loadFailure: { code: number, name: string, url: string } | null` (the
- * recorded `did-fail-load` args, or `null` once cleared) and
- * `lastRequestedUrl: string | null` (the most recently requested address,
- * stamped at every request site — `tab-entry-url.js`'s `effectiveUrl`
- * substitutes it for a live `chrome-error:` URL).
+ * `loadFailure: { code: number, name: string, url: string, cert?: { host, port,
+ * error, overridable, summary } } | null` (the recorded `did-fail-load` args,
+ * or `null` once cleared) and `lastRequestedUrl: string | null` (the most
+ * recently requested address, stamped at every request site —
+ * `tab-entry-url.js`'s `effectiveUrl` substitutes it for a live
+ * `chrome-error:` URL).
+ *
+ * Mission 20 Flight 2 Leg 2 (DD1/DD2/DD6/DD7) adds four more: `certFailure:
+ * { url, host, port, error, fingerprint, summary } | null` and `certOverride:
+ * { host, port, fingerprint, error } | null` (transient cert-trust.js decision
+ * stamps, cleared at the next non-error main-frame did-start-navigation) plus
+ * the DURABLE per-tab copies `certificate: object | null` (the observer's
+ * lookup result for the committed hostname) and `security: string | null`
+ * (the `site-security.js` enum value, pushed on its own `tab-security`
+ * channel).
  *
  * @typedef {{
  *   win: WinLike,

@@ -105,6 +105,11 @@ function setup() {
   // this via setFaviconRequest to hand back a controllable deferred promise, so
   // the assertion can await the fake fetch chain before checking h.sends.
   let faviconRequest = () => Promise.resolve(null);
+  // Mission 20 Flight 2 Leg 2 (DD6/DD7): a controllable fake — defaults to
+  // "no observer entry" (null), which every pre-existing did-navigate test
+  // exercises implicitly (none of them care about security/certificate).
+  // New tests override via setCertObserverLookup.
+  let certObserverLookup = () => null;
   // M14 F1 L1: fullscreen module fake — event wiring and the Esc branch are
   // asserted against these calls; the real mode logic has its own suite
   // (html-fullscreen.test.js).
@@ -150,6 +155,14 @@ function setup() {
     // M14 F2 L2 (DD1f seam): a recording fake — the popup teardown must route
     // its resolve-cancel through THIS seam (main.js's cancelForTab delegation).
     cancelChallengesForPopup: (popupWcId) => calls.push(['popup-cancel', popupWcId]),
+    // Mission 20 Flight 2 Leg 2 (DD6): the observer's read seam — did-navigate
+    // calls this to build entry.certificate/security. clearPartition is not
+    // exercised from THIS module (jar-data-lifecycle.js owns that call site)
+    // but the fake carries it anyway for shape parity.
+    certObserver: {
+      lookup: (partition, hostname) => certObserverLookup(partition, hostname),
+      clearPartition: () => {}
+    },
     // Mission 20 Flight 1 (DD1/AC3/AC4): a RECORDING fake, not the real
     // register-tab-ipc.js helper — this suite asserts guest-wiring's CALL
     // POINT and its ordering relative to sendToChrome/findOverlay.hide; the
@@ -173,6 +186,9 @@ function setup() {
     },
     setFaviconRequest: (fn) => {
       faviconRequest = fn;
+    },
+    setCertObserverLookup: (fn) => {
+      certObserverLookup = fn;
     }
   };
 }
@@ -1026,10 +1042,14 @@ test('AC3: did-fail-load records the failure, hides, closes find, then tells the
   assert.ok(applyIdx !== -1 && findIdx !== -1 && sendIdx !== -1, 'all three effects fired');
   assert.ok(applyIdx < findIdx, 'hide runs before find-overlay hide');
   assert.ok(findIdx < sendIdx, 'find-overlay hide runs before the chrome push');
-  assert.deepEqual(h.sends.at(-1), [
+  // Mission 20 Flight 2 Leg 4 (design review, HIGH): the tab-security 'none'
+  // push now follows the failure push unconditionally — the census/chip fix
+  // for a tab that loaded securely and then failed.
+  assert.deepEqual(h.sends.at(-2), [
     'tab-load-failure',
     { wcId: 40, failure: { code: -102, name: 'ERR_CONNECTION_REFUSED', url: 'http://127.0.0.1:1/' } }
   ]);
+  assert.deepEqual(h.sends.at(-1), ['tab-security', { wcId: 40, security: 'none' }]);
 });
 
 test('AC3 edge case: failure on an INACTIVE tab records + pushes only — no hide, no find-close', () => {
@@ -1049,112 +1069,107 @@ test('AC3 edge case: failure on an INACTIVE tab records + pushes only — no hid
     'an inactive tab is neither hidden (already hidden) nor find-closed (not the active tab)'
   );
   assert.deepEqual(h.sends, [
-    ['tab-load-failure', { wcId: 41, failure: { code: -105, name: 'ERR_NAME_NOT_RESOLVED', url: 'http://x.invalid/' } }]
+    [
+      'tab-load-failure',
+      { wcId: 41, failure: { code: -105, name: 'ERR_NAME_NOT_RESOLVED', url: 'http://x.invalid/' } }
+    ],
+    ['tab-security', { wcId: 41, security: 'none' }]
   ]);
 });
 
 // ---------------------------------------------------------------------------
-// Mission 20 Flight 1 Leg 3 (HAT H7): the error document's own commit steals
-// OS focus into the now-hidden guest — reasserted at both did-fail-load and
-// did-finish-load, each gated on active-tab + guest-focused + no-open-sheet.
+// Mission 20 Flight 2 Leg 1 (#216, DD12): the F1 HAT H7 `wc.isFocused()`
+// reasserts that used to live in did-fail-load/did-finish-load are REMOVED —
+// the leg-1 live spike traced the steal to a `focus`/`blur` cycle on the
+// GUEST that starts asynchronously right after `wc.loadURL()`, well before
+// either of these events fires, so a one-shot reassert keyed to either
+// instant raced the steal and lost (matching the debrief's own finding that
+// neither reassert "changed the observed behavior"). The fix moved upstream:
+// a `chromeNavPending` flag armed at `tab-navigate` (register-tab-ipc.test.js)
+// and a reactive chrome-`blur` listener (window-factory.test.js). This
+// module's own remaining responsibility is disarming the flag once the
+// navigation settles — pinned below — and no longer calling `chrome.focus()`
+// itself at all.
 // ---------------------------------------------------------------------------
 
-test('HAT H7: did-fail-load reasserts chrome focus when the active guest currently holds OS focus, before the chrome push', () => {
+test('#216: did-fail-load clears entry.chromeNavPending and never calls chrome.focus() itself', () => {
   const h = setup();
   const wc = new FakeContents(60);
   wc.focused = true;
   const view = { webContents: wc };
-  const entry = { view, active: true, loadFailure: null, lastRequestedUrl: 'http://x.invalid/' };
+  const entry = {
+    view,
+    active: true,
+    loadFailure: null,
+    lastRequestedUrl: 'http://x.invalid/',
+    chromeNavPending: true
+  };
   makeFailureRecord(h, 60, entry);
 
   h.wiring.wireTabViewEvents(view, 60, 'persist:jar-a');
   wc.emit('did-fail-load', {}, -105, 'ERR_NAME_NOT_RESOLVED', 'http://x.invalid/', true);
 
-  assert.ok(h.calls.includes('focus-chrome'), 'chrome.focus() called');
-  const order = h.events.map((e) => e[0]);
-  const focusIdx = order.indexOf('focus');
-  const sendIdx = order.indexOf('send');
-  assert.ok(
-    focusIdx !== -1 && sendIdx !== -1 && focusIdx < sendIdx,
-    'focus reassert precedes the tab-load-failure send'
-  );
+  assert.equal(entry.chromeNavPending, false, 'the pending flag is disarmed at did-fail-load');
+  assert.equal(h.calls.includes('focus-chrome'), false, 'guest-wiring no longer calls chrome.focus() itself');
 });
 
-test('HAT H7: did-fail-load does NOT reassert focus when the guest is not currently OS-focused', () => {
-  const h = setup();
-  const wc = new FakeContents(61);
-  wc.focused = false;
-  const view = { webContents: wc };
-  const entry = { view, active: true, loadFailure: null, lastRequestedUrl: 'http://x.invalid/' };
-  makeFailureRecord(h, 61, entry);
-
-  h.wiring.wireTabViewEvents(view, 61, 'persist:jar-a');
-  wc.emit('did-fail-load', {}, -105, 'ERR_NAME_NOT_RESOLVED', 'http://x.invalid/', true);
-
-  assert.equal(h.calls.includes('focus-chrome'), false, 'no reassert when the guest never held focus');
-});
-
-test('HAT H7: did-fail-load on a BACKGROUND tab never reasserts focus', () => {
+test('#216: did-fail-load on a BACKGROUND tab still clears its own chromeNavPending', () => {
   const h = setup();
   const wc = new FakeContents(62);
-  wc.focused = true;
   const view = { webContents: wc };
-  const entry = { view, active: false, loadFailure: null, lastRequestedUrl: 'http://x.invalid/' };
+  const entry = {
+    view,
+    active: false,
+    loadFailure: null,
+    lastRequestedUrl: 'http://x.invalid/',
+    chromeNavPending: true
+  };
   makeFailureRecord(h, 62, entry, { active: false });
 
   h.wiring.wireTabViewEvents(view, 62, 'persist:jar-a');
   wc.emit('did-fail-load', {}, -105, 'ERR_NAME_NOT_RESOLVED', 'http://x.invalid/', true);
 
-  assert.equal(h.calls.includes('focus-chrome'), false, 'a background tab failure never touches focus');
+  assert.equal(entry.chromeNavPending, false);
 });
 
-test('HAT H7: did-fail-load with an open sheet menu never reasserts focus (DD1 — the menu owns focus)', () => {
-  const h = setup();
-  const wc = new FakeContents(63);
-  wc.focused = true;
-  const view = { webContents: wc };
-  const entry = { view, active: true, loadFailure: null, lastRequestedUrl: 'http://x.invalid/' };
-  const record = makeFailureRecord(h, 63, entry);
-  record.sheet = { isMenuOpen: () => true };
-
-  h.wiring.wireTabViewEvents(view, 63, 'persist:jar-a');
-  wc.emit('did-fail-load', {}, -105, 'ERR_NAME_NOT_RESOLVED', 'http://x.invalid/', true);
-
-  assert.equal(h.calls.includes('focus-chrome'), false, "an open sheet menu is the operator's — never stolen back");
-});
-
-test('HAT H7: did-finish-load reasserts chrome focus while a failure is recorded, the guest is focused, and no sheet is open', () => {
+test("#216: did-navigate clears entry.chromeNavPending (covers both a real commit and the chrome-error document's own eventual commit)", () => {
   const h = setup();
   const wc = new FakeContents(64);
+  const view = { webContents: wc };
+  const entry = { view, active: true, loadFailure: null, lastRequestedUrl: 'https://ok.test/', chromeNavPending: true };
+  makeFailureRecord(h, 64, entry);
+
+  h.wiring.wireTabViewEvents(view, 64, 'persist:jar-a');
+  wc.url = 'https://ok.test/';
+  wc.emit('did-navigate');
+
+  assert.equal(entry.chromeNavPending, false);
+});
+
+test('#216: did-finish-load no longer touches focus or chromeNavPending at all', () => {
+  const h = setup();
+  const wc = new FakeContents(65);
   wc.focused = true;
   const view = { webContents: wc };
   const entry = {
     view,
     active: true,
     loadFailure: { code: -105, name: 'ERR_NAME_NOT_RESOLVED', url: 'http://x.invalid/' },
-    lastRequestedUrl: 'http://x.invalid/'
+    lastRequestedUrl: 'http://x.invalid/',
+    chromeNavPending: true
   };
-  makeFailureRecord(h, 64, entry);
-
-  h.wiring.wireTabViewEvents(view, 64, 'persist:jar-a');
-  wc.emit('did-finish-load');
-
-  assert.ok(h.calls.includes('focus-chrome'), "the error document's own commit re-triggers the reassert");
-  assert.equal(entry.loadFailure.code, -105, 'did-finish-load never mutates loadFailure');
-});
-
-test('HAT H7: did-finish-load does NOT reassert focus when there is no recorded failure (ordinary successful loads)', () => {
-  const h = setup();
-  const wc = new FakeContents(65);
-  wc.focused = true;
-  const view = { webContents: wc };
-  const entry = { view, active: true, loadFailure: null, lastRequestedUrl: 'https://ok.test/' };
   makeFailureRecord(h, 65, entry);
 
   h.wiring.wireTabViewEvents(view, 65, 'persist:jar-a');
   wc.emit('did-finish-load');
 
-  assert.equal(h.calls.includes('focus-chrome'), false, 'an ordinary successful load never touches focus');
+  assert.equal(h.calls.includes('focus-chrome'), false, 'did-finish-load is inert on focus (dead per the leg-1 spike)');
+  assert.equal(
+    entry.chromeNavPending,
+    true,
+    'did-finish-load does not disarm — did-navigate/did-fail-load already did'
+  );
+  assert.equal(entry.loadFailure.code, -105, 'did-finish-load never mutates loadFailure');
 });
 
 test('AC3/DD2: subframe failures are ignored entirely — no state, no push', () => {
@@ -1303,4 +1318,275 @@ test('AC6: did-navigate passes the live URL through unchanged when it is not chr
   wc.emit('did-navigate');
 
   assert.deepEqual(h.sends[0], ['tab-did-navigate', { wcId: 50, url: 'https://real-page.test/' }]);
+});
+
+// ---------------------------------------------------------------------------
+// Mission 20 Flight 2 Leg 2 (DD1/DD4/DD6/DD7): the cert-error fold at
+// did-fail-load, the certFailure/certOverride clear at did-start-navigation,
+// and the certificate/security stamp + tab-security push at did-navigate.
+// ---------------------------------------------------------------------------
+
+test('DD1/DD4: did-fail-load folds a pending certFailure into loadFailure.cert and clears certFailure', () => {
+  const h = setup();
+  const wc = new FakeContents(70);
+  const view = { webContents: wc };
+  const entry = {
+    view,
+    active: true,
+    loadFailure: null,
+    lastRequestedUrl: 'https://bad.test/',
+    certFailure: {
+      url: 'https://bad.test/',
+      host: 'bad.test',
+      port: 443,
+      error: 'ERR_CERT_AUTHORITY_INVALID',
+      fingerprint: 'AA:BB',
+      summary: { status: 'untrusted' }
+    }
+  };
+  makeFailureRecord(h, 70, entry);
+  h.wiring.wireTabViewEvents(view, 70, 'persist:jar-a');
+
+  wc.emit('did-fail-load', {}, -202, 'ERR_CERT_AUTHORITY_INVALID', 'https://bad.test/', true);
+
+  assert.deepEqual(entry.loadFailure, {
+    code: -202,
+    name: 'ERR_CERT_AUTHORITY_INVALID',
+    url: 'https://bad.test/',
+    cert: {
+      host: 'bad.test',
+      port: 443,
+      error: 'ERR_CERT_AUTHORITY_INVALID',
+      fingerprint: 'AA:BB',
+      overridable: true,
+      summary: { status: 'untrusted' }
+    }
+  });
+  assert.equal(entry.certFailure, null, 'certFailure is cleared after folding');
+});
+
+test('DD1/DD4: did-fail-load never folds a non-ERR_CERT_ failure even with a stale certFailure present, but still clears it', () => {
+  const h = setup();
+  const wc = new FakeContents(71);
+  const view = { webContents: wc };
+  const entry = {
+    view,
+    active: true,
+    loadFailure: null,
+    lastRequestedUrl: 'http://x.invalid/',
+    certFailure: {
+      url: 'https://bad.test/',
+      host: 'bad.test',
+      port: 443,
+      error: 'ERR_CERT_AUTHORITY_INVALID',
+      fingerprint: '',
+      summary: {}
+    }
+  };
+  makeFailureRecord(h, 71, entry);
+  h.wiring.wireTabViewEvents(view, 71, 'persist:jar-a');
+
+  wc.emit('did-fail-load', {}, -105, 'ERR_NAME_NOT_RESOLVED', 'http://x.invalid/', true);
+
+  assert.equal(entry.loadFailure.cert, undefined, 'no cert field folded for an unrelated failure');
+  assert.equal(entry.certFailure, null, 'the stale stamp is still cleared');
+});
+
+test('Mission 20 F2 Leg 4 (design review, HIGH): did-fail-load stamps entry.security = none and pushes tab-security, overwriting a stale prior value — even for a cert-blocked failure', () => {
+  const h = setup();
+  const wc = new FakeContents(90);
+  const view = { webContents: wc };
+  const entry = {
+    view,
+    active: true,
+    loadFailure: null,
+    lastRequestedUrl: 'https://bad.test/',
+    security: 'secure' // stale — the tab loaded fine before this failure
+  };
+  makeFailureRecord(h, 90, entry);
+  h.wiring.wireTabViewEvents(view, 90, 'persist:jar-a');
+
+  wc.emit('did-fail-load', {}, -202, 'ERR_CERT_AUTHORITY_INVALID', 'https://bad.test/', true);
+
+  assert.equal(entry.security, 'none');
+  assert.deepEqual(h.sends.at(-1), ['tab-security', { wcId: 90, security: 'none' }]);
+});
+
+test('DD1: did-start-navigation clears certFailure and certOverride on a real navigation', () => {
+  const h = setup();
+  const wc = new FakeContents(72);
+  const view = { webContents: wc };
+  const entry = {
+    view,
+    active: true,
+    loadFailure: null,
+    lastRequestedUrl: 'https://bad.test/',
+    certFailure: { url: 'https://bad.test/', host: 'bad.test' },
+    certOverride: { host: 'bad.test', port: 443 }
+  };
+  makeFailureRecord(h, 72, entry);
+  h.wiring.wireTabViewEvents(view, 72, 'persist:jar-a');
+
+  wc.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false, url: 'https://retry.test/' });
+
+  assert.equal(entry.certFailure, null);
+  assert.equal(entry.certOverride, null);
+});
+
+test('DD1: a chrome-error: did-start-navigation leaves certFailure/certOverride untouched', () => {
+  const h = setup();
+  const wc = new FakeContents(73);
+  const view = { webContents: wc };
+  const certFailure = { url: 'https://bad.test/', host: 'bad.test' };
+  const certOverride = { host: 'other.test', port: 443 };
+  const entry = {
+    view,
+    active: true,
+    loadFailure: null,
+    lastRequestedUrl: 'https://bad.test/',
+    certFailure,
+    certOverride
+  };
+  makeFailureRecord(h, 73, entry);
+  h.wiring.wireTabViewEvents(view, 73, 'persist:jar-a');
+
+  wc.emit('did-start-navigation', {
+    isMainFrame: true,
+    isSameDocument: false,
+    url: 'chrome-error://chromewebdata/'
+  });
+
+  assert.equal(entry.certFailure, certFailure);
+  assert.equal(entry.certOverride, certOverride);
+});
+
+test('DD6/DD7: did-navigate stamps entry.certificate/security from the observer and pushes tab-security AFTER tab-did-navigate', () => {
+  const h = setup();
+  const wc = new FakeContents(74);
+  wc.url = 'https://trusted.test/';
+  const view = { webContents: wc };
+  const entry = { view, active: true, loadFailure: null, lastRequestedUrl: 'https://trusted.test/', trusted: false };
+  makeFailureRecord(h, 74, entry);
+  h.wiring.wireTabViewEvents(view, 74, 'persist:jar-a');
+  const observerEntry = {
+    verificationResult: 'net::OK',
+    errorCode: 0,
+    isIssuedByKnownRoot: true,
+    summary: { status: 'trusted' }
+  };
+  h.setCertObserverLookup((partition, hostname) => {
+    assert.equal(partition, 'persist:jar-a');
+    assert.equal(hostname, 'trusted.test');
+    return observerEntry;
+  });
+
+  wc.emit('did-navigate');
+
+  assert.equal(entry.certificate, observerEntry);
+  assert.equal(entry.security, 'secure');
+  assert.deepEqual(h.sends[0], ['tab-did-navigate', { wcId: 74, url: 'https://trusted.test/' }]);
+  assert.deepEqual(h.sends[1], ['tab-security', { wcId: 74, security: 'secure' }]);
+});
+
+test('DD7: did-navigate reads overridden from the observer verification when present', () => {
+  const h = setup();
+  const wc = new FakeContents(75);
+  wc.url = 'https://bad.test/';
+  const view = { webContents: wc };
+  const entry = { view, active: true, loadFailure: null, lastRequestedUrl: 'https://bad.test/' };
+  makeFailureRecord(h, 75, entry);
+  h.wiring.wireTabViewEvents(view, 75, 'persist:jar-a');
+  h.setCertObserverLookup(() => ({ verificationResult: 'net::ERR_CERT_AUTHORITY_INVALID' }));
+
+  wc.emit('did-navigate');
+
+  assert.equal(entry.security, 'overridden');
+});
+
+test('DD7: did-navigate falls back to the certOverride decision when the observer has no entry (post-eviction)', () => {
+  const h = setup();
+  const wc = new FakeContents(76);
+  wc.url = 'https://bad.test/';
+  const view = { webContents: wc };
+  const entry = {
+    view,
+    active: true,
+    loadFailure: null,
+    lastRequestedUrl: 'https://bad.test/',
+    certOverride: { host: 'bad.test', port: 443 }
+  };
+  makeFailureRecord(h, 76, entry);
+  h.wiring.wireTabViewEvents(view, 76, 'persist:jar-a');
+  h.setCertObserverLookup(() => null);
+
+  wc.emit('did-navigate');
+
+  assert.equal(entry.certificate, null);
+  assert.equal(entry.security, 'overridden');
+});
+
+test('DD7: did-navigate for a plain http: page reports insecure, never overridden', () => {
+  const h = setup();
+  const wc = new FakeContents(77);
+  wc.url = 'http://plain.test/';
+  const view = { webContents: wc };
+  const entry = { view, active: true, loadFailure: null, lastRequestedUrl: 'http://plain.test/' };
+  makeFailureRecord(h, 77, entry);
+  h.wiring.wireTabViewEvents(view, 77, 'persist:jar-a');
+
+  wc.emit('did-navigate');
+
+  assert.equal(entry.security, 'insecure');
+});
+
+test('DD7: did-navigate for a trusted internal entry reports internal regardless of scheme', () => {
+  const h = setup();
+  const wc = new FakeContents(78);
+  wc.url = 'goldfinch://settings/';
+  const view = { webContents: wc };
+  const entry = { view, active: true, loadFailure: null, lastRequestedUrl: 'goldfinch://settings/', trusted: true };
+  makeFailureRecord(h, 78, entry);
+  h.wiring.wireTabViewEvents(view, 78, 'persist:jar-a');
+
+  wc.emit('did-navigate');
+
+  assert.equal(entry.security, 'internal');
+});
+
+test('DD7 edge case: did-navigate-in-page never touches certificate/security (no push, no recompute)', () => {
+  const h = setup();
+  const wc = new FakeContents(79);
+  wc.url = 'https://trusted.test/';
+  const view = { webContents: wc };
+  const entry = {
+    view,
+    active: true,
+    loadFailure: null,
+    lastRequestedUrl: 'https://trusted.test/',
+    security: 'secure',
+    certificate: { x: 1 }
+  };
+  makeFailureRecord(h, 79, entry);
+  h.wiring.wireTabViewEvents(view, 79, 'persist:jar-a');
+
+  wc.emit('did-navigate-in-page');
+
+  assert.equal(entry.security, 'secure');
+  assert.deepEqual(entry.certificate, { x: 1 });
+  assert.ok(!h.sends.some(([channel]) => channel === 'tab-security'));
+});
+
+test('edge case: did-navigate for a chrome-error: commit defensively reports security none (never fires live per the leg-1 spike, but guarded)', () => {
+  const h = setup();
+  const wc = new FakeContents(80);
+  wc.url = 'chrome-error://chromewebdata/';
+  const view = { webContents: wc };
+  const entry = { view, active: true, loadFailure: null, lastRequestedUrl: 'http://127.0.0.1:1/' };
+  makeFailureRecord(h, 80, entry);
+  h.wiring.wireTabViewEvents(view, 80, 'persist:jar-a');
+
+  wc.emit('did-navigate');
+
+  assert.equal(entry.certificate, null);
+  assert.equal(entry.security, 'none');
 });

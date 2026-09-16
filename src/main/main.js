@@ -107,6 +107,9 @@ const { createGuestWiring } = require('./guest-wiring');
 const { createPopupRegistry } = require('./popup-registry');
 const { createHtmlFullscreen } = require('./html-fullscreen');
 const { createAuthChallenges } = require('./auth-challenges');
+const { createCertTrust, keyFor } = require('./cert-trust');
+const { createCertObserver } = require('./cert-observer');
+const { summarizeCertificate } = require('./certificate-summary');
 const { createSessionRuntime } = require('./session-runtime');
 const { registerTabIpc, applyGuestVisibility } = require('./register-tab-ipc');
 const { registerOverlayIpc } = require('./register-overlay-ipc');
@@ -1609,6 +1612,29 @@ const popupRegistry = createPopupRegistry({
   logger: console
 });
 
+// Mission 20 Flight 2 Leg 2 (DD1/DD2): the certificate-error trust decision —
+// answers the engine at once, remembers per-jar/per-host:port/per-fingerprint
+// overrides in memory only (never persisted). Electron-free, offline-tested;
+// threaded into app-lifecycle (app.on('certificate-error')) and jar-ipc
+// (wipe/remove clears) below.
+const certTrust = createCertTrust({
+  registry,
+  popupRegistry,
+  logger: console
+});
+
+// Mission 20 Flight 2 Leg 2 (DD6): the session-level certificate-verification
+// observer — always defers to Chromium (`callback(-3)`) and records a
+// per-partition LRU bridge between verification and each tab entry's own
+// durable `certificate` copy (guest-wiring.js's did-navigate). Electron-free,
+// offline-tested; threaded into session-runtime (setCertificateVerifyProc),
+// guest-wiring (did-navigate's lookup), and jar-ipc (wipe/remove clears) below.
+const certObserver = createCertObserver({
+  cap: 256,
+  summarize: summarizeCertificate,
+  logger: console
+});
+
 // Electron construction is confined to this dependency map; window-factory.js itself
 // remains Electron-free and its close/closed lifecycle runs under strict fake windows.
 const { createWindow } = createWindowFactory({
@@ -1696,6 +1722,9 @@ const { wireGuestContents, wireTabViewEvents } = createGuestWiring({
   // it before deregistering.
   cancelChallengesForPopup,
   scheduleSnapshot: scheduleSessionSnapshot,
+  // Mission 20 Flight 2 Leg 2 (DD6): the verify-proc observer's read seam
+  // (did-navigate's durable `entry.certificate` copy).
+  certObserver,
   // Mission 20 Flight 1 (DD1/AC7): the ONE two-axis visibility helper, owned by
   // register-tab-ipc.js — threaded here so guest-wiring's own failure/clear
   // transitions call the SAME helper every other guest-show site does.
@@ -2169,7 +2198,14 @@ registerOverlayIpc({
   // post-close chrome toast is architecturally invisible behind the guest
   // view. The distinction is load-bearing: main reads, it never writes —
   // every bookmark mutation still round-trips through the owning chrome.
-  list: bookmarksStore.list
+  list: bookmarksStore.list,
+  // M20 F2 L3 (flight DD2/DD3): the cert-override proceed handler's deps —
+  // certTrust's remembered-override write is issued from exactly that
+  // handler now (AC2).
+  certTrust,
+  keyFor,
+  getTabContents,
+  isSafeTabUrl
 });
 
 // DD10: chrome init-time lock-state query (bare ipcMain.handle — file:// chrome
@@ -2318,7 +2354,12 @@ const { broadcastJarsChanged } = registerJarIpc({
   // teardown and the Bookmarks clear-data class both need the store. A
   // PLAIN optional reference (not a getVaultStore-style accessor) — bookmarksStore
   // is an eagerly-required module singleton, like historyStore above.
-  bookmarksStore
+  bookmarksStore,
+  // Mission 20 Flight 2 Leg 2 (DD2/DD6/AC9): threaded through to
+  // createJarDataLifecycle's wipeJarData — cleared before the fail-hard
+  // storage calls on both handleWipe and handleRemove.
+  certTrust,
+  certObserver
 });
 
 // Retention sweep engine + its cookie first-seen bookkeeping store (M10
@@ -2403,6 +2444,9 @@ const sessionRuntime = createSessionRuntime({
   shields,
   chromeForTab,
   schedule: setTimeout,
+  // Mission 20 Flight 2 Leg 2 (DD6): installed on every web session's
+  // setCertificateVerifyProc, beside applyShields.
+  certObserver,
   logger: console
 });
 const { applySpellcheck, applyShields, pruneAllJars } = sessionRuntime;
@@ -2549,6 +2593,9 @@ registerAppLifecycle({
   flushSessionSnapshotScheduler: () => sessionSnapshotScheduler.flush(),
   // M14 F1 L2 (DD2): the pending-challenge store behind app.on('login').
   authChallenges,
+  // Mission 20 Flight 2 Leg 2 (DD1): the certificate-error trust decision
+  // behind app.on('certificate-error').
+  certTrust,
   // M18 F2 L4 (H2 resurface): a chrome just served window-boot-config — re-key any
   // orphaned pending compromise reveal to it and re-open the recovery-show sheet.
   onChromeBooted: (rec) => resurfaceCompromiseReveal(rec),

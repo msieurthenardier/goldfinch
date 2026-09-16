@@ -242,6 +242,7 @@ Emergent blockers and issues discovered during execution.
       focus-on-failure rule; a diagnosis/design pass is needed (not a squawk).
       Discovered in Flight 1, affects Flights 2 and 3 (every hidden-guest
       surface).
+      **Flight 2 update (2026-09-16)**: leg 1's trace-driven fix (`chromeNavPending` + a reactive chrome-blur reassert, disarmed at `did-fail-load`) is unit-pinned but did NOT resolve the live symptom — the `tls-trust-surface` acceptance run's keyboard rows failed by eye (no ring, F6/Tab inert after a typed failure). Operator ruling: remains a Known Issue; the override card's own keyboard contract is sound once focus is in the panel. The residual gap leg 1 recorded (a re-steal between `did-fail-load` and the error document's own commit) is the leading hypothesis for the next attempt.
 
 ## Flights
 

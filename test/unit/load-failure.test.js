@@ -7,11 +7,13 @@ const {
   LOAD_STATES,
   classifyLoadFailure,
   shouldRecordLoadFailure,
-  isChromeErrorUrl
+  isChromeErrorUrl,
+  classifyCertError,
+  stripNetPrefix
 } = require('../../src/shared/load-failure');
 
-test('LOAD_STATES is frozen with exactly ok/failed', () => {
-  assert.deepEqual(LOAD_STATES, { OK: 'ok', FAILED: 'failed' });
+test('LOAD_STATES is frozen with exactly ok/failed/cert-blocked', () => {
+  assert.deepEqual(LOAD_STATES, { OK: 'ok', FAILED: 'failed', CERT_BLOCKED: 'cert-blocked' });
   assert.ok(Object.isFrozen(LOAD_STATES));
 });
 
@@ -117,6 +119,62 @@ test('shouldRecordLoadFailure never throws on missing/malformed input', () => {
 // ---------------------------------------------------------------------------
 // isChromeErrorUrl
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Mission 20 Flight 2 Leg 2 (DD5): stripNetPrefix + classifyCertError
+// ---------------------------------------------------------------------------
+
+test('stripNetPrefix strips a net:: prefix and passes everything else through', () => {
+  assert.equal(stripNetPrefix('net::ERR_CERT_AUTHORITY_INVALID'), 'ERR_CERT_AUTHORITY_INVALID');
+  assert.equal(stripNetPrefix('ERR_CERT_AUTHORITY_INVALID'), 'ERR_CERT_AUTHORITY_INVALID');
+  assert.equal(stripNetPrefix(''), '');
+  assert.equal(stripNetPrefix(undefined), '');
+  assert.equal(stripNetPrefix(null), '');
+  assert.equal(stripNetPrefix(42), '');
+});
+
+const CERT_KIND_CASES = [
+  ['ERR_CERT_AUTHORITY_INVALID', 'authority', true],
+  ['ERR_CERT_COMMON_NAME_INVALID', 'name', true],
+  ['ERR_CERT_DATE_INVALID', 'date', true],
+  ['ERR_CERT_WEAK_SIGNATURE_ALGORITHM', 'weak', true],
+  ['ERR_CERT_WEAK_KEY', 'weak', true],
+  ['ERR_CERT_REVOKED', 'revoked', false],
+  ['ERR_SSL_PINNED_KEY_NOT_IN_CERT_CHAIN', 'pinned', false],
+  ['ERR_CERT_KNOWN_INTERCEPTION_BLOCKED', 'pinned', false],
+  ['ERR_CERT_INVALID', 'invalid', false],
+  ['ERR_CERT_CONTAINS_ERRORS', 'invalid', false]
+];
+
+for (const [name, kind, overridable] of CERT_KIND_CASES) {
+  test(`classifyCertError matches ${name} -> ${kind} (overridable=${overridable})`, () => {
+    const result = classifyCertError(name);
+    assert.equal(result.kind, kind);
+    assert.equal(result.overridable, overridable);
+    assert.equal(typeof result.title, 'string');
+    assert.ok(result.title.length > 0);
+    assert.equal(typeof result.body, 'string');
+    assert.ok(result.body.length > 0);
+    // No engine string ever rides the app-authored copy.
+    assert.ok(!result.title.includes(name));
+    assert.ok(!result.body.includes(name));
+  });
+}
+
+test('classifyCertError: an unrecognized ERR_CERT_* name falls to other, overridable, generic copy', () => {
+  const result = classifyCertError('ERR_CERT_SOME_FUTURE_KIND');
+  assert.equal(result.kind, 'other');
+  assert.equal(result.overridable, true);
+  assert.equal(typeof result.title, 'string');
+  assert.equal(typeof result.body, 'string');
+});
+
+test('classifyCertError never throws on malformed input', () => {
+  assert.doesNotThrow(() => classifyCertError(undefined));
+  assert.doesNotThrow(() => classifyCertError(null));
+  assert.doesNotThrow(() => classifyCertError(42));
+  assert.equal(classifyCertError(undefined).kind, 'other');
+});
 
 test('isChromeErrorUrl: true for any chrome-error: URL, false otherwise', () => {
   assert.equal(isChromeErrorUrl('chrome-error://chromewebdata/'), true);

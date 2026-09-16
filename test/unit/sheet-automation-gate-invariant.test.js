@@ -237,6 +237,22 @@ test('DD1f: main sends the close/reset on the close path, and the preload expose
 });
 
 // ---------------------------------------------------------------------------
+// Mission 20 Flight 2 Leg 3 (DD3/DD10) — cert-override NEVER joins the
+// allowlist. Automation-resolve.test.js pins the resolver-level refusal;
+// this pin guards the allowlist SOURCE ITSELF, so a future edit that adds
+// 'cert-override' to resolve.js's Set fails here even before any resolver
+// test runs against it.
+// ---------------------------------------------------------------------------
+
+test("DD3/DD10: 'cert-override' is not, and must never become, a member of AUTOMATABLE_MENU_TYPES", () => {
+  assert.equal(
+    AUTOMATABLE_MENU_TYPES.has('cert-override'),
+    false,
+    "cert-override is the flight's one security-decision channel — it must never be automatable, at any tier, for any op"
+  );
+});
+
+// ---------------------------------------------------------------------------
 // AC9 — dual-site engine wiring
 // ---------------------------------------------------------------------------
 
