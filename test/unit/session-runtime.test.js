@@ -4,6 +4,7 @@ const { EventEmitter } = require('node:events');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { createSessionRuntime } = require('../../src/main/session-runtime');
+const { partitionFromStoragePath: realPartitionFromStoragePath } = require('../../src/main/jar-data-helpers');
 
 function setup(options = {}) {
   const log = [];
@@ -35,7 +36,9 @@ function setup(options = {}) {
     isCreatingInternalSession: () => creatingInternal,
     wireDownloadHandler: (session) => log.push(['downloads', session]),
     settings: options.settings || { get: () => true },
-    partitionFromStoragePath: () => (options.partition === undefined ? 'persist:jar-a' : options.partition),
+    partitionFromStoragePath:
+      options.partitionFromStoragePath ||
+      (() => (options.partition === undefined ? 'persist:jar-a' : options.partition)),
     jars: {
       list: () => {
         if (options.jarsError) throw new Error('not ready');
@@ -413,6 +416,41 @@ test('cookie changes insert first-seen, delete expiration, skip overwrite, and s
       ['insert', 'jar-a', 'sid', '.example.test', '/', 1234],
       ['delete', 'jar-a', 'sid', '.example.test', '/']
     ]
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Squawk 0079: `partitionFromStoragePath` (jar-data-helpers.js) now
+// percent-decodes the recovered directory segment — Electron writes a
+// container jar's on-disk partition directory percent-encoded
+// (`Partitions/container%3Apersonal` for `persist:container:personal`).
+// Before that fix, `onSessionCreated`'s `jars.list().find(jar =>
+// jar.partition === partition)` lookup never matched a container jar, so the
+// M10 cookie-bookkeeping listener was never attached for one and no
+// `cookie_seen` rows were ever written. This test wires the REAL helper (not
+// the ad-hoc fake above) so a regression in the decode step fails here.
+// ---------------------------------------------------------------------------
+
+test('squawk 0079: a percent-encoded partition directory still resolves its jar, attaching the cookie listener', () => {
+  const h = setup({
+    partitionFromStoragePath: realPartitionFromStoragePath,
+    jars: [{ id: 'jar-container', partition: 'persist:container:personal', retentionDays: 30 }]
+  });
+  const { session } = fakeSession(h.log);
+  session.storagePath = '/profile/Partitions/container%3Apersonal';
+  h.runtime.onSessionCreated(session);
+  assert.equal(
+    session.cookies.listenerCount('changed'),
+    1,
+    'listener attaches once the percent-encoded segment decodes to a real jar partition'
+  );
+
+  const cookie = { name: 'sq79', domain: '.example.test', path: '/' };
+  session.cookies.emit('changed', {}, cookie, 'inserted', false);
+  assert.deepEqual(
+    h.log.filter((entry) => entry[0] === 'insert'),
+    [['insert', 'jar-container', 'sq79', '.example.test', '/', 1234]],
+    'the inserted cookie reaches cookieSeenStore.insertIfAbsent keyed on the container jar'
   );
 });
 
