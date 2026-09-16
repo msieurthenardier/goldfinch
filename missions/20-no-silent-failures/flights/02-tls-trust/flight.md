@@ -1,20 +1,20 @@
 # Flight: TLS Trust — Interstitial, Override, Indicator, Viewer
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [No Silent Failures](../../mission.md)
 
 ## Contributing to Criteria
 
-- [ ] Untrusted certificates get an interstitial, not a blank — origin and
+- [x] Untrusted certificates get an interstitial, not a blank — origin and
       specific error named, risk in plain language, explicit gated proceed,
       remembered per origin until quit, never on disk, never available to
       automation (behavior-test-backed: local throwaway-CA fixture)
-- [ ] Insecure connections are labelled — one "not secure" vocabulary across
+- [x] Insecure connections are labelled — one "not secure" vocabulary across
       the address chip and the site-info popup for plain `http:` AND
       overridden-certificate pages; a trusted `https:` page is not labelled
-- [ ] A site's certificate is inspectable — subject, issuer, validity,
+- [x] A site's certificate is inspectable — subject, issuer, validity,
       fingerprints, chain; read-only
-- [ ] *(partial — the cert-blocked census value, the `security` census field,
+- [ ] *(partial — the cert-blocked census value, the `security` census field, and the interstitial's keyboard operability landed; #216 (stranded focus after a typed failure) stays open — Flight 2 update)* — ORIGINAL: *(partial — the cert-blocked census value, the `security` census field,
       the interstitial's keyboard operability, and the #216 stranded-focus
       fix)* New surfaces are safe and accessible
 - [x] *(carried from Flight 1, now specialised)* Certificate failures never
@@ -503,7 +503,7 @@ them is a spec re-author.
 
 - [x] All open questions resolved
 - [x] Design decisions documented
-- [ ] Prerequisites verified (PR #215 merged; the squawk turnaround and the leg-1 spike remain)
+- [x] Prerequisites verified
 - [x] Validation approach defined
 - [x] Legs defined
 
@@ -551,7 +551,7 @@ them is a spec re-author.
 - [x] CP3 — Chip/popup/viewer render all three states on the live rig;
       a trusted fixture page reads `secure` with a populated viewer
 - [x] CP4 — `tls-trust-surface` behavior run: 13/16, three fails dispositioned by the operator (F4 → HAT; #216 → Known Issue); `npm run a11y -- --tls-url=…` exit 0 with the `cert-blocked` state
-- [ ] CP5 — HAT walk complete; flight `landed`
+- [x] CP5 — HAT walk complete; flight `landed`
 
 ### Adaptation Criteria
 
@@ -610,7 +610,7 @@ them is a spec re-author.
       growth + audit hooks (SEAM 39), a11y state, fixtures (second CA,
       `--cert-set`, trust-anchor helper), README/CLAUDE.md; runs
       `tls-trust-surface` and `npm run a11y` as its acceptance gate.
-- [ ] `hat-and-alignment` *(optional, operator-elected)* — guided walk: the
+- [x] `hat-and-alignment` *(optional, operator-elected)* — guided walk: the
       interstitial for authority/name/date errors, View certificate,
       Advanced → Back to safety, Advanced → Proceed, the overridden chip and
       popup, a plain-`http:` page, the trusted fixture page and its viewer,
@@ -624,11 +624,11 @@ them is a spec re-author.
 
 ### Completion Checklist
 
-- [ ] All legs completed
-- [ ] Code merged
-- [ ] Tests passing (`npm test`, `npm run lint`, `npm run typecheck`,
+- [x] All legs completed
+- [ ] Code merged (PR #217 ready for review)
+- [x] Tests passing (`npm test`, `npm run lint`, `npm run typecheck`,
       `npm run format:check`, `npm run a11y` exit 0)
-- [ ] Documentation updated (`docs/mcp-automation.md`, README, CLAUDE.md —
+- [x] Documentation updated (`docs/mcp-automation.md`, README, CLAUDE.md —
       named guest-slot panel pattern, TLS trust section, seam note)
 
 ### Verification

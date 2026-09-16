@@ -23,23 +23,45 @@ export const SECURITY_STATES = Object.freeze({
 const OK_RESULTS = new Set(['net::OK', 'OK']);
 
 /**
- * Pure derivation of the top-frame committed origin's security state (DD7).
- * Evaluation order, first match wins:
+ * Pure derivation of the top-frame committed origin's security state (DD7;
+ * reordered post-ship for HAT F5 — see below). Evaluation order, first match
+ * wins:
  *   1. `internal` — a trusted `goldfinch://` entry.
  *   2. `none` — a blank/unparseable committed URL, or a parseable `about:`
  *      URL (about:blank, a failed load's pre-commit state, an
  *      `chrome-error:` document is caught earlier by guest-wiring.js's own
  *      dedicated guard, but a plain about:blank live tab reaches this rule).
  *   3. `insecure` — a parseable non-`https:`, non-`about:` URL.
- *   4. `overridden` — the session verify-proc OBSERVED a non-OK verification
- *      for this hostname (the load succeeded despite an error — an override
- *      let it through).
- *   5. `overridden` — no observer entry exists (evicted, or never verified in
- *      this session) but the caller's own decision fallback (`overridden`,
+ *   4. `overridden` — the caller's own decision fallback (`overridden`,
  *      already computed by matching `entry.certOverride` against the
- *      committed host:port) says so.
- *   6. `secure` — everything else.
+ *      committed host:port) says so. Checked BEFORE the observer, and wins
+ *      outright — see the HAT F5 note below.
+ *   5. `secure` — the session verify-proc OBSERVED an OK verification for
+ *      this hostname.
+ *   6. `overridden` — the observer OBSERVED a non-OK verification for this
+ *      hostname. Defensive only: unreachable in practice, since a non-OK
+ *      verification with no override would have failed the load rather than
+ *      committing one — kept as a fail-safe rather than an assumption.
+ *   7. `secure` — no observer entry exists (evicted, or never verified in
+ *      this session) and no override decision either.
  * Never throws — malformed input degrades to `none`.
+ *
+ * HAT F5 (post-ship fix): the observer's cache is keyed by HOSTNAME ONLY
+ * (Electron's verify-proc `Request` carries no port), so a prior trusted
+ * visit to one port on a host can leave a stale OK entry that a later,
+ * different-port override on the SAME host would otherwise be outranked by
+ * — the chip read secure/green on a tab the operator had just overridden.
+ * `overridden` is the fresher, load-scoped signal: `cert-trust.js` writes
+ * `entry.certOverride` only when `callback(true)` was the answer for THIS
+ * main-frame commit (`certificate-error` refires on every navigation), and
+ * `guest-wiring.js` clears it at the very next `did-start-navigation` — so
+ * within one committed navigation it is authoritative, and checking it
+ * before the (possibly stale, possibly wrong-port) observer entry is what
+ * fixes the collision. A certificate that is fixed server-side mid-session
+ * with no new navigation raises no `certificate-error` event, so it stamps
+ * no override and this branch is skipped — falling through to the observer
+ * (or the no-observer default), both `secure`. That residual staleness is
+ * unavoidable without a live re-check and is accepted.
  * @param {{
  *   url?: string | null,
  *   internal?: boolean,
@@ -64,13 +86,15 @@ export function deriveSecurityState(args) {
   // same way (defensive; Goldfinch never navigates a web tab to one).
   if (parsed.protocol === 'about:') return SECURITY_STATES.NONE;
   if (parsed.protocol !== 'https:') return SECURITY_STATES.INSECURE;
+  // HAT F5: the fresh, load-scoped override stamp outranks the (possibly
+  // stale, hostname-only-keyed) observer entry — see the doc comment above.
+  if (overridden) return SECURITY_STATES.OVERRIDDEN;
   const hasVerification = verification != null && typeof verification.verificationResult === 'string';
   if (hasVerification) {
     return OK_RESULTS.has(/** @type {{ verificationResult: string }} */ (verification).verificationResult)
       ? SECURITY_STATES.SECURE
       : SECURITY_STATES.OVERRIDDEN;
   }
-  if (overridden) return SECURITY_STATES.OVERRIDDEN;
   return SECURITY_STATES.SECURE;
 }
 

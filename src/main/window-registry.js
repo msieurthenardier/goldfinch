@@ -42,8 +42,11 @@
  *
  * Mission 20 Flight 2 Leg 2 (DD1/DD2/DD6/DD7) adds four more: `certFailure:
  * { url, host, port, error, fingerprint, summary } | null` and `certOverride:
- * { host, port, fingerprint, error } | null` (transient cert-trust.js decision
- * stamps, cleared at the next non-error main-frame did-start-navigation) plus
+ * { host, port, fingerprint, error, summary } | null` (transient cert-trust.js
+ * decision stamps, cleared at the next non-error main-frame
+ * did-start-navigation — `certOverride.summary` added HAT F5, mirroring
+ * `certFailure.summary`, so tab-certificate-get never falls back to the
+ * observer's hostname-only-keyed entry on an overridden tab) plus
  * the DURABLE per-tab copies `certificate: object | null` (the observer's
  * lookup result for the committed hostname) and `security: string | null`
  * (the `site-security.js` enum value, pushed on its own `tab-security`

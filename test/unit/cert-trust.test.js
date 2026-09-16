@@ -173,12 +173,15 @@ test('AC2: a remembered key allows and stamps entry.certOverride, never certFail
     true
   );
   assert.deepEqual(cb.calls, [true]);
-  assert.deepEqual(entry.certOverride, {
-    host: 'ok.test',
-    port: 443,
-    fingerprint: 'AA:BB',
-    error: 'ERR_CERT_AUTHORITY_INVALID'
-  });
+  assert.equal(entry.certOverride.host, 'ok.test');
+  assert.equal(entry.certOverride.port, 443);
+  assert.equal(entry.certOverride.fingerprint, 'AA:BB');
+  assert.equal(entry.certOverride.error, 'ERR_CERT_AUTHORITY_INVALID');
+  // HAT F5: the override needs its OWN summary (this load's actual
+  // certificate) — never falls back to the observer's hostname-keyed entry.
+  assert.equal(typeof entry.certOverride.summary, 'object');
+  assert.equal(entry.certOverride.summary.status, 'overridden');
+  assert.equal(entry.certOverride.summary.error, 'ERR_CERT_AUTHORITY_INVALID');
   assert.equal(entry.certFailure, undefined);
 });
 

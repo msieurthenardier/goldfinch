@@ -629,6 +629,13 @@ function createGuestWiring(deps) {
               !!entry.certOverride && entry.certOverride.host === hostname && entry.certOverride.port === port;
             security = deriveSecurityState({ url, internal: !!entry.trusted, verification, overridden });
           }
+          // HAT F5: `entry.certificate` stays the observer's raw lookup
+          // result for this navigation regardless of `overridden` — it is
+          // NOT the overridden-tab viewer source (that's `certOverride.summary`,
+          // read via tab-certificate-get in register-tab-ipc.js). This field
+          // remains the `secure` path's viewer source only; on an overridden
+          // tab it can be stale/wrong-port (the observer keys by hostname
+          // only, with no port) and must never be read for display.
           entry.certificate = certificate;
           entry.security = security;
           sendToChrome('tab-security', { wcId, security });

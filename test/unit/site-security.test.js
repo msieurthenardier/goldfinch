@@ -47,26 +47,36 @@ test('none for about:blank (a live, non-internal, non-failed tab that has never 
   assert.equal(deriveSecurityState({ url: 'about:blank#x' }), 'none');
 });
 
-test('overridden when the observer verification is present and not OK', () => {
+test('overridden when the observer verification is present and not OK and there is no override (defensive/unreachable-in-practice branch — a non-OK verification with no override would have failed the load)', () => {
   assert.equal(
     deriveSecurityState({
       url: 'https://bad.test/',
-      verification: { verificationResult: 'net::ERR_CERT_AUTHORITY_INVALID' }
+      verification: { verificationResult: 'net::ERR_CERT_AUTHORITY_INVALID' },
+      overridden: false
     }),
     'overridden'
   );
 });
 
-test('secure when the observer verification is present and OK, regardless of the overridden decision fallback', () => {
+test('a fresh override stamp wins over a stale OK observer entry (HAT F5)', () => {
   assert.equal(
     deriveSecurityState({ url: 'https://ok.test/', verification: { verificationResult: 'net::OK' }, overridden: true }),
-    'secure',
-    'observation wins over the decision fallback — a mid-session fix reads secure'
+    'overridden',
+    "the observer cache is keyed by hostname only, so a stale OK entry from a different port on the same host must not outrank this load's own override stamp"
   );
 });
 
-test('overridden via the decision fallback when no observer entry exists', () => {
+test('overridden via the decision, whether or not an observer entry exists', () => {
   assert.equal(deriveSecurityState({ url: 'https://bad.test/', verification: null, overridden: true }), 'overridden');
+  assert.equal(
+    deriveSecurityState({
+      url: 'https://bad.test/',
+      verification: { verificationResult: 'net::OK' },
+      overridden: true
+    }),
+    'overridden',
+    'overridden is checked before the observer, so it wins even when the (stale) observer entry says OK'
+  );
 });
 
 test('secure when there is no observer entry and no override decision', () => {

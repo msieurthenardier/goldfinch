@@ -1566,7 +1566,59 @@ test('tab-certificate-get: a trusted (secure) tab returns the observer summary w
   assert.equal(result.fingerprints.sha256, 'AA');
 });
 
-test('tab-certificate-get: an overridden tab returns status=overridden with the certOverride error', () => {
+test('tab-certificate-get: an overridden tab returns status=overridden from certOverride.summary, with the certOverride error', () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  h.addTab(source, 101);
+  const entry = source.tabViews.get(101);
+  entry.security = 'overridden';
+  entry.certOverride = {
+    host: 'bad.test',
+    port: 443,
+    fingerprint: 'AA:BB',
+    error: 'ERR_CERT_AUTHORITY_INVALID',
+    summary: { subject: { commonName: 'bad.test' }, status: 'overridden', error: 'ERR_CERT_AUTHORITY_INVALID' }
+  };
+  const result = h.ipcMain.invoke('tab-certificate-get', source.chromeView.webContents, { wcId: 101 });
+  assert.equal(result.status, 'overridden');
+  assert.equal(result.error, 'ERR_CERT_AUTHORITY_INVALID');
+  assert.equal(result.subject.commonName, 'bad.test');
+});
+
+// HAT F5: the collision this fix closes — a hostname-keyed OBSERVER entry
+// from a prior TRUSTED visit to a DIFFERENT port on the same host must never
+// leak into an overridden tab's viewer. Observer says OK for a certificate
+// whose subject is 'trusted-other-port.test' (subject A); this tab's OWN
+// override is for a different certificate (subject B). The read must return
+// subject B (certOverride.summary), never subject A (entry.certificate).
+test('tab-certificate-get: an overridden tab never falls back to a hostname-keyed observer entry from a different port (HAT F5 collision)', () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  h.addTab(source, 101);
+  const entry = source.tabViews.get(101);
+  entry.security = 'overridden';
+  // The observer's stale, hostname-only-keyed OK entry — subject A, a
+  // DIFFERENT certificate than the one this tab's own load overrode.
+  entry.certificate = {
+    verificationResult: 'net::OK',
+    errorCode: 0,
+    isIssuedByKnownRoot: true,
+    summary: { subject: { commonName: 'trusted-other-port.test' }, status: 'trusted' }
+  };
+  // This load's own override — subject B.
+  entry.certOverride = {
+    host: '127.0.0.1',
+    port: 42525,
+    fingerprint: 'CC:DD',
+    error: 'ERR_CERT_AUTHORITY_INVALID',
+    summary: { subject: { commonName: 'this-load.test' }, status: 'overridden', error: 'ERR_CERT_AUTHORITY_INVALID' }
+  };
+  const result = h.ipcMain.invoke('tab-certificate-get', source.chromeView.webContents, { wcId: 101 });
+  assert.equal(result.status, 'overridden');
+  assert.equal(result.subject.commonName, 'this-load.test');
+});
+
+test('tab-certificate-get: an overridden tab with no certOverride.summary (e.g. a pre-fix stamp) returns null, never entry.certificate', () => {
   const h = setup();
   const source = h.makeRecord(1);
   h.addTab(source, 101);
@@ -1574,15 +1626,13 @@ test('tab-certificate-get: an overridden tab returns status=overridden with the 
   entry.security = 'overridden';
   entry.certOverride = { host: 'bad.test', port: 443, fingerprint: 'AA:BB', error: 'ERR_CERT_AUTHORITY_INVALID' };
   entry.certificate = {
-    verificationResult: 'net::ERR_CERT_AUTHORITY_INVALID',
-    errorCode: -202,
-    isIssuedByKnownRoot: false,
-    summary: { subject: { commonName: 'bad.test' }, status: 'untrusted', error: 'ERR_CERT_AUTHORITY_INVALID' }
+    verificationResult: 'net::OK',
+    errorCode: 0,
+    isIssuedByKnownRoot: true,
+    summary: { subject: { commonName: 'wrong.test' }, status: 'trusted' }
   };
   const result = h.ipcMain.invoke('tab-certificate-get', source.chromeView.webContents, { wcId: 101 });
-  assert.equal(result.status, 'overridden');
-  assert.equal(result.error, 'ERR_CERT_AUTHORITY_INVALID');
-  assert.equal(result.subject.commonName, 'bad.test');
+  assert.equal(result, null);
 });
 
 test('tab-certificate-get: a cert-blocked interstitial returns entry.loadFailure.cert.summary as-is (status untrusted)', () => {

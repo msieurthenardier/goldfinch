@@ -21,6 +21,20 @@
 // least-recently-used one to evict). The observer never throws into the
 // network service: a throwing `summarize` is caught and logged, and the
 // record is skipped for that verification (never abandons the callback).
+//
+// HAT F5 (accepted gap, post-ship): the cache is keyed by HOSTNAME ONLY —
+// Electron's verify-proc `Request` carries no port, so there is no
+// disambiguator to key on. Two distinct https origins on the same hostname
+// but different ports (e.g. two local dev servers on 127.0.0.1) therefore
+// share one slot: whichever was verified most recently wins the entry. For a
+// TRUSTED page this means `did-navigate`'s `entry.certificate` stamp (the
+// `secure`-path viewer source in tab-certificate-get) can show the most
+// recently verified certificate for that hostname rather than necessarily
+// this tab's own — a real but narrow gap (same host, different port, both
+// legitimately trusted). It does NOT affect an overridden tab: that path
+// reads `certOverride.summary` instead (stamped per-load by cert-trust.js),
+// never this cache — see site-security.js's deriveSecurityState doc comment
+// and register-tab-ipc.js's tab-certificate-get for the fix this leg made.
 
 const { stripNetPrefix } = require('../shared/load-failure');
 

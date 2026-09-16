@@ -1488,6 +1488,13 @@ test('DD6/DD7: did-navigate stamps entry.certificate/security from the observer 
   assert.deepEqual(h.sends[1], ['tab-security', { wcId: 74, security: 'secure' }]);
 });
 
+// HAT F5 note: `deriveSecurityState`'s override check now runs BEFORE the
+// observer lookup (site-security.js), so with no `entry.certOverride` set
+// here this test now exercises that module's defensive/unreachable-in-
+// practice branch (observer non-OK, no override → overridden) rather than
+// the primary override-wins path — kept as a fail-safe regression pin, not
+// because this scenario is expected to occur live (a non-OK verification
+// with no override would have failed the load rather than committing one).
 test('DD7: did-navigate reads overridden from the observer verification when present', () => {
   const h = setup();
   const wc = new FakeContents(75);

@@ -112,17 +112,22 @@ node import-client-cert.mjs --remove   # certutil -D -d sql:$HOME/.pki/nssdb -n 
 
 ### Dev-only TLS trust bypass
 
-Chromium won't trust the throwaway CA and goldfinch has no
-`certificate-error` handler, so the live check launches the app with
-`npm run dev:automation -- --insecure-tls-fixtures` — the flag (dev-launch
-script only, stripped before argv forwarding) appends Chromium's
-`ignore-certificate-errors` switch. Packaged builds never run the dev-launch
-script; there is no production path to the switch.
+Chromium won't trust the throwaway CA, and goldfinch now answers that for
+real: `app.on('certificate-error')` (`src/main/app-lifecycle.js`) delegates
+to `src/main/cert-trust.js` (Mission 20 Flight 2) — refuse, or allow when the
+origin is remembered, decided and answered synchronously at once. The
+client-cert leg above has nothing to do with TLS trust decisions, though —
+it needs Chromium to skip certificate verification ENTIRELY rather than
+exercise the interstitial/override flow — so its live check still launches
+the app with `npm run dev:automation -- --insecure-tls-fixtures`. The flag
+(dev-launch script only, stripped before argv forwarding) appends Chromium's
+`--ignore-certificate-errors` switch. Packaged builds never run the
+dev-launch script; there is no production path to the switch.
 
-**This flag suppresses the `certificate-error` event entirely** — it exists
-for the client-cert leg above, which has nothing to do with TLS trust
-decisions. The TLS-trust behavior spec (Mission 20 Flight 2) launches the app
-**WITHOUT** it, so `certificate-error` fires for real.
+**This flag suppresses the `certificate-error` event entirely** — the event
+never reaches `cert-trust.js`. The TLS-trust behavior spec (Mission 20
+Flight 2) launches the app **WITHOUT** it, so `certificate-error` fires for
+real and `cert-trust.js` makes the decision.
 
 ## Second CA: the trusted fixture (Mission 20 Flight 2 Leg 4, DD14)
 

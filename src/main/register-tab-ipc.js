@@ -395,27 +395,41 @@ function registerTabIpc(deps) {
   // the cert-viewer sheet card. requireChrome + ownsTab — the SAME shape
   // tab-navigate uses (:951 below), not tab-history-snapshot's bare
   // requireChrome (that channel reads an arbitrary wcId; this one acts on
-  // the sender's OWN tab, named by wcId). `entry.certificate` is the
-  // OBSERVER's wrapper `{ verificationResult, errorCode, isIssuedByKnownRoot,
-  // summary }` (cert-observer.js), NEVER the summary itself — a wrapper with
-  // a null summary counts as absent. Never returns a `data`/PEM field — every
-  // value here traces back to certificate-summary.js's strings-only output.
+  // the sender's OWN tab, named by wcId).
+  //
+  // HAT F5 (post-ship fix): `entry.certificate` is NOT the source for an
+  // overridden tab, and never falls back to being one. `entry.certificate`
+  // is the session verify-proc OBSERVER's wrapper, keyed by HOSTNAME ONLY
+  // (Electron's verify-proc `Request` has no port) — a prior trusted visit
+  // to a DIFFERENT port on the same host can leave a stale, wrong-certificate
+  // entry there. An overridden tab's viewer source is instead
+  // `entry.certOverride.summary`, stamped by cert-trust.js for THIS load's
+  // own certificate; if it is absent (a pre-fix stamp, or a defensive gap)
+  // this returns `null` rather than resurrect the hostname collision by
+  // reading `entry.certificate` instead. Only once `entry.security` is NOT
+  // `'overridden'` does this fall through to the cert-blocked-interstitial
+  // fold (already stamped `status: 'untrusted'` by cert-trust.js's
+  // summarizeCertificate call) and then the plain observer-backed trusted
+  // path — `entry.certificate`'s wrapper `{ verificationResult, errorCode,
+  // isIssuedByKnownRoot, summary }` (cert-observer.js), NEVER the summary
+  // itself; a wrapper with a null summary counts as absent. Never returns a
+  // `data`/PEM field anywhere — every value here traces back to
+  // certificate-summary.js's strings-only output.
   ipcMain.handle('tab-certificate-get', (event, { wcId }) => {
     const owner = ownsTab(event, wcId);
     if (!owner) return null;
     const entry = owner.tabViews.get(wcId);
     if (!entry) return null;
-    // A cert-blocked interstitial's own folded failure — already stamped
-    // `status: 'untrusted'` by cert-trust.js's summarizeCertificate call.
+    if (entry.security === 'overridden') {
+      const summary = entry.certOverride?.summary;
+      if (!summary) return null;
+      return { ...summary, status: 'overridden', error: entry.certOverride.error ?? summary.error };
+    }
+    // A cert-blocked interstitial's own folded failure.
     if (entry.loadFailure?.cert?.summary) return entry.loadFailure.cert.summary;
     const summary = entry.certificate?.summary;
     if (!summary) return null;
-    const status = entry.security === 'overridden' ? 'overridden' : 'trusted';
-    return {
-      ...summary,
-      status,
-      error: status === 'overridden' ? (entry.certOverride?.error ?? summary.error) : undefined
-    };
+    return { ...summary, status: 'trusted', error: undefined };
   });
 
   // Read-only closed-tab-stack size — since F6 leg 3 (DD6) this is the push-cache's

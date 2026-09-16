@@ -1833,3 +1833,151 @@ describes as the alternative.
   no `certificate-error` handler") is now stale → HAT docs pass. Legs 1–4
   set `completed`; squawk 0077 signed off; mission Known Issue #216 updated;
   committing and opening the draft PR; leg 5 (HAT) follows.
+- Committed `3010513` (legs 1–4 + fixes F1–F4 + squawks 0077/0079); draft
+  PR #217. **Leg 5 (HAT) risk tier: interactive** — no autonomous cycle;
+  inline fixes gated fix-vs-feature. FD ruling: the F1 spec's Witnessed
+  re-run is replaced by an operator smoke (H10) — its keyboard row would fail
+  on #216 by construction. The operator's look-and-feel opinions are folded
+  into the walk.
+
+## Leg 5 — HAT and alignment (2026-09-16)
+
+**Rig**: build `3010513` (includes F4); untrusted TLS 42525, trusted TLS 42279
+(anchor imported), HTTP 42443 on 127.0.0.2, refused 43023.
+
+| Step | Verdict | Notes / fixes |
+|------|---------|---------------|
+| H1 — interstitial (untrusted) | content + function PASS; look-and-feel FIX requested | Operator: "style the pages a bit more professionally, like Chrome's interstitial, and include the Goldfinch logo" (reference screenshot supplied). Classified look-and-feel FIX, single surface → inline Developer spawn: Chrome-like left-aligned column, warning triangle (cert) / neutral glyph (network), heading/body/code typography, Retry as the filled primary, outline View certificate / Advanced, Goldfinch brand mark from the existing asset; frozen contract ids and tab order unchanged. |
+| H2 — F4 by eye | PASS | Trusted fixture: chip neutral while loading, green after commit; untrusted: neutral throughout. F4 verified live (the acceptance run's CP9 finding closed). |
+| H3 — certificate viewer | PASS | Status, subject/issuer, validity, SANs, fingerprints, two chain rows, Close/Escape all judged good; no card restyle requested. |
+| H4 — Advanced → Back to safety | PASS | Focus on Back; copy good; Proceed visually secondary; Escape, Back, and backdrop click all dismiss. |
+| H5 — Proceed | FAIL (finding F5) | Page loads, strip clears, but the chip shows a GREEN lock after proceed. Root cause (FD-verified): `cert-observer.js` keys its cache by HOSTNAME only (Electron's verify `Request` has no port); H2 had just verified the TRUSTED fixture on the same host `127.0.0.1:42279`, so at the overridden commit `lookup('127.0.0.1')` returned `OK` and `deriveSecurityState` let the observer outrank the fresh `certOverride` stamp. Same collision would make `tab-certificate-get` return the other port's certificate for the viewer. The acceptance run passed CP6 only because its trusted-fixture visit came later. Multi-surface FIX (shared model + guest-wiring + cert-trust + read invoke) → lightweight Developer design pass first (running), implementation after the restyle hand-back. |
+| H6 — remembered origin | PASS | New tab to the origin loads directly; `https://localhost:42525/` gets a fresh interstitial. |
+| H8 — plain http + trusted https | PASS | http: red open lock, "not secure", popup "Not secure (HTTP)", no Certificate action; trusted: green, "Secure (HTTPS)", Certificate → viewer "Trusted" (Goldfinch Fixture Trusted CA). |
+| H10 — Flight 1 smoke | PASS | Refused panel → Retry after starting a server recovers; DNS failure panel; Ctrl+Shift+T reopens the closed failed tab at its address and fails honestly. Stands in for the `navigation-failure-surface` Witnessed re-run (FD ruling). |
+| H12 — docs and spec | PASS (FD + Developer) | Spec rows 14/15 re-authored with the "no preliminary click" constraint and the injected-Enter apparatus note; hostname-key gap recorded under Out of Scope. Fixtures README's stale "no `certificate-error` handler" paragraph rewritten (Developer, docs only); the Second-CA section verified accurate against the scripts. Spec `Status` → `active` at landing. |
+| H1 (restyle judgment) | PASS | Restyled interstitial (cert triangle / network glyph variants, typography, button row, Goldfinch mark) accepted as-is. |
+| H5 (redo, with the same-host trusted visit first) | PASS | Chip red open lock "not secure — certificate error overridden"; popup Connection row; viewer shows the throwaway CA with status "Overridden this session" — F5 verified live. |
+| H7 — second window, second jar | PASS | Chip/popup state travels on move-to-new-window; the same origin in a different jar gets the interstitial (per-jar memory). |
+| H9 — keyboard (click-first, #216) | PASS | F6 → heading; Tab → Retry → View certificate → Advanced; Enter opens the card; Tab cycles Back ↔ Proceed; Escape; rings visible on the restyled buttons. |
+| H11 — window-wide | PASS | Resize, media panel, bookmarks bar, kebab, viewer while resizing: nothing animates the page area; column readable when narrow. |
+
+**HAT fix 1 (H1 restyle) landed** — `styles.css` + `load-failure-controller.js`:
+Chrome-like left-aligned column (max 640 px, ~90 px gutter on wide windows),
+CSS-drawn warning triangle for cert failures / ringed-slash glyph for network
+failures (`.lf-icon`, aria-hidden; pure DOM/CSS because the shared fake DOM has
+no `createElementNS`), heading 26 px/400, dim 15 px body, monospace url/code
+lines, `.lf-actions` row with Retry as the filled primary and outline View
+certificate / Advanced, `.lf-brand` (the existing `goldfinch_color.png` mark +
+wordmark), focus rings on every button; panel re-themed onto the chrome's dark
+tokens. Frozen ids and DOM/tab order untouched (contract test green). Contrast
+computed: fg 13.3:1, dim 6.0:1. Gates green; `npm run a11y --tls-url` exit 0
+(old CSS — the live check of the new CSS is at the relaunch). Relaunch deferred
+until F5 lands (one relaunch for both).
+
+**HAT fix 2 (F5 — override wins over a stale hostname-keyed OK) landed.**
+
+*Finding*: after Proceed on `https://127.0.0.1:42525/` (untrusted, overridden)
+the address chip showed GREEN instead of the not-secure/overridden treatment.
+
+*Root cause*: `cert-observer.js`'s per-partition cache is keyed by HOSTNAME
+ONLY — Electron's `certificate-error`/verify-proc `Request` carries no port.
+H2's earlier visit to the TRUSTED fixture on the same host,
+`127.0.0.1:42279`, left an `OK` entry for hostname `127.0.0.1`. At the
+overridden commit on port `42525`, `guest-wiring.js`'s `did-navigate` looked
+up `certObserver.lookup(partition, '127.0.0.1')`, got that stale `OK` back,
+and `deriveSecurityState` (`site-security.js`) let the observer's `OK`
+outrank the fresh `certOverride` decision it was also handed — the old
+evaluation order checked the observer verification before the override
+fallback. The same collision meant `tab-certificate-get`
+(`register-tab-ipc.js`) would have returned the OTHER port's certificate
+(the trusted one) in the certificate viewer for the overridden tab, since it
+read `entry.certificate` (the observer's wrapper) rather than the override's
+own certificate.
+
+*Fix, per file*:
+- `src/shared/site-security.js` (`deriveSecurityState`): reordered so
+  `if (overridden) return OVERRIDDEN` is checked immediately after the
+  insecure-scheme check, BEFORE the observer verification is consulted. The
+  observer's OK/non-OK branch now runs only when there is no override
+  decision; a non-OK observer verification with no override falling through
+  to `OVERRIDDEN` is kept as a defensive/unreachable-in-practice branch (a
+  non-OK verification with no override would have failed the load rather
+  than committing one). Doc comment rewritten with the new order and the WHY:
+  `cert-trust.js` stamps `entry.certOverride` only when `callback(true)` was
+  the answer for THIS main-frame commit (`certificate-error` refires on every
+  navigation) and `guest-wiring.js` clears it at the very next
+  `did-start-navigation`, so within one committed navigation it is
+  authoritative — fresher and load-scoped, unlike the hostname-only observer
+  cache. A certificate fixed server-side mid-session with no new navigation
+  raises no event and stamps no override, so that residual staleness (both
+  paths reading `secure`) is accepted.
+- `src/main/cert-trust.js` (`stampEntry`, allow branch): now also computes
+  `summary: summarizeCertificate(certificate, { status: 'overridden', error })`
+  and stores it on `entry.certOverride.summary`, mirroring the existing
+  `certFailure.summary` shape — the override needs ITS OWN certificate
+  summary so the viewer never has to fall back to the observer's
+  hostname-keyed (and possibly wrong-port) entry.
+- `src/main/register-tab-ipc.js` (`tab-certificate-get`): now branches FIRST
+  on `entry.security === 'overridden'` and returns
+  `{ ...entry.certOverride.summary, status: 'overridden', error: entry.certOverride.error ?? summary.error }`;
+  if `entry.certOverride?.summary` is absent (e.g. a pre-fix stamp) it
+  returns `null` — it NEVER falls back to `entry.certificate.summary` on an
+  overridden tab, closing the collision. The cert-blocked-interstitial fold
+  and the plain observer-backed trusted path are unchanged, just reached only
+  when the tab is not overridden. Doc comment rewritten (it previously
+  claimed `entry.certificate` was always the source).
+- `src/main/guest-wiring.js` (`did-navigate`): no functional change — added a
+  comment that `entry.certificate` stays the observer's raw per-navigation
+  lookup result (the `secure` path's viewer source only) and is never the
+  overridden-tab viewer source.
+- `src/main/cert-observer.js`: header comment documents the hostname-only key
+  limitation as an accepted gap — two distinct https origins on one hostname
+  with different ports share one cache slot, so a TRUSTED page's viewer can
+  show the most recently verified certificate for that hostname rather than
+  necessarily its own (narrow: same host, different port, both legitimately
+  trusted); explicitly notes the overridden path no longer reads this cache
+  at all.
+- `src/main/window-registry.js`: `tabViews` entry-shape typedef comment
+  updated to include `certOverride.summary` in the documented shape.
+
+*Tests*:
+- `test/unit/site-security.test.js`: inverted and renamed the test that
+  asserted `overridden:true` + observer `OK` → `secure` to
+  `'a fresh override stamp wins over a stale OK observer entry (HAT F5)'`,
+  now asserting `overridden`; renamed/annotated the observer-non-OK test as
+  the defensive/unreachable-in-practice branch (explicit `overridden: false`);
+  renamed the no-observer-entry fallback test to
+  `'overridden via the decision, whether or not an observer entry exists'`
+  and added a case where an observer entry IS present and says `OK` but
+  `overridden` still wins.
+- `test/unit/cert-trust.test.js`: `'AC2: a remembered key allows and stamps
+  entry.certOverride, never certFailure'` now asserts
+  `entry.certOverride.summary` is populated with `status: 'overridden'` and
+  the stripped error.
+- `test/unit/register-tab-ipc.test.js`: the overridden-tab test now stamps
+  `certOverride.summary` and asserts the reply against it; added the
+  collision case (observer entry `OK` for the hostname with a DIFFERENT
+  certificate subject, `entry.security === 'overridden'` with its own
+  `certOverride.summary` for a different subject) proving the read returns
+  the override's own subject, never the observer's; added the
+  absent-`certOverride.summary` → `null` case (never falls back to
+  `entry.certificate`).
+- `test/unit/guest-wiring.test.js`: the two DD7 `did-navigate` tests at
+  (pre-edit) lines ~1491/1506 pass unchanged; added a comment on the first
+  noting it now exercises `deriveSecurityState`'s defensive/unreachable
+  branch under the new evaluation order rather than the old primary path.
+
+*Gates*: `npm test -- --test-timeout=60000` (4783/4783 pass), `npm run lint`,
+`npm run typecheck`, `npm run format` (reformatted one test file's escaped
+quote), `npm run format:check` — all green.
+
+*Accepted gap (documented, unchanged by this fix)*: the observer cache's
+hostname-only key means a TRUSTED page's certificate viewer can show the
+wrong (but also-trusted) certificate when two distinct ports on the same
+host were both verified in-session, whichever most recently — narrow, and
+there is no port to key on without an Electron API change. The overridden
+path no longer has this exposure at all (fixed by this leg).
+
+
+**HAT complete (2026-09-16)**: 12 steps, two inline fixes (H1 restyle; F5 override-wins), one docs pass; #216 stays a Known Issue. Flight `landed`.

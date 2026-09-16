@@ -1,7 +1,7 @@
 # Behavior Test: TLS Trust Surface
 
 **Slug**: `tls-trust-surface`
-**Status**: draft
+**Status**: active
 **Created**: 2026-09-15
 **Last Run**: 2026-09-16-04-59-20 — fail/partial (13/16; F1–F3 fixed and re-verified in-run, F4 fixed post-run for HAT verification, #216 Known Issue on rows 14–15; run log `tls-trust-surface/runs/2026-09-16-04-59-20.md`)
 
@@ -90,8 +90,8 @@ tests pin each link but not the rendered result nor the engine's ordering.
 | 11 | Navigate the third tab to `https://127.0.0.1:{T2}/` (the trusted fixture). Wait up to 10 s. Capture the chrome. Read the chip's name. Enumerate tabs. Close any card via tab switch, then `evaluate` `openSiteInfoOverlay()` and read the sheet a11y tree. | No interstitial; the page shows; the chip's name does NOT say not secure; census `security: "secure"`, `loadState: "ok"`; the site-info Connection row reads secure (HTTPS) and offers **Certificate**. |
 | 12 | Navigate the third tab (currently `secure` on `{T2}`) to `https://localhost:{T}/` (the untrusted fixture under a host name NOT remembered in step 6). Wait up to 10 s. Enumerate tabs. Read the chip's accessible name. | The interstitial shows; census `security: "none"` (NOT the stale `secure`), `loadState: "cert-blocked"`; the chip's name does not say secure. *(DD7's failed-tab rule, enforced end to end.)* Then navigate the tab back to `https://127.0.0.1:{T2}/` and wait for `security: "secure"` again. |
 | 13 | Close the card (tab switch and back). Open the viewer through the product path: `evaluate` `openCertificateViewer()` on the chrome (the site-security controller's seam-published opener for the ACTIVE tab's real certificate — never the synthetic audit hook). Read the sheet a11y tree. In the shell, compute `server-trusted.pem`'s SHA-256 fingerprint. | The viewer is READABLE: subject CN `127.0.0.1`, issuer CN of the trusted fixture CA, fingerprint EQUAL to the shell's, chain of two, status line reading trusted. |
-| 14 | Open a fresh tab via `openTab` to `about:blank`. On the chrome: focus `#address` and read the focused node; set `#address` to `http://{L}:{Q}/` and press Enter (the typed path — #216's regression row). Wait up to 10 s. Read the focused node. Press F6, read; press Tab up to 6 times, reading after each. | After the typed failure the focused node is the panel heading, not `<body>`; F6 lands on the heading; Tab reaches Retry. `[a11y]` *(HAT-only clause: a visible focus ring on Retry — #216's retroactive-fail condition.)* |
-| 15 | Navigate that tab to `https://localhost:{T}/` (the same untrusted fixture under a different host name: a fresh override key, and `ERR_CERT_COMMON_NAME_INVALID` because the cert's SAN is `IP:127.0.0.1` only). Wait up to 10 s. Read the chrome a11y tree. Press F6; Tab until the focused node is **Advanced**; press Enter. Enumerate windows. Then close the card by tab switch. | The interstitial shows `ERR_CERT_COMMON_NAME_INVALID` with name-mismatch wording (or `ERR_CERT_AUTHORITY_INVALID` if Chromium reports the authority error first — either is a fresh interstitial); keyboard reaches Advanced; Enter opens the card (`sheetVisible: true`). *(No proceed — this origin stays refused.)* |
+| 14 | Open a fresh tab via `openTab` to `about:blank`. On the chrome: focus `#address` and read the focused node; set `#address` to `http://{L}:{Q}/` and press Enter (the typed path — #216's regression row). **No preliminary click anywhere on the panel or page** — the row tests keyboard reach directly after the failure lands; a click-to-refocus workaround is the failure mode, not a pass. A false `document.hasFocus()` reading escalates to an operator by-eye check (crew protocol, squawk 0076). Wait up to 10 s. Read the focused node. Press F6, read; press Tab up to 6 times, reading after each. | After the typed failure the focused node is the panel heading, not `<body>`; F6 lands on the heading; Tab reaches Retry. `[a11y]` *(HAT-only clause: a visible focus ring on Retry — #216's retroactive-fail condition.)* |
+| 15 | Navigate that tab to `https://localhost:{T}/` (the same untrusted fixture under a different host name: a fresh override key, and `ERR_CERT_COMMON_NAME_INVALID` because the cert's SAN is `IP:127.0.0.1` only). Wait up to 10 s. Read the chrome a11y tree. **Without any preliminary click**, press F6; Tab until the focused node is **Advanced**; press Enter (a REAL keypress in a by-eye check — the automation `pressKey` Enter does not activate a `<button>`, apparatus gap recorded 2026-09-16). Enumerate windows. Then close the card by tab switch. | The interstitial shows `ERR_CERT_COMMON_NAME_INVALID` with name-mismatch wording (or `ERR_CERT_AUTHORITY_INVALID` if Chromium reports the authority error first — either is a fresh interstitial); keyboard reaches Advanced; Enter opens the card (`sheetVisible: true`). *(No proceed — this origin stays refused.)* |
 | 16 | Stop both TLS fixtures and the HTTP server; remove the trust anchor (`node …/import-trust-anchor.mjs --remove`). | (cleanup; no judgment) |
 
 **Row notes**: Finalised at leg 4 (`security-indicator-and-certificate-viewer`) — step 13's opener name, `openCertificateViewer()`, is the real chrome-side function this leg lands (`site-security-controller.js`, seam-published in `renderer.js`), not a placeholder; step 15 accepts either `ERR_CERT_COMMON_NAME_INVALID` or `ERR_CERT_AUTHORITY_INVALID` for `https://localhost:{T}/` (leg 1 spike (i): the untrusted-root check wins over the SAN mismatch on this rig, but either is a fresh interstitial for a host not remembered in step 6); step 12 (added at leg 4 planning — a secure tab navigated into a cert failure must read `security: none`, never a stale `secure`) is enforced end to end by this leg's `guest-wiring.js`/`tab-controller.js` fix. `Status` stays `draft` until the Flight Director's Witnessed run (AC9) passes.
@@ -105,7 +105,12 @@ tests pin each link but not the rendered result nor the engine's ordering.
 - Subframe/subresource certificate errors (silently refused; DD1).
 - Popup windows with certificate errors (accepted gap; DD1).
 - Renderer crashes and hangs — Flight 3.
-- Rendered focus ring under automation (step 13's HAT-only clause).
+- Rendered focus ring under automation (step 14's HAT-only clause).
+- Two https origins on ONE hostname with different ports: the verify-proc
+  observer is hostname-keyed (Electron's verify request carries no port), so
+  a TRUSTED page on such a host may show the most recently verified
+  certificate for that hostname in the viewer (accepted gap, HAT F5); the
+  overridden state and its viewer are unaffected (the override stamp wins).
 
 ## Variants (optional)
 

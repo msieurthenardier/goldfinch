@@ -88,7 +88,13 @@ function createCertTrust({ registry, popupRegistry = null, logger = console }) {
       if (!entry || !isMainFrame) return;
       const strippedError = stripNetPrefix(error);
       if (decision) {
-        entry.certOverride = { host, port, fingerprint, error: strippedError };
+        // HAT F5: mirror the certFailure branch below — the override needs
+        // its OWN summary (this load's actual certificate) so the viewer
+        // never falls back to the observer's hostname-keyed entry, which can
+        // belong to a different port on the same host (register-tab-ipc.js's
+        // tab-certificate-get reads this field first on an overridden tab).
+        const summary = summarizeCertificate(certificate, { status: 'overridden', error: strippedError });
+        entry.certOverride = { host, port, fingerprint, error: strippedError, summary };
       } else {
         const summary = summarizeCertificate(certificate, { status: 'untrusted', error: strippedError });
         entry.certFailure = { url, host, port, error: strippedError, fingerprint, summary };
