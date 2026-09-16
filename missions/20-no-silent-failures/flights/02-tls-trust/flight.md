@@ -471,7 +471,7 @@ them is a spec re-author.
 
 - [x] PR #215 (Flight 1) merged to `main` (2026-09-15); the flight branch
       `flight/02-tls-trust` is cut from `main` after the merge.
-- [ ] Squawk turnaround completed and merged before leg 1: **0074**
+- [x] Squawk turnaround completed before leg 1 (2026-09-15, `squawk: turnaround 2026-09-15` on this branch): **0074**
       (`#bookmarks-bar` region → `ACCEPTED`) and **0076** (crew-protocol
       escalation on a false `document.hasFocus()`) via
       `/mission-control:squawk complete 0074 0076`.

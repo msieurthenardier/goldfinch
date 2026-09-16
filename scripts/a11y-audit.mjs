@@ -145,6 +145,16 @@ const ACCEPTED = [
     selector: '#address-wrap',
     reason: 'app-shell address bar sits outside a landmark; accepted chrome exception'
   },
+  // Mission 15's bookmarks bar was never reconciled into this allowlist when it
+  // shipped, leaving every chrome-mode run red (squawk 0074). Same app-shell
+  // exception class as #tabs/#brand/#address-wrap above — role="group" is not a
+  // landmark, and the bar sits outside one by the same frozen-chrome-shell
+  // rationale.
+  {
+    id: 'region',
+    selector: '#bookmarks-bar',
+    reason: 'app-shell bookmarks bar sits outside a landmark; accepted chrome exception'
+  },
   // NOTE (M05 F8 cutover): the old chrome `#page-context-menu` region entry was
   // retired with the chrome-DOM menus — the page-context state now audits the
   // menu-overlay SHEET document. The three state-scoped `#sheet-menu` entries

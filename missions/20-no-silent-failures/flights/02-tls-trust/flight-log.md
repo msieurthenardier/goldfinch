@@ -86,3 +86,11 @@ words it.
 - Operator approved the spec (2026-09-15); PR #215 merged. Flight set `ready`.
   Planning artifacts committed on `main`; the flight branch is cut after the
   squawk turnaround (0074 + 0076).
+
+### 2026-09-15 — turnaround + flight start
+
+- Operator ruling: the squawk turnaround (0074 + 0076) and the flight share
+  ONE branch, `flight/02-tls-trust` (cut from `main` at `24ba791`), instead
+  of the ARTIFACTS.md squawk-branch scheme — a deviation of convenience;
+  the squawk commit keeps its own `squawk: turnaround 2026-09-15` subject
+  and `Squawks:` trailer so the record stays separable.
