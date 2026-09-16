@@ -268,7 +268,7 @@ Emergent blockers and issues discovered during execution.
 - [ ] Flight 3: **Crash and hang resilience** (#133 + hung renderers) —
   guest crash surface with reload; chrome-view reload-and-reconcile from
   the registry with a multi-crash storm guard; `unresponsive` wait-or-kill;
-  local crash records and dump collection; forced-crash behavior spec for
+  local crash records and dump collection; OS-signal-injected behavior spec for
   both surfaces.
 - [ ] Flight 4 *(optional)*: **Alignment** — an interactive session for
   copy, layout, and feel across the new error, interstitial, crash, and
