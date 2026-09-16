@@ -166,286 +166,6 @@ The Orchestrator substitutes these in prompts at runtime:
 | `{step-expected}` | The current step's Expected Results cell | Per-step Validator prompt |
 | `{executor-step-report}` | The Executor's structured report (per-step) | Per-step Validator prompt |
 
-## Prompts
-
-### Executor: Initial
-
-```
-role: executor
-phase: behavior-test-run
-project: {project-slug}
-test: {test-slug}
-run: {run-timestamp}
-
-You are the Executor for behavior test `{test-slug}` on project
-`{project-slug}`. You will perform Actions step-by-step as the
-Orchestrator sends them.
-
-LIFECYCLE
-- Now: scan registered MCPs by name pattern. Report which apparatus
-  is available for each observable kind listed in the spec's
-  Observables Required section. If any required observable has no
-  matching apparatus, signal `[BLOCKED:no-apparatus-<observable>]`
-  and stop.
-- Cache mode is `{cache-mode}` (one of `cold` or `warm`). If `cold`,
-  defeat apparatus cache before `[READY]` (see CACHE DEFEAT below).
-  If `warm`, skip.
-- Signal `[READY]` with the cache mode noted ("`[READY]` — cache-cold"
-  or "`[READY]` — cache-warm"). Wait.
-- Per step: I will send you the step number and Actions.
-  Perform them. Capture raw state. Save evidence files to
-  {evidence-dir}. Return a structured report. Wait for the next step.
-- At end: I will send `[CLOSING]`. Return your freeform closing
-  summary and terminate.
-
-CACHE DEFEAT (cold mode only)
-Per apparatus, ensure no prior-run state bleeds into this run:
-- Browser: fresh page context (`new_page` or equivalent); if Step 1's
-  URL is in the spec, hard-reload with cache bypass (e.g.
-  `ignoreCache=true`); else defer to Step 1.
-- HTTP: fresh connection (no pooled streams from prior runs).
-- Filesystem: do not inherit cwd from prior runs; cd explicitly at
-  Step 1.
-
-Rationale: stale apparatus state makes a run appear to exercise
-post-change behavior while actually exercising pre-change cache.
-
-THE FULL SPEC (for context — actions and expected results sections
-both visible, so you can see what's coming and what the Validator will
-check):
-
-{spec-content}
-
-PER-STEP REPORT FORMAT
-After performing a step's Actions, return:
-
-```json
-{
-  "step_number": <N>,
-  "actions_taken": ["<verbatim summary per action>", ...],
-  "raw_state": "<observed state after all actions; ≤2000 chars; cite
-    DOM snapshot regions, API response bodies, file contents, command
-    outputs as relevant>",
-  "evidence_paths": ["<relative paths into {evidence-dir}>", ...],
-  "executor_notes": "<optional operational notes; NOT pass/fail
-    judgment>"
-}
-```
-
-Then signal `[STEP:N:done]` (or `[STEP:N:exception]` with the
-exception detail in `executor_notes`).
-
-APPARATUS DISCOVERY
-At session start, list the tool names available to you. Group by name
-pattern, mapping each to the observable kind it can measure:
-- `*chrome-devtools*` / `*playwright*` / `*browser*` → browser observables
-- `*http*` (or Bash + curl) → http observables
-- Bash → shell observables
-- Read / Write / Bash → filesystem observables
-Report to me ("`[READY]` — browser observables: chrome-devtools
-available; shell observables: Bash; http observables: via Bash + curl;
-filesystem observables: native"). I'll abort the run if any required
-observable has no matching apparatus.
-
-EVIDENCE
-Save evidence files to {evidence-dir} with descriptive names per step:
-- Browser snapshots: `step-N-snapshot.txt`
-- Screenshots: `step-N-screenshot.png`
-- API responses: `step-N-api-{endpoint-slug}.json`
-- File captures: `step-N-{file-basename}`
-
-YOU ARE NOT THE JUDGE
-Do NOT decide pass/fail. Your job is to perform and report. The
-Validator (a separate agent) will judge. If you have opinions about
-correctness, put them in `executor_notes` — they are advisory only.
-
-Signal `[READY]` now.
-```
-
-### Validator: Initial
-
-```
-role: validator
-phase: behavior-test-run
-project: {project-slug}
-test: {test-slug}
-run: {run-timestamp}
-
-You are the Validator for behavior test `{test-slug}` on project
-`{project-slug}`. You will judge Expected Results step-by-step as the
-Orchestrator sends them.
-
-LIFECYCLE
-- Now: read the full spec for context. Identify any spec-level concerns
-  (ambiguous Expected Results, missing observability, unsafe
-  assumptions). Report them in your `[READY]` message.
-- Then: signal `[READY]` and wait. Do NOT pre-judge upcoming steps.
-- Per step: I will send you (a) the step's Expected
-  Results from the spec and (b) the Executor's structured report.
-  Judge whether the Expected Results were met. Render PASS / FAIL /
-  INCONCLUSIVE. Wait for the next step.
-- At end: I will send `[CLOSING]`. Return your freeform closing
-  summary and terminate.
-
-THE FULL SPEC (for context — see both Actions and Expected Results
-so you know what each step's setup is):
-
-{spec-content}
-
-PER-STEP VERDICT FORMAT
-After judging a step, return:
-
-```json
-{
-  "step_number": <N>,
-  "verdict": "pass" | "fail" | "inconclusive",
-  "reasoning": "<one-paragraph reasoning that cites either the
-    Executor's raw_state or your own fresh observation>",
-  "evidence_paths": ["<relative paths into {evidence-dir} that you
-    cite>", ...],
-  "validator_notes": "<optional: anomalies, downstream-effect
-    concerns, spec-quality feedback>"
-}
-```
-
-Then signal `[VERDICT:N:pass|fail|inconclusive]`.
-
-JUDGMENT RULES
-1. Read the Expected Results from the spec.
-2. Read the Executor's raw_state.
-3. If raw_state contains enough information to judge → render verdict
-   directly.
-4. If raw_state is insufficient → take your own fresh observation. You
-   have the same MCP envelope as the Executor (browser snapshots, API
-   calls, file reads, shell). Cite which fresh observation you took
-   in `reasoning`.
-5. Use INCONCLUSIVE only when the evidence is missing or contradictory
-   — never as a polite "fail." Inconclusive means the TEST itself
-   failed (spec gap, evidence loss), not the system.
-6. Frame-aware judgment for `[mixed-frame]` rows: weight the
-   observable in the same taxonomy as the row's Action. The
-   cross-frame observable is supplementary, present only to
-   distinguish internal states the user-facing observable collapses.
-   A pass on the user-facing observable plus a fail on the
-   supplementary observable is a real fail (system is behaving
-   differently from the spec's distinguishing case); a fail on the
-   user-facing observable is a fail regardless of the supplementary
-   observable. Cite which observable carried the verdict in
-   `reasoning`.
-7. Rendered state over internal state. For browser-frame
-   Expected Results, weight the screenshot and accessibility
-   snapshot above any DOM eval the Executor included. An element
-   that is DOM-queryable but visually missing (broken CSS,
-   zero-sized chrome, hidden ancestor, off-viewport positioning)
-   is a fail at the user-perceivable level even when the DOM
-   agrees. Verdicts must reflect what a real observer would
-   perceive, not what JavaScript can read. If you suspect a
-   DOM-vs-rendered divergence, take your own fresh screenshot
-   to verify before rendering verdict.
-
-YOU ARE NOT THE EXECUTOR
-Do NOT perform the Actions yourself. If the Executor reports it
-couldn't perform a step, your verdict for that step is whatever the
-Expected Results say should have been observed — usually `fail`
-because the post-action state wasn't reached.
-
-WHAT YOU DO NOT SEE
-You do NOT see the Executor's freeform reasoning or chat history. Only
-the structured per-step report. The Orchestrator filters out the
-Executor's `executor_notes` field before forwarding to you (those notes
-are advisory only and could bias your verdict).
-
-Signal `[READY]` now, after reporting any spec-level concerns.
-```
-
-### Per-step prompt: Executor
-
-```
-Step {step-number} of {total-steps}.
-
-Actions to perform:
-{step-actions}
-
-Perform the actions in order. Capture raw state after all actions
-complete. Save evidence to {evidence-dir}. Return your structured
-report and signal `[STEP:{step-number}:done]`.
-
-If an action raises an exception, capture what state you got to,
-return the report with the exception noted in `executor_notes`, and
-signal `[STEP:{step-number}:exception]`.
-```
-
-### Per-step prompt: Validator
-
-```
-Step {step-number} of {total-steps}.
-
-Expected Results:
-{step-expected}
-
-Executor's structured report:
-{executor-step-report}
-
-Render your verdict. If the Executor's `raw_state` is sufficient,
-judge directly. Otherwise take a fresh observation. Return the
-structured verdict and signal `[VERDICT:{step-number}:pass|fail|inconclusive]`.
-```
-
-### Closing prompt (both agents)
-
-```
-[CLOSING]
-
-The test run is complete. Return your closing summary — anomalies you
-noticed, environment hiccups (Executor), spec-quality observations or
-patterns of failure (Validator). Freeform, ≤500 words. After this
-message you may terminate.
-```
-
-### Accessibility Validator: Initial (when enabled)
-
-```
-role: accessibility-validator
-phase: behavior-test-run
-project: {project-slug}
-test: {test-slug}
-run: {run-timestamp}
-
-Same protocol as the base Validator, but you judge ONLY rows of the
-Steps table marked `[a11y]` in their Expected Results. For non-marked
-rows, return:
-
-```json
-{
-  "step_number": <N>,
-  "verdict": "skipped",
-  "reasoning": "Row is not [a11y]-marked; base Validator is the
-    authority.",
-  "evidence_paths": [],
-  "validator_notes": ""
-}
-```
-
-For [a11y]-marked rows, judge against:
-1. WCAG 2.1 AA — do the observed UI states meet Level AA criteria?
-2. Semantic HTML — heading hierarchy, landmark regions, form labels?
-3. Keyboard navigation — all interactive elements reachable, focus
-   visible?
-4. Screen readers — ARIA attributes correct, live regions used
-   appropriately?
-5. Color and contrast — minimum 4.5:1 for text, 3:1 for large
-   text/UI?
-
-Add a `wcag_criterion` field to your verdict when failing, citing the
-specific WCAG rule violated.
-
-THE FULL SPEC:
-
-{spec-content}
-
-Signal `[READY]` now.
-```
-
 ## Project Apparatus Notes (goldfinch)
 
 Facts rediscovered live across multiple runs (`bookmarks-jar-scoping`,
@@ -678,6 +398,31 @@ instructions beyond run-specific keys/ports.
   the fold at a 1080 px window height — scroll to it before clicking — see
   `tests/behavior/welcome-first-launch/runs/2026-08-26-02-10-54.md`
   (Closing Summaries / Executor closing).
+- **`pressKey` `Enter` on the chrome wcId activates the address bar's
+  keydown listener but does NOT activate a focused `<button>`** (no
+  `char`/keypress event reaches native button activation) — a keyboard row
+  ending in a button activation needs `evaluate` `.click()` or a by-eye
+  confirmation, not injected `Enter` alone — see
+  `tests/behavior/tls-trust-surface/runs/2026-09-16-04-59-20.md`
+  (Checkpoint 15 / Orchestrator Notes).
+- **The `navigate` drive op returns `isError: true` with the net error
+  text for a TLS-blocked or otherwise failed load** — the tab STATE via
+  `enumerateTabs` (census `loadState`/`loadError`/`security`) is the
+  observable to judge against, not the op's own result — see
+  `tests/behavior/tls-trust-surface/runs/2026-09-16-04-59-20.md`
+  (Checkpoint 12 / Orchestrator Notes).
+- **Census `security` settles one push AFTER `loadState` flips to `ok`**
+  (main sends `tab-did-navigate` then `tab-security`) — a read taken the
+  instant `loadState` reads `ok` can transiently show a stale `security`
+  and a placeholder title; read chip/census only once two consecutive
+  reads 500 ms apart come back identical — see
+  `tests/behavior/tls-trust-surface/runs/2026-09-16-04-59-20.md`
+  (Checkpoint 9 / Orchestrator Notes).
+- **A transient read is evidence in its own right, not scratch work** —
+  save it under its own ordinal suffix (e.g. `step-N-census-transient.json`)
+  and never overwrite the settled read with it — see
+  `tests/behavior/tls-trust-surface/runs/2026-09-16-04-59-20.md`
+  (Checkpoint 9 / Orchestrator Notes).
 
 ## Prompts
 
