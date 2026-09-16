@@ -349,6 +349,11 @@ interface GoldfinchBridge {
    * history for Duplicate. Web tabs only — a dead/missing/internal target
    * (TOCTOU-guarded on the passed webContentsId) resolves `null`. */
   tabHistorySnapshot(payload: { webContentsId: number }): Promise<{ entries: unknown[]; index: number } | null>;
+  /** Mission 20 Flight 2 Leg 4 (DD9): the cert-viewer card's read-only
+   * certificate summary for the given tab — chrome-trust, owning-window
+   * only. `null` when no summary is available (evicted observer entry,
+   * internal/blank tab). Never carries a `data`/PEM field. */
+  tabCertificateGet(payload: { wcId: number }): Promise<Record<string, unknown> | null>;
   /** Tab context menu (M09 F5 Leg 1, DD3): the closed-tab stack's current size.
    * Since M09 F6 Leg 3 (DD6) this is the push-cache's BOOT SEED only — live
    * updates arrive via onClosedTabStackChanged below. */
@@ -499,8 +504,18 @@ interface GoldfinchBridge {
   onTabDidFinishLoad(cb: (d: { wcId: number }) => void): void;
   onTabDomReady(cb: (d: { wcId: number }) => void): void;
   onTabLoadFailure(
-    cb: (d: { wcId: number; failure: { code: number; name: string; url: string } | null }) => void
+    cb: (d: {
+      wcId: number;
+      failure: {
+        code: number;
+        name: string;
+        url: string;
+        cert?: { host: string; port: number | null; error: string; overridable: boolean; summary: any };
+      } | null;
+    }) => void
   ): void;
+  // Mission 20 Flight 2 Leg 2 (DD7): the owner-routed security-state push.
+  onTabSecurity(cb: (d: { wcId: number; security: string }) => void): void;
   onTabMediaList(cb: (d: { wcId: number; mediaList: any[] }) => void): void;
   onTabPrivacyFp(cb: (d: { wcId: number; fpCounts: any }) => void): void;
   onTabSelfClose(cb: (d: { wcId: number; historyLength: number }) => void): void;

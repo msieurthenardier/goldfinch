@@ -1,20 +1,20 @@
 # Flight: TLS Trust — Interstitial, Override, Indicator, Viewer
 
-**Status**: ready
+**Status**: completed
 **Mission**: [No Silent Failures](../../mission.md)
 
 ## Contributing to Criteria
 
-- [ ] Untrusted certificates get an interstitial, not a blank — origin and
+- [x] Untrusted certificates get an interstitial, not a blank — origin and
       specific error named, risk in plain language, explicit gated proceed,
       remembered per origin until quit, never on disk, never available to
       automation (behavior-test-backed: local throwaway-CA fixture)
-- [ ] Insecure connections are labelled — one "not secure" vocabulary across
+- [x] Insecure connections are labelled — one "not secure" vocabulary across
       the address chip and the site-info popup for plain `http:` AND
       overridden-certificate pages; a trusted `https:` page is not labelled
-- [ ] A site's certificate is inspectable — subject, issuer, validity,
+- [x] A site's certificate is inspectable — subject, issuer, validity,
       fingerprints, chain; read-only
-- [ ] *(partial — the cert-blocked census value, the `security` census field,
+- [ ] *(partial — the cert-blocked census value, the `security` census field, and the interstitial's keyboard operability landed; #216 (stranded focus after a typed failure) stays open — Flight 2 update)* — ORIGINAL: *(partial — the cert-blocked census value, the `security` census field,
       the interstitial's keyboard operability, and the #216 stranded-focus
       fix)* New surfaces are safe and accessible
 - [x] *(carried from Flight 1, now specialised)* Certificate failures never
@@ -82,7 +82,7 @@ isMainFrame))` is registered at top level in `app-lifecycle.js` beside
 `login` / `select-client-certificate` (`app-lifecycle.js:96-112`, same
 before-`whenReady` rationale), always `event.preventDefault()`, and delegates
 to a new Electron-free module `src/main/cert-trust.js`
-(`createCertTrust({ registry, popupRegistry, chromeForTab, logger })`,
+(`createCertTrust({ registry, popupRegistry, logger })` — `chromeForTab` dropped at leg 2 planning: the module pushes nothing; `guest-wiring.js` owns every push —
 the `auth-challenges.js` injected-deps shape). `handleCertificateError` does,
 in this order and synchronously: (1) resolve the guest's partition and the
 override key (DD2); (2) answer the callback **exactly once** — `true` iff the
@@ -272,10 +272,7 @@ unparseable; `insecure` for non-`https:`; for `https:`: `overridden` if the
 observer's entry for the hostname reports a non-`OK` verification (the load
 succeeded despite an error → an override let it through), else — when no
 observer entry exists — `overridden` if `entry.certOverride` matches the
-committed host:port (decision fallback), else `secure`. The value rides the
-existing `tab-did-navigate` push (`{ wcId, url, security }`,
-`guest-wiring.js:538`; the chrome handler at `renderer.js:1532-1546` stores
-`tab.security`), the adopt-time re-push (F1 DD8) and `listTabs`. In-page
+committed host:port (decision fallback), else `secure`. The value rides its OWN owner-routed push, `tab-security { wcId, security }`, sent from `did-navigate` right after `tab-did-navigate` and again from the adopt re-push site (F1 DD8) — **amended at leg 2 planning**: the original text had it ride `tab-did-navigate`, but the adopt path must not replay that push (its chrome handler resets media/privacy/suggestions). The chrome (`site-security-controller.js`) stores `tab.security`; `listTabs` reports it. In-page
 navigations keep the state (same origin by definition); a redirect chain
 resolves at its final commit; subframes never change it (accepted
 divergence: Chrome downgrades for overridden subresources); a failed or
@@ -462,8 +459,7 @@ state). With squawk 0074 completed first (prerequisite), the audit AC is
 (F1 DD10) plus `#load-failure-view-cert`, `#load-failure-advanced`; the chip
 `data-security` values and aria-label suffixes; `cert-override` and
 `cert-viewer` menuTypes and their template row roles; the census
-`loadState: 'cert-blocked'` and `security` values; the `tab-did-navigate`
-payload's `security` field; `tab-certificate-get`'s summary shape. Read by
+`loadState: 'cert-blocked'` and `security` values; the `tab-security` push's payload `{ wcId, security }` (leg 2 FD ruling — see DD7's amendment); `tab-certificate-get`'s summary shape. Read by
 this flight's spec, the audit, and the unit pins — a HAT change to any of
 them is a spec re-author.
 
@@ -471,7 +467,7 @@ them is a spec re-author.
 
 - [x] PR #215 (Flight 1) merged to `main` (2026-09-15); the flight branch
       `flight/02-tls-trust` is cut from `main` after the merge.
-- [ ] Squawk turnaround completed and merged before leg 1: **0074**
+- [x] Squawk turnaround completed before leg 1 (2026-09-15, `squawk: turnaround 2026-09-15` on this branch): **0074**
       (`#bookmarks-bar` region → `ACCEPTED`) and **0076** (crew-protocol
       escalation on a false `document.hasFocus()`) via
       `/mission-control:squawk complete 0074 0076`.
@@ -507,7 +503,7 @@ them is a spec re-author.
 
 - [x] All open questions resolved
 - [x] Design decisions documented
-- [ ] Prerequisites verified (PR #215 merged; the squawk turnaround and the leg-1 spike remain)
+- [x] Prerequisites verified
 - [x] Validation approach defined
 - [x] Legs defined
 
@@ -545,18 +541,17 @@ them is a spec re-author.
 
 ### Checkpoints
 
-- [ ] CP1 — Spike (a)–(i) logged; #216 root cause named and fixed (or
+- [x] CP1 — Spike (a)–(i) logged; #216 root cause named and fixed (or
       documented as not app-addressable); `renderer.js` under its new budget
-- [ ] CP2 — Model + trust wiring landed; the fixture navigation shows the
+- [x] CP2 — Model + trust wiring landed; the fixture navigation shows the
       interstitial with `ERR_CERT_AUTHORITY_INVALID`; census `cert-blocked`
-- [ ] CP2b — Proceed leg landed: four guards unit-pinned each failing alone;
+- [x] CP2b — Proceed leg landed: four guards unit-pinned each failing alone;
       no chrome channel can add an override; a hand-clicked proceed loads
       the page and the origin is remembered
-- [ ] CP3 — Chip/popup/viewer render all three states on the live rig;
+- [x] CP3 — Chip/popup/viewer render all three states on the live rig;
       a trusted fixture page reads `secure` with a populated viewer
-- [ ] CP4 — `tls-trust-surface` behavior run: pass (operator row included);
-      `npm run a11y` exit 0 with the `cert-blocked` state
-- [ ] CP5 — HAT walk complete; flight `landed`
+- [x] CP4 — `tls-trust-surface` behavior run: 13/16, three fails dispositioned by the operator (F4 → HAT; #216 → Known Issue); `npm run a11y -- --tls-url=…` exit 0 with the `cert-blocked` state
+- [x] CP5 — HAT walk complete; flight `landed`
 
 ### Adaptation Criteria
 
@@ -587,14 +582,14 @@ them is a spec re-author.
 > and created one at a time as the flight progresses. This list will evolve
 > based on discoveries during implementation.
 
-- [ ] `focus-trace-and-surface-substrate` — spike (a)–(h) on the live rig;
+- [x] `focus-trace-and-surface-substrate` — spike (a)–(h) on the live rig;
       the #216 diagnosis and fix with its unit pin; `audit-hooks.js`
       extraction and the `site-security-controller.js` seed (site-info glue
       moved, behaviour unchanged); shared fake-DOM harness (squawk 0077,
       completed by this leg); `RENDERER_LINE_BUDGET` lowered to the measured
       count. Ends with a typed failed navigation keeping keyboard focus in
       the panel (trace-verified main-side) and every existing test green.
-- [ ] `certificate-trust-and-interstitial` — shared models, `cert-trust.js`
+- [x] `certificate-trust-and-interstitial` — shared models, `cert-trust.js`
       (refuse-or-remember; `allow` exists but has NO caller yet),
       `cert-observer.js`, `certificate-summary.js`, entry stamps and pushes,
       the interstitial branch (cert copy + code line; Retry only — View certificate arrives with leg 4's viewer, Advanced with leg 3's card),
@@ -602,7 +597,7 @@ them is a spec re-author.
       grep-ACs (single `callback(` site; only `-3`; no persistence imports;
       snapshot/closed-tab object-shape pins). Ends with the fixture
       interstitial live and the census reporting `cert-blocked`.
-- [ ] `override-card-and-proceed` — the `cert-override` template + sheet
+- [x] `override-card-and-proceed` — the `cert-override` template + sheet
       entry, `#load-failure-advanced`, the four-guard
       `menu-overlay:cert-override-proceed` invoke (the flight's one
       security-decision channel — its own design review), the single
@@ -610,12 +605,12 @@ them is a spec re-author.
       pins (`cert-override` refused to every op at every tier; no chrome
       preload method). Ends with a hand-clicked proceed loading the fixture
       page and a second tab to the origin loading directly.
-- [ ] `security-indicator-and-certificate-viewer` — chip states + vocabulary,
+- [x] `security-indicator-and-certificate-viewer` — chip states + vocabulary,
       popup rows + action, `cert-viewer` template + read invoke, controller
       growth + audit hooks (SEAM 39), a11y state, fixtures (second CA,
       `--cert-set`, trust-anchor helper), README/CLAUDE.md; runs
       `tls-trust-surface` and `npm run a11y` as its acceptance gate.
-- [ ] `hat-and-alignment` *(optional, operator-elected)* — guided walk: the
+- [x] `hat-and-alignment` *(optional, operator-elected)* — guided walk: the
       interstitial for authority/name/date errors, View certificate,
       Advanced → Back to safety, Advanced → Proceed, the overridden chip and
       popup, a plain-`http:` page, the trusted fixture page and its viewer,
@@ -629,11 +624,11 @@ them is a spec re-author.
 
 ### Completion Checklist
 
-- [ ] All legs completed
-- [ ] Code merged
-- [ ] Tests passing (`npm test`, `npm run lint`, `npm run typecheck`,
+- [x] All legs completed
+- [ ] Code merged (PR #217 ready for review)
+- [x] Tests passing (`npm test`, `npm run lint`, `npm run typecheck`,
       `npm run format:check`, `npm run a11y` exit 0)
-- [ ] Documentation updated (`docs/mcp-automation.md`, README, CLAUDE.md —
+- [x] Documentation updated (`docs/mcp-automation.md`, README, CLAUDE.md —
       named guest-slot panel pattern, TLS trust section, seam note)
 
 ### Verification

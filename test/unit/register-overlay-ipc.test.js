@@ -2,7 +2,12 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const { registerOverlayIpc } = require('../../src/main/register-overlay-ipc');
+const { keyFor } = require('../../src/main/cert-trust');
+const { isSafeTabUrl } = require('../../src/shared/url-safety.js');
+const { maskComments } = require('../helpers/source-scan');
 
 function makeIpc() {
   const listeners = new Map();
@@ -811,4 +816,247 @@ test('malformed or degenerate slotBounds resolve to null bounds, never a bogus r
     assert.equal(bounds, null);
     assert.equal('slotBounds' in payload, false);
   }
+});
+
+// ---------------------------------------------------------------------------
+// M20 F2 L3 (flight DD2/DD3) — the cert-override sheet's PROCEED invoke.
+// AC1: four named guards, each failing ALONE, no allow/loadURL/close; the
+// happy path derives everything from the ENTRY, never the payload.
+// ---------------------------------------------------------------------------
+
+const DEFAULT_CERT_ENTRY = () => ({
+  trusted: false,
+  partition: 'persist:jarA',
+  lastRequestedUrl: 'https://127.0.0.1:8443/',
+  chromeNavPending: false,
+  loadFailure: {
+    cert: {
+      host: '127.0.0.1',
+      port: 8443,
+      fingerprint: 'AA:BB:CC',
+      overridable: true
+    }
+  }
+});
+
+/**
+ * @param {{ certTrust?: any, entry?: any, activeTabWcId?: number|null, menu?: any, wcDestroyed?: boolean, omitWc?: boolean }} [o]
+ */
+function makeCertOverrideHarness({
+  certTrust,
+  entry = DEFAULT_CERT_ENTRY(),
+  activeTabWcId = 42,
+  menu = { token: 7, menuType: 'cert-override' },
+  wcDestroyed = false,
+  omitWc = false
+} = {}) {
+  const ipcMain = makeIpcWithHandle();
+  const allowCalls = [];
+  const loadUrlCalls = [];
+  const events = [];
+  const sheetSender = { isDestroyed: () => false };
+  const sheet = {
+    getView: () => ({ webContents: sheetSender }),
+    getCurrentMenu: () => menu,
+    closeMenuOverlay: (reason, token) => events.push(['close', reason, token])
+  };
+  const tabViews = new Map();
+  if (entry) tabViews.set(activeTabWcId, entry);
+  const rec = { win: {}, sheet, activeTabWcId, tabViews };
+  const registry = { records: () => [rec], getWindowForChrome: () => null };
+  const wc = omitWc
+    ? null
+    : {
+        isDestroyed: () => wcDestroyed,
+        loadURL: (url) => {
+          loadUrlCalls.push(url);
+          return Promise.resolve();
+        }
+      };
+  registerOverlayIpc({
+    ipcMain,
+    registry,
+    chromeForAttachment: () => null,
+    chromeForTab: () => null,
+    sanitizeActivatedValue: () => undefined,
+    certTrust: certTrust === undefined ? { allow: (key) => allowCalls.push(key) } : certTrust,
+    keyFor,
+    getTabContents: (wcId) => (wc && !wcDestroyed && wcId === activeTabWcId ? wc : null),
+    isSafeTabUrl
+  });
+  return { ipcMain, events, rec, sheetSender, allowCalls, loadUrlCalls, entry };
+}
+
+function certOverrideHandler(h) {
+  return h.ipcMain.handlers.get('menu-overlay:cert-override-proceed');
+}
+
+test('the registrar never registers menu-overlay:cert-override-proceed when certTrust is absent (offline overlay tests)', () => {
+  const ipcMain = makeIpcWithHandle();
+  const registry = { records: () => [], getWindowForChrome: () => null };
+  registerOverlayIpc({
+    ipcMain,
+    registry,
+    chromeForAttachment: () => null,
+    chromeForTab: () => null,
+    sanitizeActivatedValue: () => undefined
+  });
+  assert.equal(ipcMain.handlers.has('menu-overlay:cert-override-proceed'), false);
+});
+
+test('cert-override-proceed guard 1 (sender): an unrecognized sender resolves {ok:false, reason:"sender"} — no allow, no loadURL, no close', async () => {
+  const h = makeCertOverrideHarness();
+  const res = await certOverrideHandler(h)({ sender: {} }, { token: 7 });
+  assert.deepEqual(res, { ok: false, reason: 'sender' });
+  assert.deepEqual(h.allowCalls, []);
+  assert.deepEqual(h.loadUrlCalls, []);
+  assert.deepEqual(h.events, []);
+});
+
+test('cert-override-proceed guard 2 (token): a stale token resolves {ok:false, reason:"token"} — no allow, no loadURL, no close', async () => {
+  const h = makeCertOverrideHarness();
+  const res = await certOverrideHandler(h)({ sender: h.sheetSender }, { token: 6 });
+  assert.deepEqual(res, { ok: false, reason: 'token' });
+  assert.deepEqual(h.allowCalls, []);
+  assert.deepEqual(h.loadUrlCalls, []);
+  assert.deepEqual(h.events, []);
+});
+
+test('cert-override-proceed guard 2 (token): a non-number token resolves {ok:false, reason:"token"}', async () => {
+  const h = makeCertOverrideHarness();
+  const res = await certOverrideHandler(h)({ sender: h.sheetSender }, { token: '7' });
+  assert.deepEqual(res, { ok: false, reason: 'token' });
+  assert.deepEqual(h.allowCalls, []);
+});
+
+test('cert-override-proceed guard 2 (token): no menu open at all collapses into reason "token" — no fifth reason string', async () => {
+  const h = makeCertOverrideHarness({ menu: null });
+  const res = await certOverrideHandler(h)({ sender: h.sheetSender }, { token: 7 });
+  assert.deepEqual(res, { ok: false, reason: 'token' });
+  assert.deepEqual(h.allowCalls, []);
+  assert.deepEqual(h.events, []);
+});
+
+test('cert-override-proceed guard 3 (menu-type): a different menu current (e.g. bookmark-edit) resolves {ok:false, reason:"menu-type"}', async () => {
+  const h = makeCertOverrideHarness({ menu: { token: 7, menuType: 'bookmark-edit' } });
+  const res = await certOverrideHandler(h)({ sender: h.sheetSender }, { token: 7 });
+  assert.deepEqual(res, { ok: false, reason: 'menu-type' });
+  assert.deepEqual(h.allowCalls, []);
+  assert.deepEqual(h.loadUrlCalls, []);
+  assert.deepEqual(h.events, []);
+});
+
+test('cert-override-proceed guard 4 (entry): no active tab entry resolves {ok:false, reason:"entry"}', async () => {
+  const h = makeCertOverrideHarness({ entry: null });
+  const res = await certOverrideHandler(h)({ sender: h.sheetSender }, { token: 7 });
+  assert.deepEqual(res, { ok: false, reason: 'entry' });
+  assert.deepEqual(h.allowCalls, []);
+  assert.deepEqual(h.loadUrlCalls, []);
+  assert.deepEqual(h.events, []);
+});
+
+test('cert-override-proceed guard 4 (entry): a TRUSTED entry (internal tab) can never carry a proceed', async () => {
+  const entry = DEFAULT_CERT_ENTRY();
+  entry.trusted = true;
+  const h = makeCertOverrideHarness({ entry });
+  const res = await certOverrideHandler(h)({ sender: h.sheetSender }, { token: 7 });
+  assert.deepEqual(res, { ok: false, reason: 'entry' });
+  assert.deepEqual(h.allowCalls, []);
+});
+
+test('cert-override-proceed guard 4 (entry): no loadFailure.cert at all resolves {ok:false, reason:"entry"}', async () => {
+  const entry = DEFAULT_CERT_ENTRY();
+  entry.loadFailure = null;
+  const h = makeCertOverrideHarness({ entry });
+  const res = await certOverrideHandler(h)({ sender: h.sheetSender }, { token: 7 });
+  assert.deepEqual(res, { ok: false, reason: 'entry' });
+  assert.deepEqual(h.allowCalls, []);
+});
+
+test('cert-override-proceed guard 4 (entry): a non-overridable cert kind (e.g. revoked) resolves {ok:false, reason:"entry"}', async () => {
+  const entry = DEFAULT_CERT_ENTRY();
+  entry.loadFailure.cert.overridable = false;
+  const h = makeCertOverrideHarness({ entry });
+  const res = await certOverrideHandler(h)({ sender: h.sheetSender }, { token: 7 });
+  assert.deepEqual(res, { ok: false, reason: 'entry' });
+  assert.deepEqual(h.allowCalls, []);
+});
+
+test('cert-override-proceed guard 4 (entry): a missing fingerprint resolves {ok:false, reason:"entry"} — the fold check this leg also adds', async () => {
+  const entry = DEFAULT_CERT_ENTRY();
+  delete entry.loadFailure.cert.fingerprint;
+  const h = makeCertOverrideHarness({ entry });
+  const res = await certOverrideHandler(h)({ sender: h.sheetSender }, { token: 7 });
+  assert.deepEqual(res, { ok: false, reason: 'entry' });
+  assert.deepEqual(h.allowCalls, []);
+});
+
+test('cert-override-proceed guard 4 (entry): a non-string host resolves {ok:false, reason:"entry"}', async () => {
+  const entry = DEFAULT_CERT_ENTRY();
+  entry.loadFailure.cert.host = 42;
+  const h = makeCertOverrideHarness({ entry });
+  const res = await certOverrideHandler(h)({ sender: h.sheetSender }, { token: 7 });
+  assert.deepEqual(res, { ok: false, reason: 'entry' });
+  assert.deepEqual(h.allowCalls, []);
+});
+
+test('cert-override-proceed guard 4 (entry): an unsafe lastRequestedUrl resolves {ok:false, reason:"entry"} — never loadURL\'d', async () => {
+  const entry = DEFAULT_CERT_ENTRY();
+  entry.lastRequestedUrl = 'javascript:alert(1)';
+  const h = makeCertOverrideHarness({ entry });
+  const res = await certOverrideHandler(h)({ sender: h.sheetSender }, { token: 7 });
+  assert.deepEqual(res, { ok: false, reason: 'entry' });
+  assert.deepEqual(h.allowCalls, []);
+  assert.deepEqual(h.loadUrlCalls, []);
+});
+
+test('cert-override-proceed guard 4 (entry): a destroyed/absent guest webContents resolves {ok:false, reason:"entry"}', async () => {
+  const h = makeCertOverrideHarness({ wcDestroyed: true });
+  const res = await certOverrideHandler(h)({ sender: h.sheetSender }, { token: 7 });
+  assert.deepEqual(res, { ok: false, reason: 'entry' });
+  assert.deepEqual(h.allowCalls, []);
+  assert.deepEqual(h.loadUrlCalls, []);
+});
+
+test('cert-override-proceed happy path: allow() called once with the ENTRY-derived key, closes "activated", arms chromeNavPending, loadURLs the entry\'s address', async () => {
+  const h = makeCertOverrideHarness();
+  const res = await certOverrideHandler(h)(
+    { sender: h.sheetSender },
+    // A payload carrying CONTRADICTING host/url/fingerprint fields — AC1: these
+    // must be completely ignored. The key and the navigation target both come
+    // from the entry, never from here.
+    {
+      token: 7,
+      host: 'evil.example',
+      fingerprint: 'ZZ:ZZ:ZZ',
+      url: 'https://evil.example/',
+      lastRequestedUrl: 'https://evil.example/'
+    }
+  );
+  assert.deepEqual(res, { ok: true });
+  assert.deepEqual(h.allowCalls, [keyFor('persist:jarA', '127.0.0.1', 8443, 'AA:BB:CC')]);
+  assert.equal(h.allowCalls.length, 1);
+  assert.deepEqual(h.events, [['close', 'activated', 7]]);
+  assert.equal(h.entry.chromeNavPending, true);
+  assert.deepEqual(h.loadUrlCalls, ['https://127.0.0.1:8443/']);
+});
+
+test('cert-override-proceed happy path: a stale certTrust rejection never lands — payload fields never override entry.partition either', async () => {
+  const entry = DEFAULT_CERT_ENTRY();
+  entry.partition = 'persist:jarB';
+  const h = makeCertOverrideHarness({ entry });
+  await certOverrideHandler(h)({ sender: h.sheetSender }, { token: 7, partition: 'persist:jarA' });
+  assert.deepEqual(h.allowCalls, [keyFor('persist:jarB', '127.0.0.1', 8443, 'AA:BB:CC')]);
+});
+
+// AC3: no chrome→main channel exists for a cert-override proceed — the chrome
+// preload exposes nothing named certOverride*/cert-override* (grep-AC). The
+// dedicated invoke lives ONLY on the sheet's own preload (menu-overlay-
+// preload.js), a different webContents/realm entirely — see that file's
+// certOverrideProceed comment for why the surface is structurally closed.
+test('AC3: chrome-preload.js exposes no certOverride*/cert-override* method (source-scan)', () => {
+  const chromePreloadPath = path.join(__dirname, '../../src/preload/chrome-preload.js');
+  const masked = maskComments(fs.readFileSync(chromePreloadPath, 'utf8'));
+  assert.equal(/certOverride/i.test(masked), false, 'chrome-preload.js must not expose any certOverride-named method');
+  assert.equal(/cert-override/i.test(masked), false, 'chrome-preload.js must not reference the cert-override channel');
 });

@@ -85,6 +85,12 @@ const fixtureImageUrl = new URL('bird.png', fixtureUrl).href;
 // --target=<url-substring>: audit an already-loaded guest page/<webview> target
 // (e.g. goldfinch://settings) instead of the chrome index.html renderer (DD7).
 const targetArg = argValue('--target');
+// Mission 20 Flight 2 Leg 4 (DD15): --tls-url=<https url> drives the
+// `cert-blocked` chrome state (a TLS fixture navigation, e.g. `serve-tls.mjs`
+// with no --insecure-tls-fixtures) — a SECOND process the default sweep
+// cannot assume is running, so it is opt-in and skipped with a printed
+// notice when absent (never an apparatus failure).
+const tlsUrlArg = argValue('--tls-url');
 
 // axe `runOnly` selector: rules take precedence over tags; omit for the full set.
 let runOnly = null;
@@ -144,6 +150,16 @@ const ACCEPTED = [
     id: 'region',
     selector: '#address-wrap',
     reason: 'app-shell address bar sits outside a landmark; accepted chrome exception'
+  },
+  // Mission 15's bookmarks bar was never reconciled into this allowlist when it
+  // shipped, leaving every chrome-mode run red (squawk 0074). Same app-shell
+  // exception class as #tabs/#brand/#address-wrap above — role="group" is not a
+  // landmark, and the bar sits outside one by the same frozen-chrome-shell
+  // rationale.
+  {
+    id: 'region',
+    selector: '#bookmarks-bar',
+    reason: 'app-shell bookmarks bar sits outside a landmark; accepted chrome exception'
   },
   // NOTE (M05 F8 cutover): the old chrome `#page-context-menu` region entry was
   // retired with the chrome-DOM menus — the page-context state now audits the
@@ -427,6 +443,22 @@ async function main() {
       await sleep(1000);
       allViolations.push(...(await runAxe(client, wcId, axeSource, 'load-failure')));
 
+      // 5d) Cert-blocked interstitial (Mission 20 F2 Leg 4, DD15). Opt-in:
+      // needs a SECOND process (a TLS fixture the app was launched WITHOUT
+      // --insecure-tls-fixtures against, e.g.
+      // `node tests/behavior/fixtures/web-compat/serve-tls.mjs --port <T>`)
+      // — skipped with a printed notice, never an apparatus failure, when
+      // --tls-url= is not given. Audits the same panel as 5c) but on the
+      // MORE SPECIFIC cert-blocked classification (#load-failure-view-cert /
+      // -advanced included).
+      if (tlsUrlArg) {
+        await evaluate(client, wcId, `navigate(${JSON.stringify(tlsUrlArg)})`);
+        await sleep(1000);
+        allViolations.push(...(await runAxe(client, wcId, axeSource, 'cert-blocked')));
+      } else {
+        console.log('\na11y-audit: skipping cert-blocked state — no --tls-url=<https url> given.');
+      }
+
       // 6-10) Menu-overlay SHEET states — SKIPPED BY RULING, not run (squawk 0045).
       // Every popup menu renders in the transparent sheet WebContentsView. This
       // array is kept as the RECORD of what is not covered (each state's would-be
@@ -520,6 +552,27 @@ async function main() {
         // separated Cancel row), Escape-dismissible. Raises no chrome-side
         // trigger — the audit hook opens it with a synthetic display-string row.
         { label: 'sheet:cert-picker', open: 'openCertPickerOverlayForAudit()' },
+        // M20 F2 L3 (TLS trust override, DD11/DD3): the proceed-despite-a-cert-
+        // error card — the flight's one security-decision channel. Dialog-style,
+        // Escape-dismissible; heading/body/error line + Back to safety/Proceed
+        // (modal-card contract). Raises no chrome-side trigger — the audit hook
+        // opens it with a synthetic NON-SECRET host/error/title/body model.
+        // RECORDED FOR THE SKIP LIST, NOT COVERAGE: the card itself is refused to
+        // every automation op at every tier (DD3/DD10 — cert-override never joins
+        // AUTOMATABLE_MENU_TYPES), so this entry is skipped like every other
+        // secret-sheet state below.
+        { label: 'sheet:cert-override', open: 'openCertOverrideOverlayForAudit()' },
+        // M20 F2 L4 (DD9/DD10): the read-only certificate summary card. Fixed
+        // layout (status line + scrollable rows + Close), Escape-dismissible.
+        // Raises no chrome-side trigger — the audit hook opens it with a
+        // synthetic, already-public-shaped certificate-summary model.
+        // RECORDED FOR THE SKIP LIST LIKE EVERY SHEET STATE HERE (squawk 0045
+        // — evaluate/injectScript, which axe injection needs, stay refused on
+        // ANY sheet wcId unconditionally, even though DD10 admits cert-viewer
+        // for readDom/readAxTree/captureScreenshot): axe-core auditing of any
+        // sheet state stays out of reach regardless of the (menuType × op)
+        // gate — see CLAUDE.md's "readable but not scriptable" note.
+        { label: 'sheet:cert-viewer', open: 'openCertViewerOverlayForAudit()' },
         // M11 Flight 1 Leg 3: the downloads popup. openDownloadsOverlayForAudit()
         // force-shows a capped synthetic completed list then opens the role="dialog"
         // popup (filename-open + folder buttons, a keyboard-scrollable overflow

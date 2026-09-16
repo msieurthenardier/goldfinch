@@ -367,7 +367,10 @@ A request's key resolves to an **identity** — a `jarId` or the literal `admin`
   displays. It was previously refused **absolutely**, at every tier. It is now admitted **only
   when both of these hold**:
   1. the sheet's **current** menuType is on the allowlist `AUTOMATABLE_MENU_TYPES`
-     (`src/main/automation/resolve.js`) — today `bookmarks-overflow` and `bookmark-edit`; **and**
+     (`src/main/automation/resolve.js`) — today `bookmarks-overflow`, `bookmark-edit`,
+     `site-info`, and `cert-viewer` (the address chip's info popup and the read-only
+     certificate summary card, Mission 20 Flight 2 Leg 4, DD10 — `cert-override`, the
+     one TLS-trust security-decision channel, deliberately never joins this set); **and**
   2. the operation is one of exactly three reads: **`readDom`, `readAxTree`,
      `captureScreenshot`**.
 
@@ -458,15 +461,24 @@ enumeration, no window discriminator, no window discovery, a probe-walk for over
     read; the walk was an O(64) guess.
 
 - **`enumerateTabs` is an ALL-WINDOWS census, and every row carries `windowId`.** It returns
-  `{ wcId, url, title, jarId, active, windowId, loadState, loadError }` for every drivable tab in
-  every window, ordered by window creation order, then each window's own tab creation order. The
-  return is a **plain array** — no wrapper, no marker, no properties beyond the elements.
-  - **`loadState` / `loadError` (Mission 20 Flight 1)**: `loadState` is `'ok'` or `'failed'` —
-    renderer-sourced, pushed the moment main records or clears a top-frame navigation failure. The
-    enum grows in later flights (`cert-blocked`, `crashed`, `hung`). `loadError` is
-    `{ code, name }` (the raw engine error) when `loadState` is `'failed'`, else `null`. On a
-    `'failed'` row, `title` is the same host-derived label the tab strip shows (never the guest's
-    error-document title, which is stale, empty, or absent depending on how the tab got there).
+  `{ wcId, url, title, jarId, active, windowId, loadState, loadError, security }` for every drivable
+  tab in every window, ordered by window creation order, then each window's own tab creation order.
+  The return is a **plain array** — no wrapper, no marker, no properties beyond the elements.
+  - **`loadState` / `loadError` (Mission 20 Flight 1, `cert-blocked` added Flight 2)**: `loadState`
+    is `'ok'`, `'failed'`, or `'cert-blocked'` — renderer-sourced, pushed the moment main records or
+    clears a top-frame navigation failure. The enum grows in later flights (`crashed`, `hung`).
+    `loadError` is `{ code, name }` (the raw engine error, e.g. `{ code: -202, name:
+    'ERR_CERT_AUTHORITY_INVALID' }`) when `loadState` is `'failed'`/`'cert-blocked'`, else `null`.
+    On a `'failed'`/`'cert-blocked'` row, `title` is the same host-derived label the tab strip shows
+    (never the guest's error-document title, which is stale, empty, or absent depending on how the
+    tab got there).
+  - **`security` (Mission 20 Flight 2, DD5/DD7)**: the committed top-frame origin's TLS trust
+    state, one of `'secure'`, `'insecure'`, `'overridden'`, `'internal'`, `'none'`. `'insecure'` is
+    a plain `http:` page; `'overridden'` is an `https:` page loaded past a remembered certificate
+    override; `'internal'` is a trusted `goldfinch://` page; `'none'` covers `about:blank`, an
+    unparseable URL, and any failed/cert-blocked load (the chip stays in Flight 1's
+    scheme-derived web state for those). Renderer-sourced, pushed on its own `tab-security` channel
+    at each main-frame commit.
   - **The window registry is the ownership authority**; the renderer is authoritative only for
     `url` / `title` / `jarId`. A window's chrome reporting a tab is not evidence that it owns it:
     each window's rows are filtered to that window's registry-recorded membership, and `windowId`
@@ -560,7 +572,7 @@ below.
 
 | Tool | Input schema | Result shape |
 |------|--------------|--------------|
-| `enumerateTabs` | *(none)* | JSON text: array of `{ wcId, url, title, jarId, active, windowId, loadState, loadError }` for all drivable (dom-ready) tabs across **all windows** (M09 F7 — see *Multi-window semantics*). `windowId` is stamped from the window registry, which is authoritative for ownership. A window whose chrome has not finished booting contributes **zero rows** — poll `enumerateWindows()` until every `booted` is true for a guaranteed-total census. Admin listings include the internal `goldfinch://` tabs; jar-key listings never do (session filter). Script-opened **popup windows** append extra rows marked `popup: true` (`active: false`, `windowId` = the OWNER window's, `jarId` mapped main-side from the popup's captured partition) — see *Popup windows (M14 F2)* under *Multi-window semantics*. `loadState` is `'ok'`/`'failed'` (Mission 20 F1; grows in later flights), `loadError` is `{ code, name }` when failed else `null` |
+| `enumerateTabs` | *(none)* | JSON text: array of `{ wcId, url, title, jarId, active, windowId, loadState, loadError, security }` for all drivable (dom-ready) tabs across **all windows** (M09 F7 — see *Multi-window semantics*). `windowId` is stamped from the window registry, which is authoritative for ownership. A window whose chrome has not finished booting contributes **zero rows** — poll `enumerateWindows()` until every `booted` is true for a guaranteed-total census. Admin listings include the internal `goldfinch://` tabs; jar-key listings never do (session filter). Script-opened **popup windows** append extra rows marked `popup: true` (`active: false`, `windowId` = the OWNER window's, `jarId` mapped main-side from the popup's captured partition) — see *Popup windows (M14 F2)* under *Multi-window semantics*. `loadState` is `'ok'`/`'failed'`/`'cert-blocked'` (Mission 20; grows in later flights), `loadError` is `{ code, name }` when failed/cert-blocked else `null`. `security` (Mission 20 Flight 2) is one of `'secure'`/`'insecure'`/`'overridden'`/`'internal'`/`'none'` — the committed top-frame origin's TLS trust state |
 | `openTab` | `{ url: string, jarId?: string }` *(`url` required; `jarId` optional)* | JSON text: the new tab's `wcId` (number) — or `null` if the URL was rejected renderer-side or no handle appeared within the timeout (a **normal** result, not an error). `jarId`: a jar key may only supply its own jar id (foreign → `out-of-jar`); admin may supply any; an unknown id is refused (`unknown-jar`); omit to open in the current default jar (a fresh evaporating burner tab when Burner holds the flag) — admin identity only; a jar key's omitted `jarId` still forces that key's own jar. |
 | `closeTab` | `{ wcId: integer }` *(required)* | JSON text: boolean success signal (`true`/`false`) |
 | `activateTab` | `{ wcId: integer }` *(required)* | JSON text: boolean success signal. `true` — the tab was activated **and its owning window raised** (M09 F7 DD6: the dispatch goes to the tab's OWNING window's chrome, so this works across windows). `false` — the wcId is **not a registry-owned tab** (e.g. an overlay view probed by id, or a **popup** — a popup is not in any window's strip; no window is raised, drive it directly): no activation, no raise, no error. A third outcome is a **refusal**, not a boolean: if the registry says a window owns the tab but that window's chrome cannot activate it (a registry/renderer desync), the op errors with `automation: activate-refused — …` (isError) rather than silently returning `false`. |

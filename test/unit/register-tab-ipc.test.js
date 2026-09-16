@@ -329,6 +329,8 @@ test('registers the complete tab/move channel set exactly once', () => {
       'closed-tab-stack-size',
       'move-targets',
       'tab-adopt-by-drop',
+      // Mission 20 Flight 2 Leg 4 (DD9): the cert-viewer card's read-only summary.
+      'tab-certificate-get',
       'tab-create',
       // M17 F1 L1 (DD2/DD4): the F6 chrome→content focus-entry gesture's handle.
       'tab-focus-guest',
@@ -938,6 +940,67 @@ test("AC3: tab-navigate loadURL is gated on the target tab's trust — unsafe we
 });
 
 // ---------------------------------------------------------------------------
+// Mission 20 Flight 2 Leg 1 (#216, DD12 H2/H3): tab-navigate's loadURL branch
+// arms entry.chromeNavPending from the SENDER chrome's OS focus at call time —
+// the live spike traced the stranded-focus steal to an asynchronous guest
+// self-focus that starts a few ms into the navigation, so the reactive
+// chrome-blur listener (window-factory.js) is what actually reasserts; this
+// handler's only job is recording whether that listener should care.
+// ---------------------------------------------------------------------------
+
+test('#216: tab-navigate loadURL arms entry.chromeNavPending when the sender chrome held focus', () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  h.addTab(source, 101, false);
+  source.chromeView.webContents.focused = true;
+
+  h.ipcMain.send('tab-navigate', source.chromeView.webContents, {
+    wcId: 101,
+    verb: 'loadURL',
+    args: ['https://example.test/']
+  });
+
+  assert.equal(source.tabViews.get(101).chromeNavPending, true);
+});
+
+test('#216: tab-navigate loadURL does NOT arm entry.chromeNavPending when the sender chrome did not hold focus', () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  h.addTab(source, 101, false);
+  source.chromeView.webContents.focused = false;
+
+  h.ipcMain.send('tab-navigate', source.chromeView.webContents, {
+    wcId: 101,
+    verb: 'loadURL',
+    args: ['https://example.test/']
+  });
+
+  assert.equal(source.tabViews.get(101).chromeNavPending, false);
+});
+
+test('#216: a SECOND tab-navigate re-evaluates chromeNavPending from the CURRENT chrome focus (a stale arm never survives)', () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  h.addTab(source, 101, false);
+  source.chromeView.webContents.focused = true;
+
+  h.ipcMain.send('tab-navigate', source.chromeView.webContents, {
+    wcId: 101,
+    verb: 'loadURL',
+    args: ['https://example.test/']
+  });
+  assert.equal(source.tabViews.get(101).chromeNavPending, true);
+
+  source.chromeView.webContents.focused = false;
+  h.ipcMain.send('tab-navigate', source.chromeView.webContents, {
+    wcId: 101,
+    verb: 'loadURL',
+    args: ['https://example.test/two']
+  });
+  assert.equal(source.tabViews.get(101).chromeNavPending, false);
+});
+
+// ---------------------------------------------------------------------------
 // M14 F1 L2 (DD2) — auth pending-challenge store call points.
 // ---------------------------------------------------------------------------
 
@@ -1260,6 +1323,21 @@ test('AC2: tab-create seeds loadFailure: null and lastRequestedUrl from the load
   assert.equal(entry.lastRequestedUrl, 'https://example.test/page');
 });
 
+test('Mission 20 F2 L2: tab-create seeds certFailure/certOverride/certificate/security all null', async () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  const wcId = await h.ipcMain.invoke('tab-create', source.chromeView.webContents, {
+    url: 'https://example.test/page',
+    partition: 'persist:jar-a',
+    trusted: false
+  });
+  const entry = source.tabViews.get(wcId);
+  assert.equal(entry.certFailure, null);
+  assert.equal(entry.certOverride, null);
+  assert.equal(entry.certificate, null);
+  assert.equal(entry.security, null);
+});
+
 test('AC2: tab-create restore branch seeds lastRequestedUrl from the active history entry', async () => {
   const h = setup();
   const source = h.makeRecord(1);
@@ -1386,4 +1464,199 @@ test('AC9: a move of a clean (non-failed) entry sends no tab-load-failure re-pus
     h.log.filter((x) => x[0] === 'visible' && x[1] === 101),
     [['visible', 101, true]]
   );
+});
+
+// ---------------------------------------------------------------------------
+// Mission 20 Flight 2 Leg 2 (DD7 FD amendment/AC6): the tab-security re-push
+// at adopt — its own channel, never a replay of tab-did-navigate.
+// ---------------------------------------------------------------------------
+
+test('DD7: a move re-pushes tab-security to the target AFTER adopt-tab (never replaying tab-did-navigate)', () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  const target = h.makeRecord(2);
+  h.addTab(source, 101);
+  source.tabViews.get(101).security = 'overridden';
+
+  const result = h.ipcMain.invoke('tab-move-to-window', source.chromeView.webContents, { wcId: 101, windowId: 2 });
+  assert.deepEqual(result, { ok: true, windowId: 2 });
+
+  const targetChromeId = target.chromeView.webContents.id;
+  const sends = h.log.filter((x) => x[0] === 'send' && x[1] === targetChromeId);
+  const adoptIdx = sends.findIndex((x) => x[2] === 'adopt-tab');
+  const securityIdx = sends.findIndex((x) => x[2] === 'tab-security');
+  const didNavigateIdx = sends.findIndex((x) => x[2] === 'tab-did-navigate');
+  assert.ok(adoptIdx !== -1, 'adopt-tab was sent');
+  assert.ok(securityIdx !== -1, 'tab-security was re-pushed');
+  assert.ok(securityIdx > adoptIdx, 'the re-push lands strictly AFTER the adopt payload');
+  assert.deepEqual(sends[securityIdx][3], { wcId: 101, security: 'overridden' });
+  assert.equal(didNavigateIdx, -1, 'tab-did-navigate is never replayed by the adopt path');
+});
+
+test('DD7: a move of an entry with no security value yet sends no tab-security re-push', () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  const target = h.makeRecord(2);
+  h.addTab(source, 101);
+  h.ipcMain.invoke('tab-move-to-window', source.chromeView.webContents, { wcId: 101, windowId: 2 });
+  const targetChromeId = target.chromeView.webContents.id;
+  const sends = h.log.filter((x) => x[0] === 'send' && x[1] === targetChromeId && x[2] === 'tab-security');
+  assert.deepEqual(sends, []);
+});
+
+// ---------------------------------------------------------------------------
+// Mission 20 Flight 2 Leg 4 (DD9): tab-certificate-get — requireChrome +
+// ownsTab (the tab-navigate shape), reads entry.certificate's OBSERVER
+// WRAPPER (never a bare summary), and never returns a `data`/PEM field.
+// ---------------------------------------------------------------------------
+
+test('tab-certificate-get: refuses a non-chrome sender', () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  h.addTab(source, 101);
+  assert.equal(h.ipcMain.invoke('tab-certificate-get', {}, { wcId: 101 }), null);
+});
+
+test('tab-certificate-get: refuses a chrome sender that does not own the tab', () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  const other = h.makeRecord(2);
+  h.addTab(source, 101);
+  assert.equal(h.ipcMain.invoke('tab-certificate-get', other.chromeView.webContents, { wcId: 101 }), null);
+});
+
+test('tab-certificate-get: unknown wcId (no entry) returns null', () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  h.addTab(source, 101);
+  assert.equal(h.ipcMain.invoke('tab-certificate-get', source.chromeView.webContents, { wcId: 999 }), null);
+});
+
+test('tab-certificate-get: a wrapper with a null summary counts as absent', () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  h.addTab(source, 101);
+  source.tabViews.get(101).certificate = { verificationResult: 'net::OK', errorCode: 0, summary: null };
+  assert.equal(h.ipcMain.invoke('tab-certificate-get', source.chromeView.webContents, { wcId: 101 }), null);
+});
+
+test('tab-certificate-get: no observer wrapper and no cert-blocked failure returns null', () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  h.addTab(source, 101);
+  assert.equal(h.ipcMain.invoke('tab-certificate-get', source.chromeView.webContents, { wcId: 101 }), null);
+});
+
+test('tab-certificate-get: a trusted (secure) tab returns the observer summary with status=trusted, error undefined', () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  h.addTab(source, 101);
+  const entry = source.tabViews.get(101);
+  entry.security = 'secure';
+  entry.certificate = {
+    verificationResult: 'net::OK',
+    errorCode: 0,
+    isIssuedByKnownRoot: true,
+    summary: { subject: { commonName: 'a.example' }, fingerprints: { sha256: 'AA', sha1: 'BB' }, status: 'trusted' }
+  };
+  const result = h.ipcMain.invoke('tab-certificate-get', source.chromeView.webContents, { wcId: 101 });
+  assert.equal(result.status, 'trusted');
+  assert.equal(result.error, undefined);
+  assert.equal(result.subject.commonName, 'a.example');
+  assert.equal(result.fingerprints.sha256, 'AA');
+});
+
+test('tab-certificate-get: an overridden tab returns status=overridden from certOverride.summary, with the certOverride error', () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  h.addTab(source, 101);
+  const entry = source.tabViews.get(101);
+  entry.security = 'overridden';
+  entry.certOverride = {
+    host: 'bad.test',
+    port: 443,
+    fingerprint: 'AA:BB',
+    error: 'ERR_CERT_AUTHORITY_INVALID',
+    summary: { subject: { commonName: 'bad.test' }, status: 'overridden', error: 'ERR_CERT_AUTHORITY_INVALID' }
+  };
+  const result = h.ipcMain.invoke('tab-certificate-get', source.chromeView.webContents, { wcId: 101 });
+  assert.equal(result.status, 'overridden');
+  assert.equal(result.error, 'ERR_CERT_AUTHORITY_INVALID');
+  assert.equal(result.subject.commonName, 'bad.test');
+});
+
+// HAT F5: the collision this fix closes — a hostname-keyed OBSERVER entry
+// from a prior TRUSTED visit to a DIFFERENT port on the same host must never
+// leak into an overridden tab's viewer. Observer says OK for a certificate
+// whose subject is 'trusted-other-port.test' (subject A); this tab's OWN
+// override is for a different certificate (subject B). The read must return
+// subject B (certOverride.summary), never subject A (entry.certificate).
+test('tab-certificate-get: an overridden tab never falls back to a hostname-keyed observer entry from a different port (HAT F5 collision)', () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  h.addTab(source, 101);
+  const entry = source.tabViews.get(101);
+  entry.security = 'overridden';
+  // The observer's stale, hostname-only-keyed OK entry — subject A, a
+  // DIFFERENT certificate than the one this tab's own load overrode.
+  entry.certificate = {
+    verificationResult: 'net::OK',
+    errorCode: 0,
+    isIssuedByKnownRoot: true,
+    summary: { subject: { commonName: 'trusted-other-port.test' }, status: 'trusted' }
+  };
+  // This load's own override — subject B.
+  entry.certOverride = {
+    host: '127.0.0.1',
+    port: 42525,
+    fingerprint: 'CC:DD',
+    error: 'ERR_CERT_AUTHORITY_INVALID',
+    summary: { subject: { commonName: 'this-load.test' }, status: 'overridden', error: 'ERR_CERT_AUTHORITY_INVALID' }
+  };
+  const result = h.ipcMain.invoke('tab-certificate-get', source.chromeView.webContents, { wcId: 101 });
+  assert.equal(result.status, 'overridden');
+  assert.equal(result.subject.commonName, 'this-load.test');
+});
+
+test('tab-certificate-get: an overridden tab with no certOverride.summary (e.g. a pre-fix stamp) returns null, never entry.certificate', () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  h.addTab(source, 101);
+  const entry = source.tabViews.get(101);
+  entry.security = 'overridden';
+  entry.certOverride = { host: 'bad.test', port: 443, fingerprint: 'AA:BB', error: 'ERR_CERT_AUTHORITY_INVALID' };
+  entry.certificate = {
+    verificationResult: 'net::OK',
+    errorCode: 0,
+    isIssuedByKnownRoot: true,
+    summary: { subject: { commonName: 'wrong.test' }, status: 'trusted' }
+  };
+  const result = h.ipcMain.invoke('tab-certificate-get', source.chromeView.webContents, { wcId: 101 });
+  assert.equal(result, null);
+});
+
+test('tab-certificate-get: a cert-blocked interstitial returns entry.loadFailure.cert.summary as-is (status untrusted)', () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  h.addTab(source, 101);
+  const entry = source.tabViews.get(101);
+  const summary = { subject: { commonName: 'bad.test' }, status: 'untrusted', error: 'ERR_CERT_AUTHORITY_INVALID' };
+  entry.loadFailure = { code: -202, name: 'ERR_CERT_AUTHORITY_INVALID', url: 'https://bad.test/', cert: { summary } };
+  // Even a stray observer wrapper on the same entry must be ignored — the
+  // cert-blocked branch wins.
+  entry.certificate = { summary: { status: 'trusted' } };
+  const result = h.ipcMain.invoke('tab-certificate-get', source.chromeView.webContents, { wcId: 101 });
+  assert.equal(result, summary);
+});
+
+test('tab-certificate-get: the reply never carries a data/PEM field', () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  h.addTab(source, 101);
+  const entry = source.tabViews.get(101);
+  entry.security = 'secure';
+  entry.certificate = { summary: { subject: {}, status: 'trusted' } };
+  const result = h.ipcMain.invoke('tab-certificate-get', source.chromeView.webContents, { wcId: 101 });
+  assert.equal('data' in result, false);
+  assert.equal(JSON.stringify(result).includes('-----BEGIN'), false);
 });

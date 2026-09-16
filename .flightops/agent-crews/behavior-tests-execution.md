@@ -455,6 +455,20 @@ Facts rediscovered live across multiple runs (`bookmarks-jar-scoping`,
 read before signalling `[READY]` so a crew spawn needs no hand-added apparatus
 instructions beyond run-specific keys/ports.
 
+- **A false `document.hasFocus() === false` reading is an escalation
+  trigger, not a rig footnote.** On any row whose Expected Result concerns
+  keyboard focus, focus rings, or focus order, `document.hasFocus() ===
+  false` on the chrome document (or any other evidence the chrome document
+  does not hold OS focus) must never be folded into a pass. The Executor
+  reports it as `[BLOCKED:apparatus-focus]` in its structured report for
+  that step; the Validator must not render PASS on that row from a11y-tree
+  evidence alone — it renders INCONCLUSIVE and escalates to the
+  Orchestrator ("verify by eye before this row is judged"), who pauses for
+  an operator confirmation. Precedent: Mission 20 Flight 1,
+  `navigation-failure-surface` run 2026-09-15 checkpoint 8 — the false
+  reading was the symptom of a real defect (issue #216: OS focus leaves the
+  chrome after a typed navigation starts, stranding keyboard focus),
+  invisible to the automation apparatus until the HAT — see squawk 0076.
 - **Never use session-registered `mcp__goldfinch*` / `mcp__chrome-devtools*`
   tools.** The registrations on the dev machine carry statically pinned keys
   and at least one points at the operator's production browser. Drive the
@@ -693,7 +707,10 @@ LIFECYCLE
   or "`[READY]` — cache-warm"). Wait.
 - PROJECT APPARATUS NOTES: read the `Project Apparatus Notes (goldfinch)`
   section of this crew file before signalling `[READY]` — in particular the
-  prohibition on session-registered `mcp__goldfinch*` tools.
+  prohibition on session-registered `mcp__goldfinch*` tools and the
+  `document.hasFocus()` escalation rule (a false reading on a
+  keyboard-focus row is `[BLOCKED:apparatus-focus]`, never folded into a
+  pass).
 - Per step: I will SendMessage you with the step number and Actions.
   Perform them. Capture raw state. Save evidence files to
   {evidence-dir}. Return a structured report. Wait for the next step.
@@ -784,7 +801,10 @@ LIFECYCLE
 - Then: signal `[READY]` and wait. Do NOT pre-judge upcoming steps.
 - PROJECT APPARATUS NOTES: read the `Project Apparatus Notes (goldfinch)`
   section of this crew file before signalling `[READY]` — in particular the
-  prohibition on session-registered `mcp__goldfinch*` tools.
+  prohibition on session-registered `mcp__goldfinch*` tools and the
+  `document.hasFocus()` escalation rule (a false reading on a
+  keyboard-focus row is `[BLOCKED:apparatus-focus]`, never folded into a
+  pass).
 - Per step: I will SendMessage you with (a) the step's Expected
   Results from the spec and (b) the Executor's structured report.
   Judge whether the Expected Results were met. Render PASS / FAIL /
@@ -970,9 +990,13 @@ Signal `[READY]` now.
   times out on the guest capture instead — same run.
 - **`document.hasFocus()` is false on the chrome document under automation
   on WSLg** — `:focus`/`:focus-visible` never match, so no focus ring can
-  paint even when `activeElement` and the a11y tree agree; keyboard
-  evidence on this rig is activeElement + a11y `focused=true`; a rendered
-  ring is a HAT-only observable — same run (checkpoint 8).
+  paint even when `activeElement` and the a11y tree agree. This is the rig
+  condition the escalation rule above exists for: on a keyboard-focus row,
+  treat it as `[BLOCKED:apparatus-focus]` and escalate to INCONCLUSIVE —
+  activeElement + a11y `focused=true` alone no longer clears a
+  keyboard-focus row for PASS; a rendered ring stays a verify-by-eye
+  (HAT-only) observable — same run (checkpoint 8); see squawk 0076 /
+  issue #216.
 - **`python3 -m http.server` with stdout redirected never flushes its
   "Serving HTTP" banner** (block-buffered); gate readiness on `ss -ltn` + a
   curl 200, or run with `python3 -u` — same run (checkpoint 6). Shell

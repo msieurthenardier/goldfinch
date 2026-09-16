@@ -24,7 +24,8 @@ import { LOAD_STATES, failedTabTitle } from '../../shared/load-failure.js';
  *   welcome?: { reasons: Set<string>, pendingQuery: string | null } | null,
  *   attaching?: boolean,
  *   pendingUrl?: string | null,
- *   loadFailure?: { code: number, name: string, url: string } | null
+ *   loadFailure?: { code: number, name: string, url: string, cert?: { host: string, port: number | null, error: string, overridable: boolean, summary: any } } | null,
+ *   security?: string | null
  * }} Tab
  */
 
@@ -1209,8 +1210,20 @@ export function createTabController(deps) {
         active: t.id === ctx.activeTabId,
         // Mission 20 F1 Leg 2 (AC8): renderer-sourced census fields — the
         // renderer holds the failure the moment main pushes it, no new drive op.
-        loadState: t.loadFailure ? LOAD_STATES.FAILED : LOAD_STATES.OK,
-        loadError: t.loadFailure ? { code: t.loadFailure.code, name: t.loadFailure.name } : null
+        // Mission 20 Flight 2 Leg 2 (AC4): a folded cert failure reports the
+        // more specific `cert-blocked` state — `t.loadFailure.cert` is only
+        // ever set for a genuine ERR_CERT_* failure (guest-wiring.js's fold).
+        loadState: t.loadFailure?.cert ? LOAD_STATES.CERT_BLOCKED : t.loadFailure ? LOAD_STATES.FAILED : LOAD_STATES.OK,
+        loadError: t.loadFailure ? { code: t.loadFailure.code, name: t.loadFailure.name } : null,
+        // Mission 20 Flight 2 Leg 2 (AC4/DD7): the security enum, pushed by
+        // main's own tab-security channel and stored on the tab record by
+        // site-security-controller.js. Mission 20 Flight 2 Leg 4 (design
+        // review, HIGH, belt-and-suspenders): a failed/cert-blocked tab
+        // reports `none` regardless of a stale prior value — main's own
+        // did-fail-load fix (guest-wiring.js) is the source-of-truth fix;
+        // this guard just keeps the census honest even if that push is ever
+        // missed or races.
+        security: t.loadFailure ? 'none' : (t.security ?? 'none')
       }));
     },
     openTab(url, jarId) {

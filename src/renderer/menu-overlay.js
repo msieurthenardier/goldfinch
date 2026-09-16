@@ -55,6 +55,8 @@ import { BOOKMARK_DND_MIME, overflowDropIndexY, overflowIndicatorY } from '../sh
 import { buildVaultUnlockCard } from '../shared/vault-unlock-template.js';
 import { buildAuthBasicCard } from '../shared/auth-basic-template.js';
 import { buildBookmarkEditCard, applyBookmarkEditModel } from '../shared/bookmark-edit-template.js';
+import { buildCertOverrideCard, applyCertOverrideModel } from '../shared/cert-override-template.js';
+import { buildCertViewerCard, applyCertViewerModel } from '../shared/cert-viewer-template.js';
 import { buildBookmarkStarIcon } from '../shared/bookmark-star-icon.js';
 import {
   buildCertPickerCard,
@@ -2720,9 +2722,147 @@ import {
     }
   });
 
+  /* ---------------------------------------------------- template: cert-override */
+  // The flight's ONE security-decision channel (Mission 20 Flight 2 Leg 3,
+  // flight DD3) — proceed despite a TLS certificate error. Fixed layout
+  // (heading/body/error line/status + Back/Proceed), centered via CSS — the
+  // anchor is ignored (auth-basic/vault-unlock discipline). `dismissible` is
+  // left at its default `true` (unlike every one-time-secret show sheet):
+  // Escape/Back/backdrop/outside-click all dismiss it, and it is NOT in
+  // VAULT_BLUR_SURVIVAL_MENU_TYPES — a window blur closes it like any
+  // ordinary menu. Proceed rides the DEDICATED menu-overlay:cert-override-
+  // proceed invoke (never channel-4 sendActivated — DD3's four-guard main
+  // handler is the sole path that can grant the override); Back is a plain
+  // dismiss.
+
+  const certOverride = buildCertOverrideCard(document);
+  const certOverrideNode = certOverride.node;
+  root.appendChild(certOverrideNode);
+
+  let certOverrideBusy = false; // guards a concurrent submit (double-Enter / Enter+click)
+
+  // no `items` — roving no-ops; Tab-cycling + Escape are the modal-card helper below.
+  const certOverrideEntry = sheet({
+    node: certOverrideNode,
+    onOpen() {
+      certOverrideBusy = false;
+      certOverride.proceed.disabled = false;
+      certOverrideNode.classList.remove('hidden');
+      // Back to safety holds initial focus (DD3) — Proceed never auto-focuses,
+      // and Enter on Back's native button closes the card (no extra wiring).
+      certOverride.back.focus();
+    }
+  });
+
+  /** Render the heading/body/error line + the Proceed label from the object
+   * model ({ host, error, title, body }) via the pure template applier — the
+   * anchor argument is accepted for call-site parity with every other
+   * renderX(model, anchor) function here but deliberately unused (fixed,
+   * centered layout). @param {any} model */
+  function renderCertOverride(model) {
+    applyCertOverrideModel(certOverride, model);
+    certOverrideNode.classList.remove('hidden');
+  }
+
+  /** Proceed → the DEDICATED cert-override-proceed invoke. `{ ok: true }`:
+   * main has ALREADY closed the sheet ('activated') — the eager close/reset
+   * channel (DD1f, ahead of this invoke's own resolution) hides the card via
+   * onCloseReset's closeAll(), so this is deliberately a no-op here (unlike
+   * bookmark-edit-submit's belt-and-suspenders local close — this channel's
+   * `report.sent = true` alone suppresses the trailing dismissed). `{ ok:
+   * false }`: a guard failed main-side (stale token/menu, or the entry's
+   * failure cleared between open and click, DD3's edge case) — stay open
+   * with the status line; the operator can retry or click Back. */
+  async function submitCertOverrideProceed() {
+    if (report.sent || report.token == null || certOverrideBusy) return;
+    const token = report.token;
+    certOverrideBusy = true;
+    certOverride.proceed.disabled = true;
+    let res;
+    try {
+      res = await window.menuOverlay.certOverrideProceed({ token });
+    } catch {
+      res = { ok: false }; // a rejected invoke degrades to the same stay-open feedback
+    } finally {
+      certOverrideBusy = false;
+      certOverride.proceed.disabled = false;
+    }
+    // Stale-resolution guard: a supersede / model-replace during the await
+    // moved the live token; a late result must not act on the new menu.
+    if (report.token !== token || report.sent) return;
+    if (res && res.ok) {
+      report.sent = true; // main already closed the sheet; suppress the trailing dismissed
+    } else {
+      certOverride.status.textContent = "Couldn't proceed — go back and try again";
+    }
+  }
+
+  certOverride.proceed.addEventListener('click', () => {
+    void submitCertOverrideProceed();
+  });
+  // Back — a deliberate dismiss, same family as Escape (the vault-compromise
+  // Cancel / auth-basic header-X precedent).
+  certOverride.back.addEventListener('click', () => {
+    report.lastStimulus = 'escape';
+    menuController.close(certOverrideEntry);
+  });
+  attachModalCard({
+    node: certOverrideNode,
+    getCycle: () => [certOverride.back, certOverride.proceed],
+    close: (stimulus) => {
+      report.lastStimulus = stimulus;
+      menuController.close(certOverrideEntry);
+    }
+  });
+
+  /* ----------------------------------------------------- template: cert-viewer */
+  // Mission 20 Flight 2 Leg 4 (DD9) — a READ-ONLY certificate summary card,
+  // fed by main's tab-certificate-get read. Fixed layout (status line +
+  // scrollable rows + Close), centered via CSS — the anchor is ignored (the
+  // auth-basic/vault-unlock/cert-override discipline). Unlike cert-override,
+  // there is NOTHING to submit: dismissible (default true), Close focused on
+  // open, Escape/Close/backdrop/blur all dismiss it — the ordinary
+  // attachModalCard contract, no dedicated invoke channel.
+
+  const certViewer = buildCertViewerCard(document);
+  const certViewerNode = certViewer.node;
+  root.appendChild(certViewerNode);
+
+  // no `items` — roving no-ops; Tab-cycling + Escape are the modal-card helper below.
+  const certViewerEntry = sheet({
+    node: certViewerNode,
+    onOpen() {
+      certViewerNode.classList.remove('hidden');
+      certViewer.close.focus();
+    }
+  });
+
+  /** Render the status line + labelled rows from the object model (the
+   * tab-certificate-get reply, or null for the "unavailable" case) via the
+   * pure template applier — the anchor argument is accepted for call-site
+   * parity with every other renderX(model, anchor) function here but
+   * deliberately unused (fixed, centered layout). @param {any} model */
+  function renderCertViewer(model) {
+    applyCertViewerModel(certViewer, model);
+    certViewerNode.classList.remove('hidden');
+  }
+
+  certViewer.close.addEventListener('click', () => {
+    report.lastStimulus = 'escape'; // Close is a deliberate dismiss, same family as Escape.
+    menuController.close(certViewerEntry);
+  });
+  attachModalCard({
+    node: certViewerNode,
+    getCycle: () => [certViewer.close],
+    close: (stimulus) => {
+      report.lastStimulus = stimulus;
+      menuController.close(certViewerEntry);
+    }
+  });
+
   /* ----------------------------------------------------- registry + init dispatch */
 
-  /** @type {{ [menuType: string]: 'menu' | 'info-popup' | 'input-dialog' | 'suggestions' | 'downloads' | 'vault-unlock' | 'vault-picker' | 'vault-capture' | 'vault-set' | 'vault-recovery-show' | 'vault-stepup' | 'vault-accesskey-show' | 'vault-import' | 'vault-change-master' | 'vault-recover' | 'vault-compromise' | 'vault-compromise-recover' | 'vault-adminkey-show' | 'auth-basic' | 'cert-picker' | 'bookmark-edit' }} */
+  /** @type {{ [menuType: string]: 'menu' | 'info-popup' | 'input-dialog' | 'suggestions' | 'downloads' | 'vault-unlock' | 'vault-picker' | 'vault-capture' | 'vault-set' | 'vault-recovery-show' | 'vault-stepup' | 'vault-accesskey-show' | 'vault-import' | 'vault-change-master' | 'vault-recover' | 'vault-compromise' | 'vault-compromise-recover' | 'vault-adminkey-show' | 'auth-basic' | 'cert-picker' | 'bookmark-edit' | 'cert-override' | 'cert-viewer' }} */
   const TEMPLATES = {
     kebab: 'menu',
     container: 'menu',
@@ -2733,6 +2873,8 @@ import {
     'auth-basic': 'auth-basic', // M14 F1 L2 — HTTP basic-auth credential prompt
     'cert-picker': 'cert-picker', // M14 F1 L3 — TLS client-certificate chooser
     'bookmark-edit': 'bookmark-edit', // M15 F1 Leg 2 — star/bar/overflow quick-edit popover (anchored)
+    'cert-override': 'cert-override', // M20 F2 Leg 3 — the proceed-despite-a-cert-error card
+    'cert-viewer': 'cert-viewer', // M20 F2 Leg 4 — the read-only certificate summary card
     'vault-unlock': 'vault-unlock', // M12 F2 Leg 2 — the FIFTH kind (see above)
     'vault-picker': 'vault-picker', // M12 F2 Leg 3 — the SIXTH kind (see above)
     'vault-capture': 'vault-capture', // M12 F2 Leg 4 — the SEVENTH kind (see above)
@@ -2775,7 +2917,9 @@ import {
     [vaultCompromiseEntry, vaultCompromiseNode],
     [vaultCompromiseRecoverEntry, vaultCompromiseRecoverNode],
     [adminKeyEntry, adminKeyNode],
-    [bookmarkEditEntry, bookmarkEditNode]
+    [bookmarkEditEntry, bookmarkEditNode],
+    [certOverrideEntry, certOverrideNode],
+    [certViewerEntry, certViewerNode]
   ]);
 
   // Capture-phase reason attribution (document capture beats the controller's
@@ -2852,16 +2996,22 @@ import {
     const modelShapeOk =
       template === 'cert-picker'
         ? !!model && typeof model === 'object'
-        : template === 'suggestions' ||
-            template === 'vault-capture' ||
-            template === 'vault-recovery-show' ||
-            template === 'vault-stepup' ||
-            template === 'vault-accesskey-show' ||
-            template === 'vault-adminkey-show' ||
-            template === 'auth-basic' ||
-            template === 'bookmark-edit'
-          ? model && typeof model === 'object' && !Array.isArray(model)
-          : Array.isArray(model);
+        : // cert-viewer's model is deliberately nullable — `null` IS a valid
+          // model (DD9's "unavailable — reload to refresh" case, an evicted
+          // observer entry or an internal/blank tab), never a rejected shape.
+          template === 'cert-viewer'
+          ? model === null || (typeof model === 'object' && !Array.isArray(model))
+          : template === 'suggestions' ||
+              template === 'vault-capture' ||
+              template === 'vault-recovery-show' ||
+              template === 'vault-stepup' ||
+              template === 'vault-accesskey-show' ||
+              template === 'vault-adminkey-show' ||
+              template === 'auth-basic' ||
+              template === 'bookmark-edit' ||
+              template === 'cert-override'
+            ? model && typeof model === 'object' && !Array.isArray(model)
+            : Array.isArray(model);
     if (!modelShapeOk) return;
 
     // In-place downloads update (Leg 4, Option 1): a repaint that arrives while
@@ -3023,6 +3173,20 @@ import {
       // NOT fall through to the non-focusing 'menu' fallback.
       renderBookmarkEdit(model, anchor);
       menuController.open(bookmarkEditEntry, 0);
+    } else if (template === 'cert-override') {
+      // Fixed layout (heading/body/error line/status + Back/Proceed), centered
+      // via CSS — the anchor is ignored (auth-basic/vault-unlock discipline).
+      // Render FIRST, then open through the controller. onOpen focuses Back;
+      // it must NOT fall through to the non-focusing 'menu' fallback.
+      renderCertOverride(model);
+      menuController.open(certOverrideEntry, 0);
+    } else if (template === 'cert-viewer') {
+      // Read-only certificate summary — fixed layout, centered via CSS, the
+      // anchor is ignored. Render FIRST, then open through the controller.
+      // onOpen focuses Close; it must NOT fall through to the non-focusing
+      // 'menu' fallback.
+      renderCertViewer(model);
+      menuController.open(certViewerEntry, 0);
     } else {
       // input-dialog: fixed layout, model may be empty; centered via CSS —
       // the anchor is deliberately ignored.

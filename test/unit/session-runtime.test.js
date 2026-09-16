@@ -22,6 +22,15 @@ function setup(options = {}) {
     }
   };
   const sweepPromise = options.sweepPromise || Promise.resolve({ 'jar-a': { classes: ['cookies', 'storage'] } });
+  // Mission 20 Flight 2 Leg 2 (DD6/AC5): a recording fake — procFor is called
+  // for EVERY web session (Burner included), before the jar-lookup block.
+  const certObserverCalls = [];
+  const certObserver = {
+    procFor: (partition) => {
+      certObserverCalls.push(partition);
+      return () => {};
+    }
+  };
   const runtime = createSessionRuntime({
     isCreatingInternalSession: () => creatingInternal,
     wireDownloadHandler: (session) => log.push(['downloads', session]),
@@ -76,6 +85,7 @@ function setup(options = {}) {
       stripUrl: (url) => url
     },
     chromeForTab: () => ({ send: (channel, payload) => chromeSends.push([channel, payload]) }),
+    certObserver,
     schedule: (fn) => {
       timers.push(fn);
       return timers.length;
@@ -91,6 +101,7 @@ function setup(options = {}) {
     log,
     broadcasts,
     chromeSends,
+    certObserverCalls,
     setCreatingInternal(value) {
       creatingInternal = value;
     },
@@ -131,6 +142,11 @@ function fakeSession(log) {
     },
     setPermissionCheckHandler(fn) {
       handlers.permissionCheck = fn;
+    },
+    // Mission 20 Flight 2 Leg 2 (DD6): the verify-proc observer install site.
+    setCertificateVerifyProc(fn) {
+      handlers.certVerifyProc = fn;
+      counts.certVerifyProc = (counts.certVerifyProc || 0) + 1;
     }
   };
   return { session, handlers, counts };
@@ -145,6 +161,32 @@ test('internal-session creation marks and refuses every web-session wiring', () 
   assert.deepEqual(counts, { beforeRequest: 0, beforeSendHeaders: 0, headersReceived: 0 });
   assert.equal(session.cookies.listenerCount('changed'), 0);
   assert.deepEqual(h.log, []);
+  // Mission 20 Flight 2 Leg 2 (DD6): the internal session NEVER gets an
+  // observer — the early return above precedes the install site entirely.
+  assert.equal(counts.certVerifyProc, undefined);
+  assert.deepEqual(h.certObserverCalls, []);
+});
+
+// ---------------------------------------------------------------------------
+// Mission 20 Flight 2 Leg 2 (AC5): the observer is installed BEFORE the
+// jar-lookup block's `if (!jarEntry) return` — a session with no jar entry
+// (Burner, or any session-created race) still gets it.
+// ---------------------------------------------------------------------------
+
+test('AC5: a web session with NO matching jar entry still gets the verify-proc installed', () => {
+  const h = setup({ partition: null }); // partitionFromStoragePath resolves null -> jarEntry lookup fails
+  const { session, counts } = fakeSession(h.log);
+  h.runtime.onSessionCreated(session);
+  assert.equal(counts.certVerifyProc, 1, 'installed despite no jar entry (Burner parity)');
+  assert.deepEqual(h.certObserverCalls, ['default']);
+});
+
+test('AC5: a web session WITH a matching jar entry is keyed by its own partition, not "default"', () => {
+  const h = setup(); // default fake resolves partition -> 'persist:jar-a', matching the seeded jar
+  const { session, counts } = fakeSession(h.log);
+  h.runtime.onSessionCreated(session);
+  assert.equal(counts.certVerifyProc, 1);
+  assert.deepEqual(h.certObserverCalls, ['persist:jar-a']);
 });
 
 test('web session gets one Shields pipeline, downloads, idempotent spellcheck, and one cookie listener', () => {
@@ -152,7 +194,10 @@ test('web session gets one Shields pipeline, downloads, idempotent spellcheck, a
   const { session, counts } = fakeSession(h.log);
   h.runtime.onSessionCreated(session);
   assert.equal(session.__goldfinchShields, true);
-  assert.deepEqual(counts, { beforeRequest: 1, beforeSendHeaders: 1, headersReceived: 1 });
+  // Mission 20 Flight 2 Leg 2 (DD6): a verify-proc is installed for every web
+  // session, beside applyShields.
+  assert.deepEqual(counts, { beforeRequest: 1, beforeSendHeaders: 1, headersReceived: 1, certVerifyProc: 1 });
+  assert.equal(h.certObserverCalls.length, 1);
   assert.equal(h.log[0][0], 'downloads');
   assert.deepEqual(h.log[1], ['languages', ['en-US']]);
   assert.equal(session.cookies.listenerCount('changed'), 1);
@@ -160,7 +205,7 @@ test('web session gets one Shields pipeline, downloads, idempotent spellcheck, a
   h.runtime.applyShields(session);
   assert.deepEqual(
     counts,
-    { beforeRequest: 1, beforeSendHeaders: 1, headersReceived: 1 },
+    { beforeRequest: 1, beforeSendHeaders: 1, headersReceived: 1, certVerifyProc: 1 },
     'repeat application never installs a second webRequest listener'
   );
   h.runtime.applySpellcheck(session, false);

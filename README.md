@@ -47,10 +47,16 @@ or download **v0.16.4** directly:
   window in the opener's cookie jar with a live `window.opener` handle —
   sign-in result delivery and popup self-close included. A navigation that
   **fails to load** (DNS, connection refused, timeout, a blocked/unsafe
-  address, and — until certificate errors get their own interstitial — an
-  untrusted certificate) never leaves a blank tab: Goldfinch shows an
-  explanatory page with the address you tried, the reason, and a **Retry**
-  button.
+  address, or an untrusted certificate) never leaves a blank tab: Goldfinch
+  shows an explanatory page with the address you tried, the reason, and a
+  **Retry** button. A **certificate error** additionally offers **View
+  certificate** (a read-only card with the subject, issuer, validity dates,
+  fingerprints, and certificate chain) and, when the error is one a browser
+  can safely let you bypass, **Advanced → Proceed** — a decision remembered
+  only for that certificate, for the rest of the session. The address bar
+  and the site-information popup always say **"Not secure"** for plain HTTP
+  and for a certificate error you chose to override — the certificate viewer
+  is available for any trusted page too, from the site-information popup.
 - **Frameless window**: Goldfinch runs in a custom frameless window —
   minimize / maximize-restore / close controls live at the right end of the tab
   bar on Windows and Linux; macOS keeps its native traffic-light controls.

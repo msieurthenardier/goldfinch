@@ -42,14 +42,48 @@ test("fresh tab with unparseable/empty URL → '—' host fallback", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Connection: HTTPS vs HTTP (prefix test, case-insensitive — parity with the
-// chrome popup's /^https:/i)
+// Connection: neutral/blank until main pushes a known state (no known
+// tab.security yet — pre-push tab). Acceptance-run fix pass, F4
+// (tls-trust-surface checkpoint 9): this used to fall back to a
+// scheme-derived HTTPS/HTTP label, asserting trust before the connection was
+// verified. The popup never claims a state main has not pushed.
 // ---------------------------------------------------------------------------
-test('connection is HTTPS for https: URLs, HTTP otherwise', () => {
-  assert.equal(deriveSiteInfo({ url: 'https://a.example/' }, false).connection, 'HTTPS');
-  assert.equal(deriveSiteInfo({ url: 'HTTPS://a.example/' }, false).connection, 'HTTPS');
-  assert.equal(deriveSiteInfo({ url: 'http://a.example/' }, false).connection, 'HTTP');
-  assert.equal(deriveSiteInfo({ url: '' }, false).connection, 'HTTP');
+test('connection is blank until main pushes a security state (tls-trust-surface checkpoint 9)', () => {
+  assert.equal(deriveSiteInfo({ url: 'https://a.example/' }, false).connection, '');
+  assert.equal(deriveSiteInfo({ url: 'HTTPS://a.example/' }, false).connection, '');
+  assert.equal(deriveSiteInfo({ url: 'http://a.example/' }, false).connection, '');
+  assert.equal(deriveSiteInfo({ url: '' }, false).connection, '');
+});
+
+// ---------------------------------------------------------------------------
+// Mission 20 Flight 2 Leg 4 (DD8): connection reads tab.security via the
+// shared vocabulary; showCertificate gates on security ∈ {secure,
+// overridden} OR a folded cert-blocked failure.
+// ---------------------------------------------------------------------------
+test('connection reads tab.security through the shared vocabulary (secure/insecure/overridden/none)', () => {
+  assert.equal(deriveSiteInfo({ url: 'https://a.example/', security: 'secure' }, false).connection, 'Secure (HTTPS)');
+  assert.equal(
+    deriveSiteInfo({ url: 'http://a.example/', security: 'insecure' }, false).connection,
+    'Not secure (HTTP)'
+  );
+  assert.equal(
+    deriveSiteInfo({ url: 'https://a.example/', security: 'overridden' }, false).connection,
+    'Not secure — certificate error overridden (HTTPS)'
+  );
+  // `none`/unrecognized → blank, no claim (F4: never a scheme-derived guess).
+  assert.equal(deriveSiteInfo({ url: 'https://a.example/', security: 'none' }, false).connection, '');
+});
+
+test('showCertificate is true for secure/overridden, and for a cert-blocked interstitial regardless of security', () => {
+  assert.equal(deriveSiteInfo({ url: 'https://a.example/', security: 'secure' }, false).showCertificate, true);
+  assert.equal(deriveSiteInfo({ url: 'https://a.example/', security: 'overridden' }, false).showCertificate, true);
+  assert.equal(deriveSiteInfo({ url: 'http://a.example/', security: 'insecure' }, false).showCertificate, false);
+  assert.equal(deriveSiteInfo({ url: 'https://a.example/', security: 'none' }, false).showCertificate, false);
+  assert.equal(
+    deriveSiteInfo({ url: 'https://a.example/', security: 'none', loadFailure: { cert: { error: 'X' } } }, false)
+      .showCertificate,
+    true
+  );
 });
 
 // ---------------------------------------------------------------------------

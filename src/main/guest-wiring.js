@@ -22,8 +22,11 @@ const { isBurnerPartition } = require('../shared/burner');
 // Mission 20 Flight 1 (DD2/DD4): the shared classification predicates and the
 // entry-URL substitution helper — both Electron-free, both required at the
 // established main-side CJS-of-ESM pattern (`settings-store.js:24` et al.).
-const { shouldRecordLoadFailure, isChromeErrorUrl } = require('../shared/load-failure');
+const { shouldRecordLoadFailure, isChromeErrorUrl, classifyCertError } = require('../shared/load-failure');
 const { effectiveUrl } = require('./tab-entry-url');
+// Mission 20 Flight 2 Leg 2 (DD6/DD7): the security-state enum + pure
+// derivation, and the observer's durable-copy read seam.
+const { deriveSecurityState, SECURITY_STATES } = require('../shared/site-security');
 
 /**
  * M14 F2 L1 — the DD3 popup predicate (pure, exported for the unit matrix),
@@ -76,6 +79,9 @@ function createGuestWiring(deps) {
     faviconFetcher,
     popupRegistry,
     webPreloadPath,
+    // Mission 20 Flight 2 Leg 2 (DD6): the session-level certificate-
+    // verification observer's read seam (`did-navigate`'s durable-copy stamp).
+    certObserver,
     // Squawk 0073: arms the continuous session-snapshot debounce (built + owned in
     // main.js) on a URL change — the snapshot's `url` field must track live
     // navigation, not just tab creation/close/activation. Optional-chained so an
@@ -477,6 +483,12 @@ function createGuestWiring(deps) {
           const entry = resolveEntry();
           if (entry) {
             entry.lastRequestedUrl = e.url;
+            // Mission 20 Flight 2 Leg 2 (DD1): a real, page-initiated
+            // main-frame navigation invalidates any pending/prior cert
+            // decision stamp — the error document's own `chrome-error:`
+            // commit is excluded above, same guard as the loadFailure clear.
+            entry.certFailure = null;
+            entry.certOverride = null;
             if (entry.loadFailure) {
               entry.loadFailure = null;
               applyGuestVisibility(entry);
@@ -504,27 +516,67 @@ function createGuestWiring(deps) {
         // lastRequestedUrl — `failure.url` above already carries whatever the
         // engine handed back, empty or not.
         if (validatedURL) entry.lastRequestedUrl = validatedURL;
-        // Pinned order (DD1): record → hide (if active) → close find (if active) →
-        // tell the chrome. The sheet is left alone — an open menu is the
-        // operator's, not the page's.
+        // Mission 20 Flight 2 Leg 2 (DD1/DD4): fold a pending certFailure stamp
+        // into this failure's `.cert` field. `cert-trust.js` holds only ONE
+        // certFailure slot at a time (overwritten on every refusal) — so for
+        // the two-rapid-cert-errors edge case (a redirect chain, A→B, both
+        // bad) there is never more than one candidate to fold: whichever
+        // stamp is CURRENT at this instant is, by construction, "the latest"
+        // the leg's edge-case ruling calls for. Cleared unconditionally right
+        // after, so a certFailure can never leak into an unrelated LATER
+        // failure.
+        if (entry.certFailure) {
+          if (typeof errorDescription === 'string' && errorDescription.startsWith('ERR_CERT_')) {
+            const cf = entry.certFailure;
+            entry.loadFailure.cert = {
+              host: cf.host,
+              port: cf.port,
+              error: cf.error,
+              // Mission 20 Flight 2 Leg 3 (DD2/DD3): the proceed handler keys
+              // the override from THIS field, never from a payload — carry it
+              // through the fold (it was in cert-trust.js's stamp but not
+              // here, so the interstitial's recorded failure had no
+              // fingerprint to key an override with).
+              fingerprint: cf.fingerprint,
+              overridable: classifyCertError(cf.error).overridable,
+              summary: cf.summary
+            };
+          }
+          entry.certFailure = null;
+        }
+        // Pinned order (DD1, extended by Mission 20 Flight 2 Leg 2): record →
+        // fold cert (above) → hide (if active) → close find (if active) →
+        // chromeNavPending clear (below) → tell the chrome. The sheet is left
+        // alone — an open menu is the operator's, not the page's.
         if (owner.activeTabWcId === wcId) {
           applyGuestVisibility(entry);
           owner.findOverlay?.hide();
         }
-        // Mission 20 Flight 1 Leg 3 (HAT H7, focus logger-confirmed): Chromium
-        // is about to commit its own `chrome-error://chromewebdata/` document
-        // into this now-hidden guest, and that commit steals OS input focus
-        // into it — hidden + focused means keystrokes go nowhere, and the
-        // chrome's own `heading.focus()` call (triggered by the send below)
-        // becomes a DOM-only focus in an unfocused window (F6/Tab silently
-        // land on the hidden guest). Reassert OS focus onto the chrome NOW,
-        // while it still holds it, before the error document has a chance to
-        // take it. Gated on the guest CURRENTLY holding focus (a background
-        // failure — activeTabWcId mismatch — never touches focus) and on no
-        // sheet menu being open (DD1: an open menu is the operator's focus to
-        // keep, the same posture as the findOverlay.hide() gate above).
-        if (owner.activeTabWcId === wcId && wc.isFocused() && !owner.sheet?.isMenuOpen()) chromeForTab(wcId)?.focus();
+        // Mission 20 Flight 2 Leg 1 (#216, DD12): the F1 did-fail-load/did-finish-load
+        // `wc.isFocused()` reasserts that used to live here are REMOVED — the leg-1
+        // diagnostic run on the live rig found the steal to be a few-ms-after-
+        // `loadURL` `focus`/`blur` cycle on the GUEST's webContents that starts and
+        // is largely resolved BEFORE this handler ever runs (well before
+        // did-fail-load), so a one-shot reassert keyed to this instant raced the
+        // steal and lost (confirmed by the debrief: "did not change the observed
+        // behavior"). The fix is now
+        // upstream — a `chromeNavPending` flag armed at `tab-navigate` (when the
+        // sender chrome held focus) and a reactive chrome-`blur` listener
+        // (`window-factory.js`) that reasserts chrome focus the instant it fires,
+        // however many times the guest re-steals it. `chromeNavPending` clears
+        // right below.
+        entry.chromeNavPending = false;
         sendToChrome('tab-load-failure', { wcId, failure: entry.loadFailure });
+        // Mission 20 Flight 2 Leg 4 (design review, HIGH): a tab that loaded
+        // securely and then fails kept its STALE security value — no push
+        // fired on failure, so the chip could read "secure" for a page that
+        // no longer resolves at all (DD7/DD16's invariant, "a failed or
+        // cert-blocked tab has security: none", was never enforced end to
+        // end). Fixed at the source: stamp `none` and push it right after
+        // the failure push, unconditionally (a fresh commit recomputes it on
+        // its own did-navigate — this never needs to be un-set elsewhere).
+        entry.security = SECURITY_STATES.NONE;
+        sendToChrome('tab-security', { wcId, security: SECURITY_STATES.NONE });
       })
     );
     wc.on(
@@ -534,8 +586,60 @@ function createGuestWiring(deps) {
         // chrome-error: URL — the census, the address bar, and history must never
         // see the error document's own URL.
         const entry = resolveEntry();
+        // Mission 20 Flight 2 Leg 1 (#216, DD12): disarm the pending flag here too
+        // — this fires for a genuinely successful commit AND for the internal
+        // `chrome-error:` document's own eventual commit, so either way the
+        // "chrome-initiated navigation in flight" window has closed.
+        if (entry) entry.chromeNavPending = false;
         const url = entry ? effectiveUrl(entry) : wc.getURL();
         sendToChrome('tab-did-navigate', { wcId, url });
+        // Mission 20 Flight 2 Leg 2 (DD6/DD7, FD amendment to DD7): certificate +
+        // security state at each main-frame commit. Its OWN owner-routed push
+        // (`tab-security`), sent right after `tab-did-navigate` — never riding
+        // that channel itself, because the adopt re-push (register-tab-ipc.js)
+        // must NOT replay `tab-did-navigate` (its chrome handler resets
+        // media/privacy/suggestions).
+        if (entry) {
+          const rawUrl = wc.getURL();
+          /** @type {string} */
+          let security = SECURITY_STATES.NONE;
+          let certificate = null;
+          // Edge case: did-navigate never fires for a chrome-error: commit
+          // (F1 spike (b)) — defensive only, since effectiveUrl already
+          // guards the URL the chrome sees.
+          if (!isChromeErrorUrl(rawUrl)) {
+            let hostname;
+            let port = /** @type {number | null} */ (null);
+            try {
+              const parsed = new URL(url);
+              hostname = parsed.hostname;
+              port = parsed.port
+                ? Number(parsed.port)
+                : parsed.protocol === 'https:'
+                  ? 443
+                  : parsed.protocol === 'http:'
+                    ? 80
+                    : null;
+            } catch {
+              hostname = null;
+            }
+            const verification = hostname ? certObserver.lookup(partition, hostname) : null;
+            certificate = verification || null;
+            const overridden =
+              !!entry.certOverride && entry.certOverride.host === hostname && entry.certOverride.port === port;
+            security = deriveSecurityState({ url, internal: !!entry.trusted, verification, overridden });
+          }
+          // HAT F5: `entry.certificate` stays the observer's raw lookup
+          // result for this navigation regardless of `overridden` — it is
+          // NOT the overridden-tab viewer source (that's `certOverride.summary`,
+          // read via tab-certificate-get in register-tab-ipc.js). This field
+          // remains the `secure` path's viewer source only; on an overridden
+          // tab it can be stale/wrong-port (the observer keys by hostname
+          // only, with no port) and must never be read for display.
+          entry.certificate = certificate;
+          entry.security = security;
+          sendToChrome('tab-security', { wcId, security });
+        }
         sendToChrome('tab-nav-state', {
           wcId,
           canGoBack: wc.navigationHistory.canGoBack(),
@@ -608,20 +712,14 @@ function createGuestWiring(deps) {
           canGoBack: wc.navigationHistory.canGoBack(),
           canGoForward: wc.navigationHistory.canGoForward()
         });
-        // Mission 20 Flight 1 Leg 3 (HAT H7): this handler fires AGAIN for the
-        // error document's own commit — that second commit is when the OS-
-        // focus steal into the hidden guest actually happens (the did-fail-load
-        // reassert above already lost that race once, since the error document
-        // hadn't committed yet). Reassert only while a failure is still
-        // recorded for this tab, it's the active tab, the guest currently
-        // holds OS focus, and no sheet menu is open (DD1 — an open menu is the
-        // operator's). Never mutates `entry.loadFailure` or sends anything
-        // else; a background tab's failure never touches focus.
-        const owner = registry.getWindowForGuest(wcId);
-        const entry = owner?.tabViews?.get(wcId);
-        if (entry?.loadFailure && owner?.activeTabWcId === wcId && wc.isFocused() && !owner?.sheet?.isMenuOpen()) {
-          chromeForTab(wcId)?.focus();
-        }
+        // Mission 20 Flight 2 Leg 1 (#216, DD12): the F1 speculative reassert that
+        // used to live here (a second `wc.isFocused()` check for the error
+        // document's own commit) is REMOVED — dead per the leg-1 live diagnostic
+        // run, which found a `focus`/`blur` cycle on the guest starting
+        // asynchronously right after `wc.loadURL()`, well before this event ever
+        // fires. The debrief already recorded this exact reassert as ineffective
+        // ("did not change the observed behavior"). The chrome-blur listener in
+        // window-factory.js is the sole remaining reassert mechanism.
       })
     );
     wc.on(

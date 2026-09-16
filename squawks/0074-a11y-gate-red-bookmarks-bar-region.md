@@ -1,10 +1,10 @@
 # Squawk 0074: `npm run a11y` is red on every chrome state — `#bookmarks-bar` region violation never accepted
 
-**Status**: deferred
+**Status**: completed
 **Type**: defect
 **Severity**: routine
 **Reported**: 2026-09-15
-**Completed**: —
+**Completed**: 2026-09-15
 
 ## Report
 
@@ -34,22 +34,39 @@ lists a `region` violation on `#bookmarks-bar` in every state.
 
 ## Corrective Action
 
-_(written at completion)_ Either add the `(region, #bookmarks-bar)` pair to
-`ACCEPTED` with the same app-shell reason as its siblings, or give the bar a
-landmark role (`navigation` + its existing label) — pick the one consistent
-with how `#tabs` was ruled; one read pass.
+Added the `(region, #bookmarks-bar)` pair to `ACCEPTED` in
+`scripts/a11y-audit.mjs`, immediately beside its `#tabs`/`#brand`/
+`#address-wrap` app-shell siblings, using the same "app-shell … sits outside
+a landmark; accepted chrome exception" reason and a note citing Mission 15 /
+squawk 0074. This is the option consistent with how `#tabs`/`#brand`/
+`#address-wrap` were ruled: `#bookmarks-bar` is `role="group"` (not a
+landmark) on the same frozen app-shell chrome as those three, so the
+allowlist-entry precedent applies directly. Did NOT change the bar's role in
+`src/renderer/index.html` — that would touch the frozen chrome DOM contract
+(CLAUDE.md's Tab strip / bookmarks-bar sections) and the bookmarks-bar
+behavior specs, which is out of this squawk's scope.
+
+Checked `test/unit` for a test pinning `ACCEPTED`'s shape/contents
+(`a11y-audit-exit-codes.test.js` pins the three `process.exit` codes;
+`a11y-audit-sheet-skip.test.js` pins the sheet-skip mechanism;
+`seam-contract.test.js` pins the evaluate-seam identifiers the audit script
+drives) — none inspect `ACCEPTED` entries, so no existing test needed
+extending, and per this squawk's scope no new test file was added.
 
 ## Verification
 
-`npm run a11y` exits 0 on the canonical dev launch with no `ACCEPTED`
-entries beyond the one added (or none, if the role change is chosen).
+- `npm run lint` — clean (no output beyond the script header).
+- `npm run format:check` — "All matched files use Prettier code style!"
+  (no reformat needed).
+- `npm test -- --test-timeout=60000` — 4565 tests, 0 failures.
+- `npm run a11y` was NOT run here — it requires the live app (canonical
+  admin dev launch), which this squawk's instructions say not to launch.
+  The live exit-0 confirmation is deferred to Mission 20 Flight 2 leg 4's
+  acceptance gate, where `npm run a11y` runs against the running app with
+  an exit-0 AC.
 
 ## Sign-Off
 
-_(written at completion)_
-
-## Disposition
-
-**Deferred**: out of Mission 20 Flight 1's scope (the flight added no bar
-code) — revisit at the next squawk turnaround, and before Mission 20 Flight 2
-audits its interstitial states (a green gate is the only honest AC there).
+**Reviewer**: Reviewer agent (Sonnet), batch review of squawks 0074 + 0076, 2026-09-15
+**Verdict**: confirmed — corrective action correct, complete, confined to the reported surface; lint/format/tests green (4565/4565)
+**Commit**: `squawk: turnaround 2026-09-15` on `flight/02-tls-trust` (turnaround shares the Mission 20 Flight 2 branch by operator ruling)

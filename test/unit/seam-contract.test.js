@@ -85,7 +85,20 @@ const A11Y_AUDIT_MJS = path.join(REPO_ROOT, 'scripts/a11y-audit.mjs');
 // openVaultCompromiseOverlayForAudit / openVaultCompromiseRecoverOverlayForAudit — the
 // SHEET_STATES 'sheet:vault-compromise' / 'sheet:vault-compromise-recover' a11y drivers
 // (same leg-authorized seam-addition precedent as the other vault sheets).
-const SEAM_COUNT = 36;
+// M20 F2 L3 (TLS trust override, DD11/DD3): +1 for openCertOverrideOverlayForAudit —
+// the SHEET_STATES 'sheet:cert-override' a11y driver for the proceed-despite-a-cert-
+// error card (same leg-authorized seam-addition precedent; the card itself stays
+// refused to every automation op, DD3/DD10 — this hook exists for the audit's skip
+// list, not for coverage).
+// M20 F2 L4 (security-indicator-and-certificate-viewer, DD11): +2, 37 → 39 —
+// openCertViewerOverlayForAudit (the SHEET_STATES 'sheet:cert-viewer' a11y driver,
+// same leg-authorized precedent — unlike cert-override's hook, cert-viewer IS
+// admitted to AUTOMATABLE_MENU_TYPES, DD10, so this one is real audit coverage,
+// not a skip-list record) and openCertificateViewer (the controller's real-model
+// opener for the active tab — the only automation-reachable route to a TRUSTED
+// page's viewer, since the popup's Certificate action lives on the sheet; the
+// M16 F2 L1 openNewTab precedent — a non-a11y, behavior-spec-driven addition).
+const SEAM_COUNT = 39;
 // Renderer line budget: raised from M11's 1200 to absorb Mission 12's password-manager
 // renderer work (the chrome-owned vault sheets + indicator wiring). See the merge of
 // PR #112; renderer.js extraction remains banked architecture debt.
@@ -197,7 +210,54 @@ const SEAM_COUNT = 36;
 // controller can sync the address bar/chip on an active-tab failure push —
 // see load-failure-controller.js). No other renderer.js line changed. Zero
 // headroom, same policy as every prior entry.
-const RENDERER_LINE_BUDGET = 1858;
+// Mission 20 Flight 2 Leg 1 (DD11): LOWERED, 1858 → 1792, by the
+// `audit-hooks.js` extraction (the six `open*ForAudit` hooks, ≈90 lines) and
+// the `site-security-controller.js` seed (the chip listeners, `siteInfoAnchor`,
+// `openSiteInfoOverlay`, ≈25 lines) — both behaviour-preserving moves, offset
+// by the two new `import`/construction blocks and the #216 fix's one extra
+// chained guard in the `onActivated` short-circuit. Measured AFTER
+// `npm run format` (CLAUDE.md § Formatting is Prettier's) — not the flight
+// spec's ≤ 1770 estimate, which DD11 itself says to treat as a floor, not a
+// target: "leg 1 pins whatever Prettier measures, not the estimate."
+// Mission 20 Flight 2 Leg 2 (AC10): RAISED, 1792 → 1794 — a named, bounded
+// bump for exactly two new dependency keys on the EXISTING
+// `createSiteSecurityController` construction call (`bridge: window.goldfinch`
+// and `findTabByWcId`, needed so the controller can subscribe the owner-
+// routed `tab-security` push and resolve a possibly-background tab from it —
+// see site-security-controller.js), never glue logic. Measured AFTER
+// `npm run format`; ≤ 1796 per the leg's own bound.
+// Mission 20 Flight 2 Leg 3 (override-card-and-proceed, FD ruling): RAISED,
+// 1794 → 1799 — EXACTLY FIVE named glue lines, no more: the `'cert-override'`
+// menu-state table entry (lazy `document.getElementById('load-failure-
+// advanced')` resolver — the Advanced trigger cannot be a static `els.*`
+// entry, since its button is built after this table); one `onAdvanced` dep on
+// the EXISTING `createLoadFailureController` call (a late-bound closure into
+// `siteSecurityController`, constructed further down — the `homePageCache`
+// idiom); one `closeOverlayMenu` dep on the EXISTING
+// `createSiteSecurityController` call; the audit-hook destructure line
+// (`openCertOverrideOverlayForAudit`); and the seam-tail republish line for
+// the same name. Measured AFTER `npm run format`; ≤ 1800 per the leg's own
+// bound — no line was folded to fit.
+// Mission 20 Flight 2 Leg 4 (security-indicator-and-certificate-viewer, FD
+// ruling): RAISED, 1799 → 1804 — EXACTLY FIVE named glue lines, no more: the
+// `'cert-viewer'` menu-state table entry (`fixedTriggerMenu(() =>
+// els.addressChip)` — from the panel, refocus lands on the chip); one
+// `onViewCertificate` dep on the EXISTING `createLoadFailureController` call
+// (the `onAdvanced` precedent, late-bound into `siteSecurityController`); the
+// audit-hook destructure line (`openCertViewerOverlayForAudit`); and TWO
+// seam-tail republish lines (`openCertViewerOverlayForAudit` — the a11y hook
+// — and `openCertificateViewer` — the ONE behavior-spec-driven opener, the
+// M16 F2 L1 `openNewTab` precedent). Measured AFTER `npm run format`; ≤ 1805
+// per the FD ruling — no line was folded to fit.
+// Acceptance-run fix pass F3 (tls-trust-surface checkpoint 6, 2026-09-16):
+// RAISED, 1804 → 1806 — TWO named glue lines: `createSiteSecurityController`'s
+// call gains `isActiveTab`/`updateAddressChip` deps (the load-failure-
+// controller.js F1 fix-pass shape) so the `tab-security` push can refresh the
+// chip for the tab it landed on, closing the gap where `tab-did-navigate`'s
+// own updateAddressChip call drew a stale (pre-navigation) security state.
+// Measured AFTER `npm run format` (this test's own split-array metric — one
+// above `wc -l` for a newline-terminated file).
+const RENDERER_LINE_BUDGET = 1806;
 
 // Bookmarks-bar line budget (squawk 0025, M15 debrief finding F25): bar/
 // overflow rendering, measurement, and dispatch business logic lives in

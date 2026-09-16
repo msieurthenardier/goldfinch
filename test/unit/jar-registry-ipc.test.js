@@ -388,6 +388,38 @@ test('jars-remove session-throw pin: bookkeeping cleanup is SKIPPED too (it runs
 });
 
 // ---------------------------------------------------------------------------
+// Mission 20 Flight 2 Leg 2 (DD2/DD6/AC9): the cert-trust/cert-observer
+// clears run FIRST inside wipeJarData (reached via handleRemove), before the
+// fail-hard storage calls.
+// ---------------------------------------------------------------------------
+
+test("AC9: jars-remove clears cert-trust/cert-observer for the jar's partition BEFORE clearStorageData", async (t) => {
+  const h = makeHarness(t, { storagePaths: { 'persist:container:personal': '/fake/Partitions/container:personal' } });
+  const result = await h.invoke('jars-remove', { id: 'personal' });
+  assert.equal(result.ok, true);
+  const order = h.events.map((e) => e.fn);
+  const trustIdx = order.indexOf('certTrust.clearPartition');
+  const observerIdx = order.indexOf('certObserver.clearPartition');
+  const storageIdx = order.indexOf('clearStorageData');
+  assert.ok(trustIdx !== -1 && observerIdx !== -1 && storageIdx !== -1, 'all three ran');
+  assert.ok(trustIdx < storageIdx, 'certTrust clear runs before the fail-hard clearStorageData call');
+  assert.ok(observerIdx < storageIdx, 'certObserver clear runs before the fail-hard clearStorageData call');
+});
+
+test('AC9: cert-trust/cert-observer STILL clear on jars-remove even when clearStorageData throws (fail-soft wipe)', async (t) => {
+  const h = makeHarness(t, {
+    storagePaths: { 'persist:container:personal': '/fake/Partitions/container:personal' },
+    storageThrows: true
+  });
+  const result = await h.invoke('jars-remove', { id: 'personal' });
+  assert.equal(result.ok, true);
+  assert.equal(result.wiped, false, 'the wipe itself still fails-soft on the storage error');
+  const order = h.events.map((e) => e.fn);
+  assert.ok(order.includes('certTrust.clearPartition'), 'trust was cleared despite the later throw');
+  assert.ok(order.includes('certObserver.clearPartition'), 'observer was cleared despite the later throw');
+});
+
+// ---------------------------------------------------------------------------
 test('jars-rename with a non-object primitive payload (string) returns null, no throw', (t) => {
   const h = makeHarness(t);
   assert.equal(h.invoke('jars-rename', 'personal'), null);

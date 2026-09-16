@@ -114,6 +114,17 @@ axe-core audit (`scripts/a11y-audit.mjs`) against the RUNNING app over the MCP s
   always disabled (the tab/close-button pattern is accepted APG).
 - **Fixture**: serve `tests/behavior/fixtures/a11y-media/` via `python3 -m http.server` at
   `http://127.0.0.1:8000/`.
+- **`cert-blocked` state (`--tls-url=<https url>`, Mission 20 F2 L4, DD15)**: opt-in — needs
+  a SECOND process, a TLS fixture the app was launched **WITHOUT**
+  `--insecure-tls-fixtures` against, e.g.:
+  ```
+  node tests/behavior/fixtures/web-compat/serve-tls.mjs --port <T>
+  npm run a11y -- --tls-url=https://127.0.0.1:<T>/
+  ```
+  This audits the load-failure panel's MORE SPECIFIC cert-blocked classification
+  (`#load-failure-view-cert`/`-advanced` included) right after the generic
+  `load-failure` state. Absent `--tls-url=`, the audit prints a skip notice and exits
+  on the chrome states' own result — never an apparatus failure for simply omitting it.
 - **Exclusions**: `goldfinch://settings` cannot be audited via `--target` (the eval tools
   exclude the internal session even for admin); the find overlay is not audited here (its
   a11y rests on the verbatim attribute carry-over + HAT keyboard pass).

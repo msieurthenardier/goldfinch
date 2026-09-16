@@ -113,6 +113,26 @@ test('mapEnumeratedTabs: loadState/loadError pass through unchanged when present
   assert.deepEqual(result[0].loadError, { code: -312, name: 'ERR_UNSAFE_PORT' });
 });
 
+// ---------------------------------------------------------------------------
+// Mission 20 Flight 2 Leg 2 (AC4): the `security` census field
+// ---------------------------------------------------------------------------
+
+test('mapEnumeratedTabs: security passes through unchanged when present', () => {
+  const wc = makeGuestWc(13);
+  const rawTabs = [
+    { wcId: 13, url: 'https://bad.test/', title: 'Bad', jarId: 'default', active: true, security: 'overridden' }
+  ];
+  const result = mapEnumeratedTabs(rawTabs, { fromId: makeFakeFromId({ 13: wc }), chromeContents: null });
+  assert.equal(result[0].security, 'overridden');
+});
+
+test('mapEnumeratedTabs: security defaults to none when absent from the raw row', () => {
+  const wc = makeGuestWc(14);
+  const rawTabs = [{ wcId: 14, url: 'about:blank', title: 'New tab', jarId: 'default', active: false }];
+  const result = mapEnumeratedTabs(rawTabs, { fromId: makeFakeFromId({ 14: wc }), chromeContents: null });
+  assert.equal(result[0].security, 'none');
+});
+
 test('mapEnumeratedTabs: loadState defaults to ok and loadError to null when absent from the raw row', () => {
   const wc = makeGuestWc(12);
   const rawTabs = [{ wcId: 12, url: 'https://example.com', title: 'Example', jarId: 'default', active: false }];

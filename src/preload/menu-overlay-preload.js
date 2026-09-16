@@ -125,5 +125,15 @@ contextBridge.exposeInMainWorld('menuOverlay', {
   // has legitimately blur-closed and no menuType/token could still match — its
   // freshness check moves to the chrome, the only party that can still evaluate
   // it (and `end` can only CANCEL a session, never cause a write).
-  sheetDrag: (payload) => ipcRenderer.send('menu-overlay:sheet-drag', payload)
+  sheetDrag: (payload) => ipcRenderer.send('menu-overlay:sheet-drag', payload),
+  // M20 F2 L3 (flight DD3): the cert-override sheet's DEDICATED proceed
+  // channel — the flight's ONE security-decision channel. One-way payload
+  // shape `{ token }` ONLY: the override key and the re-navigation target are
+  // both derived main-side from the entry, never from anything the sheet
+  // sends. An invoke (not send) — the sheet awaits { ok, reason? } to decide
+  // whether to stay open with the "Couldn't proceed" status line. No other
+  // method here is named `certOverride*`/`cert-override*` — that absence is
+  // itself part of AC3's closure (grep-AC; the chrome preload exposes none
+  // at all).
+  certOverrideProceed: (payload) => ipcRenderer.invoke('menu-overlay:cert-override-proceed', payload)
 });

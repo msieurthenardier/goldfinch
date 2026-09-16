@@ -70,6 +70,9 @@ function makeHarness({
   // M14 F1 L3: captured app.on('select-client-certificate') routings —
   // [webContents, url, list, callback].
   const certSelectCalls = [];
+  // Mission 20 Flight 2 Leg 2: captured app.on('certificate-error') routings —
+  // [webContents, url, error, certificate, callback, isMainFrame].
+  const certErrorCalls = [];
   const app = {
     isPackaged: !dev,
     on: (name, fn) => appListeners.set(name, fn),
@@ -213,6 +216,11 @@ function makeHarness({
       handleLogin: (...args) => authLoginCalls.push(args),
       handleSelectClientCertificate: (...args) => certSelectCalls.push(args)
     },
+    // Mission 20 Flight 2 Leg 2 (DD1): the certificate-error trust decision
+    // behind app.on('certificate-error') — a recording fake.
+    certTrust: {
+      handleCertificateError: (...args) => certErrorCalls.push(args)
+    },
     getAllWindows: () => [],
     argv: [],
     env: {},
@@ -230,6 +238,7 @@ function makeHarness({
     internalSession,
     authLoginCalls,
     certSelectCalls,
+    certErrorCalls,
     defaultSessionReads: () => defaultSessionReads,
     setBootRecord: (record) => {
       bootRecord = record;
@@ -348,6 +357,37 @@ test('select-client-certificate handler ALWAYS preventDefault()s and routes all 
   );
   assert.equal(h.certSelectCalls.length, 1);
   assert.deepEqual(h.certSelectCalls[0], [webContents, url, list, callback]);
+});
+
+// ---------------------------------------------------------------------------
+// Mission 20 Flight 2 Leg 2 (DD1): app.on('certificate-error') registration +
+// routing — beside 'login'/'select-client-certificate', same rationale.
+// ---------------------------------------------------------------------------
+
+test('certificate-error handler is registered at TOP-LEVEL scope, before whenReady resolves (Mission 20 F2 L2 / DD1)', () => {
+  const h = makeHarness();
+  assert.equal(h.appListeners.has('certificate-error'), true);
+});
+
+test('certificate-error handler ALWAYS preventDefault()s and routes all six args to certTrust.handleCertificateError', () => {
+  const h = makeHarness();
+  const handler = h.appListeners.get('certificate-error');
+  const event = {
+    prevented: false,
+    preventDefault() {
+      this.prevented = true;
+    }
+  };
+  const webContents = { id: 7, session: {} };
+  const url = 'https://bad.test/';
+  const error = 'net::ERR_CERT_AUTHORITY_INVALID';
+  const certificate = { fingerprint: 'AA:BB', data: '' };
+  const callback = () => {};
+  const isMainFrame = true;
+  handler(event, webContents, url, error, certificate, callback, isMainFrame);
+  assert.equal(event.prevented, true, 'preventDefault must run unconditionally');
+  assert.equal(h.certErrorCalls.length, 1);
+  assert.deepEqual(h.certErrorCalls[0], [webContents, url, error, certificate, callback, isMainFrame]);
 });
 
 test('web-contents-created catch-all is registered at TOP-LEVEL scope, before whenReady resolves (Mission 13 F3 Leg 3 / DD3)', () => {

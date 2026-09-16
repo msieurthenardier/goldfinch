@@ -233,3 +233,19 @@ test('AC6: a healthy tab (no failure) still snapshots the live URL as before', (
   const out = buildSessionSnapshot({ windows: [win], jarsList: JARS });
   assert.equal(out.windows[0].tabs[0].url, 'https://healthy.example/');
 });
+
+// --- Mission 20 Flight 2 Leg 2 (DD2/AC7): object-shape pin — cert/security fields ---
+// never reach disk. The builder emits an EXPLICIT allowlisted object literal
+// (never a spread), so an entry carrying certFailure/certOverride/certificate/
+// security must still snapshot exactly { url, jarId, active } — no more, no fewer.
+
+test('AC7: a tab entry object-shape pin — the snapshot never carries cert/security fields, even when the source entry has them', () => {
+  const entry = makeEntry({ partition: 'persist:jar-work' });
+  entry.certFailure = { url: 'https://bad.test/', host: 'bad.test', port: 443, error: 'ERR_CERT_AUTHORITY_INVALID' };
+  entry.certOverride = { host: 'bad.test', port: 443, fingerprint: 'AA' };
+  entry.certificate = { verificationResult: 'net::OK' };
+  entry.security = 'overridden';
+  const win = makeWindow([[1, entry]]);
+  const out = buildSessionSnapshot({ windows: [win], jarsList: JARS });
+  assert.deepEqual(Object.keys(out.windows[0].tabs[0]).sort(), ['active', 'jarId', 'url']);
+});

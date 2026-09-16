@@ -101,6 +101,88 @@ test('tracks focus and routes resize/maximize state only to the owning chrome', 
   assert.ok(fsIdx !== -1 && fsIdx < sendIdx, 'resize re-expand precedes the triggered renderer send');
 });
 
+// ---------------------------------------------------------------------------
+// Mission 20 Flight 2 Leg 1 (#216, DD12 H2/H3): the reactive chrome-blur
+// reassert. The live spike traced the stranded-focus steal to the navigating
+// GUEST asserting itself as the window's focused child view asynchronously,
+// a few ms into a chrome-initiated navigation — well before did-fail-load, so
+// a one-shot reassert issued from the tab-navigate handler would race the
+// steal and lose. Reacting to the chrome's OWN `blur` instead catches it
+// whenever it actually lands.
+// ---------------------------------------------------------------------------
+
+test('#216: chrome blur reasserts chrome focus while the active tab has a chrome-initiated navigation pending', () => {
+  const h = createHarness();
+  const rec = h.factory.createWindow();
+  const guest = new h.FakeWebContentsView({});
+  const wcId = guest.webContents.id;
+  rec.tabViews.set(wcId, { view: guest, trusted: false, chromeNavPending: true });
+  rec.activeTabWcId = wcId;
+  h.log.length = 0;
+
+  rec.chromeView.webContents.emit('blur');
+
+  assert.ok(h.log.includes(`focus-wc:${rec.chromeView.webContents.id}`), 'chrome.focus() reasserted');
+});
+
+test('#216: chrome blur does NOT reassert when no chrome-initiated navigation is pending', () => {
+  const h = createHarness();
+  const rec = h.factory.createWindow();
+  const guest = new h.FakeWebContentsView({});
+  const wcId = guest.webContents.id;
+  rec.tabViews.set(wcId, { view: guest, trusted: false, chromeNavPending: false });
+  rec.activeTabWcId = wcId;
+  h.log.length = 0;
+
+  rec.chromeView.webContents.emit('blur');
+
+  assert.equal(h.log.includes(`focus-wc:${rec.chromeView.webContents.id}`), false);
+});
+
+test("#216: chrome blur does NOT reassert for a BACKGROUND tab's pending navigation (only the active tab counts)", () => {
+  const h = createHarness();
+  const rec = h.factory.createWindow();
+  const guest = new h.FakeWebContentsView({});
+  const wcId = guest.webContents.id;
+  rec.tabViews.set(wcId, { view: guest, trusted: false, chromeNavPending: true });
+  rec.activeTabWcId = null; // nothing active — the pending tab is not foreground
+  h.log.length = 0;
+
+  rec.chromeView.webContents.emit('blur');
+
+  assert.equal(h.log.includes(`focus-wc:${rec.chromeView.webContents.id}`), false);
+});
+
+test('#216: chrome blur does NOT reassert while a sheet menu is open (DD1 — the menu owns focus)', () => {
+  const h = createHarness();
+  const rec = h.factory.createWindow();
+  const guest = new h.FakeWebContentsView({});
+  const wcId = guest.webContents.id;
+  rec.tabViews.set(wcId, { view: guest, trusted: false, chromeNavPending: true });
+  rec.activeTabWcId = wcId;
+  rec.sheet = { isMenuOpen: () => true };
+  h.log.length = 0;
+
+  rec.chromeView.webContents.emit('blur');
+
+  assert.equal(h.log.includes(`focus-wc:${rec.chromeView.webContents.id}`), false);
+});
+
+test('#216: chrome blur does NOT reassert on a real app-switch (win.isFocused() false — never fight another application)', () => {
+  const h = createHarness();
+  const rec = h.factory.createWindow();
+  const guest = new h.FakeWebContentsView({});
+  const wcId = guest.webContents.id;
+  rec.tabViews.set(wcId, { view: guest, trusted: false, chromeNavPending: true });
+  rec.activeTabWcId = wcId;
+  rec.win._focused = false;
+  h.log.length = 0;
+
+  rec.chromeView.webContents.emit('blur');
+
+  assert.equal(h.log.includes(`focus-wc:${rec.chromeView.webContents.id}`), false);
+});
+
 test('close tears down overlays before capture/snapshot and destroys every guest afterward', () => {
   const h = createHarness({ settings: { get: () => true } });
   const rec = h.factory.createWindow();

@@ -30,6 +30,8 @@ import { resolveRestoreContainer } from '../shared/restore-container.js'; // M09
 import { SEARCH_ENGINES, buildSearchUrl, capPendingQuery, normalizeHomePageInput } from '../shared/search-engines.js'; // M16 F1 Leg 2 / F2 Leg 2 / F3 Leg 2: the curated table (welcome-controller's engine block) + toUrl's engine-id → URL lookup + the pending-query cap + the shared domain-normalize rule (HAT item 5)
 import { createChromeContext, escapeHtml } from './chrome/context.js';
 import { createDownloadsController } from './chrome/downloads-controller.js';
+import { createAuditHooks } from './chrome/audit-hooks.js';
+import { createSiteSecurityController } from './chrome/site-security-controller.js';
 import { createVaultController } from './chrome/vault-controller.js';
 import { createJarsClient } from './chrome/jars-client.js';
 import { createBookmarksClient, bookmarkEntryToEditModel } from './chrome/bookmarks-client.js';
@@ -390,6 +392,7 @@ const KEBAB_ACTIONS = {
 };
 
 let overlayMenuClient;
+let siteSecurityController;
 const downloadsController = createDownloadsController({
   els,
   goldfinch: window.goldfinch,
@@ -447,6 +450,8 @@ const overlayMenus = {
   // shape — a real trigger button, template family 'menu' (shares menuNode —
   // no NODE_OF_ENTRY addition, per the leg's audit-seam AC).
   'bookmarks-overflow': fixedTriggerMenu(() => els.bookmarksOverflow),
+  'cert-override': fixedTriggerMenu(() => document.getElementById('load-failure-advanced')), // M20 F2 L3 (DD3/DD4): LAZY — the button is built after this table
+  'cert-viewer': fixedTriggerMenu(() => els.addressChip), // M20 F2 L4 (DD9): from the panel, refocus lands on the chip (acceptable)
   'page-context': {
     open: false,
     token: 0,
@@ -519,7 +524,11 @@ overlayMenuClient = createOverlayMenus({
   now: () => performance.now(),
   measureSlot: measureWebviewsSlotDIP, // squawk 0057 — sheet placement for a viewless welcome tab (rationale in overlay-menus.js)
   onActivated: (payload) => {
-    if (!downloadsController.handleActivation(payload) && !vaultController.handleActivation(payload))
+    if (
+      !downloadsController.handleActivation(payload) &&
+      !vaultController.handleActivation(payload) &&
+      !siteSecurityController.handleActivation(payload)
+    )
       dispatchOverlayActivation(payload);
   },
   onClosed: handleOverlayClosed
@@ -647,7 +656,9 @@ loadFailureController = createLoadFailureController({
   findTabByWcId,
   isActiveTab: (tab) => tab.id === ctx.activeTabId,
   classifyLoadFailure, // Mission 20 F1 Leg 2 (DD1)
-  updateAddressChip // F1 fix pass: sync the bar on an active-tab failure push
+  updateAddressChip, // F1 fix pass: sync the bar on an active-tab failure push
+  onAdvanced: (tab) => siteSecurityController.openCertOverrideOverlay(tab), // M20 F2 L3: late-bound (constructed below)
+  onViewCertificate: (tab) => siteSecurityController.openCertificateViewer(tab) // M20 F2 L4: late-bound (constructed below)
 });
 
 shortcutController = createShortcutController({
@@ -697,7 +708,6 @@ const leftAnchorOf = (el) => {
   return leftSheetAnchor(wv, r);
 };
 const containerAnchor = () => leftAnchorOf(els.newTabMenu);
-const siteInfoAnchor = () => leftAnchorOf(els.addressChip);
 
 // Bookmarks bar + overflow (M15 F1 Leg 3) — houses ALL bar/overflow business
 // logic per the leg's line-budget FD ruling (this file gets only the
@@ -775,30 +785,9 @@ const openContainerOverlay = (startIndex) =>
     containerAnchor(),
     startIndex
   );
-// Site-info model derived from the active tab via the shared deriveSiteInfo
-// (the one derivation source). startIndex is meaningless for the no-items
-// popup — the sheet focuses the "Site settings →" action.
-const openSiteInfoOverlay = () => openOverlayMenu('site-info', siteInfoModel(activeTab()), siteInfoAnchor(), 0);
 // New-container dialog (AC4): the template ignores the anchor (centered via CSS)
 // but the open path stays uniform (fresh token, aria on the ▾ refocus trigger).
 const openNewContainerOverlay = () => openOverlayMenu('new-container', [], containerAnchor(), 0);
-// M14 F1 L2 (auth-challenges): a11y SHEET_STATES hook for the auth-basic credential
-// sheet. Opens with a synthetic NON-SECRET host/realm model so the labeled
-// username/password fields + Sign in/Cancel render (dialog-style, Escape-dismissible).
-// Same leg-authorized evaluate-seam precedent as the vault sheet hooks above.
-const openAuthBasicOverlayForAudit = () =>
-  openOverlayMenu('auth-basic', { host: '127.0.0.1:8091', realm: 'fixture' }, null, 0);
-// M14 F1 L3 (client-cert): a11y SHEET_STATES hook for the cert-picker chooser
-// sheet. Opens with a synthetic display-string row (subject + issuer — never a
-// certificate object) so the roving list + Cancel row render. Same
-// leg-authorized evaluate-seam precedent as openAuthBasicOverlayForAudit.
-const openCertPickerOverlayForAudit = () =>
-  openOverlayMenu(
-    'cert-picker',
-    [{ subject: 'CN=Fixture Client', issuer: 'CN=Goldfinch Fixture Throwaway CA' }],
-    null,
-    0
-  );
 // Bookmark-edit popover opener (M15 F1 Leg 2, flight DD4/AC "Anchored
 // positioning attempt"; anchor PARAMETERIZED leg 3 — bar/overflow right-click
 // reuse this same opener anchored at their own trigger element instead of the
@@ -835,23 +824,6 @@ function handleBookmarkStarActivate(tab) {
     if (bookmark) openBookmarkEditOverlay(bookmark, els.star, tab && tab.container ? tab.container.id : null);
   });
 }
-// M15 F1 Leg 2 (FD-ruled seam addition): a11y SHEET_STATES hook for the
-// bookmark-edit popover. Opens with a synthetic NON-SECRET row (id/name/url
-// are all this leg's own already-public data) so the labeled name/url fields
-// + Remove/Done render (dialog-style, Escape-dismissible). Same
-// leg-authorized evaluate-seam precedent as openAuthBasicOverlayForAudit.
-const openBookmarkEditOverlayForAudit = () =>
-  openOverlayMenu('bookmark-edit', { id: 'bm-audit', name: 'Fixture Bookmark', url: 'https://example.com/' }, null, 0);
-// M15 F1 Leg 3 (FD-ruled seam addition, SHEET_STATES ordering rule — see the
-// flight-log FD ruling: placed BEFORE sheet:kebab so this new surface gets
-// real audit coverage instead of being masked by the pre-existing kebab
-// secret-sheet refusal): a11y hook for the bookmarks-overflow chevron menu.
-// Opens with a synthetic NON-SECRET row (this leg's own already-public data
-// shape) so the roving item list renders — template family 'menu' (shares
-// menuNode with kebab/container/page-context/tab-context; no NODE_OF_ENTRY
-// addition, per the leg's audit-seam AC).
-const openBookmarksOverflowOverlayForAudit = () =>
-  openOverlayMenu('bookmarks-overflow', [{ id: 'bookmark:0', label: 'Fixture Bookmark' }], null, 0);
 // Page-context sheet opener (Leg 4). The four invocation sites (guest
 // right-click subscription, chrome-focused keyboard, toolbar-unpin, audit hook)
 // live further down; they capture pageCtx FIRST, then call with a POINT anchor:
@@ -921,16 +893,26 @@ els.newTabMenu.addEventListener('keydown', (e) => {
   }
 });
 
-// 🔒 site-info chip (Leg 3): click toggle + trigger keydown — the chip's own
-// keydown handler below registers Enter/Space/ArrowDown/ArrowUp (startIndex is
-// moot for the popup, so all four keys open the same way).
-els.addressChip.addEventListener('click', () => overlayTriggerClick('site-info', openSiteInfoOverlay));
-els.addressChip.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-    e.preventDefault();
-    openSiteInfoOverlay();
-  }
+// Mission 20 Flight 2 Leg 1 (DD11 seed): the 🔒 site-info chip's trigger
+// listeners, siteInfoAnchor, and openSiteInfoOverlay now live in
+// site-security-controller.js — moved verbatim, behaviour unchanged.
+// `openSiteInfoOverlay` is destructured back out for the evaluate seam tail
+// (same bare-name republish-by-name discipline as audit-hooks.js above).
+siteSecurityController = createSiteSecurityController({
+  els,
+  openOverlayMenu,
+  siteInfoModel,
+  activeTab,
+  overlayTriggerClick,
+  leftAnchorOf,
+  openSiteSettingsTab,
+  bridge: window.goldfinch,
+  findTabByWcId,
+  closeOverlayMenu: (reason) => overlayMenuClient.close(reason), // M20 F2 L3 (DD3)
+  isActiveTab: (tab) => tab.id === ctx.activeTabId,
+  updateAddressChip // Acceptance-run fix pass F3: refresh the chip on the tab-security push
 });
+const { openSiteInfoOverlay, openCertificateViewer } = siteSecurityController;
 
 // ★ star trigger (M15 F1 Leg 2): native <button> — Enter/Space already
 // synthesize click, no separate keydown handler needed.
@@ -976,10 +958,6 @@ function dispatchOverlayActivation({ menuType, id, value }) {
         const c = jarsClient.containers.find((x) => x.id === jarId);
         if (c) openNewTab(c); // M16 F2 Leg 1 (DD4)
       }
-      break;
-    }
-    case 'site-info': {
-      if (id === 'site-settings') openSiteSettingsTab();
       break;
     }
     case 'new-container': {
@@ -1274,6 +1252,10 @@ function handleOverlayClosed({ menuType, reason }) {
   // vault-capture dismiss-drop path) moved wholesale to vault-controller.js
   // (M15 F2 Leg 1 renderer-extraction) — see its handleClosed.
   vaultController.handleClosed({ menuType, reason });
+  // Mission 20 Flight 2 Leg 1 (DD11 seed): a no-op today (site-info/cert-viewer/
+  // cert-override have no close-side state yet) — the seat legs 3-4 use for the
+  // cert-override card's navigation-away close.
+  siteSecurityController.handleClosed({ menuType, reason });
 }
 
 /* ------------------------------------------------- page context menu (SC6/DD2/DD3) */
@@ -1380,32 +1362,6 @@ function openToolbarContextMenu(item, anchorEl) {
   openPageContextOverlaySheet(chromePointToSheet(r.left, r.bottom));
 }
 
-/**
- * Test/audit hook: open the page context menu with a representative synthetic params payload
- * so the `npm run a11y` harness can audit the open sheet menu. Builds a full-section
- * menu (link + selection + editable + spelling-suggestions + Inspect) at a fixed chrome coord.
- * Reachable via the MCP evaluate tool (published by the evaluate-reachable seam
- * at the bottom of this file — module scope hides top-level functions).
- */
-function openPageContextMenuForAudit() {
-  pageCtx.wcId = (activeTab() && activeTab().wcId) || null;
-  pageCtx.params = {
-    linkURL: 'https://example.com/',
-    selectionText: 'sample',
-    isEditable: true,
-    editFlags: { canCut: true, canCopy: true, canPaste: true, canUndo: true, canRedo: true },
-    misspelledWord: 'teh',
-    dictionarySuggestions: ['the', 'ten', 'tea'],
-    x: 80,
-    y: 80
-  };
-  pageCtx.toolbarItem = null;
-  pageCtx.returnFocus = els.address;
-  // The synthetic 80,80 CHROME coords are translated chrome→sheet like the other
-  // keyboard-mode anchors — immaterial to the audit's purpose, pinned for determinism.
-  openPageContextOverlaySheet(chromePointToSheet(80, 80));
-}
-
 /* ------------------------------------------------ tab context menu (M09 F5 Leg 1) */
 // Tab-scoped context menu, rendered from the sheet (menuType 'tab-context',
 // element-anchored like the toolbar Unpin menu — DD2). ONE trigger listener
@@ -1480,41 +1436,30 @@ function openTabContextMenu(id, anchorEl) {
   openOverlayMenu('tab-context', model, chromePointToSheet(r.left, r.bottom), 0);
 }
 
-/**
- * Test/audit hook: open the tab context menu with a REPRESENTATIVE synthetic
- * model (bypassing the live orderedTabIds()/stack-size-cache reads that
- * openTabContextMenu makes, exactly the way openPageContextMenuForAudit
- * bypasses the live guest params) — items-to-right and a non-empty stack so all
- * five items render, per the a11y checkpoint. Anchored at the first tab if one
- * exists, else the tab strip itself. Reachable via the MCP evaluate tool
- * (closed-set seam at the bottom of this file — FD-ruled addition, flight DD).
- *
- * The synthetic moveTargets (M09 F8 Leg 4) is the point of the word REPRESENTATIVE:
- * the live cache is empty in a one-window app, so an audit that read it would render
- * no "Move to window …" item and report clean on a menu MISSING the item type leg 4
- * added. The audit must exercise the shape it is auditing.
- */
-function openTabContextMenuForAudit() {
-  const ids = orderedTabIds();
-  const id = ids[0] || null;
-  const anchorEl = (id && tabs.get(id) && tabs.get(id).btn) || els.tabs;
-  tabCtx.tabId = id;
-  tabCtx.returnFocus = els.address;
-  const r = anchorEl.getBoundingClientRect();
-  // isInternal:false — representative synthetic model with EVERY item rendered
-  // (seven since M09 F8: tab:move-new-window — F6 — plus one tab:move-window:<id>),
-  // per the a11y checkpoint.
-  const moveTargets = [{ windowId: 0, label: 'Another window' }];
-  const model = tabContextModel({
-    tabId: id || 'audit',
-    isLastTab: false,
-    tabsToRight: 1,
-    stackSize: 1,
-    isInternal: false,
-    moveTargets
-  });
-  openOverlayMenu('tab-context', model, chromePointToSheet(r.left, r.bottom), 0);
-}
+// Mission 20 Flight 2 Leg 1 (DD11): the `open*ForAudit` hook family, extracted
+// verbatim into audit-hooks.js (zero-headroom relief for this composition
+// root) — bound here to the SAME names the seam tail below republishes, so
+// SEAM_COUNT and the a11y audit's `open:` strings are untouched by the move.
+const {
+  openAuthBasicOverlayForAudit,
+  openCertPickerOverlayForAudit,
+  openBookmarkEditOverlayForAudit,
+  openBookmarksOverflowOverlayForAudit,
+  openCertOverrideOverlayForAudit,
+  openCertViewerOverlayForAudit,
+  openPageContextMenuForAudit,
+  openTabContextMenuForAudit
+} = createAuditHooks({
+  openOverlayMenu,
+  els,
+  tabs,
+  orderedTabIds,
+  activeTab,
+  chromePointToSheet,
+  pageCtx,
+  tabCtx,
+  openPageContextOverlaySheet
+});
 
 /* ------------------------------------------------------------------ tabs */
 
@@ -1853,5 +1798,8 @@ Object.assign(/** @type {any} */ (globalThis), {
   openBookmarkEditOverlayForAudit, // M15 F1 Leg 2 — SHEET_STATES 'sheet:bookmark-edit' (FD-ruled addition)
   openBookmarksOverflowOverlayForAudit, // M15 F1 Leg 3 — SHEET_STATES 'sheet:bookmarks-overflow' (FD-ruled addition)
   openVaultCompromiseOverlayForAudit, // M18 F2 L4 — SHEET_STATES 'sheet:vault-compromise' (leg-authorized addition)
-  openVaultCompromiseRecoverOverlayForAudit // M18 F2 L4 — SHEET_STATES 'sheet:vault-compromise-recover' (leg-authorized addition)
+  openVaultCompromiseRecoverOverlayForAudit, // M18 F2 L4 — SHEET_STATES 'sheet:vault-compromise-recover' (leg-authorized addition)
+  openCertOverrideOverlayForAudit, // M20 F2 L3 — SHEET_STATES 'sheet:cert-override' (leg-authorized addition, SEAM_COUNT 36 → 37)
+  openCertViewerOverlayForAudit, // M20 F2 L4 — SHEET_STATES 'sheet:cert-viewer' (leg-authorized addition, SEAM_COUNT 37 → 38)
+  openCertificateViewer // M20 F2 L4 — behavior-spec-driven opener (the M16 F2 L1 openNewTab precedent, SEAM_COUNT 38 → 39)
 });

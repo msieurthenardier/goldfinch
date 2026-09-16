@@ -51,6 +51,10 @@ function createSessionRuntime(deps) {
     shields,
     chromeForTab,
     schedule,
+    // Mission 20 Flight 2 Leg 2 (DD6): the session-level certificate-
+    // verification observer — installed on every web session below, beside
+    // applyShields.
+    certObserver,
     logger
   } = deps;
 
@@ -252,6 +256,14 @@ function createSessionRuntime(deps) {
     }
 
     applyShields(session);
+    // Mission 20 Flight 2 Leg 2 (DD6): install the verify-proc observer for
+    // EVERY web session, Burner included — BEFORE the jar-lookup block below,
+    // whose `if (!jarEntry) return` would otherwise skip the Burner session
+    // entirely (Burner is never a `jars.list()` entry, `jars.js:18`). The
+    // default session has no jar storage path at all, so it keys `'default'`
+    // (media-proxy fetches; never affects any tab entry — no tab lives there).
+    const certObserverPartition = partitionFromStoragePath(session.storagePath) ?? 'default';
+    session.setCertificateVerifyProc(certObserver.procFor(certObserverPartition));
     wireDownloadHandler(session);
     let spellcheckOn;
     try {

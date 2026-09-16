@@ -163,7 +163,28 @@ function partitionFromStoragePath(storagePath) {
   if (idx === -1 || idx === segments.length - 1) return null;
   const name = segments[idx + 1];
   if (!name) return null;
-  return `persist:${name}`;
+  // Mission 20 Flight 2 Leg 4 (live-discovered, HIGH): Electron's on-disk
+  // directory name for a partition is PERCENT-ENCODED (verified on the live
+  // rig: `Partitions/container%3Apersonal`, not `Partitions/container:personal`)
+  // — a colon inside the partition domain (every `jars.js` container partition
+  // is `persist:container:<id>`, itself carrying an inner colon) is escaped
+  // in the filesystem-safe directory name. Reconstructing `persist:${name}`
+  // from the RAW segment therefore never matched a real `jars.list()` entry's
+  // literal `partition` string, so every caller of this function's non-null
+  // result silently failed its lookup for every container jar in production
+  // (this leg's `tab-certificate-get` for a trusted page, AND the pre-existing
+  // retention-sweep cookie-bookkeeping attach at `session-runtime.js`'s
+  // `session-created` hook — both `jars.list().find(jar => jar.partition ===
+  // partition)` calls). `decodeURIComponent` reverses it; a malformed
+  // %-sequence (defensive — never seen live) degrades to the raw segment
+  // rather than throwing.
+  let decoded;
+  try {
+    decoded = decodeURIComponent(name);
+  } catch {
+    decoded = name;
+  }
+  return `persist:${decoded}`;
 }
 
 /**

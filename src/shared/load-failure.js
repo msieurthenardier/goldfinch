@@ -8,8 +8,8 @@
 // `LOAD_STATES` is the single source for the census `loadState` field's enum;
 // Flights 2 and 3 append `cert-blocked` / `crashed` / `hung` here, one place.
 
-/** @type {{ OK: 'ok', FAILED: 'failed' }} */
-export const LOAD_STATES = Object.freeze({ OK: 'ok', FAILED: 'failed' });
+/** @type {{ OK: 'ok', FAILED: 'failed', CERT_BLOCKED: 'cert-blocked' }} */
+export const LOAD_STATES = Object.freeze({ OK: 'ok', FAILED: 'failed', CERT_BLOCKED: 'cert-blocked' });
 
 /**
  * Match on `name` first (stable across Chromium releases) — any `ERR_CERT_*`
@@ -159,6 +159,97 @@ export function classifyLoadFailure(failure) {
   }
   const copy = KIND_COPY[kind] || KIND_COPY.unknown;
   return { kind, title: copy.title, body: copy.body, retryable: copy.retryable };
+}
+
+/**
+ * DD5's certificate-kind table, name-matched (a `net::` prefix is stripped by
+ * the caller first — `stripNetPrefix` below). `overridable: false` names a
+ * kind Chrome itself never lets past its own interstitial (revoked, pinned,
+ * malformed) — leg 3's proceed card refuses these regardless of the operator's
+ * click. Any other `ERR_CERT_*`/`ERR_SSL_PINNED_*` name not listed falls to
+ * `other` (overridable, generic copy) — new Chromium error names degrade
+ * gracefully instead of losing their `cert` classification entirely.
+ * @type {Record<string, { kind: string, overridable: boolean }>}
+ */
+const CERT_KIND = Object.freeze({
+  ERR_CERT_AUTHORITY_INVALID: { kind: 'authority', overridable: true },
+  ERR_CERT_COMMON_NAME_INVALID: { kind: 'name', overridable: true },
+  ERR_CERT_DATE_INVALID: { kind: 'date', overridable: true },
+  ERR_CERT_WEAK_SIGNATURE_ALGORITHM: { kind: 'weak', overridable: true },
+  ERR_CERT_WEAK_KEY: { kind: 'weak', overridable: true },
+  ERR_CERT_REVOKED: { kind: 'revoked', overridable: false },
+  ERR_SSL_PINNED_KEY_NOT_IN_CERT_CHAIN: { kind: 'pinned', overridable: false },
+  ERR_CERT_KNOWN_INTERCEPTION_BLOCKED: { kind: 'pinned', overridable: false },
+  ERR_CERT_INVALID: { kind: 'invalid', overridable: false },
+  ERR_CERT_CONTAINS_ERRORS: { kind: 'invalid', overridable: false }
+});
+
+/**
+ * App-authored title/body per certificate kind (DD4/DD5) — engine strings
+ * never become prose, same house rule as `KIND_COPY` above.
+ * @type {Record<string, { title: string, body: string }>}
+ */
+const CERT_KIND_COPY = Object.freeze({
+  authority: {
+    title: "This connection isn't private",
+    body: "This site's security certificate is from an authority Goldfinch doesn't trust."
+  },
+  name: {
+    title: "This connection isn't private",
+    body: "This site's security certificate doesn't match the address you're visiting."
+  },
+  date: {
+    title: "This connection isn't private",
+    body: "This site's security certificate has expired or isn't valid yet."
+  },
+  weak: {
+    title: "This connection isn't private",
+    body: "This site's security certificate uses a weak signature or key."
+  },
+  revoked: {
+    title: "This connection isn't private",
+    body: "This site's security certificate has been revoked."
+  },
+  pinned: {
+    title: "This connection isn't private",
+    body: "This site's security certificate doesn't match what Goldfinch expected for it."
+  },
+  invalid: {
+    title: "This connection isn't private",
+    body: "This site's security certificate is invalid."
+  },
+  other: {
+    title: "This connection isn't private",
+    body: "This site's security certificate isn't trusted."
+  }
+});
+
+/**
+ * `'net::ERR_X'` → `'ERR_X'`; any other string (already-stripped, or a
+ * non-`net::`-prefixed name) passes through unchanged. Never throws —
+ * non-string input coerces to `''`.
+ * @param {unknown} error
+ * @returns {string}
+ */
+export function stripNetPrefix(error) {
+  if (typeof error !== 'string') return '';
+  return error.startsWith('net::') ? error.slice(5) : error;
+}
+
+/**
+ * Classify a certificate error `name` (already `net::`-stripped, e.g.
+ * `ERR_CERT_AUTHORITY_INVALID`) into app-authored `{ kind, title, body,
+ * overridable }` (DD5). An unrecognized/non-string name falls to `other`
+ * (overridable, generic copy) — never throws.
+ * @param {unknown} name
+ * @returns {{ kind: string, title: string, body: string, overridable: boolean }}
+ */
+export function classifyCertError(name) {
+  const known = typeof name === 'string' ? CERT_KIND[name] : undefined;
+  const kind = known ? known.kind : 'other';
+  const overridable = known ? known.overridable : true;
+  const copy = CERT_KIND_COPY[kind] || CERT_KIND_COPY.other;
+  return { kind, title: copy.title, body: copy.body, overridable };
 }
 
 /**

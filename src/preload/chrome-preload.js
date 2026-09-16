@@ -241,6 +241,10 @@ contextBridge.exposeInMainWorld('goldfinch', {
   // history for Duplicate ({entries, index}, or null for internal/dead targets),
   // and read the closed-tab stack's size for the reopen-closed omission rule.
   tabHistorySnapshot: ({ webContentsId }) => ipcRenderer.invoke('tab-history-snapshot', { webContentsId }),
+  // Mission 20 Flight 2 Leg 4 (DD9): the read-only certificate summary behind
+  // the cert-viewer sheet card — chrome-trust, owning-window only (the
+  // handler's own requireChrome + ownsTab gate).
+  tabCertificateGet: ({ wcId }) => ipcRenderer.invoke('tab-certificate-get', { wcId }),
   closedTabStackSize: () => ipcRenderer.invoke('closed-tab-stack-size'),
   // DD6 push-cache (M09 F6 Leg 3): main pushes { size } on every closed-tab-stack
   // mutation; the chrome caches it so the tab-context opener is synchronous. The
@@ -355,6 +359,10 @@ contextBridge.exposeInMainWorld('goldfinch', {
   // Mission 20 Flight 1 (DD2/AC10): the owner-routed push for a failed/cleared
   // top-frame navigation — `failure: null` on the clear transition.
   onTabLoadFailure: (cb) => ipcRenderer.on('tab-load-failure', (_e, d) => cb(d)),
+  // Mission 20 Flight 2 Leg 2 (DD7): the owner-routed push for the top-frame
+  // committed origin's security state — its OWN channel, never riding
+  // tab-did-navigate (see guest-wiring.js / register-tab-ipc.js).
+  onTabSecurity: (cb) => ipcRenderer.on('tab-security', (_e, d) => cb(d)),
   onTabMediaList: (cb) => ipcRenderer.on('tab-media-list', (_e, d) => cb(d)),
   onTabPrivacyFp: (cb) => ipcRenderer.on('tab-privacy-fp', (_e, d) => cb(d)),
   // Guest self-close request (issue #119): window.close() in a page, forwarded

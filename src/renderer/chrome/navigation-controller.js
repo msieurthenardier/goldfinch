@@ -1,5 +1,12 @@
 /** @typedef {any} Tab */
 
+// Mission 20 Flight 2 Leg 4 (DD8): the ONE "not secure" vocabulary — chip
+// data-security/aria-label/title all read through the shared helpers so the
+// address chip and the site-info popup (site-info.js) never drift.
+import { SECURITY_STATES, chipAriaLabel } from '../../shared/site-security.js';
+
+const KNOWN_SECURITY_STATES = new Set(Object.values(SECURITY_STATES));
+
 /** @param {any} deps */
 export function createNavigationController(deps) {
   const {
@@ -40,7 +47,8 @@ export function createNavigationController(deps) {
     if (!url || url === 'about:blank') {
       // Neutral default: new/blank tab — web state with generic label
       chip.removeAttribute('data-state');
-      chip.removeAttribute('data-secure');
+      chip.removeAttribute('data-security');
+      chip.removeAttribute('title');
       chip.setAttribute('aria-label', 'Site information');
       els.address.readOnly = false;
       return;
@@ -48,7 +56,8 @@ export function createNavigationController(deps) {
 
     if (isInternalPageUrl(url)) {
       chip.setAttribute('data-state', 'internal');
-      chip.removeAttribute('data-secure');
+      chip.removeAttribute('data-security');
+      chip.removeAttribute('title');
       chip.setAttribute('aria-label', 'Secure Goldfinch page');
       els.address.readOnly = true;
       return;
@@ -61,18 +70,40 @@ export function createNavigationController(deps) {
     } catch {
       // Unparseable URL — fall back to neutral default
       chip.removeAttribute('data-state');
-      chip.removeAttribute('data-secure');
+      chip.removeAttribute('data-security');
+      chip.removeAttribute('title');
       chip.setAttribute('aria-label', 'Site information');
       els.address.readOnly = false;
       return;
     }
-    const secure = /^https:/i.test(url);
+    // Mission 20 Flight 2 Leg 4 (DD8/DD16, acceptance-run fix F4): a
+    // failed/cert-blocked tab reports `none` regardless of whatever
+    // tab.security a prior successful commit left behind — the
+    // aria-label/title must never say "secure" for a cert-blocked https:
+    // address. Otherwise prefer the pushed tab.security (DD7) when it is a
+    // known state. The RULE: the chip never claims a state main has not
+    // pushed — a pre-push tab (tab.security undefined, or any unrecognized
+    // value) renders NONE, the neutral closed lock, never a scheme-derived
+    // guess. The old `/^https:/ → secure` fallback asserted trust before the
+    // connection's actual verification result was known (tls-trust-surface
+    // checkpoint 9: a brand-new https: tab showed a green lock — even for an
+    // origin whose certificate was overridden — until the first tab-security
+    // push landed ~1s later). Chrome parity: neutral until the navigation
+    // commits and the state is known.
+    let security;
+    if (tab.loadFailure) {
+      security = SECURITY_STATES.NONE;
+    } else if (KNOWN_SECURITY_STATES.has(tab.security)) {
+      security = tab.security;
+    } else {
+      security = SECURITY_STATES.NONE;
+    }
     chip.setAttribute('data-state', 'web');
-    chip.setAttribute('data-secure', secure ? 'true' : 'false');
-    chip.setAttribute(
-      'aria-label',
-      host ? (secure ? `Site information, ${host}` : `Site information, ${host}, not secure`) : 'Site information'
-    );
+    chip.setAttribute('data-security', security);
+    const label = chipAriaLabel(host, security);
+    chip.setAttribute('aria-label', label);
+    if (host) chip.setAttribute('title', label);
+    else chip.removeAttribute('title');
     els.address.readOnly = false;
   }
 

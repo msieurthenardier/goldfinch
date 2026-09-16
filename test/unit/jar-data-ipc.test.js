@@ -373,6 +373,52 @@ test('jars-wipe session-throw-with-history-rows pin: fail-hard returns, the purg
   assert.equal(h.broadcasts().length, 0);
 });
 
+// ---------------------------------------------------------------------------
+// Mission 20 Flight 2 Leg 2 (DD2/DD6/AC9): the cert-trust/cert-observer
+// clears run FIRST inside wipeJarData, before the fail-hard storage calls —
+// so trust is dropped even when clearStorageData() throws.
+// ---------------------------------------------------------------------------
+
+test("AC9: jars-wipe clears cert-trust/cert-observer for the jar's partition BEFORE clearStorageData", async (t) => {
+  const h = makeHarness(t, { storagePaths: { 'persist:container:personal': '/fake/Partitions/container:personal' } });
+  const result = await h.invoke('jars-wipe', { id: 'personal' });
+  assert.equal(result.ok, true);
+  const order = h.events.map((e) => e.fn);
+  const trustIdx = order.indexOf('certTrust.clearPartition');
+  const observerIdx = order.indexOf('certObserver.clearPartition');
+  const storageIdx = order.indexOf('clearStorageData');
+  assert.ok(trustIdx !== -1 && observerIdx !== -1 && storageIdx !== -1, 'all three ran');
+  assert.ok(trustIdx < storageIdx, 'certTrust clear runs before the fail-hard clearStorageData call');
+  assert.ok(observerIdx < storageIdx, 'certObserver clear runs before the fail-hard clearStorageData call');
+  const trustEvent = h.events[trustIdx];
+  assert.equal(trustEvent.partition, 'persist:container:personal');
+});
+
+test('AC9: cert-trust/cert-observer STILL clear even when clearStorageData throws (fail-soft, ahead of the fail-hard call)', async (t) => {
+  const h = makeHarness(t, {
+    storagePaths: { 'persist:container:personal': '/fake/Partitions/container:personal' },
+    storageThrows: true
+  });
+  const result = await h.invoke('jars-wipe', { id: 'personal' });
+  assert.equal(result.ok, false, 'the wipe itself still fails-hard on the storage error');
+  const order = h.events.map((e) => e.fn);
+  assert.ok(order.includes('certTrust.clearPartition'), 'trust was cleared despite the later throw');
+  assert.ok(order.includes('certObserver.clearPartition'), 'observer was cleared despite the later throw');
+});
+
+test('AC9: a throwing certTrust.clearPartition is fail-soft — the wipe still proceeds and succeeds', async (t) => {
+  const h = makeHarness(t, {
+    storagePaths: { 'persist:container:personal': '/fake/Partitions/container:personal' },
+    certTrust: {
+      clearPartition: () => {
+        throw new Error('cert-trust blew up');
+      }
+    }
+  });
+  const result = await h.invoke('jars-wipe', { id: 'personal' });
+  assert.equal(result.ok, true, 'a throwing clear never breaks the wipe');
+});
+
 test('internal-jars-wipe shares behavior with jars-wipe', async (t) => {
   const h = makeHarness(t);
   const result = await h.invokeInternal('internal-jars-wipe', { id: 'work' });

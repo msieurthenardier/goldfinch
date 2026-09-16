@@ -81,7 +81,31 @@ test('renderer.js is untouched by this leg (DD11: no renderer.js change, or a na
   // Retargeted again (Mission 20 F1 post-acceptance fix pass, F1): 1857 → 1858, the single
   // `updateAddressChip` dep line added to loadFailureController's construction call — see
   // seam-contract.test.js's RENDERER_LINE_BUDGET comment for the full accounting.
-  assert.equal(lines, 1858, 'renderer.js line count matches the current landed source');
+  // Retargeted again (Mission 20 Flight 2 Leg 1): 1858 → 1792, the audit-hooks.js
+  // extraction + site-security-controller.js seed (DD11) — LOWERED this time, a
+  // behaviour-preserving move, not a growth; see seam-contract.test.js's
+  // RENDERER_LINE_BUDGET comment for the full accounting.
+  // Retargeted again (Mission 20 Flight 2 Leg 2, AC10): 1792 → 1794, the two
+  // new `createSiteSecurityController` dependency keys (`bridge`,
+  // `findTabByWcId`) — see seam-contract.test.js's RENDERER_LINE_BUDGET
+  // comment for the full accounting.
+  // Retargeted again (Mission 20 Flight 2 Leg 3, override-card-and-proceed):
+  // 1794 → 1799, EXACTLY FIVE named glue lines (menu-state entry, `onAdvanced`
+  // dep, `closeOverlayMenu` dep, the audit-hook destructure line, the
+  // seam-tail republish line) — see seam-contract.test.js's
+  // RENDERER_LINE_BUDGET comment for the full accounting.
+  // Retargeted again (Mission 20 Flight 2 Leg 4, security-indicator-and-
+  // certificate-viewer): 1799 → 1804, EXACTLY FIVE named glue lines
+  // (menu-state entry, `onViewCertificate` dep, the audit-hook destructure
+  // line, two seam-tail republish lines) — see seam-contract.test.js's
+  // RENDERER_LINE_BUDGET comment for the full accounting.
+  // Retargeted again (acceptance-run fix pass F3, tls-trust-surface
+  // checkpoint 6): 1804 → 1806, TWO named glue lines — `createSiteSecurityController`'s
+  // call gains `isActiveTab`/`updateAddressChip` deps so the `tab-security`
+  // push can refresh the chip for the tab it landed on — see
+  // seam-contract.test.js's RENDERER_LINE_BUDGET comment for the full
+  // accounting.
+  assert.equal(lines, 1806, 'renderer.js line count matches the current landed source');
 });
 
 test('no inline VaultStore error-class check outside the vault-sheet-errors.js mapper (zero inline ladders)', () => {

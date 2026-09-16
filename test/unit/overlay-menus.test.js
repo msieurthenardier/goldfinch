@@ -230,6 +230,68 @@ test('openSiteSettingsTab: called twice in a row creates no second tab', async (
   assert.ok(h.calls.some(([name]) => name === 'tabNavigate' || name === 'activateTab'));
 });
 
+// Mission 20 Flight 2 Leg 4 (DD8): siteInfoModel's ONE conditional push —
+// the certificate action, before site-settings, iff deriveSiteInfo says
+// showCertificate.
+test('siteInfoModel pushes a certificate action before site-settings when showCertificate is true', async () => {
+  const { createChromePageActions } = await import('../../src/renderer/chrome/overlay-menus.js');
+  const h = pageActionsHarness();
+  const actions = createChromePageActions({
+    ...h,
+    activeTab: () => ({ url: 'https://a.example/' }),
+    isInternalPageUrl: () => false,
+    deriveSiteInfo: () => ({
+      internal: false,
+      host: 'a.example',
+      connection: 'Secure (HTTPS)',
+      trackers: 0,
+      permissions: 0,
+      showCertificate: true
+    }),
+    openNewTab: () => {}
+  });
+  const model = actions.siteInfoModel();
+  const ids = model.filter((i) => i.type === 'action').map((i) => i.id);
+  assert.deepEqual(ids, ['certificate', 'site-settings']);
+});
+
+test('siteInfoModel omits the certificate action when showCertificate is false', async () => {
+  const { createChromePageActions } = await import('../../src/renderer/chrome/overlay-menus.js');
+  const h = pageActionsHarness();
+  const actions = createChromePageActions({
+    ...h,
+    activeTab: () => ({ url: 'http://a.example/' }),
+    isInternalPageUrl: () => false,
+    deriveSiteInfo: () => ({
+      internal: false,
+      host: 'a.example',
+      connection: 'Not secure (HTTP)',
+      trackers: 0,
+      permissions: 0,
+      showCertificate: false
+    }),
+    openNewTab: () => {}
+  });
+  const model = actions.siteInfoModel();
+  const ids = model.filter((i) => i.type === 'action').map((i) => i.id);
+  assert.deepEqual(ids, ['site-settings']);
+});
+
+test('siteInfoModel: internal tab returns only the secure-page note (unchanged shape)', async () => {
+  const { createChromePageActions } = await import('../../src/renderer/chrome/overlay-menus.js');
+  const h = pageActionsHarness();
+  const actions = createChromePageActions({
+    ...h,
+    activeTab: () => ({ url: 'goldfinch://settings' }),
+    isInternalPageUrl: () => true,
+    deriveSiteInfo: () => ({ internal: true, note: "You're viewing a secure Goldfinch page." }),
+    openNewTab: () => {}
+  });
+  assert.deepEqual(actions.siteInfoModel(), [
+    { type: 'note', variant: 'secure', text: "You're viewing a secure Goldfinch page." }
+  ]);
+});
+
 test('menu models and chrome-to-sheet anchor conversion retain exact shapes', async () => {
   const { buildKebabModel, chromePointToSheet, leftSheetAnchor, rightSheetAnchor } =
     await import('../../src/renderer/chrome/overlay-menus.js');

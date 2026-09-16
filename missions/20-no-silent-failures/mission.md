@@ -76,21 +76,21 @@ Open Questions below.
 - [x] **Failure is visible from the tab strip.** A failed, crashed, or hung
   tab is identifiable in the strip without switching to it, and the address
   bar keeps showing the intended address, not an internal error address.
-- [ ] **Untrusted certificates get an interstitial, not a blank.** Navigating
+- [x] **Untrusted certificates get an interstitial, not a blank.** Navigating
   to an origin whose certificate fails validation shows a surface naming
   the origin and the specific certificate error, with the risk explained in
   plain language. Proceeding requires an explicit, gated action; the
   decision is remembered for that origin until the app quits, is never
   written to disk, and is never available to automation. *(behavior-test-
   backed: local self-signed fixture)*
-- [ ] **Insecure connections are labelled.** A page served over plain
+- [x] **Insecure connections are labelled.** A page served over plain
   `http:`, or over a certificate the operator overrode, carries a visible
   "not secure" state in the address chip and the site-info popup for as
   long as that page is shown; a trusted `https:` page does not. (The
   scheme-based half already ships — the chip and popup distinguish `http:`
   from `https:` today; the new delta is the overridden-certificate state
   and one consistent vocabulary across both.)
-- [ ] **A site's certificate is inspectable.** From the address chip the
+- [x] **A site's certificate is inspectable.** From the address chip the
   operator can read the current page's certificate: subject, issuer,
   validity window, fingerprints, and the chain. Read-only.
 - [ ] **A crashed tab recovers in place.** When a tab's renderer dies, the
@@ -242,6 +242,7 @@ Emergent blockers and issues discovered during execution.
       focus-on-failure rule; a diagnosis/design pass is needed (not a squawk).
       Discovered in Flight 1, affects Flights 2 and 3 (every hidden-guest
       surface).
+      **Flight 2 update (2026-09-16)**: leg 1's trace-driven fix (`chromeNavPending` + a reactive chrome-blur reassert, disarmed at `did-fail-load`) is unit-pinned but did NOT resolve the live symptom — the `tls-trust-surface` acceptance run's keyboard rows failed by eye (no ring, F6/Tab inert after a typed failure). Operator ruling: remains a Known Issue; the override card's own keyboard contract is sound once focus is in the panel. The residual gap leg 1 recorded (a re-steal between `did-fail-load` and the error document's own commit) is the leading hypothesis for the next attempt.
 
 ## Flights
 
@@ -255,7 +256,7 @@ Emergent blockers and issues discovered during execution.
   operator-facing copy via a pure model; retry; tab-strip failed state;
   census load-state; a11y; behavior spec per failure class. Certificate
   failures reach this generic surface until Flight 2 specialises them.
-- [ ] Flight 2: **TLS trust: interstitial, override, indicator, viewer**
+- [x] Flight 2: **TLS trust: interstitial, override, indicator, viewer** — landed 2026-09-16 (PR #217); #216 still open —
   (#143) — `certificate-error` answered at once (refuse-or-remembered; the
   held-callback auth-challenge model was considered and rejected at Flight 2
   planning — a certificate refusal has a fail-then-retry shape), the

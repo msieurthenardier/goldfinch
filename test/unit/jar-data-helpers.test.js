@@ -161,6 +161,28 @@ test('partitionFromStoragePath: the legacy default jar partition round-trips too
   assert.equal(partitionFromStoragePath('/home/user/.config/goldfinch/Partitions/goldfinch'), 'persist:goldfinch');
 });
 
+// Mission 20 Flight 2 Leg 4 (live-discovered, HIGH): Electron's REAL on-disk
+// directory name percent-encodes the partition segment — verified on the
+// live rig (`Partitions/container%3Apersonal`, not the literal-colon shape
+// the tests above assumed). Every container jar's partition carries an
+// inner colon (`persist:container:<id>`), so decoding is load-bearing for
+// EVERY real container jar, not just an edge case.
+test('partitionFromStoragePath: decodes a percent-encoded segment (the REAL Electron on-disk shape)', () => {
+  assert.equal(
+    partitionFromStoragePath('/home/user/.config/goldfinch-dev/Partitions/container%3Apersonal'),
+    'persist:container:personal'
+  );
+  assert.equal(
+    partitionFromStoragePath('/home/user/.config/goldfinch-dev/Partitions/container%3Awork'),
+    'persist:container:work'
+  );
+});
+
+test('partitionFromStoragePath: a malformed %-sequence degrades to the raw segment, never throws', () => {
+  assert.doesNotThrow(() => partitionFromStoragePath('/home/user/.config/goldfinch/Partitions/container%'));
+  assert.equal(partitionFromStoragePath('/home/user/.config/goldfinch/Partitions/container%'), 'persist:container%');
+});
+
 test('partitionFromStoragePath: no Partitions segment at all (e.g. the default session root) returns null', () => {
   assert.equal(partitionFromStoragePath('/home/user/.config/goldfinch'), null);
 });

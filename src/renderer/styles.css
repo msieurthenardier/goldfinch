@@ -508,17 +508,21 @@ a:focus-visible {
 }
 
 /* Secure HTTPS web tab: green closed lock */
-.addr-chip[data-state='web'][data-secure='true'] {
+.addr-chip[data-state='web'][data-security='secure'] {
   color: #6dff8f;
 }
 
-/* Insecure HTTP web tab: red broken/open lock.
+/* Insecure HTTP web tab, AND an overridden-certificate HTTPS tab (DD8 — the
+   two "not secure" states share the broken lock SHAPE, distinguished only by
+   words in the label/title, never colour/shape alone): red broken/open lock.
    The ::after shackle is shifted right and rotated to read as ajar/broken —
    a distinct SHAPE from the closed shackle, so security state is not color-alone. */
-.addr-chip[data-state='web'][data-secure='false'] {
+.addr-chip[data-state='web'][data-security='insecure'],
+.addr-chip[data-state='web'][data-security='overridden'] {
   color: #ff6b6b;
 }
-.addr-chip[data-state='web'][data-secure='false']::after {
+.addr-chip[data-state='web'][data-security='insecure']::after,
+.addr-chip[data-state='web'][data-security='overridden']::after {
   transform: translateX(2px) rotate(30deg);
   border-bottom: none;
 }
@@ -897,27 +901,36 @@ a:focus-visible {
   font-size: 13px;
 }
 
-/* Load-failure surface (Mission 20 F1 Leg 2, DD1/DD10): a CSS child of
-   #webviews, the same "no rect measurement, no resize wiring" position as
-   #welcome-surface immediately above — a failed tab's guest is hidden
-   main-side, so nothing composites over this either (the two panels are
-   mutually exclusive per DD1, hence duplicated tokens rather than a shared
-   selector spanning both independently-hidden sections). No
+/* Load-failure surface (Mission 20 F1 Leg 2, DD1/DD10; restyled HAT H1 fix
+   1): a CSS child of #webviews, the same "no rect measurement, no resize
+   wiring" position as #welcome-surface immediately above — a failed tab's
+   guest is hidden main-side, so nothing composites over this either (the two
+   panels are mutually exclusive per DD1, hence duplicated tokens rather than
+   a shared selector spanning both independently-hidden sections). No
    transition/animation on anything here — the guest slot itself is
-   unchanged, this is a sibling overlay (native-surface invariant). */
+   unchanged, this is a sibling overlay (native-surface invariant).
+
+   HAT H1 fix 1 ("style it like Chrome's interstitial, with the Goldfinch
+   logo"): the panel now rides the CHROME'S OWN dark palette (--bg/--fg/
+   --fg-dim/--accent) instead of the ad-hoc white sub-theme #welcome-surface
+   uses — a Chrome-style dark interstitial, left-aligned column, and this
+   surface has no equivalent "operator is filling in a form" reason to prefer
+   a light card. Contrast (computed, sRGB relative luminance, WCAG formula):
+   --fg on --bg = 13.3:1; --fg-dim on --bg = 6.0:1 (both comfortably clear
+   4.5:1 for the body/url/code text that uses --lf-fg-dim). */
 #load-failure-surface {
   position: absolute;
   inset: 0;
   overflow: auto;
-  --lf-bg: #ffffff;
-  --lf-fg: #1e1f25;
-  --lf-fg-dim: #5c5f6b;
+  --lf-bg: var(--bg);
+  --lf-fg: var(--fg);
+  --lf-fg-dim: var(--fg-dim);
   --lf-accent: var(--accent);
-  /* HAT fix (H1, finding 2): a darkened gold for a focus outline that reads
-     against this panel's white background — raw --accent is too
-     low-contrast for that on white (same rationale as
-     #welcome-surface's --wl-accent-strong immediately above). */
-  --lf-accent-strong: color-mix(in srgb, var(--accent) 65%, black);
+  --lf-accent-strong: var(--accent);
+  /* Decorative only (aria-hidden icon fill) — not text, not AA-graded.
+     ~Chrome's dark-mode cert-error red. */
+  --lf-danger: #f28b82;
+  --lf-border: var(--border);
   color: var(--lf-fg);
   background: var(--lf-bg);
 }
@@ -925,50 +938,174 @@ a:focus-visible {
   display: none;
 }
 .load-failure-column {
-  max-width: 480px;
-  margin: 80px auto 0;
-  padding: 0 24px;
-  text-align: center;
+  max-width: 640px;
+  /* ~90px left gutter on a wide window, shrinking on a narrow one — the
+     Chrome-interstitial column proportions the operator referenced, without
+     the gutter alone eating a narrow window's whole width. */
+  padding: max(64px, 12vh) 32px 48px clamp(24px, 8vw, 90px);
+  text-align: left;
 }
+
+/* Icon (HAT H1 fix 1): a Chrome-style warning triangle for a certificate
+   failure, a neutral "disconnected" ring for every other failure kind — both
+   built once from plain nested divs (no SVG: this module runs against a
+   fake-DOM test harness with no createElementNS; no glyph/text content
+   either, so the decorative red triangle is never a color-contrast node) and
+   swapped purely via the `data-failure-kind` attribute render() already
+   sets/deletes — no extra JS state. aria-hidden on the container. */
+.lf-icon {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  margin: 0 0 24px;
+  flex: none;
+}
+.lf-icon-cert {
+  display: none;
+  position: absolute;
+  inset: 0;
+  background: var(--lf-danger);
+  clip-path: polygon(50% 5%, 96% 92%, 4% 92%);
+}
+#load-failure-surface[data-failure-kind='cert'] .lf-icon-cert {
+  display: block;
+}
+.lf-icon-cert-bar {
+  position: absolute;
+  left: 50%;
+  top: 48%;
+  width: 6px;
+  height: 16px;
+  border-radius: 3px;
+  background: var(--lf-bg);
+  transform: translate(-50%, -50%);
+}
+.lf-icon-cert-dot {
+  position: absolute;
+  left: 50%;
+  top: 76%;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--lf-bg);
+  transform: translate(-50%, -50%);
+}
+.lf-icon-network {
+  display: block;
+  position: absolute;
+  inset: 4px;
+  border: 3px solid var(--lf-fg-dim);
+  border-radius: 50%;
+}
+.lf-icon-network::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: -3px;
+  bottom: -3px;
+  width: 3px;
+  background: var(--lf-fg-dim);
+  transform: translateX(-50%) rotate(45deg);
+}
+#load-failure-surface[data-failure-kind='cert'] .lf-icon-network {
+  display: none;
+}
+
 #load-failure-heading {
   margin: 0 0 12px;
+  font-size: 26px;
+  font-weight: 400;
+  line-height: 1.3;
+  color: var(--lf-fg);
 }
 #load-failure-body {
   margin: 0 0 16px;
+  max-width: 60ch;
+  font-size: 15px;
+  line-height: 1.5;
   color: var(--lf-fg-dim);
 }
-#load-failure-url,
-#load-failure-code {
+#load-failure-url {
   margin: 0 0 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 13px;
   color: var(--lf-fg-dim);
   word-break: break-all;
 }
-#load-failure-retry {
-  margin-top: 16px;
-  padding: 8px 20px;
-  border-radius: 6px;
-  border: none;
-  background: var(--lf-accent);
-  color: var(--accent-fg);
+#load-failure-code {
+  margin: 0 0 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--lf-fg-dim);
+  word-break: break-all;
+}
+
+.lf-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 20px;
+}
+.lf-btn {
+  height: 36px;
+  padding: 0 20px;
+  border-radius: 18px;
   font: inherit;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
 }
-#load-failure-retry.hidden {
-  display: none;
+.lf-btn-primary {
+  border: none;
+  background: var(--lf-accent);
+  color: var(--accent-fg);
 }
-/* HAT fix (H1, finding 2): explicit, panel-scoped keyboard-focus rings. The
-   operator couldn't tell where focus landed — the heading (`tabindex="-1"`,
-   the F6/typed-Enter-failure target) and Retry both rendered with no visible
-   ring on Tab. A 3px solid outline in the panel's strong accent, offset so
-   it never crowds the text/button border; contrast-checked against the
-   panel's white background. Bare id selectors (1,0,0 each) already out-
-   specify any bare-type/class :focus-visible rule elsewhere in this file, so
-   no `!important` is needed. Scoped to this panel only — squawk 0044 tracks
-   the SAME gap on the chrome toolbar separately; do not "fix" that here. */
+.lf-btn-primary:hover {
+  background: color-mix(in srgb, var(--lf-accent) 85%, white);
+}
+.lf-btn-outline {
+  border: 1px solid var(--lf-border);
+  background: transparent;
+  color: var(--lf-fg);
+}
+.lf-btn-outline:hover {
+  background: var(--bg-2);
+  border-color: var(--lf-fg-dim);
+}
+
+/* Brand (HAT H1 fix 1): unobtrusive Goldfinch mark, bottom of the column —
+   the welcome-controller.js `.welcome-mark` precedent, same asset. Decorative
+   `alt=""` since the wordmark span already carries the visible name. */
+.lf-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 40px;
+  opacity: 0.7;
+}
+.lf-brand-mark {
+  width: 18px;
+  height: 18px;
+  -webkit-user-drag: none;
+  user-select: none;
+}
+.lf-brand-name {
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  color: var(--lf-fg-dim);
+}
+
+/* HAT fix (H1, finding 2; extended HAT H1 fix 1 to every interactive control
+   on the panel): explicit, panel-scoped keyboard-focus rings so the operator
+   can always tell where focus landed. Bare id selectors (1,0,0 each) and one
+   class selector (0,1,0) already out-specify any bare-type/class
+   :focus-visible rule elsewhere in this file, so no `!important` is needed.
+   Scoped to this panel only — squawk 0044 tracks the SAME gap on the chrome
+   toolbar separately; do not "fix" that here. */
 #load-failure-heading:focus-visible,
-#load-failure-retry:focus-visible {
+.lf-btn:focus-visible {
   outline: 3px solid var(--lf-accent-strong);
   outline-offset: 2px;
 }

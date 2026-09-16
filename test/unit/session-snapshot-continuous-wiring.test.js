@@ -102,9 +102,13 @@ test('register-tab-ipc.js destructures scheduleSnapshot from deps', () => {
 // Mission 20 Flight 1 (AC2): the object literal grew two fields (`loadFailure`,
 // `lastRequestedUrl`) — the anchor now matches through `lastRequestedUrl: …` rather
 // than stopping dead at `active: false`, so a further field added later stays
-// wrap-insensitive too.
+// wrap-insensitive too. Mission 20 Flight 2 Leg 1 (#216): the object literal grew a
+// THIRD field (`chromeNavPending`, plus its own provenance comment between it and
+// `lastRequestedUrl`) — the tail is now a non-greedy `[\s\S]*?` through to the closing
+// `});` instead of a fixed field list, so it tolerates both the interleaved comment and
+// whatever further field a later leg adds, without re-widening this pin again.
 const TAB_CREATE_ARM_RE =
-  /(rec\.tabViews\.set\(\s*wcId,\s*\{\s*view,\s*partition:\s*trusted\s*\?\s*INTERNAL_PARTITION\s*:\s*partition,\s*trusted,\s*active:\s*false,\s*loadFailure:\s*null,\s*lastRequestedUrl:\s*initialLastRequestedUrl\s*\}\s*\);)\s*\/\/[^\n]*\n\s*scheduleSnapshot\?\.\(\);/;
+  /(rec\.tabViews\.set\(\s*wcId,\s*\{\s*view,\s*partition:\s*trusted\s*\?\s*INTERNAL_PARTITION\s*:\s*partition,\s*trusted,\s*active:\s*false,\s*loadFailure:\s*null,\s*lastRequestedUrl:\s*initialLastRequestedUrl[\s\S]*?\}\s*\);)\s*\/\/[^\n]*\n\s*scheduleSnapshot\?\.\(\);/;
 const TAB_CLOSE_ARM_RE = /(owner\.tabViews\.delete\(\s*wcId\s*\);)\s*\/\/[^\n]*\n\s*scheduleSnapshot\?\.\(\);/;
 // tab-hide and tab-set-active share BYTE-IDENTICAL Squawk 0073 comment text ("`active` is
 // part of the snapshot — …") — disambiguation comes entirely from each regex's own anchor

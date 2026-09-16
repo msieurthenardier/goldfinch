@@ -68,6 +68,9 @@ function registerAppLifecycle({
   buildSessionSnapshot,
   appDb,
   authChallenges,
+  // Mission 20 Flight 2 Leg 2 (DD1): the certificate-error trust decision —
+  // registered top-level beside 'login' below, same before-whenReady rationale.
+  certTrust,
   // M18 F2 L4 (H2 resurface): optional hook fired after a chrome's
   // window-boot-config invoke is served (queued sends flushed, subscriptions
   // provably live) — main re-keys any orphaned pending compromise reveal to
@@ -109,6 +112,19 @@ function registerAppLifecycle({
   app.on('select-client-certificate', (event, webContents, url, list, callback) => {
     event.preventDefault();
     authChallenges.handleSelectClientCertificate(webContents, url, list, callback);
+  });
+
+  // Mission 20 Flight 2 Leg 2 (DD1): certificate errors. Registered at
+  // TOP-LEVEL scope, same rationale as 'login'/'select-client-certificate'
+  // above — the first window's first navigation can hit a bad certificate
+  // before whenReady's tail runs. preventDefault() ALWAYS — Electron would
+  // otherwise refuse the load itself with no chance to remember an operator
+  // override; from here `cert-trust.js` answers the callback EXACTLY ONCE,
+  // synchronously (never queued — DD1's "answer at once" shape, the opposite
+  // of the auth-challenge store's held-callback model).
+  app.on('certificate-error', (event, webContents, url, error, certificate, callback, isMainFrame) => {
+    event.preventDefault();
+    certTrust.handleCertificateError(webContents, url, error, certificate, callback, isMainFrame);
   });
 
   // Mission 13 Flight 3 / Leg 3 (DD3, AC2): every webContents (chrome, overlays,
