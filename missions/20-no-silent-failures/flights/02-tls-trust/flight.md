@@ -1,6 +1,6 @@
 # Flight: TLS Trust — Interstitial, Override, Indicator, Viewer
 
-**Status**: landed
+**Status**: completed
 **Mission**: [No Silent Failures](../../mission.md)
 
 ## Contributing to Criteria
