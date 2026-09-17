@@ -18,7 +18,7 @@ const { isSafeColor } = require('../shared/safe-color');
 
 /**
  * @typedef {{ id: string, name: string, color: string, partition: string, burner?: boolean }} ContainerSnapshot
- * @typedef {{ wcId: number, url: string, title: string, favicon: string | null, container: ContainerSnapshot }} MoveTabPayload
+ * @typedef {{ wcId: number, url: string, title: string, favicon: string | null, container: ContainerSnapshot, trusted?: boolean }} MoveTabPayload
  */
 
 // Mission 13 Flight 1 / Leg 1 (DD1): data:-URL favicons (introduced by the
@@ -78,7 +78,7 @@ function validateMoveTabPayload(payload) {
  * Electron-free and offline-testable.
  * @param {MoveTabPayload} p
  * @param {{ isDestroyed: () => boolean, getURL: () => string, getTitle: () => string } | null} wc
- * @returns {{ wcId: number, url: string, title: string, favicon: string | null, container: ContainerSnapshot }}
+ * @returns {{ wcId: number, url: string, title: string, favicon: string | null, container: ContainerSnapshot, trusted: boolean }}
  */
 function buildAdoptPayload(p, wc) {
   const live = wc && !wc.isDestroyed() ? wc : null;
@@ -87,7 +87,15 @@ function buildAdoptPayload(p, wc) {
     url: (live && live.getURL()) || p.url,
     title: (live && live.getTitle()) || p.title,
     favicon: p.favicon,
-    container: p.container
+    container: p.container,
+    // Mission 20 Flight 3 Leg 3 (leg-3 design review Decision): read from `p`
+    // in MAIN, never from a renderer/move payload directly —
+    // `validateMoveTabPayload`'s normalized shape carries no `trusted` field
+    // at all, so every move-path adopt coerces to `false` here regardless of
+    // what a hostile chrome sender might try to smuggle. Only
+    // `chrome-recovery.js`'s `buildRecoveryAdopts` ever passes `p.trusted:
+    // true`, sourced from the registry ENTRY it is rebuilding from.
+    trusted: !!p.trusted
   };
 }
 

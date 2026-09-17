@@ -60,6 +60,10 @@ class FakeContents extends EventEmitter {
   setWebRTCIPHandlingPolicy(policy) {
     this.webrtcPolicy = policy;
   }
+  // Mission 20 Flight 3 Leg 2: the kill-and-reload / crash-recovery respawn.
+  reload() {
+    this.reloadCalls = (this.reloadCalls || 0) + 1;
+  }
 }
 
 function setup() {
@@ -120,6 +124,12 @@ function setup() {
   const wiring = createGuestWiring({
     registry,
     chromeForTab: () => chrome,
+    // Mission 20 Flight 3 Leg 3 (DD5): `wireTabViewEvents`'s `sendToChrome`
+    // now routes through `sendOrQueue` rather than `chromeForTab(wcId)?.send`
+    // directly — this fake preserves every existing test's "always delivers
+    // immediately to `chrome`" behavior (the real boot-gate semantics are
+    // pinned in register-tab-ipc.test.js).
+    sendOrQueue: (wcId, channel, payload) => chrome.send(channel, payload),
     htmlFullscreen: {
       enter: (id) => calls.push(['fs-enter', id]),
       exit: (id) => calls.push(['fs-exit', id]),
@@ -170,6 +180,12 @@ function setup() {
     // grep-AC in guest-visibility-invariant.test.js.
     applyGuestVisibility: (entry) =>
       events.push(['apply-visibility', { active: entry.active, loadFailure: entry.loadFailure }]),
+    // Mission 20 Flight 3 Leg 2: the OPTIONAL crash-record sink — a recording
+    // fake here (leg 3 wires the real crash-log.js).
+    onCrash: (record) => {
+      calls.push(['on-crash', record]);
+      events.push(['on-crash', record]);
+    },
     logger: { warn() {} }
   });
   return {
@@ -612,12 +628,24 @@ class FakePopupWindow extends EventEmitter {
     super();
     this.webContents = new FakeContents(wcId, false);
     this.destroyed = false;
+    // Mission 20 Flight 3 Leg 3 (DD7): the popup crash site's `windowId` is
+    // the popup's OWN `win.id` — a distinct fake value from its webContents
+    // id so a test asserting both fields catches an accidental id mix-up.
+    this.id = wcId + 10_000;
   }
   isDestroyed() {
     return this.destroyed;
   }
   destroy() {
     this.destroyed = true;
+  }
+  // Mission 20 Flight 3 Leg 2 (DD2): a popup crash calls win.close() — models
+  // Electron's real BrowserWindow.close() firing 'closed' (which
+  // onWindowClosed's sanctioned wrapper listens for).
+  close() {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    this.emit('closed');
   }
 }
 
@@ -1018,7 +1046,9 @@ function makeFailureRecord(
   { active = true, findOverlay = { hide: () => h.events.push(['find-hide']) } } = {}
 ) {
   const tabViews = new Map([[wcId, entry]]);
-  const record = { activeTabWcId: active ? wcId : null, tabViews, findOverlay };
+  // Mission 20 Flight 3 Leg 3 (DD7): the crash-record sites read `owner.win.id`
+  // for the record's `windowId` field — every record fake carries one.
+  const record = { activeTabWcId: active ? wcId : null, tabViews, findOverlay, win: { id: 1 } };
   h.records.set(wcId, record);
   return record;
 }
@@ -1596,4 +1626,355 @@ test('edge case: did-navigate for a chrome-error: commit defensively reports sec
 
   assert.equal(entry.certificate, null);
   assert.equal(entry.security, 'none');
+});
+
+// ---------------------------------------------------------------------------
+// Mission 20 Flight 3 Leg 2 (DD1/DD2/DD3): render-process-gone (crash +
+// kill-and-reload), unresponsive/responsive (hang), and did-start-navigation
+// clearing crash/hung/killRequested.
+// ---------------------------------------------------------------------------
+
+test('AC1: render-process-gone with reason !== clean-exit hides the guest, stamps entry.crash, clears loadFailure/hung, and pushes tab-crash on its own channel', () => {
+  const h = setup();
+  const wc = new FakeContents(100);
+  wc.url = 'https://crashed.test/';
+  const view = { webContents: wc };
+  const entry = { view, active: true, loadFailure: { code: -1, name: 'stale' }, hung: true, lastRequestedUrl: null };
+  makeFailureRecord(h, 100, entry);
+  h.wiring.wireTabViewEvents(view, 100, 'persist:jar-a');
+
+  wc.emit('render-process-gone', {}, { reason: 'crashed', exitCode: 139 });
+
+  assert.deepEqual(entry.crash, { reason: 'crashed', exitCode: 139, url: 'https://crashed.test/' });
+  assert.equal(entry.loadFailure, null, 'a dead renderer is never also reported failed');
+  assert.equal(entry.hung, false, 'a dead renderer is never also reported hung');
+  assert.ok(
+    h.events.some((e) => e[0] === 'apply-visibility'),
+    'the guest is hidden through the shared visibility helper'
+  );
+  assert.ok(
+    h.events.some((e) => e[0] === 'find-hide'),
+    'the active tab find overlay is closed'
+  );
+  assert.deepEqual(h.sends, [
+    ['tab-crash', { wcId: 100, crash: { reason: 'crashed', exitCode: 139, url: 'https://crashed.test/' } }],
+    ['tab-hung', { wcId: 100, hung: false }],
+    ['tab-security', { wcId: 100, security: 'none' }]
+  ]);
+  assert.equal(entry.security, 'none');
+  assert.deepEqual(h.calls.at(-1), [
+    'on-crash',
+    {
+      kind: 'guest',
+      reason: 'crashed',
+      exitCode: 139,
+      wcId: 100,
+      url: 'https://crashed.test/',
+      partition: 'persist:jar-a',
+      windowId: 1,
+      recovery: 'panel'
+    }
+  ]);
+});
+
+test('AC1: render-process-gone does not push tab-hung when the tab was never hung', () => {
+  const h = setup();
+  const wc = new FakeContents(101);
+  const view = { webContents: wc };
+  const entry = { view, active: true, loadFailure: null, hung: false, lastRequestedUrl: null };
+  makeFailureRecord(h, 101, entry);
+  h.wiring.wireTabViewEvents(view, 101, 'persist:jar-a');
+
+  wc.emit('render-process-gone', {}, { reason: 'crashed', exitCode: 139 });
+
+  assert.deepEqual(
+    h.sends.map((s) => s[0]),
+    ['tab-crash', 'tab-security'],
+    'no tab-hung push when the tab was not hung'
+  );
+});
+
+test('AC1: render-process-gone with reason clean-exit is ignored entirely', () => {
+  const h = setup();
+  const wc = new FakeContents(102);
+  const view = { webContents: wc };
+  const entry = { view, active: true, loadFailure: null, crash: null, hung: false, lastRequestedUrl: null };
+  makeFailureRecord(h, 102, entry);
+  h.wiring.wireTabViewEvents(view, 102, 'persist:jar-a');
+
+  wc.emit('render-process-gone', {}, { reason: 'clean-exit', exitCode: 0 });
+
+  assert.equal(entry.crash, null);
+  assert.deepEqual(h.sends, []);
+  assert.deepEqual(h.calls, []);
+});
+
+test('AC1 edge case: render-process-gone for a gone window (registry miss) is ignored, never throws', () => {
+  const h = setup();
+  const wc = new FakeContents(103);
+  const view = { webContents: wc };
+  // No h.records.set(103, ...) — the owning window is gone.
+  h.wiring.wireTabViewEvents(view, 103, 'persist:jar-a');
+
+  assert.doesNotThrow(() => wc.emit('render-process-gone', {}, { reason: 'crashed', exitCode: 139 }));
+  assert.deepEqual(h.sends, []);
+});
+
+test('AC1 edge case: render-process-gone for a gone tabViews entry (mid-teardown) is ignored, never throws', () => {
+  const h = setup();
+  const wc = new FakeContents(104);
+  const view = { webContents: wc };
+  h.records.set(104, { activeTabWcId: null, tabViews: new Map(), findOverlay: null });
+  h.wiring.wireTabViewEvents(view, 104, 'persist:jar-a');
+
+  assert.doesNotThrow(() => wc.emit('render-process-gone', {}, { reason: 'crashed', exitCode: 139 }));
+  assert.deepEqual(h.sends, []);
+});
+
+test('AC1 edge case: a crash on a BACKGROUND (inactive) tab hides no find overlay and stamps only', () => {
+  const h = setup();
+  const wc = new FakeContents(105);
+  const view = { webContents: wc };
+  const entry = { view, active: false, loadFailure: null, hung: false, lastRequestedUrl: null };
+  makeFailureRecord(h, 105, entry, { active: false });
+  h.wiring.wireTabViewEvents(view, 105, 'persist:jar-a');
+
+  wc.emit('render-process-gone', {}, { reason: 'crashed', exitCode: 139 });
+
+  assert.ok(entry.crash, 'the crash is still recorded for a background tab');
+  assert.ok(
+    !h.events.some((e) => e[0] === 'find-hide'),
+    'a background crash never closes the find overlay (not the active tab)'
+  );
+});
+
+test('AC2: kill-and-reload — the flag alone gates the bypass, WHATEVER the reported reason (spike (f))', () => {
+  const h = setup();
+  const wc = new FakeContents(106);
+  const view = { webContents: wc };
+  const entry = {
+    view,
+    active: true,
+    loadFailure: null,
+    crash: null,
+    hung: true,
+    killRequested: true,
+    lastRequestedUrl: null
+  };
+  makeFailureRecord(h, 106, entry);
+  h.wiring.wireTabViewEvents(view, 106, 'persist:jar-a');
+
+  // Spike (f): forcefullyCrashRenderer() reports itself as 'crashed' on this
+  // platform, NOT 'killed' — the bypass must still fire.
+  wc.emit('render-process-gone', {}, { reason: 'crashed', exitCode: 133 });
+
+  assert.equal(entry.killRequested, false, 'the flag is consumed');
+  assert.equal(entry.crash, null, 'no crash panel for a kill-and-reload');
+  assert.equal(entry.hung, false);
+  assert.deepEqual(h.sends, [['tab-hung', { wcId: 106, hung: false }]], 'no tab-crash push on the kill-reload path');
+  assert.equal(wc.reloadCalls, 1, 'the guest is reloaded in place');
+  assert.deepEqual(h.calls.at(-1), [
+    'on-crash',
+    {
+      kind: 'guest',
+      reason: 'crashed',
+      exitCode: 133,
+      wcId: 106,
+      url: 'https://example.test/page',
+      partition: 'persist:jar-a',
+      windowId: 1,
+      recovery: 'reloaded'
+    }
+  ]);
+});
+
+test('AC3: unresponsive stamps entry.hung and pushes tab-hung true', () => {
+  const h = setup();
+  const wc = new FakeContents(107);
+  const view = { webContents: wc };
+  const entry = { view, active: true, loadFailure: null, hung: false, lastRequestedUrl: null };
+  makeFailureRecord(h, 107, entry);
+  h.wiring.wireTabViewEvents(view, 107, 'persist:jar-a');
+
+  wc.emit('unresponsive');
+
+  assert.equal(entry.hung, true);
+  assert.deepEqual(h.sends, [['tab-hung', { wcId: 107, hung: true }]]);
+});
+
+test('AC3: responsive clears entry.hung and pushes tab-hung false', () => {
+  const h = setup();
+  const wc = new FakeContents(108);
+  const view = { webContents: wc };
+  const entry = { view, active: true, loadFailure: null, hung: true, lastRequestedUrl: null };
+  makeFailureRecord(h, 108, entry);
+  h.wiring.wireTabViewEvents(view, 108, 'persist:jar-a');
+
+  wc.emit('responsive');
+
+  assert.equal(entry.hung, false);
+  assert.deepEqual(h.sends, [['tab-hung', { wcId: 108, hung: false }]]);
+});
+
+test('AC3: unresponsive is ignored for a TRUSTED (internal) entry, a crashed entry, and a kill-pending entry', () => {
+  const cases = [
+    { trusted: true, crash: null, killRequested: false, label: 'trusted' },
+    { trusted: false, crash: { reason: 'crashed', exitCode: 139, url: 'x' }, killRequested: false, label: 'crashed' },
+    { trusted: false, crash: null, killRequested: true, label: 'kill-pending' }
+  ];
+  for (const [i, c] of cases.entries()) {
+    const h = setup();
+    const wcId = 200 + i;
+    const wc = new FakeContents(wcId);
+    const view = { webContents: wc };
+    const entry = {
+      view,
+      active: true,
+      loadFailure: null,
+      hung: false,
+      trusted: c.trusted,
+      crash: c.crash,
+      killRequested: c.killRequested,
+      lastRequestedUrl: null
+    };
+    makeFailureRecord(h, wcId, entry);
+    h.wiring.wireTabViewEvents(view, wcId, 'persist:jar-a');
+
+    wc.emit('unresponsive');
+
+    assert.equal(entry.hung, false, `${c.label}: unresponsive must be ignored`);
+    assert.deepEqual(h.sends, [], `${c.label}: no tab-hung push`);
+  }
+});
+
+test('AC2/DD1: did-start-navigation clears a lingering crash, hung, and killRequested flag', () => {
+  const h = setup();
+  const wc = new FakeContents(109);
+  const view = { webContents: wc };
+  const entry = {
+    view,
+    active: true,
+    loadFailure: null,
+    crash: { reason: 'crashed', exitCode: 139, url: 'https://old.test/' },
+    hung: true,
+    killRequested: true,
+    lastRequestedUrl: null
+  };
+  makeFailureRecord(h, 109, entry);
+  h.wiring.wireTabViewEvents(view, 109, 'persist:jar-a');
+
+  wc.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false, url: 'https://new.test/' });
+
+  assert.equal(entry.crash, null);
+  assert.equal(entry.hung, false);
+  assert.equal(entry.killRequested, false);
+  assert.deepEqual(h.sends, [
+    ['tab-crash', { wcId: 109, crash: null }],
+    ['tab-hung', { wcId: 109, hung: false }]
+  ]);
+});
+
+test('AC2 edge case: did-start-navigation clears a lingering killRequested flag even with no crash/hung to clear', () => {
+  const h = setup();
+  const wc = new FakeContents(110);
+  const view = { webContents: wc };
+  const entry = {
+    view,
+    active: true,
+    loadFailure: null,
+    crash: null,
+    hung: false,
+    killRequested: true,
+    lastRequestedUrl: null
+  };
+  makeFailureRecord(h, 110, entry);
+  h.wiring.wireTabViewEvents(view, 110, 'persist:jar-a');
+
+  wc.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false, url: 'https://new.test/' });
+
+  assert.equal(entry.killRequested, false);
+  assert.deepEqual(h.sends, [], 'no spurious pushes when there was nothing to clear');
+});
+
+// ---------------------------------------------------------------------------
+// Mission 20 Flight 3 Leg 2 (DD2): a popup's own render-process-gone.
+// ---------------------------------------------------------------------------
+
+test('DD2: a popup render-process-gone (non-clean-exit) records and closes the popup window', () => {
+  const h = popupHarness();
+  const win = new FakePopupWindow(701);
+  h.wc.emit('did-create-window', win);
+  const popupWc = win.webContents;
+  popupWc.url = 'https://popup.test/oauth';
+
+  popupWc.emit('render-process-gone', {}, { reason: 'crashed', exitCode: 139 });
+
+  assert.equal(win.destroyed, true, 'the popup window is closed (win.close(), which also fires its own teardown)');
+  assert.deepEqual(
+    h.calls.filter((c) => Array.isArray(c) && c[0] === 'on-crash'),
+    [
+      [
+        'on-crash',
+        {
+          kind: 'popup',
+          reason: 'crashed',
+          exitCode: 139,
+          url: 'https://popup.test/oauth',
+          partition: 'persist:jar-a',
+          windowId: win.id,
+          recovery: 'closed'
+        }
+      ]
+    ]
+  );
+});
+
+test('DD2: a popup render-process-gone with reason clean-exit is ignored — the window stays open', () => {
+  const h = popupHarness();
+  const win = new FakePopupWindow(702);
+  h.wc.emit('did-create-window', win);
+  const popupWc = win.webContents;
+
+  popupWc.emit('render-process-gone', {}, { reason: 'clean-exit', exitCode: 0 });
+
+  assert.deepEqual(
+    h.calls.filter((c) => Array.isArray(c) && c[0] === 'on-crash'),
+    []
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Mission 20 Flight 3 Leg 3 (DD5/AC4): sendToChrome routes through
+// sendOrQueue — grep-AC: zero `chromeForTab(wcId)?.send` inside
+// wireTabViewEvents (the two remaining call sites, devtools-state-changed
+// and page-context-menu, both live in wireGuestContents, ABOVE this
+// function).
+// ---------------------------------------------------------------------------
+
+test('AC4 source-scan: wireTabViewEvents contains zero chromeForTab(wcId)?.send call sites', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'main', 'guest-wiring.js'), 'utf8');
+  const start = src.indexOf('function wireTabViewEvents(');
+  assert.ok(start >= 0, 'wireTabViewEvents must exist');
+  // Isolate the function body via balanced-brace matching (the sheet-
+  // automation-gate-invariant idiom — never a fixed-line-count slice).
+  let depth = 0;
+  let end = -1;
+  for (let i = src.indexOf('{', start); i < src.length; i++) {
+    if (src[i] === '{') depth++;
+    else if (src[i] === '}') {
+      depth--;
+      if (depth === 0) {
+        end = i;
+        break;
+      }
+    }
+  }
+  assert.ok(end > start, 'must find the end of wireTabViewEvents');
+  const body = src.slice(start, end);
+  assert.equal(
+    (body.match(/chromeForTab\(wcId\)\?\.send/g) || []).length,
+    0,
+    'wireTabViewEvents must route every per-tab push through sendOrQueue, never chromeForTab(wcId)?.send directly'
+  );
+  assert.ok(body.includes('sendOrQueue(wcId, channel, payload)'), 'sendToChrome must be sendOrQueue-backed');
 });

@@ -105,7 +105,25 @@ test('renderer.js is untouched by this leg (DD11: no renderer.js change, or a na
   // push can refresh the chip for the tab it landed on — see
   // seam-contract.test.js's RENDERER_LINE_BUDGET comment for the full
   // accounting.
-  assert.equal(lines, 1806, 'renderer.js line count matches the current landed source');
+  // Retargeted again (Mission 20 Flight 3 Leg 1, dispatch-extraction-and-
+  // crash-spike, DD11): 1806 → 1532 — LOWERED, a behaviour-preserving move,
+  // not a growth: the generic `dispatchOverlayActivation` switch +
+  // `handleOverlayClosed` sink extracted verbatim into `src/renderer/chrome/
+  // overlay-dispatch.js`'s `createOverlayDispatch(deps)` (the two names left
+  // behind are hoisted function declarations, not `const` thunks — a `const`
+  // is a TDZ ReferenceError at overlayMenuClient's earlier construction
+  // site), and the five independent `updateAddressChip` call sites unified
+  // behind one `refreshTabIndicators(tab, { force })` owned by
+  // site-security-controller.js — see seam-contract.test.js's
+  // RENDERER_LINE_BUDGET comment for the full accounting.
+  // Retargeted again (Mission 20 Flight 3 Leg 2, guest-crash-and-hang-
+  // surfaces): 1532 → 1577 — the crash-panel/hang-bar chrome glue (the
+  // hang-notice-controller.js import + construction + subscription, the
+  // `projectHangNotice` wrapper + dep line, and the two new
+  // `showCrashPanelForAudit`/`showHangNoticeForAudit` seam hooks) — this
+  // leg's OWN scope, not a foreign touch; see seam-contract.test.js's
+  // RENDERER_LINE_BUDGET comment for the full accounting.
+  assert.equal(lines, 1577, 'renderer.js line count matches the current landed source');
 });
 
 test('no inline VaultStore error-class check outside the vault-sheet-errors.js mapper (zero inline ladders)', () => {

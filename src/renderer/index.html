@@ -348,6 +348,21 @@
       </button>
     </div>
 
+    <!-- Hang notice (Mission 20 F3 Leg 2, DD3). A non-blocking bar shown while
+         the ACTIVE tab's renderer is unresponsive, cleared the moment it
+         answers again. Hidden via .hidden by default — the #bookmarks-bar
+         shape: fixed height, #main's flex:1 absorbs the change INSTANTLY (see
+         the styles.css INVARIANT comment on #bookmarks-bar — never animated).
+         Static content (no per-item render): hang-notice-controller.js only
+         toggles visibility and drives the two buttons. -->
+    <div id="hang-notice" class="hidden" role="status">
+      <span>This page isn't responding</span>
+      <div class="hang-notice-actions">
+        <button id="hang-notice-wait" type="button" class="text-btn small">Wait</button>
+        <button id="hang-notice-kill" type="button" class="text-btn small">Kill and reload</button>
+      </div>
+    </div>
+
     <!-- Main area: web content + media panel -->
     <div id="main">
       <div id="webviews">

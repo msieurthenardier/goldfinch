@@ -1,6 +1,6 @@
 # Flight: Crash and Hang Resilience
 
-**Status**: ready
+**Status**: in-flight
 **Mission**: [No Silent Failures](../../mission.md)
 
 ## Contributing to Criteria
@@ -341,7 +341,7 @@ Settle-before-read: `loadState` may flip before `pid` refreshes; read twice.
 
 **DD11 — Substrate first: the composition root gets headroom, the chip
 refresh gets one owner.** Leg 1 extracts `dispatchOverlayActivation`
-(`renderer.js:932-1235`) and `handleOverlayClosed` (`:1236-1275`) into
+(`renderer.js:932-1222`) and `handleOverlayClosed` (`:1236-1259`) into
 `src/renderer/chrome/overlay-dispatch.js` (`createOverlayDispatch(deps)` —
 the generic switch with every action injected; the three controllers'
 `handleActivation`/`handleClosed` chains stay where they are, ahead of it),
@@ -366,26 +366,33 @@ the crash-log field set (DD7). A HAT change is a spec re-author.
 
 ### Prerequisites
 
-- [ ] `main` at `3613542` or later (Flight 2 + squawks merged); flight branch
+- [x] `main` at `3613542` or later (Flight 2 + squawks merged); flight branch
       `flight/03-crash-and-hang-resilience` cut from `main`.
-- [ ] Live rig launchable (leg-1-of-F2 rules: env-only key, kill by port
+- [x] Live rig launchable (leg-1-of-F2 rules: env-only key, kill by port
       pid, `127.0.0.2` refuses, ozone wayland); `kill` available (yes).
-- [ ] Leg-1 spike logged before leg 2: (a) does `unresponsive` fire for a
-      busy-looping page with NO input, and after one `click`; (b) does
-      `responsive` follow `kill -CONT`; (c) `wc.getURL()`, `navigationHistory`
-      and `effectiveUrl` after `kill -SEGV`; (d) `wc.reload()` on a crashed
-      guest respawns and keeps history (back works); (e) window close with a
-      crashed guest attached does not throw; (f) `forcefullyCrashRenderer()`
-      emits `render-process-gone` with `reason: 'killed'`; (g) `reload()` on
-      the crashed CHROME webContents re-runs `index.html` and re-invokes
-      `window-boot-config` (else `loadFile`); (h) `render-process-gone`
-      `reason`/`exitCode` for SEGV vs KILL vs OOM (a page allocating until
-      the renderer dies — optional); (i) `app.getPath('crashDumps')` receives
-      a minidump after a SEGV with `crashReporter` started local-only, and
-      NO network request is attempted (`--log-net-log` or a proxy env var
-pointing at a refusing port during the spike); (j) `wc.getOSProcessId()`
-on a crashed, not-yet-reloaded renderer (`0` / `undefined` / throw).
-- [ ] Fixture: `tests/behavior/fixtures/keyboard-nav` (links page) on
+- [x] Leg-1 spike logged before leg 2 (full table + exact reason/exitCode
+      pairs: flight-log "Spike Results (leg 1)"): (a) does `unresponsive`
+      fire for a busy-looping page with NO input, and after one `click` —
+      **holds**, input-driven; (b) does `responsive` follow `kill -CONT` —
+      **holds**; (c) `wc.getURL()`, `navigationHistory` and `effectiveUrl`
+      after `kill -SEGV` — **holds**, both survive; (d) `wc.reload()` on a
+      crashed guest respawns and keeps history (back works) — **holds**;
+      (e) window close with a crashed guest attached does not throw —
+      **holds**; (f) `forcefullyCrashRenderer()` emits `render-process-gone`
+      with `reason: 'killed'` — **VARIANT**: actually yields
+      `reason: 'crashed'`, `exitCode: 133` on this rig — **flagged for leg 2
+      design** (recommend gating kill-and-reload on `entry.killRequested`
+      alone, not on `reason`); (g) `reload()` on the crashed CHROME
+      webContents re-runs `index.html` and re-invokes `window-boot-config` —
+      **holds** (no `loadFile` fallback needed); (h) `render-process-gone`
+      `reason`/`exitCode` for SEGV (`crashed`/139) vs KILL (`killed`/9) —
+      **holds**; OOM skipped (optional); (i) `app.getPath('crashDumps')`
+      receives a minidump after a SEGV with `crashReporter` started
+      local-only, and NO network request is attempted — **holds** (6 real
+      `.dmp` files; confirmed under a refusing-proxy relaunch too); (j)
+      `wc.getOSProcessId()` on a crashed, not-yet-reloaded renderer —
+      **holds**, always `0` (never `undefined`/throw).
+- [x] Fixture: `tests/behavior/fixtures/keyboard-nav` (links page) on
       `127.0.0.2:{P}` for a normal page; a tiny `busy.html` fixture with a
       "Busy loop 20 s" button (new, in `tests/behavior/fixtures/crash/`) for
       the input-driven hang row.
@@ -428,12 +435,12 @@ on a crashed, not-yet-reloaded renderer (`0` / `undefined` / throw).
 
 ### Checkpoints
 
-- [ ] CP1 — Spike logged; `renderer.js` under its new budget; dispatch
+- [x] CP1 — Spike logged; `renderer.js` under its new budget; dispatch
       extraction green on the menu-spec unit twins
-- [ ] CP2 — A SEGV'd guest shows the crash panel; Reload recovers with
+- [x] CP2 — A SEGV'd guest shows the crash panel; Reload recovers with
       history; a STOPped guest shows the bar after one click; CONT clears it;
       census `crashed` / `hung`
-- [ ] CP3 — A killed chrome renderer comes back with every tab and the
+- [x] CP3 — A killed chrome renderer comes back with every tab and the
       active tab; a fourth crash in 60 s pauses; `crash-log.jsonl` has
       redacted rows; a minidump exists; no network attempt
 - [ ] CP4 — `crash-and-hang-surfaces` run: pass; `npm run a11y` exit 0
@@ -466,17 +473,29 @@ on a crashed, not-yet-reloaded renderer (`0` / `undefined` / throw).
 > and created one at a time as the flight progresses. This list will evolve
 > based on discoveries during implementation.
 
-- [ ] `dispatch-extraction-and-crash-spike` — `overlay-dispatch.js`,
+- [x] `dispatch-extraction-and-crash-spike` — `overlay-dispatch.js`,
       `refreshTabIndicators`, budget re-pin, spike (a)–(i) logged. Ends with
-      green gates and the premises settled.
-- [ ] `guest-crash-and-hang-surfaces` — DD1–DD4, DD9 (census + admin pid),
+      green gates and the premises settled. **Landed 2026-09-16** — nine of
+      ten premises `holds`, premise (f) is a `variant`
+      (`forcefullyCrashRenderer()` yields `reason: 'crashed'`, not
+      `'killed'`) flagged for leg 2's design; see flight-log Anomalies.
+- [x] `guest-crash-and-hang-surfaces` — DD1–DD4, DD9 (census + admin pid),
       the panel's crash branch, the hang bar, pushes, pins. Ends with a
       signalled guest recovering by Reload and a stopped guest showing the
-      bar live.
-- [ ] `chrome-recovery-and-crash-records` — DD5–DD8; `crash-log.js`,
+      bar live. **Landed 2026-09-16** — all 11 ACs verified; see flight-log
+      for the live smoke findings and two Anomalies (a SIGSTOPped renderer
+      cannot service `forcefullyCrashRenderer()`'s IPC — the kill-and-reload
+      row was re-verified with the real busy-loop fixture instead; a driver
+      bug, not a product bug, from a multi-window persisted dev profile).
+- [x] `chrome-recovery-and-crash-records` — DD5–DD8; `crash-log.js`,
       `crashReporter`, `chrome-recovery.js`, the boot-config branch, docs.
       Ends with a killed chrome coming back with its tabs and a redacted
-      record on disk.
+      record on disk. **Landed 2026-09-16** — all 11 ACs verified; live
+      smoke (16/16 rows pass) confirmed chrome reload-and-reconcile,
+      the 3-per-60s cap + pause, and redacted crash-log records; see
+      flight-log for findings and two Anomalies (SEGV proved unreliable
+      against a sandboxed guest renderer this run — KILL substituted; a
+      driver return-shape bug, not a product defect).
 - [ ] `acceptance-and-docs` — the Witnessed run (operator present for
       nothing — every row is automatable), a11y states, README/CLAUDE.md.
 - [ ] `hat-and-alignment` *(optional, operator-elected)* — small walk.

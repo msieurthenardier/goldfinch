@@ -126,15 +126,31 @@ test('adopt payload takes MAIN-AUTHORITATIVE url/title from the live wc at send 
     url: 'https://a.example/deep',
     title: 'Deep A',
     favicon: 'https://a.example/f.ico',
-    container: p.container
+    container: p.container,
+    trusted: false
   });
 });
 
 test('a destroyed/absent wc falls back to the renderer snapshot url/title', () => {
   const p = validateMoveTabPayload(GOOD);
   const dead = { isDestroyed: () => true, getURL: () => 'x', getTitle: () => 'x' };
-  assert.deepEqual(buildAdoptPayload(p, dead), { ...p });
-  assert.deepEqual(buildAdoptPayload(p, null), { ...p });
+  assert.deepEqual(buildAdoptPayload(p, dead), { ...p, trusted: false });
+  assert.deepEqual(buildAdoptPayload(p, null), { ...p, trusted: false });
+});
+
+// --- trusted (Mission 20 Flight 3 Leg 3, leg-3 design review Decision) --------
+
+test('a move-path adopt NEVER carries trusted: true — validateMoveTabPayload has no trusted field to smuggle', () => {
+  const p = validateMoveTabPayload(GOOD);
+  assert.equal('trusted' in p, false);
+  const adopt = buildAdoptPayload(p, liveWc('https://a.example/', 'A'));
+  assert.equal(adopt.trusted, false);
+});
+
+test('buildAdoptPayload reads trusted from its `p` argument, not from the move payload shape', () => {
+  const p = validateMoveTabPayload(GOOD);
+  const adopt = buildAdoptPayload({ ...p, trusted: true }, liveWc('https://a.example/', 'A'));
+  assert.equal(adopt.trusted, true);
 });
 
 test('empty live url/title fall back per-field to the snapshot (a mid-boot wc must not blank the strip)', () => {

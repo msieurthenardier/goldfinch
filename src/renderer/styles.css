@@ -317,7 +317,9 @@ html.platform-darwin #window-controls {
   line-height: 14px;
   font-size: 12px;
 }
-.tab[data-load-state='failed'] .tab-fav {
+.tab[data-load-state='failed'] .tab-fav,
+.tab[data-load-state='crashed'] .tab-fav,
+.tab[data-load-state='hung'] .tab-fav {
   display: none;
 }
 .tab .tab-close {
@@ -789,6 +791,41 @@ a:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* ---------- Hang notice (Mission 20 F3 Leg 2, DD3) ---------- */
+#hang-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 12px;
+  /* Fixed literal — #main's flex:1 absorbs whatever this row is or isn't, so
+     the height must never itself depend on content (the #bookmarks-bar
+     precedent immediately above). */
+  height: 30px;
+  background: var(--bg-3);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  /* INSTANTLY — no transition, same rationale as #bookmarks-bar above:
+     showing/hiding this row changes #main's flex-computed height, which
+     changes the active guest's bounds via tabSetActive/tabSetBounds — a
+     SEPARATE COMPOSITING SURFACE whose bounds move in ONE discrete
+     `setBounds` step. window-controller.js's hang-notice-controller.js
+     equivalent calls sendActiveBounds() explicitly right after every net
+     visibility change — belt-and-suspenders over the #webviews
+     ResizeObserver.
+     INVARIANT: never animate #hang-notice's visibility/height. Animate only
+     things that float OVER the guest (find bar, menu sheet) — never this row. */
+}
+#hang-notice.hidden {
+  display: none;
+}
+.hang-notice-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
 #bookmarks-overflow {
   flex: none;
   /* PINNED: mirrored as CHEVRON_WIDTH in bookmarks-bar.js (see the pinned-pair

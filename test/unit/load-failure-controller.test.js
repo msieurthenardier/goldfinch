@@ -36,7 +36,16 @@ function createHarness() {
   address.value = '';
   const els = { loadFailureSurface: root, address };
   const addressChipCalls = [];
-  const updateAddressChip = (tab) => addressChipCalls.push(tab);
+  const refreshTabIndicatorsOpts = [];
+  // Mission 20 F3 Leg 1 (DD11): the controller's dep is now the unified
+  // refreshTabIndicators(tab, opts) owner (site-security-controller.js) —
+  // addressChipCalls keeps its pre-existing tab-only shape (every prior
+  // assertion below reads it by identity); refreshTabIndicatorsOpts records
+  // the opts bag separately (the real call site always passes { force: true }).
+  const refreshTabIndicators = (tab, opts) => {
+    addressChipCalls.push(tab);
+    refreshTabIndicatorsOpts.push(opts);
+  };
   const document = createFakeDocument();
   const tabsByWcId = new Map();
   const findTabByWcId = (wcId) => tabsByWcId.get(wcId) || null;
@@ -46,9 +55,15 @@ function createHarness() {
   const calls = [];
   const advancedCalls = [];
   const viewCertificateCalls = [];
+  const crashSubscribers = [];
   const bridge = {
     onTabLoadFailure(cb) {
       subscribers.push(cb);
+    },
+    // Mission 20 Flight 3 Leg 2 (DD1): the crash push — the onTabLoadFailure
+    // shape, its own independent subscriber list.
+    onTabCrash(cb) {
+      crashSubscribers.push(cb);
     },
     tabNavigate(payload) {
       calls.push(['tabNavigate', payload]);
@@ -68,8 +83,9 @@ function createHarness() {
     findTabByWcId,
     isActiveTab,
     classifyLoadFailure,
-    updateAddressChip,
+    refreshTabIndicators,
     addressChipCalls,
+    refreshTabIndicatorsOpts,
     calls,
     advancedCalls,
     viewCertificateCalls,
@@ -83,6 +99,9 @@ function createHarness() {
     },
     pushFailure(payload) {
       subscribers.forEach((fn) => fn(payload));
+    },
+    pushCrash(payload) {
+      crashSubscribers.forEach((fn) => fn(payload));
     }
   };
 }
@@ -96,7 +115,7 @@ async function loadController(h) {
     findTabByWcId: h.findTabByWcId,
     isActiveTab: h.isActiveTab,
     classifyLoadFailure: h.classifyLoadFailure,
-    updateAddressChip: h.updateAddressChip,
+    refreshTabIndicators: h.refreshTabIndicators,
     onAdvanced: h.onAdvanced,
     onViewCertificate: h.onViewCertificate
   });
@@ -300,8 +319,13 @@ test('chip updates even while the address bar has focus (tls-trust-surface check
     }
   });
 
-  assert.equal(h.addressChipCalls.length, 1, 'updateAddressChip must run even while the address bar has focus');
+  assert.equal(h.addressChipCalls.length, 1, 'refreshTabIndicators must run even while the address bar has focus');
   assert.equal(h.addressChipCalls[0], tab);
+  assert.deepEqual(
+    h.refreshTabIndicatorsOpts[0],
+    { force: true },
+    "Mission 20 F3 Leg 1 (DD11): the load-failure push forces the refresh — CLAUDE.md 'Chrome indicators' rule (c)"
+  );
   assert.equal(h.els.address.value, 'https://bad.test/', 'the value write stays guarded and must not be overwritten');
 
   // Sanity check on the other side of the guard: with focus elsewhere, both
@@ -734,4 +758,213 @@ test('DD9: DOM order is heading-column children Retry → View certificate → A
   const order = column.children.map((c) => c.id);
   assert.ok(order.indexOf(retry.id) < order.indexOf(viewCert.id), 'Retry precedes View certificate');
   assert.ok(order.indexOf(viewCert.id) < order.indexOf(advanced.id), 'View certificate precedes Advanced');
+});
+
+// ---------------------------------------------------------------------------
+// Mission 20 Flight 3 Leg 2 (DD1): the crash branch — classifyCrash copy,
+// the `<reason> (<exitCode>)` code line, #load-failure-reload, Retry/View
+// certificate/Advanced all hidden, strip crashed state, onTabLoadFailure
+// clearing tab.crash, and the Reload button's tabNavigate reload.
+// ---------------------------------------------------------------------------
+
+test('AC5: a crash push on the ACTIVE tab shows the panel with classifyCrash copy, the reason (exitCode) code line, and Reload only', async () => {
+  const h = createHarness();
+  const tab = {
+    id: 'tab-1',
+    wcId: 10,
+    url: 'https://crashed.test/',
+    title: 'Crashed',
+    btn: makeBtn(),
+    loadFailure: null,
+    crash: null
+  };
+  h.addTab(tab);
+  h.setActive('tab-1');
+  await loadController(h);
+
+  h.pushCrash({ wcId: 10, crash: { reason: 'crashed', exitCode: 139, url: 'https://crashed.test/' } });
+
+  assert.deepEqual(tab.crash, { reason: 'crashed', exitCode: 139, url: 'https://crashed.test/' });
+  assert.equal(h.els.loadFailureSurface.classList.contains('hidden'), false, 'the panel must be shown');
+  const heading = findById(h, 'load-failure-heading');
+  assert.equal(heading.textContent, 'This page crashed');
+  const codeLine = findById(h, 'load-failure-code');
+  assert.equal(codeLine.textContent, 'crashed (139)');
+  assert.equal(findById(h, 'load-failure-retry').classList.contains('hidden'), true, 'Retry hidden for a crash');
+  assert.equal(
+    findById(h, 'load-failure-view-cert').classList.contains('hidden'),
+    true,
+    'View certificate hidden for a crash'
+  );
+  assert.equal(findById(h, 'load-failure-advanced').classList.contains('hidden'), true, 'Advanced hidden for a crash');
+  assert.equal(findById(h, 'load-failure-reload').classList.contains('hidden'), false, 'Reload shown for a crash');
+  assert.equal(h.els.loadFailureSurface.dataset.failureKind, 'crash');
+});
+
+test('AC1: classifyCrash killed/oom copy renders through the panel', async () => {
+  const h = createHarness();
+  const tab = { id: 'tab-1', wcId: 10, url: 'https://x/', title: 'X', btn: makeBtn(), loadFailure: null, crash: null };
+  h.addTab(tab);
+  h.setActive('tab-1');
+  await loadController(h);
+
+  h.pushCrash({ wcId: 10, crash: { reason: 'killed', exitCode: 9, url: 'https://x/' } });
+  assert.equal(findById(h, 'load-failure-heading').textContent, 'This page was closed by the system');
+
+  h.pushCrash({ wcId: 10, crash: { reason: 'oom', exitCode: 1, url: 'https://x/' } });
+  assert.equal(findById(h, 'load-failure-heading').textContent, 'This page ran out of memory');
+});
+
+test('AC5: Reload sends tabNavigate reload for the panel’s tab', async () => {
+  const h = createHarness();
+  const tab = {
+    id: 'tab-1',
+    wcId: 10,
+    url: 'https://crashed.test/',
+    title: 'Crashed',
+    btn: makeBtn(),
+    loadFailure: null,
+    crash: null
+  };
+  h.addTab(tab);
+  h.setActive('tab-1');
+  await loadController(h);
+  h.pushCrash({ wcId: 10, crash: { reason: 'crashed', exitCode: 139, url: 'https://crashed.test/' } });
+
+  const reload = findById(h, 'load-failure-reload');
+  reload.click();
+
+  assert.deepEqual(h.calls, [['tabNavigate', { wcId: 10, verb: 'reload' }]]);
+});
+
+test('clicking Reload while no crash is current is a no-op', async () => {
+  const h = createHarness();
+  const tab = { id: 'tab-1', wcId: 10, url: 'http://x/', title: 'X', btn: makeBtn(), loadFailure: null, crash: null };
+  h.addTab(tab);
+  h.setActive('tab-1');
+  await loadController(h);
+  const reload = findById(h, 'load-failure-reload');
+  reload.click();
+  assert.equal(h.calls.length, 0);
+});
+
+test('AC5/DD1: applyStripState marks a crashed tab with data-load-state="crashed" and the crashed suffix', async () => {
+  const h = createHarness();
+  const tab = {
+    id: 'tab-1',
+    wcId: 10,
+    url: 'https://crashed.test/',
+    title: 'Crashed',
+    btn: makeBtn(),
+    loadFailure: null,
+    crash: null
+  };
+  h.addTab(tab);
+  h.setActive('tab-1');
+  await loadController(h);
+
+  h.pushCrash({ wcId: 10, crash: { reason: 'crashed', exitCode: 139, url: 'https://crashed.test/' } });
+
+  assert.equal(tab.btn.dataset.loadState, 'crashed');
+  const status = tab.btn.querySelector('.tab-status');
+  assert.equal(status.hidden, false);
+  assert.equal(status.textContent, '⚠');
+  assert.ok(tab.btn.getAttribute('aria-label').endsWith('— crashed'));
+});
+
+test('DD1: crash precedence — crash beats a stale loadFailure/hung on the strip (deriveStripLoadState)', async () => {
+  const h = createHarness();
+  const tab = {
+    id: 'tab-1',
+    wcId: 10,
+    url: 'https://crashed.test/',
+    title: 'Crashed',
+    btn: makeBtn(),
+    loadFailure: { code: -1, name: 'stale' },
+    hung: true,
+    crash: null
+  };
+  h.addTab(tab);
+  h.setActive('tab-1');
+  await loadController(h);
+
+  h.pushCrash({ wcId: 10, crash: { reason: 'crashed', exitCode: 139, url: 'https://crashed.test/' } });
+
+  assert.equal(tab.crash !== null, true);
+  assert.equal(tab.loadFailure, null, 'a dead renderer is never also reported failed');
+  assert.equal(tab.hung, false, 'a dead renderer is never also reported hung');
+  assert.equal(tab.btn.dataset.loadState, 'crashed');
+});
+
+test('a tab-crash null push (cleared by navigation) hides the panel and clears the strip on the active tab', async () => {
+  const h = createHarness();
+  const tab = {
+    id: 'tab-1',
+    wcId: 10,
+    url: 'https://crashed.test/',
+    title: 'Crashed',
+    btn: makeBtn(),
+    loadFailure: null,
+    crash: { reason: 'crashed', exitCode: 139, url: 'https://crashed.test/' }
+  };
+  tab.btn.dataset.loadState = 'crashed';
+  h.addTab(tab);
+  h.setActive('tab-1');
+  await loadController(h);
+  h.els.loadFailureSurface.classList.remove('hidden'); // simulate it was showing
+
+  h.pushCrash({ wcId: 10, crash: null });
+
+  assert.equal(tab.crash, null);
+  assert.equal(tab.btn.dataset.loadState, undefined);
+  assert.equal(h.els.loadFailureSurface.classList.contains('hidden'), true);
+});
+
+test('a crash push on a BACKGROUND tab marks the strip but never shows the panel', async () => {
+  const h = createHarness();
+  const tab = {
+    id: 'tab-1',
+    wcId: 10,
+    url: 'https://crashed.test/',
+    title: 'Crashed',
+    btn: makeBtn(),
+    loadFailure: null,
+    crash: null
+  };
+  h.addTab(tab);
+  h.setActive('some-other-tab');
+  await loadController(h);
+
+  h.pushCrash({ wcId: 10, crash: { reason: 'crashed', exitCode: 139, url: 'https://crashed.test/' } });
+
+  assert.ok(tab.crash);
+  assert.equal(tab.btn.dataset.loadState, 'crashed');
+  assert.equal(h.els.loadFailureSurface.classList.contains('hidden'), true, 'a background crash never opens the panel');
+});
+
+test('a crash push for an unknown wcId is a no-op', async () => {
+  const h = createHarness();
+  await loadController(h);
+  assert.doesNotThrow(() => h.pushCrash({ wcId: 999, crash: { reason: 'crashed', exitCode: 139, url: 'x' } }));
+});
+
+test('DD1: a fresh failed load clears a prior crash (crash then a fresh failed load)', async () => {
+  const h = createHarness();
+  const tab = {
+    id: 'tab-1',
+    wcId: 10,
+    url: 'https://x.test/',
+    title: 'X',
+    btn: makeBtn(),
+    loadFailure: null,
+    crash: { reason: 'crashed', exitCode: 139, url: 'https://x.test/' }
+  };
+  h.addTab(tab);
+  h.setActive('tab-1');
+  await loadController(h);
+
+  h.pushFailure({ wcId: 10, failure: { code: -102, name: 'ERR_CONNECTION_REFUSED', url: 'https://x.test/' } });
+
+  assert.equal(tab.crash, null);
+  assert.deepEqual(tab.loadFailure, { code: -102, name: 'ERR_CONNECTION_REFUSED', url: 'https://x.test/' });
 });

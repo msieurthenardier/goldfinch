@@ -25,6 +25,9 @@ import { LOAD_STATES, failedTabTitle } from '../../shared/load-failure.js';
  *   attaching?: boolean,
  *   pendingUrl?: string | null,
  *   loadFailure?: { code: number, name: string, url: string, cert?: { host: string, port: number | null, error: string, overridable: boolean, summary: any } } | null,
+ *   crash?: { reason: string, exitCode: number, url: string } | null,
+ *   hung?: boolean,
+ *   hangDismissed?: boolean,
  *   security?: string | null
  * }} Tab
  */
@@ -63,7 +66,7 @@ export function createTabController(deps) {
     fetchCookies,
     closeSuggestions,
     resetSuggestionsForActivation,
-    updateAddressChip,
+    refreshTabIndicators, // Mission 20 F3 Leg 1 (DD11): the single chip-refresh owner (site-security-controller.js)
     renderMedia,
     renderPrivacy,
     setDevtoolsPressed,
@@ -77,7 +80,10 @@ export function createTabController(deps) {
     // Mission 20 F1 Leg 2 (DD1/AC3): the load-failure panel, same late-bound
     // wrapper-function shape as the welcome pair above.
     showLoadFailurePanel,
-    hideLoadFailurePanel
+    hideLoadFailurePanel,
+    // Mission 20 F3 Leg 2 (DD3): the hang bar's own activation-class
+    // projection — hang-notice-controller.js's `project(tab)`.
+    projectHangNotice
   } = deps;
   // Trusted-tab pseudo-jar display name (Leg 3, ownership ruling from the Leg 1
   // design review — folded into DD3): every trusted internal tab used to hardcode
@@ -901,26 +907,32 @@ export function createTabController(deps) {
       t.btn.tabIndex = isActive ? 0 : -1;
     }
 
-    // Surface projection (Mission 20 F1 Leg 2, DD1/AC3): a tab is either a
-    // viewless welcome record OR a real tab that may be failed — never both
-    // (a welcome record has no guest, so it can never carry a load failure).
-    // Exactly one of #welcome-surface / #load-failure-surface / neither is
-    // ever visible; driven from every activation-class event, mirroring
-    // onViewCreated's own welcome-panel toggle so neither surface lags a tab
-    // switch.
-    if (tab.welcome) {
-      hideLoadFailurePanel();
-      showWelcomePanel(tab);
-    } else if (tab.loadFailure) {
+    // Surface projection (Mission 20 F1 Leg 2, DD1/AC3; precedence amended
+    // F3 Leg 2, DD1): a tab is either a viewless welcome record OR a real tab
+    // that may be crashed/failed — never both (a welcome record has no
+    // guest, so it can never carry a crash or a load failure). Exactly one of
+    // #welcome-surface / #load-failure-surface / neither is ever visible;
+    // precedence crash > loadFailure > welcome > neither (a crash and a load
+    // failure are exclusive by construction, so this collapses to one call —
+    // render() itself branches on tab.crash first). Driven from every
+    // activation-class event, mirroring onViewCreated's own toggle so no
+    // surface lags a tab switch.
+    if (tab.crash || tab.loadFailure) {
       hideWelcomePanel();
       showLoadFailurePanel(tab);
+    } else if (tab.welcome) {
+      hideLoadFailurePanel();
+      showWelcomePanel(tab);
     } else {
       hideWelcomePanel();
       hideLoadFailurePanel();
     }
+    // Mission 20 F3 Leg 2 (DD3): re-project the hang bar for the newly active
+    // tab on every activation — mirrors the panel projection above.
+    projectHangNotice(tab);
 
     els.address.value = tab.url || '';
-    updateAddressChip(tab);
+    refreshTabIndicators(tab);
     refreshZoomControl(tab);
     refreshStar(tab); // sync path 4/5 (M15 F1 Leg 2) — covers adopt-tab too (single body)
     // Activation-class bar-render trigger 2/2 (M15 F2 Leg 3, DD7 table 4/5):
@@ -1107,7 +1119,15 @@ export function createTabController(deps) {
       id,
       url: typeof payload.url === 'string' ? payload.url : '',
       jar: payload.container,
-      trusted: false, // internal tabs never move (model omission + main refusal, M4)
+      // Mission 20 Flight 3 Leg 3 (leg-3 design review Decision): the
+      // move-window path never carries an internal tab (main refusal, M4) and
+      // its payload has no `trusted` field at all, so `!!payload.trusted` is
+      // `false` there unchanged; chrome recovery's adopt DOES carry an
+      // internal tab and stamps `trusted: true` main-side (never renderer-
+      // supplied) — honoring it here is what keeps a recovered Settings/
+      // Downloads/Jars tab internal rather than a web page with toolbar
+      // buttons enabled.
+      trusted: !!payload.trusted,
       title: typeof payload.title === 'string' && payload.title ? payload.title : null
     });
     // Direct wcId assignment (review M3): no tabCreate invoke, no provisioning
@@ -1121,10 +1141,15 @@ export function createTabController(deps) {
         img.classList.remove('hidden');
       }
     }
-    // Focus rules: the moved tab is this window's active tab (Chrome parity).
+    // Focus rules: the moved tab is this window's active tab (Chrome parity) —
+    // UNLESS the payload explicitly says otherwise (Mission 20 Flight 3 Leg 3:
+    // chrome recovery adopts N tabs in one boot round-trip and stamps
+    // `active: false` on every entry but the record's own `activeTabWcId`;
+    // absent `active` still activates, so the move path's single-adopt
+    // round-trip — which never sends this field — is unaffected).
     // activateTab sends tab-set-active with THIS window's measured slot bounds —
     // correcting the main-side H3 seed against any chrome-layout delta.
-    activateTab(id);
+    if (payload.active !== false) activateTab(id);
   });
 
   // tab-moved-away (SOURCE chrome): strip removal WITHOUT destroy — mirrors
@@ -1204,8 +1229,10 @@ export function createTabController(deps) {
         url: t.url,
         // F2 (post-acceptance fix pass): a failed tab reports the same
         // host-derived label the strip shows — never the stale/empty page
-        // title the guest's error document may have set.
-        title: t.loadFailure ? failedTabTitle(t) : t.title,
+        // title the guest's error document may have set. Mission 20 F3 Leg 2
+        // (DD9): a crashed tab uses the same label (failedTabTitle reads
+        // crash.url first).
+        title: t.crash || t.loadFailure ? failedTabTitle(t) : t.title,
         jarId: t.container ? t.container.id : null,
         active: t.id === ctx.activeTabId,
         // Mission 20 F1 Leg 2 (AC8): renderer-sourced census fields — the
@@ -1213,8 +1240,23 @@ export function createTabController(deps) {
         // Mission 20 Flight 2 Leg 2 (AC4): a folded cert failure reports the
         // more specific `cert-blocked` state — `t.loadFailure.cert` is only
         // ever set for a genuine ERR_CERT_* failure (guest-wiring.js's fold).
-        loadState: t.loadFailure?.cert ? LOAD_STATES.CERT_BLOCKED : t.loadFailure ? LOAD_STATES.FAILED : LOAD_STATES.OK,
-        loadError: t.loadFailure ? { code: t.loadFailure.code, name: t.loadFailure.name } : null,
+        // Mission 20 Flight 3 Leg 2 (DD9): crash > cert-blocked/failed > hung
+        // > ok — a dead renderer is never also reported failed or hung (the
+        // crash handler clears both in the same step it stamps `crash`).
+        loadState: t.crash
+          ? LOAD_STATES.CRASHED
+          : t.loadFailure?.cert
+            ? LOAD_STATES.CERT_BLOCKED
+            : t.loadFailure
+              ? LOAD_STATES.FAILED
+              : t.hung
+                ? LOAD_STATES.HUNG
+                : LOAD_STATES.OK,
+        loadError: t.crash
+          ? { code: t.crash.exitCode, name: t.crash.reason }
+          : t.loadFailure
+            ? { code: t.loadFailure.code, name: t.loadFailure.name }
+            : null,
         // Mission 20 Flight 2 Leg 2 (AC4/DD7): the security enum, pushed by
         // main's own tab-security channel and stored on the tab record by
         // site-security-controller.js. Mission 20 Flight 2 Leg 4 (design
@@ -1222,8 +1264,9 @@ export function createTabController(deps) {
         // reports `none` regardless of a stale prior value — main's own
         // did-fail-load fix (guest-wiring.js) is the source-of-truth fix;
         // this guard just keeps the census honest even if that push is ever
-        // missed or races.
-        security: t.loadFailure ? 'none' : (t.security ?? 'none')
+        // missed or races. Mission 20 Flight 3 Leg 2: a crashed tab reports
+        // `none` too (main's render-process-gone handler stamps it).
+        security: t.crash || t.loadFailure ? 'none' : (t.security ?? 'none')
       }));
     },
     openTab(url, jarId) {

@@ -206,12 +206,13 @@ export function createShortcutController(deps) {
         return true;
       // F6 / Shift+F6 (M17 F1 L1, DD1/DD4) — chrome↔content focus-cycling.
       case 'focus-content':
-        // Mission 20 F1 Leg 2 (DD6): a failed active tab has no focusable
-        // guest — land in the load-failure panel's heading instead. The
-        // chrome already holds tab.loadFailure from the push, so this
+        // Mission 20 F1 Leg 2 (DD6), widened F3 Leg 2 (DD1): a taken-over
+        // active tab (a load failure OR a crash) has no focusable guest —
+        // land in the load-failure panel's heading instead. The chrome
+        // already holds tab.loadFailure/tab.crash from the push, so this
         // resolves synchronously with no main round-trip; main's
         // tab-focus-guest refusal (DD1) remains the backstop.
-        if (activeTab()?.loadFailure) {
+        if (activeTab()?.loadFailure || activeTab()?.crash) {
           focusLoadFailureHeading();
           return true;
         }

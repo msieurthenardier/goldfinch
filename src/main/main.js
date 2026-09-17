@@ -13,7 +13,8 @@ const {
   protocol,
   net,
   clipboard,
-  Menu
+  Menu,
+  crashReporter
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -42,6 +43,11 @@ const { registerHistoryIpc } = require('./history-ipc');
 const { createFaviconFetcher } = require('./favicon-fetch');
 const { isSafeTabUrl, isInternalPageUrl } = require('../shared/url-safety');
 const { devUserDataPath } = require('../shared/dev-profile');
+// Mission 20 Flight 3 Leg 3 (DD7/DD8): the crash-record writer (field
+// allowlist) — Electron-free, injected {dir, fs, now}.
+const { createCrashLog, kindOfChildProcess } = require('./crash-log');
+// Mission 20 Flight 3 Leg 3 (DD5): chrome reload-and-reconcile (Electron-free).
+const { createChromeRecovery } = require('./chrome-recovery');
 const { parseMediaProxyUrl } = require('../shared/media-proxy');
 const { INTERNAL_PARTITION } = require('../shared/internal-page');
 const { createMediaProxyHandler } = require('./media-proxy-handler');
@@ -111,7 +117,7 @@ const { createCertTrust, keyFor } = require('./cert-trust');
 const { createCertObserver } = require('./cert-observer');
 const { summarizeCertificate } = require('./certificate-summary');
 const { createSessionRuntime } = require('./session-runtime');
-const { registerTabIpc, applyGuestVisibility } = require('./register-tab-ipc');
+const { registerTabIpc, applyGuestVisibility, createSendOrQueue } = require('./register-tab-ipc');
 const { registerOverlayIpc } = require('./register-overlay-ipc');
 const { registerDownloadIpc } = require('./register-download-ipc');
 const { registerSettingsIpc } = require('./register-settings-ipc');
@@ -273,6 +279,48 @@ if (process.platform === 'win32') {
 if (!app.isPackaged) {
   app.setPath('userData', devUserDataPath(app.getPath('userData')));
 }
+
+// Mission 20 Flight 3 Leg 3 (DD8): Chromium's own minidump collector, started
+// at module load (before app.whenReady()) so early crashes are caught too —
+// but PLACED IMMEDIATELY AFTER the dev-profile redirect above, never before
+// it. Electron 44 has no `crashesDirectory` option; the dump database path is
+// resolved from `userData` at `start()` time, so a call placed any earlier
+// would write dev-launch dumps into the operator's REAL profile (squawk 0017
+// / #121 isolation). NO `submitURL` key at all — `uploadToServer: false`
+// alone means nothing is ever attempted to be uploaded (source-scan pinned:
+// `test/unit/crash-reporter-pins.test.js` asserts exactly one
+// `crashReporter.start(` call, that its literal contains
+// `uploadToServer: false`, that neither `submitURL` nor `addExtraParameter`
+// appears anywhere in `src/`, and that this call sits textually after the
+// `setPath('userData'` line above).
+crashReporter.start({
+  uploadToServer: false,
+  compress: false,
+  ignoreSystemCrashHandler: false,
+  rateLimit: false
+});
+
+// Mission 20 Flight 3 Leg 3 (DD7): the local crash-record writer, constructed
+// after the dev-profile redirect too (so `app.getPath('userData')` already
+// resolves the -dev directory under a dev launch). `record()`'s field
+// allowlist is enforced by destructuring its input — see crash-log.js.
+const crashLog = createCrashLog({ dir: app.getPath('userData'), fs, now: () => new Date(), logger: console });
+/** @param {any} e */
+const onCrash = (e) => crashLog.record(e);
+// DD2/DD7: `gpu`/`utility`/`other` kinds carry reason + exitCode only — no
+// url/partition/windowId exists for a non-guest child process.
+/** @param {{ type?: string, reason?: string, exitCode?: number } | null | undefined} details */
+const onChildProcessGone = (details) => {
+  crashLog.record({
+    kind: kindOfChildProcess(details && details.type),
+    reason: details && details.reason,
+    exitCode: details && details.exitCode,
+    url: null,
+    partition: null,
+    windowId: null,
+    recovery: 'ignored'
+  });
+};
 
 // Fixed internal assets remain an exact host/path allowlist. The extracted
 // builder receives __dirname and path; it never derives a file from a URL.
@@ -1637,6 +1685,11 @@ const certObserver = createCertObserver({
 
 // Electron construction is confined to this dependency map; window-factory.js itself
 // remains Electron-free and its close/closed lifecycle runs under strict fake windows.
+// Mission 20 Flight 3 Leg 3 (DD5/DD6): chrome reload-and-reconcile — a per-
+// window ring of crash timestamps lazily initialized ON each registry
+// record (window-registry.js is untouched); Electron-free, offline-tested.
+const chromeRecovery = createChromeRecovery({ now: () => Date.now(), logger: console });
+
 const { createWindow } = createWindowFactory({
   BaseWindow,
   WebContentsView,
@@ -1691,8 +1744,15 @@ const { createWindow } = createWindowFactory({
   releaseVaultHoldsForWindow,
   defer: setImmediate,
   scheduleSnapshot: scheduleSessionSnapshot,
+  chromeRecovery,
+  onCrash,
   logger: console
 });
+
+// Mission 20 Flight 3 Leg 3 (DD5): constructed ONCE, before both `createGuestWiring`
+// and `registerTabIpc` — both receive the SAME instance, so a per-tab push routes
+// through one boot-gate implementation regardless of which module sent it.
+const sendOrQueue = createSendOrQueue(registry);
 
 // Guest event wiring is pure composition: the extracted module sees only injected
 // owner lookups, decisions, and side effects. Both entry points read live state.
@@ -1729,6 +1789,14 @@ const { wireGuestContents, wireTabViewEvents } = createGuestWiring({
   // register-tab-ipc.js — threaded here so guest-wiring's own failure/clear
   // transitions call the SAME helper every other guest-show site does.
   applyGuestVisibility,
+  // Mission 20 Flight 3 Leg 3 (DD5): every per-tab push routes through the
+  // boot gate — a push racing a chrome reload is queued and replayed after
+  // the recovery adopts, never lost.
+  sendOrQueue,
+  // Mission 20 Flight 3 Leg 3 (DD7): the crash-record sink — guest crash/
+  // kill-reload/popup-crash sites all call this (leg 2 already calls the
+  // shape; this leg wires the real writer).
+  onCrash,
   logger: console
 });
 
@@ -2599,6 +2667,20 @@ registerAppLifecycle({
   // M18 F2 L4 (H2 resurface): a chrome just served window-boot-config — re-key any
   // orphaned pending compromise reveal to it and re-open the recovery-show sheet.
   onChromeBooted: (rec) => resurfaceCompromiseReveal(rec),
+  // Mission 20 Flight 3 Leg 3 (DD5): `window-boot-config`'s `recoverTabs`
+  // branch — the same chrome recovery instance window-factory.js's crash
+  // hook uses, plus the pieces it needs to rebuild adopt payloads main-side.
+  chromeRecovery,
+  buildAdoptPayload,
+  getDefaultJar: () => jars.getDefault(),
+  // Mission 20 Flight 3 Leg 3 (DD8/AC7): pruned at app.ready, after
+  // initProfileAndStores (so `app.getPath('crashDumps')` resolves the -dev
+  // directory under a dev launch, same rationale as crashLog's own
+  // construction above).
+  pruneCrashDumps: (dir) => crashLog.pruneDumps(dir),
+  // Mission 20 Flight 3 Leg 3 (DD2/DD7): `gpu`/`utility`/`other` child-
+  // process crashes — registered top-level beside 'login'/'certificate-error'.
+  onChildProcessGone,
   getAllWindows: () => BaseWindow.getAllWindows(),
   argv: process.argv,
   env: process.env,

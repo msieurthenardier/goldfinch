@@ -55,8 +55,48 @@ test('window-census: one record → one row carrying every AC5 field', () => {
     sheetVisible: true,
     findVisible: false,
     sheetWcId: 77,
-    findWcId: 88
+    findWcId: 88,
+    chromePid: null,
+    recoveryPaused: false
   });
+});
+
+// ---------------------------------------------------------------------------
+// chromePid / recoveryPaused (Mission 20 Flight 3 Leg 3, DD9/AC9)
+// ---------------------------------------------------------------------------
+
+test('window-census: chromePid reads getOSProcessId(), coerced 0/undefined/throw → null', () => {
+  const withPid = (getOSProcessId) => ({
+    win: { id: 1 },
+    chromeView: { webContents: { id: 11, getOSProcessId } },
+    tabViews: new Map(),
+    activeTabWcId: null,
+    bootConfigServed: true,
+    sheet: null,
+    findOverlay: null
+  });
+  assert.equal(buildWindowCensus([withPid(() => 4242)], null)[0].chromePid, 4242);
+  assert.equal(buildWindowCensus([withPid(() => 0)], null)[0].chromePid, null);
+  assert.equal(buildWindowCensus([withPid(() => undefined)], null)[0].chromePid, null);
+  assert.equal(
+    buildWindowCensus(
+      [
+        withPid(() => {
+          throw new Error('gone');
+        })
+      ],
+      null
+    )[0].chromePid,
+    null
+  );
+});
+
+test('window-census: recoveryPaused reflects rec.chromeRecoveryPaused, coerced to a boolean', () => {
+  const paused = rec({ id: 1 });
+  paused.chromeRecoveryPaused = true;
+  const notPaused = rec({ id: 2 });
+  assert.equal(buildWindowCensus([paused], null)[0].recoveryPaused, true);
+  assert.equal(buildWindowCensus([notPaused], null)[0].recoveryPaused, false);
 });
 
 test('window-census: two records → INSERTION ORDER preserved', () => {

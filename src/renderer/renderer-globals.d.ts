@@ -516,6 +516,10 @@ interface GoldfinchBridge {
   ): void;
   // Mission 20 Flight 2 Leg 2 (DD7): the owner-routed security-state push.
   onTabSecurity(cb: (d: { wcId: number; security: string }) => void): void;
+  // Mission 20 Flight 3 Leg 2 (DD1/DD3): the owner-routed crash/hang pushes —
+  // `crash: null` and `hung: false` are the clear transitions.
+  onTabCrash(cb: (d: { wcId: number; crash: { reason: string; exitCode: number; url: string } | null }) => void): void;
+  onTabHung(cb: (d: { wcId: number; hung: boolean }) => void): void;
   onTabMediaList(cb: (d: { wcId: number; mediaList: any[] }) => void): void;
   onTabPrivacyFp(cb: (d: { wcId: number; fpCounts: any }) => void): void;
   onTabSelfClose(cb: (d: { wcId: number; historyLength: number }) => void): void;

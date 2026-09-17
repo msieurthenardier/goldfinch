@@ -131,7 +131,7 @@ function createHarness() {
     fetchCookies: noOp,
     closeSuggestions: noOp,
     resetSuggestionsForActivation: noOp,
-    updateAddressChip: noOp,
+    refreshTabIndicators: noOp, // Mission 20 F3 Leg 1 (DD11): site-security-controller.js's unified chip owner
     renderMedia: noOp,
     renderPrivacy: noOp,
     setDevtoolsPressed: noOp,
@@ -146,7 +146,10 @@ function createHarness() {
     // Mission 20 F1 Leg 2 (AC3): the load-failure panel toggle — same
     // tracked-wrapper shape as the welcome pair above.
     showLoadFailurePanel: (tab) => calls.push(['showLoadFailurePanel', tab && tab.id]),
-    hideLoadFailurePanel: () => calls.push(['hideLoadFailurePanel'])
+    hideLoadFailurePanel: () => calls.push(['hideLoadFailurePanel']),
+    // Mission 20 F3 Leg 2 (DD3): the hang bar's activation-class projection —
+    // tracked so tests can pin that activateTab re-projects it every time.
+    projectHangNotice: (tab) => calls.push(['projectHangNotice', tab && tab.id])
   };
   return {
     deps,
@@ -284,6 +287,63 @@ test('cross-window adopt and moved-away reuse the strip authority without create
 });
 
 // ---------------------------------------------------------------------------
+// Mission 20 Flight 3 Leg 3 (leg-3 design review Decision): recovery adopts
+// carry `trusted` (main-derived, never renderer-supplied) and an explicit
+// `active` flag — `onAdoptTab` must honor both without breaking the ordinary
+// single-adopt move path (no `trusted`/`active` field at all).
+// ---------------------------------------------------------------------------
+
+test('onAdoptTab honors payload.trusted (main-derived internal-tab fidelity across recovery)', async () => {
+  const h = createHarness();
+  const controller = await loadController(h);
+  const internalContainer = { id: 'internal', name: 'settings', color: '#9aa0ac', partition: 'goldfinch-internal' };
+  h.callbacks.adopt({
+    wcId: 900,
+    url: 'goldfinch://settings/',
+    title: 'Settings',
+    favicon: null,
+    container: internalContainer,
+    trusted: true
+  });
+  const tab = controller.findTabByWcId(900);
+  assert.equal(tab.trusted, true);
+});
+
+test('onAdoptTab: a move-path payload with no trusted field adopts as untrusted (unchanged)', async () => {
+  const h = createHarness();
+  const controller = await loadController(h);
+  h.callbacks.adopt({ wcId: 901, url: 'https://a.example/', title: 'A', favicon: null, container: h.jar });
+  const tab = controller.findTabByWcId(901);
+  assert.equal(tab.trusted, false);
+});
+
+test('onAdoptTab: active !== false activates (absent field — the move path is unaffected)', async () => {
+  const h = createHarness();
+  const controller = await loadController(h);
+  controller.createTab('https://first.test/');
+  await settle();
+  h.callbacks.adopt({ wcId: 902, url: 'https://adopted.test/', title: 'Adopted', favicon: null, container: h.jar });
+  assert.equal(controller.activeTab().wcId, 902);
+});
+
+test('onAdoptTab: active: false does NOT activate (a recovery adopt for a non-active entry)', async () => {
+  const h = createHarness();
+  const controller = await loadController(h);
+  controller.createTab('https://first.test/');
+  await settle();
+  h.callbacks.adopt({
+    wcId: 903,
+    url: 'https://background.test/',
+    title: 'Background',
+    favicon: null,
+    container: h.jar,
+    active: false
+  });
+  assert.notEqual(controller.activeTab().wcId, 903);
+  assert.ok(controller.findTabByWcId(903), 'the tab is still adopted onto the strip');
+});
+
+// ---------------------------------------------------------------------------
 // M16 F2 Leg 1 (DD1/DD2/DD4): the viewless welcome record, its attach
 // primitive, and the openNewTab resolver.
 // ---------------------------------------------------------------------------
@@ -346,7 +406,7 @@ test('activating a background-failed tab shows the load-failure panel; switching
   assert.ok(!h.calls.some(([name]) => name === 'showLoadFailurePanel'));
 });
 
-test('the welcome branch wins over a (structurally-impossible) loadFailure on the same record', async () => {
+test('DD1 (F3 L2 precedence amendment): loadFailure wins over welcome on a (structurally-impossible) same record — precedence crash > loadFailure > welcome > neither', async () => {
   const h = createHarness();
   const controller = await loadController(h);
   const welcome = controller.openWelcomeTab({ reasons: ['home'] });
@@ -354,9 +414,9 @@ test('the welcome branch wins over a (structurally-impossible) loadFailure on th
   h.calls.length = 0;
 
   controller.activateTab(welcome.id);
-  assert.ok(h.calls.some(([name, id]) => name === 'showWelcomePanel' && id === welcome.id));
-  assert.ok(h.calls.some(([name]) => name === 'hideLoadFailurePanel'));
-  assert.ok(!h.calls.some(([name]) => name === 'showLoadFailurePanel'));
+  assert.ok(h.calls.some(([name, id]) => name === 'showLoadFailurePanel' && id === welcome.id));
+  assert.ok(h.calls.some(([name]) => name === 'hideWelcomePanel'));
+  assert.ok(!h.calls.some(([name]) => name === 'showWelcomePanel'));
 });
 
 test('the tab-row template gains a hidden .tab-status span before .tab-title (AC4)', async () => {
@@ -410,6 +470,97 @@ test('Mission 20 F2 Leg 4 (design review, belt-and-suspenders): census security 
   const failedRow = rows.find((r) => r.wcId === failed.wcId);
   assert.equal(okRow.security, 'secure');
   assert.equal(failedRow.security, 'none');
+});
+
+// ---------------------------------------------------------------------------
+// Mission 20 Flight 3 Leg 2 (DD1/DD3/DD9): the crash/hang projection
+// precedence, the hang-bar activation-class projection, and the census's
+// crashed/hung rows.
+// ---------------------------------------------------------------------------
+
+test('DD1: activateTab projects exactly the crash panel — crash beats a load failure and welcome', async () => {
+  const h = createHarness();
+  const controller = await loadController(h);
+  const tab = controller.createTab('https://a.test/');
+  await settle();
+  tab.crash = { reason: 'crashed', exitCode: 139, url: 'https://a.test/' };
+  tab.loadFailure = { code: -1, name: 'stale' };
+  h.calls.length = 0;
+
+  controller.activateTab(tab.id);
+
+  assert.ok(h.calls.some(([name, id]) => name === 'showLoadFailurePanel' && id === tab.id));
+  assert.ok(h.calls.some(([name]) => name === 'hideWelcomePanel'));
+  assert.ok(!h.calls.some(([name]) => name === 'showWelcomePanel'));
+});
+
+test('DD3: activateTab re-projects the hang bar on every activation', async () => {
+  const h = createHarness();
+  const controller = await loadController(h);
+  const tab = controller.createTab('https://a.test/');
+  await settle();
+  h.calls.length = 0;
+
+  controller.activateTab(tab.id);
+
+  assert.ok(h.calls.some(([name, id]) => name === 'projectHangNotice' && id === tab.id));
+});
+
+test('DD9: census reports loadState crashed with loadError { code: exitCode, name: reason }', async () => {
+  const h = createHarness();
+  const controller = await loadController(h);
+  const crashed = controller.createTab('https://crashed.test/');
+  await settle();
+  crashed.crash = { reason: 'crashed', exitCode: 139, url: 'https://crashed.test/' };
+
+  // @ts-ignore
+  const rows = h.deps.window.__goldfinchAutomation.listTabs();
+  const row = rows.find((r) => r.wcId === crashed.wcId);
+  assert.equal(row.loadState, 'crashed');
+  assert.deepEqual(row.loadError, { code: 139, name: 'crashed' });
+  assert.equal(row.security, 'none');
+});
+
+test('DD9: census reports loadState hung when the tab is hung and has no crash/failure', async () => {
+  const h = createHarness();
+  const controller = await loadController(h);
+  const hung = controller.createTab('https://hung.test/');
+  await settle();
+  hung.hung = true;
+
+  // @ts-ignore
+  const rows = h.deps.window.__goldfinchAutomation.listTabs();
+  const row = rows.find((r) => r.wcId === hung.wcId);
+  assert.equal(row.loadState, 'hung');
+  assert.equal(row.loadError, null);
+});
+
+test('DD9: census precedence — crash beats hung (a dead renderer is never also reported hung)', async () => {
+  const h = createHarness();
+  const controller = await loadController(h);
+  const tab = controller.createTab('https://x.test/');
+  await settle();
+  tab.crash = { reason: 'crashed', exitCode: 139, url: 'https://x.test/' };
+  tab.hung = true; // stale — must never surface once crashed
+
+  // @ts-ignore
+  const rows = h.deps.window.__goldfinchAutomation.listTabs();
+  const row = rows.find((r) => r.wcId === tab.wcId);
+  assert.equal(row.loadState, 'crashed');
+});
+
+test('DD9: census title on a crashed tab is the same host-derived label the strip shows', async () => {
+  const h = createHarness();
+  const controller = await loadController(h);
+  const crashed = controller.createTab('https://crashed.test/path');
+  await settle();
+  crashed.title = 'chrome-error://chromewebdata/';
+  crashed.crash = { reason: 'crashed', exitCode: 139, url: 'https://crashed.test/path' };
+
+  // @ts-ignore
+  const rows = h.deps.window.__goldfinchAutomation.listTabs();
+  const row = rows.find((r) => r.wcId === crashed.wcId);
+  assert.equal(row.title, 'crashed.test');
 });
 
 test('F2: listTabs() census title on a failed tab is the same host-derived label the strip shows', async () => {

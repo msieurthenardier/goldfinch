@@ -72,7 +72,13 @@ const IDS = {
   welcomeSurface: 'welcome-surface',
   // Load-failure surface (Mission 20 F1 Leg 2, DD1): the chrome-rendered panel
   // a failed tab shows in the guest slot; load-failure-controller.js owns it.
-  loadFailureSurface: 'load-failure-surface'
+  loadFailureSurface: 'load-failure-surface',
+  // Hang notice (Mission 20 F3 Leg 2, DD3): the non-blocking bar under the
+  // toolbar shown while the active tab's renderer is unresponsive;
+  // hang-notice-controller.js owns it.
+  hangNotice: 'hang-notice',
+  hangNoticeWait: 'hang-notice-wait',
+  hangNoticeKill: 'hang-notice-kill'
 };
 
 export function createChromeContext({ document, goldfinch }) {

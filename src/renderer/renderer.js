@@ -44,7 +44,9 @@ import { createTabController } from './chrome/tab-controller.js';
 import { createWindowController } from './chrome/window-controller.js';
 import { createWelcomeController } from './chrome/welcome-controller.js';
 import { createLoadFailureController } from './chrome/load-failure-controller.js';
+import { createHangNoticeController } from './chrome/hang-notice-controller.js'; // Mission 20 F3 Leg 2
 import { classifyLoadFailure } from '../shared/load-failure.js'; // Mission 20 F1 Leg 2
+import { createOverlayDispatch } from './chrome/overlay-dispatch.js'; // Mission 20 F3 Leg 1 (DD11)
 import {
   buildKebabModel,
   chromePointToSheet as convertChromePointToSheet,
@@ -104,6 +106,7 @@ let pageActions;
 let bookmarksBarController;
 let welcomeController;
 let loadFailureController;
+let hangNoticeController;
 const jarsClient = createJarsClient({
   bridge: window.goldfinch,
   ctx,
@@ -183,7 +186,10 @@ tabController = createTabController({
   fetchCookies,
   closeSuggestions,
   resetSuggestionsForActivation,
-  updateAddressChip,
+  // Mission 20 F3 Leg 1 (DD11): late-bound (siteSecurityController is
+  // constructed below, at renderer.js:901) — never a direct property read at
+  // construction, exactly like the existing onAdvanced dep further down.
+  refreshTabIndicators: (tab, opts) => siteSecurityController.refreshTabIndicators(tab, opts),
   renderMedia,
   renderPrivacy,
   setDevtoolsPressed,
@@ -191,7 +197,8 @@ tabController = createTabController({
   showWelcomePanel,
   hideWelcomePanel,
   showLoadFailurePanel,
-  hideLoadFailurePanel
+  hideLoadFailurePanel,
+  projectHangNotice
 });
 
 const {
@@ -225,6 +232,9 @@ function showLoadFailurePanel(tab) {
 function hideLoadFailurePanel() {
   return loadFailureController.hide();
 } // Mission 20 F1 Leg 2
+function projectHangNotice(tab) {
+  return hangNoticeController.project(tab);
+} // Mission 20 F3 Leg 2
 function updateAddressChip(tab) {
   return navigationController.updateAddressChip(tab);
 }
@@ -656,10 +666,23 @@ loadFailureController = createLoadFailureController({
   findTabByWcId,
   isActiveTab: (tab) => tab.id === ctx.activeTabId,
   classifyLoadFailure, // Mission 20 F1 Leg 2 (DD1)
-  updateAddressChip, // F1 fix pass: sync the bar on an active-tab failure push
+  refreshTabIndicators: (tab, opts) => siteSecurityController.refreshTabIndicators(tab, opts), // Mission 20 F3 Leg 1 (DD11): late-bound (constructed below)
   onAdvanced: (tab) => siteSecurityController.openCertOverrideOverlay(tab), // M20 F2 L3: late-bound (constructed below)
   onViewCertificate: (tab) => siteSecurityController.openCertificateViewer(tab) // M20 F2 L4: late-bound (constructed below)
 });
+
+// Mission 20 F3 Leg 2 (DD3): the hang bar's own controller. `refreshStrip`
+// reuses load-failure-controller.js's `applyStripState` — the ONE
+// `dataset.loadState` writer — rather than a second write site.
+hangNoticeController = createHangNoticeController({
+  els,
+  isActiveTab: (tab) => tab.id === ctx.activeTabId,
+  findTabByWcId,
+  tabNavigate: window.goldfinch.tabNavigate,
+  refreshStrip: (tab) => loadFailureController.applyStripState(tab),
+  sendActiveBounds
+});
+window.goldfinch.onTabHung(hangNoticeController.onTabHung);
 
 shortcutController = createShortcutController({
   window,
@@ -924,338 +947,60 @@ els.star.addEventListener('click', () => handleBookmarkStarActivate(activeTab())
 // bookmark-mutation issuer).
 window.goldfinch.onBookmarkEditSubmit((payload) => bookmarksClient.handleEditSubmit(payload));
 
-// Channel 6: execute the activated item's action via the named action bodies /
-// shared helpers (one source of truth). Arrives AFTER
-// the channel-7 'activated' close (main emits 7 before 6), so trigger state is
-// already reset and the action wins any focus race. `value` (Leg 3) is the
-// input-dialog's text — shape-validated main-side (string, ≤24), data here.
-function dispatchOverlayActivation({ menuType, id, value }) {
-  switch (menuType) {
-    case 'kebab': {
-      const fn = KEBAB_ACTIONS[id];
-      if (fn) fn();
-      break;
-    }
-    case 'container': {
-      // NAMESPACED id dispatch (round-2 design catch): `jar:<jarId>` selects
-      // that jar — even one literally named "New Container" (slug id
-      // `new-container`) or "Burner"; sentinels ride the `action:` prefix, so
-      // a user jar can never shadow them.
-      if (id === 'action:new-container') {
-        // Activated-close-then-fresh-open (design decision): main already
-        // closed the container menu (reason 'activated' — the normal channel-4
-        // path); immediately re-open menuType 'new-container' as a FRESH open
-        // through the same path as any trigger open (new token; uniform
-        // suppress/aria bookkeeping). The one-IPC-round-trip hide/re-show
-        // blink is the accepted variation.
-        openNewContainerOverlay();
-      } else if (id === 'action:burner') {
-        openNewTab(jarsClient.makeBurner()); // M16 F2 Leg 1 (DD4)
-      } else if (id === 'action:manage-jars') {
-        openJarsPage();
-      } else if (id.startsWith('jar:')) {
-        const jarId = id.slice('jar:'.length);
-        const c = jarsClient.containers.find((x) => x.id === jarId);
-        if (c) openNewTab(c); // M16 F2 Leg 1 (DD4)
-      }
-      break;
-    }
-    case 'new-container': {
-      // Shared submit body (the old dialog's create path, extracted): trim
-      // guard + newContainerCreate → push + createTab. The sheet page already
-      // guards whitespace-only input (dialog stays open page-side).
-      if (id === 'create') createContainerAndOpenTab(value);
-      break;
-    }
-    case 'auth-basic': {
-      // The only channel-4 activation is the NON-SECRET id:'cancel' (M14 F1 L2) —
-      // the credential rides the dedicated menuOverlay.authSubmit invoke, never
-      // this dispatch. Main's auth store maps the 'activated' close to
-      // resolve-cancel; nothing to do chrome-side (validated no-op).
-      break;
-    }
-    case 'cert-picker': {
-      // Selection already resolved MAIN-SIDE, ledger-first, in register-
-      // overlay-ipc BEFORE this unconditional forward (M14 F1 L3 — the
-      // deliberate deviation from vault-picker's chrome-side dispatch). Every
-      // id ('cert:<i>' / 'cancel') is a validated no-op here.
-      break;
-    }
-    // vault-picker, vault-recovery-show, vault-accesskey-show, vault-adminkey-show:
-    // handled by vaultController.handleActivation (chained ahead of this dispatch —
-    // see the onActivated wiring above), so no case for them lives here (M15 F2 Leg 1
-    // renderer-extraction).
-    case 'bookmark-edit': {
-      // No channel-4 activation ever rides this menuType — Remove/Done submit
-      // over the DEDICATED menu-overlay:bookmark-edit-submit invoke, never
-      // sendActivated (24-char cap; DD3-preserving). Included for switch
-      // completeness / VALIDATED-NO-OP discipline, the auth-basic/cert-picker
-      // precedent.
-      break;
-    }
-    case 'bookmarks-overflow': {
-      // Index dispatch (M15 F1 Leg 3, DD9): `bookmark:<i>` (row click) and
-      // `bookmark-edit:<i>` (the sheet's first per-row contextmenu, sent via
-      // sendActivatedOnce on the SAME channel-4) both resolve against the
-      // chrome-side snapshot in bookmarks-bar.js — VALIDATED-NO-OP on an
-      // out-of-range/malformed id.
-      bookmarksBarController.dispatch(id);
-      break;
-    }
-    case 'page-context': {
-      // Bodies read the pageCtx fields CAPTURED at open (TOCTOU: acted-on
-      // wcId is never re-resolved via activeTab()). VALIDATED-NO-OP discipline
-      // on EVERY id (design review): a synchronous local open can overwrite
-      // pageCtx between channel 7 and channel 6, and params can be gone by
-      // dispatch time (tab closed) — each body re-guards its inputs and never
-      // throws on a stale dispatch (main-side handlers already tolerate dead
-      // wcId targets).
-      const p = pageCtx.params || {};
-      const wcId = pageCtx.wcId;
-      // D3 (M06 F2 HAT): link/image/selection-search opens inherit the SOURCE
-      // tab's jar (inheritContainerFrom, defined near makeBurner) instead of
-      // createTab's default-jar resolution — computed once here (all three
-      // call sites below are mutually exclusive per dispatch; the source tab
-      // never changes mid-dispatch, so one lookup covers all three bodies).
-      const srcContainer = jarsClient.inheritContainerFrom(findTabByWcId(wcId));
-      if (id === 'link:open') {
-        if (typeof p.linkURL === 'string' && p.linkURL) createTab(p.linkURL, srcContainer);
-      } else if (id === 'link:copy') {
-        if (typeof p.linkURL === 'string' && p.linkURL) window.goldfinch.clipboardWriteText(p.linkURL);
-      } else if (id === 'image:open' || id === 'image:copy' || id === 'image:save') {
-        // Same srcURL || imageURL preference + mediaType gate as the builder.
-        const imgSrc = p.mediaType === 'image' ? p.srcURL || p.imageURL : null;
-        if (typeof imgSrc === 'string' && imgSrc) {
-          if (id === 'image:open') {
-            createTab(imgSrc, srcContainer);
-          } else if (id === 'image:copy') {
-            window.goldfinch.clipboardWriteText(imgSrc);
-          } else {
-            const r = window.goldfinch.downloadMedia({
-              webContentsId: wcId,
-              url: imgSrc,
-              suggestedName: basenameFromUrl(imgSrc)
-            });
-            Promise.resolve(r)
-              .then((res) => {
-                if (!res || !res.ok) toast('Download failed', (res && res.error) || 'Unknown error');
-              })
-              .catch(() => toast('Download failed', 'Unknown error'));
-          }
-        }
-      } else if (id === 'sel:copy') {
-        if (typeof p.selectionText === 'string' && p.selectionText) {
-          window.goldfinch.clipboardWriteText(p.selectionText);
-        }
-      } else if (id === 'sel:search') {
-        // M16 F2 Leg 2 (DD3): shares the address bar's null-engine handoff
-        if (typeof p.selectionText === 'string' && p.selectionText) {
-          const q = capPendingQuery(p.selectionText),
-            u = toUrl(q); // Capture site 2/2: capped to PENDING_QUERY_MAX
-          if (u == null) openWelcomeTab({ container: srcContainer, reasons: ['search'], pendingQuery: q });
-          else createTab(u, srcContainer);
-        }
-      } else if (id.startsWith('edit:')) {
-        // Allowlisted edit-action dispatch (main re-validates the allowlist too).
-        // Also re-check the captured editFlags that gated menu construction
-        // (page-context-model.js: canCut/canCopy/canPaste/canUndo/canRedo).
-        const action = id.slice('edit:'.length);
-        const flagKey = 'can' + action.charAt(0).toUpperCase() + action.slice(1);
-        if (
-          p.isEditable &&
-          ['cut', 'copy', 'paste', 'undo', 'redo'].includes(action) &&
-          p.editFlags &&
-          p.editFlags[/** @type {'canCut'|'canCopy'|'canPaste'|'canUndo'|'canRedo'} */ (flagKey)]
-        ) {
-          window.goldfinch.pageContextAction({ webContentsId: wcId, action });
-        }
-      } else if (id.startsWith('spell:')) {
-        // INDEX dispatch (DD8): the id carries only the index; the word resolves
-        // from the CAPTURED suggestions with bounds/type validation — a guest
-        // string never round-trips as a command. Out-of-range / malformed /
-        // params-gone → validated no-op.
-        const i = Number.parseInt(id.slice('spell:'.length), 10);
-        const sugg = p.dictionarySuggestions;
-        if (
-          Number.isInteger(i) &&
-          i >= 0 &&
-          Array.isArray(sugg) &&
-          i < Math.min(sugg.length, 8) &&
-          typeof sugg[i] === 'string'
-        ) {
-          window.goldfinch.correctMisspelling({ webContentsId: wcId, word: sugg[i] });
-        }
-      } else if (id === 'action:inspect') {
-        if (wcId != null) window.goldfinch.toggleDevtools({ webContentsId: wcId });
-      } else if (id === 'action:bookmark-page') {
-        // VALIDATED-NO-OP (M15 F1 Leg 2): re-resolve the tab from the
-        // CAPTURED wcId (TOCTOU rule — never activeTab()); no-op if gone,
-        // then run the shared star handler against THAT tab.
-        const bmTab = wcId != null ? findTabByWcId(wcId) : null;
-        if (bmTab) handleBookmarkStarActivate(bmTab);
-      } else if (id.startsWith('action:unpin:')) {
-        const item = id.slice('action:unpin:'.length);
-        if (item === 'media' || item === 'shields' || item === 'devtools') {
-          window.goldfinch.unpinToolbarItem(item);
-          // Dispatch-body refocus: the unpin hides the button the menu was
-          // anchored to — land focus on the address bar. NOT the reason map
-          // (page-context stays escape-only).
-          els.address.focus();
-        }
-      } else if (id === 'action:vault-lock') {
-        vaultController.lockNow();
-      } // squawk 0038: anchor never hides (locked↔unlocked only) — no refocus override needed, unlike unpin above
-      break;
-    }
-    case 'tab-context': {
-      // TOCTOU discipline (design review, same pattern as page-context above):
-      // the tab id is captured at OPEN (tabCtx.tabId), never re-resolved via
-      // activeTab(); every body re-validates the tab still exists via tabs.get
-      // and no-ops (never throws) on a vanished id.
-      const tabId = tabCtx.tabId;
-      const target = tabId ? tabs.get(tabId) : null;
-      if (id === 'tab:close') {
-        if (target) closeTab(tabId);
-      } else if (id === 'tab:close-others' || id === 'tab:close-right') {
-        if (!target) break;
-        // Ordered-sweep batch close (flight DD2 ruling — the onJarWiped/
-        // refreshOpenTabJars activation-flicker idiom): snapshot the targets
-        // BEFORE any close mutates the strip, activate the ANCHOR (the invoking
-        // tab) FIRST when the active tab is among the targets (Chrome parity —
-        // the anchor becomes active), THEN close each target. Activating first
-        // means none of the targets is still the active tab by the time
-        // closeTab runs on it, so closeTab's own next-tab fallback never fires
-        // mid-sweep — never let it cascade.
-        const ids = orderedTabIds();
-        const anchorIndex = ids.indexOf(tabId);
-        if (anchorIndex === -1) break; // vanished — no-op
-        const targetIds = id === 'tab:close-others' ? ids.filter((i) => i !== tabId) : ids.slice(anchorIndex + 1);
-        if (!targetIds.length) break;
-        if (targetIds.includes(ctx.activeTabId)) activateTab(tabId);
-        for (const t of targetIds) closeTab(t);
-      } else if (id === 'tab:duplicate') {
-        // Address + jar + nav history (DD1's resolved open question): the
-        // history-snapshot invoke + createTab with restoreHistory + insertAt
-        // sourceIndex+1 (Chrome parity — lands beside the source). Title is
-        // seeded from the renderer's OWN tab.title — no round-trip through main.
-        if (!target || target.wcId == null) break;
-        const sourceContainer = target.container;
-        const sourceTitle = target.title;
-        const sourceUrl = target.url;
-        window.goldfinch.tabHistorySnapshot({ webContentsId: target.wcId }).then((snap) => {
-          if (!snap) return; // internal/dead source by the time the invoke resolved — no-op
-          // sourceIndex is computed AND used here, synchronously at resolve time
-          // (M09 F6 Leg 3, DD6 — the F5 staleness sibling: capturing it BEFORE
-          // the invoke could misplace the duplicate if the strip mutated during
-          // the round-trip). A source that vanished mid-invoke (-1) appends.
-          const sourceIndex = orderedTabIds().indexOf(tabId);
-          createTab(sourceUrl, sourceContainer, {
-            restoreHistory: { entries: snap.entries, index: snap.index, title: sourceTitle },
-            insertAt: sourceIndex === -1 ? null : sourceIndex + 1
-          });
-        });
-      } else if (id === 'tab:move-new-window') {
-        // Move to new window (M09 F6 Leg 4, DD5 / review H2): the invoke
-        // carries THIS renderer's strip snapshot — a burner's synthesized
-        // container and the favicon exist ONLY renderer-side; main cannot
-        // rebuild either from the wcId (it re-derives url/title itself at
-        // adopt-send time). Validated no-op on a vanished/wcId-less target;
-        // the strip removal arrives via the tab-moved-away push, never done
-        // locally (main is the executor).
-        if (!target || target.wcId == null) break;
-        window.goldfinch.tabMoveToNewWindow({
-          wcId: target.wcId,
-          url: target.url,
-          title: target.title,
-          favicon: target.favicon,
-          container: target.container
-        });
-      } else if (id.startsWith('tab:move-window:')) {
-        // Move to an EXISTING window (M09 F8 Leg 4, DD8) — the tab's only way
-        // across windows in F8. Same strip snapshot as the new-window path above,
-        // plus the destination.
-        //
-        // The windowId is ECHOED from the item id main built it into — never a
-        // position in the current list, which is exactly what the reversed ordinal
-        // scheme would have sent. Re-reading it here rather than re-deriving it
-        // from moveTargetsCache is the point: the cache may have been re-pushed
-        // since the menu opened, and this move means the window the USER picked.
-        // Main re-resolves the id through the registry and REFUSES if that window
-        // has closed (DD5) rather than re-pointing at a survivor.
-        if (!target || target.wcId == null) break;
-        const windowId = Number(id.slice('tab:move-window:'.length));
-        if (!Number.isInteger(windowId)) break;
-        window.goldfinch
-          .tabMoveToWindow({
-            wcId: target.wcId,
-            url: target.url,
-            title: target.title,
-            favicon: target.favicon,
-            container: target.container,
-            windowId
-          })
-          .then((result) => {
-            // DD5: every outcome is announced. On success `tab-moved-away` has
-            // already removed the strip entry, so this is all that is left either way.
-            announceTabStatus(moveOutcomeMessage(result, 'another window'));
-          });
-      } else if (id === 'tab:reopen-closed') {
-        // The EXISTING dispatchChromeAction('reopen-closed-tab') case (dispatch
-        // reuse, DD2) — its jar-fallback/positional-reopen decisions ride along
-        // free. Deliberately NOT gated on `target`: reopen acts on the closed-tab
-        // stack, not the invoking tab, which may itself have vanished by now.
-        dispatchChromeAction('reopen-closed-tab');
-      }
-      break;
-    }
-    case 'suggestions': {
-      // INDEX dispatch (the spell:<i> idiom): the id carries only the row
-      // index; the URL resolves from `suggest.items`, which channel 7 (just
-      // above, fired before this) deliberately left intact for exactly this
-      // read on the 'activated' reason. Vanished/mismatched (e.g. a tab switch
-      // raced the click and bumped suggest.seq, invalidating suggest.items in
-      // between) → no-op, never throw.
-      navigationController.dispatchSuggestion(id);
-      break;
-    }
-  }
+// Mission 20 Flight 3 Leg 1 (DD11): the generic activation switch and the
+// shared overlay-closed sink now live in overlay-dispatch.js (behaviour-
+// preserving extraction — the F2 debrief's recommendation 2). Constructed
+// here, in the switch's old textual position, so every free identifier it
+// used to close over is still readable at this point in module evaluation.
+// `pageCtx`/`tabCtx` are threaded as getters (both are `const`s declared
+// further down — a direct property here would be a TDZ ReferenceError at
+// load); `refreshTabIndicators`/other late-constructed-controller reads use
+// the same late-bound-closure discipline elsewhere in this file.
+const overlayDispatch = createOverlayDispatch({
+  KEBAB_ACTIONS,
+  openNewContainerOverlay,
+  openNewTab,
+  jarsClient,
+  openJarsPage,
+  createContainerAndOpenTab,
+  bookmarksBarController,
+  findTabByWcId,
+  createTab,
+  basenameFromUrl,
+  toast,
+  capPendingQuery,
+  toUrl,
+  openWelcomeTab,
+  orderedTabIds,
+  ctx,
+  activateTab,
+  closeTab,
+  tabs,
+  announceTabStatus,
+  moveOutcomeMessage,
+  dispatchChromeAction,
+  handleBookmarkStarActivate,
+  dispatchSuggestion: (id) => navigationController.dispatchSuggestion(id),
+  handleSuggestionsClosed: (reason) => navigationController.handleSuggestionsClosed(reason),
+  lockVaultNow: () => vaultController.lockNow(),
+  vaultHandleClosed: (payload) => vaultController.handleClosed(payload),
+  siteSecurityHandleClosed: (payload) => siteSecurityController.handleClosed(payload),
+  bridge: window.goldfinch,
+  els,
+  pageCtx: () => pageCtx,
+  tabCtx: () => tabCtx
+});
+// Function DECLARATIONS (hoisted), not `const` thunks: `overlayMenuClient`'s
+// construction (well above this point) already references these two names by
+// value in its onActivated/onClosed wiring — a `const` here would be a TDZ
+// ReferenceError at that earlier line. The body reads `overlayDispatch` at
+// CALL time, by which point module evaluation has completed and it is
+// assigned — the same late-bound discipline the rest of this file uses.
+function dispatchOverlayActivation(payload) {
+  return overlayDispatch.dispatchActivation(payload);
 }
-
-// Channel 7: the single close-state sink. Stale tokens (a re-open raced an old
-// instance's close) are dropped WHOLE — a stale close must not clear the newer
-// open's state (and, for page-context, must not consume the newer open's
-// returnFocus). aria-expanded resets on EVERY (non-stale) reason — guarded on
-// ariaTarget() (null for page-context, whose transient trigger is never
-// stamped). Refocus is the per-entry reason policy (chrome-side half — main
-// already moved webContents-level focus for escape/activated): fixed-trigger
-// menus focus the trigger on escape/activated; page-context is escape-only →
-// the captured returnFocus (cleared after use). toggle → no move (the click
-// already focused chrome); blur → NO refocus (never steal focus from another
-// app); tab-switch/superseded/tab-close/tab-hide/teardown → no move (the
-// incoming guest keeps focus).
-function handleOverlayClosed({ menuType, reason }) {
-  // Suggestions branch (design review, HIGH): main-initiated closes (window
-  // blur, tab-switch, etc.) reach the sheet WITHOUT going through
-  // closeSuggestions() — this is the only place those reset local state, so
-  // every NON-STALE suggestions close resets it here too. Timers are ALWAYS
-  // cancelled (incl. 'activated' — this is what lets a real Ch6 activation win
-  // the pointer-blur grace-timer race: the timer must die the instant the row
-  // click's close lands, not 150 ms later). items/selectedIndex are the
-  // EXCEPTION on 'activated': channel 7 (this handler) fires strictly BEFORE
-  // channel 6 for the same activation (main emits 7 then 6 — round-2 design
-  // lock), so the Ch6 `sug:<i>` dispatch below still needs `suggest.items` to
-  // resolve the clicked row's URL. Ch6 finishes the reset once it has read it.
-  if (menuType === 'suggestions') {
-    navigationController.handleSuggestionsClosed(reason);
-  }
-  // Vault-owned close branches (vault-unlock's two dismiss-abandon guards, the
-  // vault-capture dismiss-drop path) moved wholesale to vault-controller.js
-  // (M15 F2 Leg 1 renderer-extraction) — see its handleClosed.
-  vaultController.handleClosed({ menuType, reason });
-  // Mission 20 Flight 2 Leg 1 (DD11 seed): a no-op today (site-info/cert-viewer/
-  // cert-override have no close-side state yet) — the seat legs 3-4 use for the
-  // cert-override card's navigation-away close.
-  siteSecurityController.handleClosed({ menuType, reason });
+function handleOverlayClosed(payload) {
+  return overlayDispatch.handleClosed(payload);
 }
 
 /* ------------------------------------------------- page context menu (SC6/DD2/DD3) */
@@ -1480,7 +1225,7 @@ window.goldfinch.onTabDidNavigate(({ wcId, url }) => {
   tab.url = url;
   if (tab.id === ctx.activeTabId) {
     els.address.value = tab.url;
-    updateAddressChip(tab);
+    siteSecurityController.refreshTabIndicators(tab); // Mission 20 F3 Leg 1 (DD11): the single chip-refresh owner
     updateNavButtons();
     refreshStar(tab); // sync path 1/5 (M15 F1 Leg 2)
     // Close trigger: navigation of the active tab (flight DD5).
@@ -1511,7 +1256,7 @@ window.goldfinch.onTabDidNavigateInPage(({ wcId, url }) => {
   tab.url = url;
   if (tab.id === ctx.activeTabId) {
     els.address.value = tab.url;
-    updateAddressChip(tab);
+    siteSecurityController.refreshTabIndicators(tab); // Mission 20 F3 Leg 1 (DD11): the single chip-refresh owner
     updateNavButtons();
     refreshStar(tab); // sync path 2/5 (M15 F1 Leg 2)
     // Close trigger: navigation (in-page variant) of the active tab (flight DD5).
@@ -1535,7 +1280,7 @@ window.goldfinch.onTabTitle(({ wcId, title }) => {
   const tab = findTabByWcId(wcId);
   if (!tab) return;
   tab.title = title;
-  if (tab.loadFailure) return; // Mission 20 F1 L2 (AC5): a late/empty error-document title must not clobber the strip's host title.
+  if (tab.loadFailure || tab.crash) return; // Mission 20 F1 L2 (AC5) / F3 L2 (DD1): a late/empty error-document title must not clobber the strip's host title.
   tab.btn.querySelector('.tab-title').textContent = title || tab.url;
   tab.btn.title = title || '';
   const name = title || tab.url;
@@ -1721,6 +1466,27 @@ Promise.all([
   }
 });
 
+// Mission 20 F3 Leg 2 (DD11 seam ruling): synthetic crash/hang records on the
+// active tab for the a11y audit's two new chrome states. Persist until the
+// tab's next real push clears them — the showDownloadsIndicatorForAudit
+// precedent never reverts either, and the audit visits each state in its own
+// fresh tab, so persistence never occludes a later capture.
+function showCrashPanelForAudit() {
+  const tab = activeTab();
+  if (!tab || tab.wcId == null) return;
+  tab.crash = { reason: 'crashed', exitCode: 139, url: tab.url };
+  tab.loadFailure = null;
+  tab.hung = false;
+  loadFailureController.applyStripState(tab);
+  loadFailureController.show(tab);
+}
+function showHangNoticeForAudit() {
+  const tab = activeTab();
+  if (!tab || tab.wcId == null) return;
+  tab.hung = true;
+  hangNoticeController.project(tab);
+}
+
 // ---------------------------------------------------------------------------
 // Evaluate-reachable automation/dogfooding seam (M07 Flight 2 leg 5, FD-approved).
 // This file is an ES module: its top-level functions are module-scoped, NOT
@@ -1757,7 +1523,10 @@ Promise.all([
 // openNewTab (33 → 34, see its inline comment below) — CLAUDE.md's dual-source note updated too.
 // M18 F2 L4: added openVaultCompromiseOverlayForAudit + openVaultCompromiseRecoverOverlayForAudit
 // (34 → 36) for the sheet:vault-compromise / vault-compromise-recover a11y states — the
-// every-new-sheet, leg-authorized precedent; CLAUDE.md's dual-source note updated in the same change.)
+// every-new-sheet, leg-authorized precedent; CLAUDE.md's dual-source note updated in the same change.
+// M20 F3 Leg 2 FD ruling: added showCrashPanelForAudit + showHangNoticeForAudit (39 → 41) for the
+// new 'crashed'/'hung' chrome states (synthetic records on the active tab, the
+// showDownloadsIndicatorForAudit precedent) — CLAUDE.md's dual-source note updated in the same change.)
 Object.assign(/** @type {any} */ (globalThis), {
   // dogfooding (flight live-boot procedures, docs/mcp-automation.md)
   openJarsPage,
@@ -1801,5 +1570,7 @@ Object.assign(/** @type {any} */ (globalThis), {
   openVaultCompromiseRecoverOverlayForAudit, // M18 F2 L4 — SHEET_STATES 'sheet:vault-compromise-recover' (leg-authorized addition)
   openCertOverrideOverlayForAudit, // M20 F2 L3 — SHEET_STATES 'sheet:cert-override' (leg-authorized addition, SEAM_COUNT 36 → 37)
   openCertViewerOverlayForAudit, // M20 F2 L4 — SHEET_STATES 'sheet:cert-viewer' (leg-authorized addition, SEAM_COUNT 37 → 38)
-  openCertificateViewer // M20 F2 L4 — behavior-spec-driven opener (the M16 F2 L1 openNewTab precedent, SEAM_COUNT 38 → 39)
+  openCertificateViewer, // M20 F2 L4 — behavior-spec-driven opener (the M16 F2 L1 openNewTab precedent, SEAM_COUNT 38 → 39)
+  showCrashPanelForAudit, // M20 F3 L2 — chrome state 'crashed' (FD-ruled addition, SEAM_COUNT 39 → 40)
+  showHangNoticeForAudit // M20 F3 L2 — chrome state 'hung' (FD-ruled addition, SEAM_COUNT 40 → 41)
 });

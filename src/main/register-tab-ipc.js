@@ -2,23 +2,104 @@
 'use strict';
 
 const { isBurnerPartition } = require('../shared/burner');
+// Mission 20 Flight 3 Leg 2 (DD1): the shared guest-takeover predicate — a
+// crash is now the third case (alongside a load failure) that hides a guest
+// and refuses it focus.
+const { guestTakenOver } = require('../shared/load-failure');
+const { effectiveUrl } = require('./tab-entry-url');
 
 /**
- * Mission 20 Flight 1 (DD1/AC7): the ONE two-axis visibility/focus invariant
- * for a guest view — a guest is visible iff its tab is active AND its entry
- * carries no load failure. TOP-LEVEL (not nested in `registerTabIpc(deps)`'s
+ * Mission 20 Flight 1 (DD1/AC7), widened Flight 3 Leg 2 (DD1): the ONE
+ * two-axis visibility/focus invariant for a guest view — a guest is visible
+ * iff its tab is active AND its entry is not taken over (a load failure OR a
+ * crash — `guestTakenOver`). TOP-LEVEL (not nested in `registerTabIpc(deps)`'s
  * closure like `queueChromeSend`/`ownsTab`): it needs no injected deps, and
  * `guest-wiring.js` — a different module — reaches it via `main.js` deps
  * threading (`createGuestWiring`'s deps object), not a direct require, so the
  * guest-wiring unit suite can inject a recording fake for the AC3 call-order
  * assertion. Every guest SHOW site in this file calls it; a guest never
- * receives OS focus while its entry carries a load failure (the two call
- * sites below and `tab-focus-guest` each enforce the focus half themselves).
- * @param {{ view: { webContents: any, setVisible: (v: boolean) => void }, active?: boolean, loadFailure?: any } | null | undefined} entry
+ * receives OS focus while its entry is taken over (the two call sites below
+ * and `tab-focus-guest` each enforce the focus half themselves).
+ * @param {{ view: { webContents: any, setVisible: (v: boolean) => void }, active?: boolean, loadFailure?: any, crash?: any } | null | undefined} entry
  */
 function applyGuestVisibility(entry) {
   if (!entry || !entry.view || entry.view.webContents.isDestroyed()) return;
-  entry.view.setVisible(!!entry.active && !entry.loadFailure);
+  entry.view.setVisible(!!entry.active && !guestTakenOver(entry));
+}
+
+/**
+ * Mission 20 Flight 3 Leg 3 (DD5): the ONE boot-gate decision for a
+ * main→chrome send tied to a specific window record. Booted → send at once
+ * via the record's own chromeView; unbooted → push the thunk onto
+ * `pendingChromeSends` (an append FIFO flushed by `window-boot-config`).
+ * TOP-LEVEL (like `applyGuestVisibility`) so `sendOrQueue` below and
+ * `guest-wiring.js` — a different module, reached via `main.js` deps
+ * threading — share this ONE implementation rather than a closure-local copy.
+ * @param {any} record
+ * @param {() => [string, any]} buildMessage
+ */
+function queueChromeSend(record, buildMessage) {
+  if (record.bootConfigServed) {
+    const chrome = record.chromeView.webContents;
+    if (chrome && !chrome.isDestroyed()) {
+      const [channel, payload] = buildMessage();
+      chrome.send(channel, payload);
+    }
+  } else {
+    record.pendingChromeSends.push(buildMessage);
+  }
+}
+
+/**
+ * Mission 20 Flight 3 Leg 3 (DD5): a per-tab push whose owning record is
+ * resolved by wcId at CALL time (event-time routing class 3 — a moved tab's
+ * pushes automatically rebind). Constructed once in `main.js` BEFORE both
+ * `createGuestWiring` and `registerTabIpc` receive it, so `guest-wiring.js`'s
+ * `sendToChrome` and every push in this file route through the same boot
+ * gate as the move/adopt block always has.
+ * @param {any} registry
+ * @returns {(wcId: number, channel: string, payload: any) => void}
+ */
+function createSendOrQueue(registry) {
+  return function sendOrQueue(wcId, channel, payload) {
+    const record = registry.getWindowForGuest(wcId);
+    if (record) queueChromeSend(record, () => [channel, payload]);
+  };
+}
+
+/**
+ * Mission 20 Flight 3 Leg 3 (DD5): the ONE definition of the per-tab
+ * re-push set — load-failure (if set), security (if set), crash (if set),
+ * hung (if set), then nav-state (always, unconditional). Shared by the
+ * move/adopt block below (queued thunks via `queueChromeSend`, values read
+ * at DELIVERY time) and by `chrome-recovery.js`'s `buildRecoveryAdopts`
+ * (direct array push). `send(channel, build)` abstracts the two delivery
+ * shapes — `target` is accepted for call-site symmetry with the move/adopt
+ * block's own `queueChromeSend(target, …)` callers, not read here.
+ * @param {any} target
+ * @param {number} wcId
+ * @param {any} entry
+ * @param {any} wc
+ * @param {(channel: string, build: () => any) => void} send
+ */
+function pushTabStateFor(target, wcId, entry, wc, send) {
+  if (entry.loadFailure) {
+    send('tab-load-failure', () => ({ wcId, failure: entry.loadFailure }));
+  }
+  if (entry.security) {
+    send('tab-security', () => ({ wcId, security: entry.security }));
+  }
+  if (entry.crash) {
+    send('tab-crash', () => ({ wcId, crash: entry.crash }));
+  }
+  if (entry.hung) {
+    send('tab-hung', () => ({ wcId, hung: true }));
+  }
+  send('tab-nav-state', () => ({
+    wcId,
+    canGoBack: !wc.isDestroyed() && wc.navigationHistory.canGoBack(),
+    canGoForward: !wc.isDestroyed() && wc.navigationHistory.canGoForward()
+  }));
 }
 
 /**
@@ -68,18 +149,6 @@ function registerTabIpc(deps) {
     scheduleSnapshot,
     logger
   } = deps;
-
-  function queueChromeSend(record, buildMessage) {
-    if (record.bootConfigServed) {
-      const chrome = record.chromeView.webContents;
-      if (chrome && !chrome.isDestroyed()) {
-        const [channel, payload] = buildMessage();
-        chrome.send(channel, payload);
-      }
-    } else {
-      record.pendingChromeSends.push(buildMessage);
-    }
-  }
 
   // Leg 2 (F3 DD2) sender-identity gate. `requireChrome` resolves the SENDER's
   // own window record via identity-compare against every record's chromeView —
@@ -197,7 +266,15 @@ function registerTabIpc(deps) {
       certFailure: null,
       certOverride: null,
       certificate: null,
-      security: null
+      security: null,
+      // Mission 20 Flight 3 Leg 2 (DD1/DD3): crash/hang fields, all seeded
+      // unset. `killRequested` is the kill-and-reload sequencing flag — set
+      // immediately before `forcefullyCrashRenderer()`, consumed by the
+      // following `render-process-gone` regardless of its reported reason
+      // (flight-log Decision: gate on this flag alone, never on `reason`).
+      crash: null,
+      hung: false,
+      killRequested: false
     });
     // Squawk 0073: a new tab is new topology — debounced snapshot re-arm.
     scheduleSnapshot?.();
@@ -694,26 +771,11 @@ function registerTabIpc(deps) {
     // a failure recorded before the move — re-push it, queued on the SAME boot-gated
     // path so it lands right after the adopt payload. The moved guest already stays
     // hidden (AC7, above); this only re-syncs the adopting chrome's own record/panel.
-    if (entry.loadFailure) {
-      queueChromeSend(target, () => ['tab-load-failure', { wcId: p.wcId, failure: entry.loadFailure }]);
-    }
-    // Mission 20 Flight 2 Leg 2 (DD7 FD amendment): the adopting window's
-    // chrome has no record of this tab's security state either — re-push it
-    // on the SAME boot-gated path, right beside the load-failure re-push.
-    // Deliberately NOT a replay of `tab-did-navigate` (its chrome handler
-    // resets media/privacy/suggestions) — `tab-security` is its own channel
-    // for exactly this reason.
-    if (entry.security) {
-      queueChromeSend(target, () => ['tab-security', { wcId: p.wcId, security: entry.security }]);
-    }
-    queueChromeSend(target, () => [
-      'tab-nav-state',
-      {
-        wcId: p.wcId,
-        canGoBack: !wc.isDestroyed() && wc.navigationHistory.canGoBack(),
-        canGoForward: !wc.isDestroyed() && wc.navigationHistory.canGoForward()
-      }
-    ]);
+    // Mission 20 Flight 3 Leg 3 (DD5): the shared re-push set (load-failure,
+    // security, crash, hung, nav-state) — one definition, shared with
+    // `chrome-recovery.js`'s `buildRecoveryAdopts`. Still boot-gated thunks:
+    // values are read at DELIVERY time, not now.
+    pushTabStateFor(target, p.wcId, entry, wc, (ch, build) => queueChromeSend(target, () => [ch, build()]));
     // Both records' active tab just changed, so both windows' captions did (DD8).
     // Synchronous sends, and AFTER the pair — never between it.
     broadcastMoveTargetsChanged();
@@ -1028,13 +1090,35 @@ function registerTabIpc(deps) {
         logger.warn('[tab-navigate] loadURL rejected:', err && (err.code || err.message || err));
       });
     } else if (verb === 'reload') {
-      wc.reload();
+      // Edge case (leg 2 Edge Cases): a guest that crashed before its first
+      // commit has an empty history — `wc.reload()` is a no-op there, so fall
+      // back to loading the entry's own effective URL (acceptable variation).
+      const entry = owner.tabViews.get(wcId);
+      if (entry && wc.navigationHistory.length() === 0) {
+        wc.loadURL(effectiveUrl(entry)).catch((err) => {
+          logger.warn('[tab-navigate] reload loadURL rejected:', err && (err.code || err.message || err));
+        });
+      } else {
+        wc.reload();
+      }
     } else if (verb === 'stop') {
       wc.stop();
     } else if (verb === 'goBack') {
       wc.navigationHistory.goBack();
     } else if (verb === 'goForward') {
       wc.navigationHistory.goForward();
+    } else if (verb === 'kill-reload') {
+      // Mission 20 Flight 3 Leg 2 (DD3): the hang bar's Kill-and-reload.
+      // Refused for a trusted/internal tab (no hang bar is ever shown for one
+      // either — `unresponsive` skips trusted entries) and for a destroyed
+      // guest (already refused above by the shared `!wc || wc.isDestroyed()`
+      // guard). `killRequested` is consumed by the following
+      // `render-process-gone`, WHATEVER its reported `reason` (flight-log
+      // Decision, spike (f)).
+      const entry = owner.tabViews.get(wcId);
+      if (!entry || entry.trusted) return;
+      entry.killRequested = true;
+      wc.forcefullyCrashRenderer();
     }
   });
 
@@ -1054,10 +1138,11 @@ function registerTabIpc(deps) {
     const wcId = rec.activeTabWcId;
     if (wcId == null) return false;
     const entry = rec.tabViews.get(wcId);
-    // Mission 20 Flight 1 (DD1/AC7): a failed active tab refuses the F6 gesture —
-    // the guest never receives OS focus while its entry carries a load failure; the
-    // chrome moves focus into the panel instead (its own responsibility, DD6).
-    if (!entry || entry.view.webContents.isDestroyed() || entry.loadFailure) return false;
+    // Mission 20 Flight 1 (DD1/AC7), widened Flight 3 Leg 2 (DD1): a taken-over
+    // active tab (a load failure OR a crash) refuses the F6 gesture — the
+    // guest never receives OS focus while its entry is taken over; the chrome
+    // moves focus into the panel instead (its own responsibility, DD6).
+    if (!entry || entry.view.webContents.isDestroyed() || guestTakenOver(entry)) return false;
     entry.view.webContents.focus();
     return true;
   });
@@ -1120,9 +1205,10 @@ function registerTabIpc(deps) {
       // page-focused (captured above), so a page-content Ctrl+#/Ctrl+Tab does not orphan OS
       // focus. Internal/trusted incoming tabs are focused too (deliberate: cycling INTO a
       // goldfinch:// page must not re-orphan focus).
-      // Mission 20 Flight 1 (DD1/AC7): the re-arm is skipped for a failed incoming
-      // tab — the guest never receives OS focus while its entry carries a failure.
-      if (wasPageFocused && !entry.view.webContents.isDestroyed() && !entry.loadFailure) {
+      // Mission 20 Flight 1 (DD1/AC7), widened Flight 3 Leg 2 (DD1): the re-arm
+      // is skipped for a taken-over incoming tab — the guest never receives OS
+      // focus while its entry is taken over (a load failure OR a crash).
+      if (wasPageFocused && !entry.view.webContents.isDestroyed() && !guestTakenOver(entry)) {
         entry.view.webContents.focus();
       }
       // Find-overlay z-order re-assert (DD2 invariant): strictly AFTER the guest re-add
@@ -1248,4 +1334,4 @@ function registerTabIpc(deps) {
   });
 }
 
-module.exports = { registerTabIpc, applyGuestVisibility };
+module.exports = { registerTabIpc, applyGuestVisibility, queueChromeSend, createSendOrQueue, pushTabStateFor };

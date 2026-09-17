@@ -12,7 +12,7 @@
 // — the leg's renderer.js line budget has room for exactly two new
 // createSiteSecurityController keys and no more, so this controller reaches
 // for the shared module itself (the failedTabTitle precedent, one line below).
-import { failedTabTitle, classifyCertError } from '../../shared/load-failure.js';
+import { failedTabTitle, classifyCertError, classifyCrash, deriveStripLoadState } from '../../shared/load-failure.js';
 
 /** @param {any} deps */
 export function createLoadFailureController(deps) {
@@ -23,7 +23,7 @@ export function createLoadFailureController(deps) {
     findTabByWcId,
     isActiveTab,
     classifyLoadFailure,
-    updateAddressChip,
+    refreshTabIndicators, // Mission 20 F3 Leg 1 (DD11): the single chip-refresh owner (site-security-controller.js)
     onAdvanced,
     onViewCertificate // Mission 20 Flight 2 Leg 4 (DD9): the View certificate button's opener
   } = deps;
@@ -99,6 +99,18 @@ export function createLoadFailureController(deps) {
   retry.classList.add('lf-btn', 'lf-btn-primary');
   actions.appendChild(retry);
 
+  // Mission 20 Flight 3 Leg 2 (DD1): Reload — the crash branch's ONLY
+  // action, additive contract hook. Distinct from Retry: a failed load
+  // retries the INTENDED address; a crash reloads the CURRENT history entry
+  // (`wc.reload()` respawns the renderer in place — spike (d), history
+  // intact). Hidden outside the crash branch.
+  const reload = document.createElement('button');
+  reload.type = 'button';
+  reload.id = 'load-failure-reload';
+  reload.textContent = 'Reload';
+  reload.classList.add('hidden', 'lf-btn', 'lf-btn-primary');
+  actions.appendChild(reload);
+
   // Mission 20 Flight 2 Leg 4 (DD9): View certificate — opens the read-only
   // cert-viewer sheet card for the panel's current tab. Shown for ANY cert
   // failure (overridable or not — the viewer is informational, unlike
@@ -160,12 +172,20 @@ export function createLoadFailureController(deps) {
     return '';
   }
 
-  // render(tab): reads classifyLoadFailure(tab.loadFailure) and writes every
-  // line via textContent only — engine strings (the raw `name`) and the
-  // intended address are user/page-adjacent data, never markup (house rule).
+  // render(tab): reads classifyLoadFailure(tab.loadFailure) / classifyCrash /
+  // classifyCertError and writes every line via textContent only — engine
+  // strings (the raw `name`/`reason`) and the intended address are
+  // user/page-adjacent data, never markup (house rule).
+  //
+  // Mission 20 Flight 3 Leg 2 (DD1): the crash branch is checked FIRST —
+  // exclusive with a load failure by construction (the crash handler clears
+  // `loadFailure` in the same step it stamps `crash`), never both at once.
+  // Retry / View certificate / Advanced are all hidden for a crash; Reload
+  // is its one action.
   /** @param {any} tab */
   function render(tab) {
-    const failure = tab && tab.loadFailure;
+    const crash = tab && tab.crash;
+    const failure = !crash && tab && tab.loadFailure;
     const cert = failure && failure.cert;
     // Mission 20 Flight 2 Leg 2 (DD4): cert branch — title/body come from
     // classifyCertError(failure.cert.error), never classifyLoadFailure (which
@@ -173,25 +193,36 @@ export function createLoadFailureController(deps) {
     // kind's copy). The code line (name + numeric code) is UNCHANGED either
     // way — formatFailureCode reads the top-level failure.name/code, which
     // guest-wiring.js never touches when folding.
-    const classification = cert ? classifyCertError(cert.error) : classifyLoadFailure(failure);
-    heading.textContent = classification.title;
+    const classification = crash
+      ? classifyCrash(crash.reason)
+      : cert
+        ? classifyCertError(cert.error)
+        : classifyLoadFailure(failure);
+    heading.textContent = crash ? classification.heading : classification.title;
     body.textContent = classification.body;
-    urlLine.textContent = (failure && failure.url) || (tab && tab.url) || '';
-    codeLine.textContent = formatFailureCode(failure);
+    urlLine.textContent = (crash && crash.url) || (failure && failure.url) || (tab && tab.url) || '';
+    codeLine.textContent = crash
+      ? formatFailureCode({ name: crash.reason, code: crash.exitCode })
+      : formatFailureCode(failure);
     // Retry is always shown for a cert failure (DD4 — a transient
-    // interception clears on retry); otherwise the ordinary retryable flag.
-    retry.classList.toggle('hidden', cert ? false : !classification.retryable);
+    // interception clears on retry); otherwise the ordinary retryable flag;
+    // always hidden for a crash (Reload is the crash's one action).
+    retry.classList.toggle('hidden', crash ? true : cert ? false : !classification.retryable);
     // View certificate (DD9): shown for ANY cert failure, overridable or not
-    // — informational, never gated on overridable the way Advanced is.
-    viewCert.classList.toggle('hidden', !cert);
+    // — informational, never gated on overridable the way Advanced is; never
+    // shown for a crash (no certificate is involved).
+    viewCert.classList.toggle('hidden', crash ? true : !cert);
     // Advanced (AC5): shown ONLY for an overridable cert failure — hidden for
     // every other failure kind AND for a non-overridable cert kind
     // (revoked/pinned/invalid), where classifyCertError's own body copy
-    // already says the error cannot be bypassed.
-    advanced.classList.toggle('hidden', !(cert && classification.overridable));
+    // already says the error cannot be bypassed; never shown for a crash.
+    advanced.classList.toggle('hidden', crash ? true : !(cert && classification.overridable));
+    // Reload (DD1): shown ONLY for the crash branch.
+    reload.classList.toggle('hidden', !crash);
     // CSS hook for leg 4's styling + the a11y audit's state selector — present
-    // only while the panel shows a cert failure.
-    if (cert) root.dataset.failureKind = 'cert';
+    // only while the panel shows a crash or a cert failure.
+    if (crash) root.dataset.failureKind = 'crash';
+    else if (cert) root.dataset.failureKind = 'cert';
     else delete root.dataset.failureKind;
   }
 
@@ -215,16 +246,24 @@ export function createLoadFailureController(deps) {
 
   // applyStripState(tab) is the ONLY writer of `data-load-state` / the
   // `.tab-status` span (Implementation Guidance #3) — called for every
-  // failure/clear push regardless of whether the tab is active, so the strip
-  // never lags a background failure (behavior spec steps 4-5).
+  // failure/crash/hang/clear push regardless of whether the tab is active, so
+  // the strip never lags a background transition (behavior spec steps 4-5).
+  //
+  // Mission 20 Flight 3 Leg 2 (DD1): the ONE strip-state derivation is
+  // `deriveStripLoadState(tab)` (crashed > failed > hung > null) — this is
+  // the sole `dataset.loadState =` write site, and its value comes from that
+  // one function, never a field-scoped literal racing another writer.
   /** @param {any} tab */
   function applyStripState(tab) {
     if (!tab || !tab.btn) return;
     const statusEl = tab.btn.querySelector('.tab-status');
     const titleEl = tab.btn.querySelector('.tab-title');
     const closeEl = tab.btn.querySelector('.tab-close');
-    if (tab.loadFailure) {
-      tab.btn.dataset.loadState = 'failed';
+    const state = deriveStripLoadState(tab);
+    if (state) tab.btn.dataset.loadState = state;
+    else delete tab.btn.dataset.loadState;
+
+    if (state === 'crashed' || state === 'failed') {
       if (statusEl) {
         statusEl.hidden = false;
         statusEl.textContent = '⚠';
@@ -232,22 +271,35 @@ export function createLoadFailureController(deps) {
       const host = failedTabTitle(tab);
       if (titleEl) titleEl.textContent = host;
       tab.btn.title = host;
-      const label = `${host} — failed to load`;
+      const label = `${host} — ${state === 'crashed' ? 'crashed' : 'failed to load'}`;
       tab.btn.setAttribute('aria-label', label);
       if (closeEl) closeEl.setAttribute('aria-label', `Close tab: ${label}`);
-    } else {
-      delete tab.btn.dataset.loadState;
+      return;
+    }
+    if (state === 'hung') {
       if (statusEl) {
-        statusEl.hidden = true;
-        statusEl.textContent = '';
+        statusEl.hidden = false;
+        statusEl.textContent = '⏳';
       }
-      // Re-derive exactly as renderer.js's onTabTitle does on an ordinary push.
       const name = tab.title || tab.url;
       if (titleEl) titleEl.textContent = name;
       tab.btn.title = name || '';
-      tab.btn.setAttribute('aria-label', name);
-      if (closeEl) closeEl.setAttribute('aria-label', `Close tab: ${name}`);
+      const label = `${name} — not responding`;
+      tab.btn.setAttribute('aria-label', label);
+      if (closeEl) closeEl.setAttribute('aria-label', `Close tab: ${label}`);
+      return;
     }
+    // null — cleared. Re-derive exactly as renderer.js's onTabTitle does on
+    // an ordinary push.
+    if (statusEl) {
+      statusEl.hidden = true;
+      statusEl.textContent = '';
+    }
+    const name = tab.title || tab.url;
+    if (titleEl) titleEl.textContent = name;
+    tab.btn.title = name || '';
+    tab.btn.setAttribute('aria-label', name);
+    if (closeEl) closeEl.setAttribute('aria-label', `Close tab: ${name}`);
   }
 
   // Retry (AC6): navigates the tab the panel currently shows via the
@@ -259,6 +311,16 @@ export function createLoadFailureController(deps) {
     const tab = currentTab;
     if (!tab || !tab.loadFailure || tab.wcId == null) return;
     bridge.tabNavigate({ wcId: tab.wcId, verb: 'loadURL', args: [tab.loadFailure.url || tab.url] });
+  });
+
+  // Reload (DD1): respawns the crashed renderer in place — main's `reload`
+  // verb calls `wc.reload()` (history intact, spike (d)); the resulting
+  // navigation clears `entry.crash` and pushes `tab-crash null`, hiding this
+  // panel (AC2's clear-transition precedent).
+  reload.addEventListener('click', () => {
+    const tab = currentTab;
+    if (!tab || !tab.crash || tab.wcId == null) return;
+    bridge.tabNavigate({ wcId: tab.wcId, verb: 'reload' });
   });
 
   // View certificate (DD9): opens the read-only cert-viewer sheet card for
@@ -292,6 +354,9 @@ export function createLoadFailureController(deps) {
     // `failure.url` (main's `lastRequestedUrl`) is the intended address.
     if (failure && failure.url) tab.url = failure.url;
     tab.loadFailure = failure || null;
+    // Mission 20 Flight 3 Leg 2 (DD1): a crash then a fresh failed load —
+    // the crash is exclusive with a load failure (never both at once).
+    if (failure) tab.crash = null;
     applyStripState(tab);
     if (!isActiveTab(tab)) return;
     if (failure) {
@@ -302,20 +367,54 @@ export function createLoadFailureController(deps) {
       // committed — mirror activateTab's own sync.
       //
       // tls-trust-surface checkpoint 2 (acceptance-run F1): the chip write
-      // must NOT share the address-value guard below. updateAddressChip maps
+      // must NOT share the address-value guard below. The chip refresh maps
       // a set tab.loadFailure to security 'none' regardless of focus — a
       // security indicator has to reflect real state even while the operator
       // is typing/focused in the address bar (a new tab autofocuses it), or
       // an untrusted-cert interstitial renders behind a stale green lock.
       // Only the VALUE write — which would clobber in-progress typing — stays
-      // behind the activeElement guard.
-      updateAddressChip(tab);
+      // behind the activeElement guard. `force: true` (CLAUDE.md "Chrome
+      // indicators" rule (c)): this push refreshes the chip UNCONDITIONALLY —
+      // this call site is already gated to the active tab by the `return`
+      // above, but forcing documents the rule directly at its one canonical
+      // call site rather than relying on the surrounding gate.
+      refreshTabIndicators(tab, { force: true });
       if (document.activeElement !== els.address) {
         els.address.value = tab.url;
       }
       // Focus the panel only when no chrome control already holds focus (the
       // typed-Enter pendingFocusGuest case, which never resolves for a
       // failed load) — never steal focus from an operator mid-interaction.
+      if (document.activeElement === null || document.activeElement === document.body) {
+        focusHeading();
+      }
+    } else {
+      hide();
+    }
+  });
+
+  // Mission 20 Flight 3 Leg 2 (DD1): the crash push — the onTabLoadFailure
+  // shape above, registered by this same controller (no other file reacts to
+  // tab-crash).
+  bridge.onTabCrash(({ wcId, crash }) => {
+    const tab = findTabByWcId(wcId);
+    if (!tab) return; // unknown wcId — no-op
+    if (crash && crash.url) tab.url = crash.url;
+    tab.crash = crash || null;
+    // A dead renderer is neither failed nor hung — the error document it may
+    // have been showing died with it (DD1's exclusivity rule).
+    if (crash) {
+      tab.loadFailure = null;
+      tab.hung = false;
+    }
+    applyStripState(tab);
+    if (!isActiveTab(tab)) return;
+    if (crash) {
+      show(tab);
+      refreshTabIndicators(tab, { force: true });
+      if (document.activeElement !== els.address) {
+        els.address.value = tab.url;
+      }
       if (document.activeElement === null || document.activeElement === document.body) {
         focusHeading();
       }

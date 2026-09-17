@@ -99,6 +99,20 @@ function createGuestWiring(deps) {
     // owner-window close path (closeAllForRecord invokes the seam per entry
     // before destroying). Optional: absent → no-op (leg-1-era tests unchanged).
     cancelChallengesForPopup = () => {},
+    // Mission 20 Flight 3 Leg 2 (DD1/DD2/DD7): OPTIONAL crash-record sink,
+    // the SAME "leave the composition root passing nothing" shape as
+    // `cancelChallengesForPopup`'s own default no-op below, except this one
+    // stays genuinely optional (`onCrash?.(...)` at every call site) — leg 3
+    // wires `crash-log.js` in here via `main.js` deps threading; this leg
+    // only calls the shape.
+    onCrash,
+    // Mission 20 Flight 3 Leg 3 (DD5): boot-gated per-tab push routing — sends
+    // immediately when the owning chrome is booted, else queues on the
+    // record's pendingChromeSends (flushed, deduped, by window-boot-config's
+    // recoverTabs branch). Lifted to a module-level export of
+    // register-tab-ipc.js and constructed once in main.js BEFORE this module
+    // and registerTabIpc both receive it — one implementation.
+    sendOrQueue,
     logger
   } = deps;
 
@@ -357,6 +371,26 @@ function createGuestWiring(deps) {
         getHistoryRecorder()?.handleTitleUpdated(popupWcId, title);
       });
 
+      // Mission 20 Flight 3 Leg 2 (DD2): a popup has no strip, no panel, and
+      // no chrome to push to — a dead popup renderer records (leg 3 wires
+      // crash-log.js) and CLOSES the popup window, so the opener sees an
+      // ordinary closed window instead of a gray one that never answers. No
+      // reload affordance (accepted: an OAuth flow re-opens from the page).
+      popupWc.on('render-process-gone', (_event, details) => {
+        const { reason, exitCode } = details || {};
+        if (reason === 'clean-exit') return;
+        onCrash?.({
+          kind: 'popup',
+          reason,
+          exitCode,
+          url: popupWc.getURL(),
+          partition,
+          windowId: win.id,
+          recovery: 'closed'
+        });
+        if (!win.isDestroyed()) win.close();
+      });
+
       // Teardown rides the events destroy() actually EMITS — `closed` on the
       // window (via the sanctioned onWindowClosed wrapper: captured-primitive
       // discipline, never a raw registration) and `destroyed` on the contents
@@ -452,7 +486,7 @@ function createGuestWiring(deps) {
 
   function wireTabViewEvents(view, wcId, partition) {
     const wc = view.webContents;
-    const sendToChrome = (channel, payload) => chromeForTab(wcId)?.send(channel, payload);
+    const sendToChrome = (channel, payload) => sendOrQueue(wcId, channel, payload);
     const guard =
       (fn) =>
       (...args) => {
@@ -494,6 +528,23 @@ function createGuestWiring(deps) {
               applyGuestVisibility(entry);
               sendToChrome('tab-load-failure', { wcId, failure: null });
             }
+            // Mission 20 Flight 3 Leg 2 (DD1/DD2/DD3): a real navigation
+            // (the crashed guest's own respawn-and-reload, or an ordinary
+            // navigation that lands before a pending kill actually crashed
+            // the renderer) clears the crash/hang state and any lingering
+            // kill-and-reload flag — the flight-log Decision's "a navigation
+            // that lands before the crash event means the kill did not
+            // happen; the flag must not linger."
+            if (entry.crash) {
+              entry.crash = null;
+              applyGuestVisibility(entry);
+              sendToChrome('tab-crash', { wcId, crash: null });
+            }
+            if (entry.hung) {
+              entry.hung = false;
+              sendToChrome('tab-hung', { wcId, hung: false });
+            }
+            entry.killRequested = false;
           }
         }
       })
@@ -577,6 +628,86 @@ function createGuestWiring(deps) {
         // its own did-navigate — this never needs to be un-set elsewhere).
         entry.security = SECURITY_STATES.NONE;
         sendToChrome('tab-security', { wcId, security: SECURITY_STATES.NONE });
+      })
+    );
+    // Mission 20 Flight 3 Leg 2 (DD1/DD2): a dead guest renderer. `clean-exit`
+    // (a normal renderer shutdown, e.g. during window/tab teardown) is
+    // ignored; a gone window or a gone tabViews entry (mid-teardown) is
+    // ignored too — never read `win.*` here (the Wayland wedge), which is why
+    // this resolves the OWNER record fresh rather than reading through `win`.
+    wc.on(
+      'render-process-gone',
+      guard((_event, details) => {
+        const { reason, exitCode } = details || {};
+        if (reason === 'clean-exit') return;
+        const owner = registry.getWindowForGuest(wcId);
+        const entry = owner?.tabViews?.get(wcId);
+        if (!owner || !entry) return;
+        // Mission 20 Flight 3 Leg 2 (DD3, flight-log Decision): the
+        // kill-and-reload bypass gates on `killRequested` ALONE, never on
+        // `reason` — spike (f) measured `forcefullyCrashRenderer()` reporting
+        // itself as `reason: 'crashed'` on this platform, not `'killed'`.
+        if (entry.killRequested) {
+          entry.killRequested = false;
+          entry.hung = false;
+          sendToChrome('tab-hung', { wcId, hung: false });
+          onCrash?.({
+            kind: 'guest',
+            reason,
+            exitCode,
+            wcId,
+            url: effectiveUrl(entry),
+            partition,
+            windowId: owner.win.id,
+            recovery: 'reloaded'
+          });
+          wc.reload();
+          return;
+        }
+        const wasHung = entry.hung;
+        entry.crash = { reason, exitCode, url: effectiveUrl(entry) };
+        entry.loadFailure = null;
+        entry.hung = false;
+        applyGuestVisibility(entry);
+        if (owner.activeTabWcId === wcId) {
+          owner.findOverlay?.hide();
+        }
+        entry.security = SECURITY_STATES.NONE;
+        sendToChrome('tab-crash', { wcId, crash: entry.crash });
+        if (wasHung) sendToChrome('tab-hung', { wcId, hung: false });
+        sendToChrome('tab-security', { wcId, security: SECURITY_STATES.NONE });
+        onCrash?.({
+          kind: 'guest',
+          reason,
+          exitCode,
+          wcId,
+          url: entry.crash.url,
+          partition,
+          windowId: owner.win.id,
+          recovery: 'panel'
+        });
+      })
+    );
+    // Mission 20 Flight 3 Leg 2 (DD3/DD4): Chromium's own input-driven hang
+    // detection — no watchdog added. A crashed, kill-pending, or TRUSTED
+    // (internal) entry never shows the hang bar — trusted pages are ours, and
+    // a crash/kill already owns the tab's takeover state.
+    wc.on(
+      'unresponsive',
+      guard(() => {
+        const entry = resolveEntry();
+        if (!entry || entry.trusted || entry.crash || entry.killRequested) return;
+        entry.hung = true;
+        sendToChrome('tab-hung', { wcId, hung: true });
+      })
+    );
+    wc.on(
+      'responsive',
+      guard(() => {
+        const entry = resolveEntry();
+        if (!entry) return;
+        entry.hung = false;
+        sendToChrome('tab-hung', { wcId, hung: false });
       })
     );
     wc.on(
