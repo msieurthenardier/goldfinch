@@ -1,6 +1,6 @@
 # Mission: No Silent Failures
 
-**Status**: active
+**Status**: completed
 
 ## Outcome
 
@@ -270,6 +270,6 @@ Emergent blockers and issues discovered during execution.
   the registry with a multi-crash storm guard; `unresponsive` wait-or-kill;
   local crash records and dump collection; OS-signal-injected behavior spec for
   both surfaces.
-- [ ] Flight 4 *(optional)*: **Alignment** — an interactive session for
+- [~] Flight 4 *(optional — RETIRED unflown 2026-09-17: each flight closed with its own HAT, so there was nothing left to align)*: **Alignment** — an interactive session for
   copy, layout, and feel across the new error, interstitial, crash, and
   hang surfaces.
