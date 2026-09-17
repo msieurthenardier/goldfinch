@@ -3,7 +3,12 @@
 const { EventEmitter } = require('node:events');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { registerTabIpc } = require('../../src/main/register-tab-ipc');
+const {
+  registerTabIpc,
+  queueChromeSend,
+  createSendOrQueue,
+  pushTabStateFor
+} = require('../../src/main/register-tab-ipc');
 
 class FakeIpc {
   constructor() {
@@ -32,9 +37,14 @@ class FakeContents extends EventEmitter {
     this.destroyed = false;
     this.focused = false;
     this.url = `https://tab-${id}.test/`;
+    // Mission 20 Flight 3 Leg 2: default history length 1 (the common "has
+    // committed something" case) — a test exercising the empty-history reload
+    // fallback overrides this directly (`wc.navigationHistory._length = 0`).
+    this._historyLength = 1;
     this.navigationHistory = {
       getAllEntries: () => [{ url: this.url }],
       getActiveIndex: () => 0,
+      length: () => this._historyLength,
       restore: (value) => {
         log.push(['restore', id, value]);
         return Promise.resolve();
@@ -80,6 +90,9 @@ class FakeContents extends EventEmitter {
   }
   stop() {
     this.log.push(['stop', this.id]);
+  }
+  forcefullyCrashRenderer() {
+    this.log.push(['force-crash', this.id]);
   }
   findInPage(text, options) {
     this.log.push(['find', this.id, text, options]);
@@ -1659,4 +1672,399 @@ test('tab-certificate-get: the reply never carries a data/PEM field', () => {
   const result = h.ipcMain.invoke('tab-certificate-get', source.chromeView.webContents, { wcId: 101 });
   assert.equal('data' in result, false);
   assert.equal(JSON.stringify(result).includes('-----BEGIN'), false);
+});
+
+// ---------------------------------------------------------------------------
+// Mission 20 Flight 3 Leg 2 (DD1/DD3/DD9): the crash/hang entry fields, the
+// guestTakenOver-widened visibility/focus invariant, the adopt re-pushes, and
+// the kill-reload verb + the empty-history reload fallback.
+// ---------------------------------------------------------------------------
+
+test('tab-create seeds crash: null, hung: false, killRequested: false', async () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  const wcId = await h.ipcMain.invoke('tab-create', source.chromeView.webContents, {
+    url: 'https://example.test/page',
+    partition: 'persist:jar-a',
+    trusted: false
+  });
+  const entry = source.tabViews.get(wcId);
+  assert.equal(entry.crash, null);
+  assert.equal(entry.hung, false);
+  assert.equal(entry.killRequested, false);
+});
+
+test('AC4/DD1: tab-set-active hides (never shows) an incoming tab carrying a crash, and never focuses it', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  h.addTab(record, 101);
+  const incoming = h.addTab(record, 102);
+  incoming.webContents.destroyed = false;
+  record.tabViews.get(102).crash = { reason: 'crashed', exitCode: 139, url: 'https://x.test/' };
+  record.activeTabWcId = 101;
+  h.log.length = 0;
+  h.ipcMain.send('tab-set-active', record.chromeView.webContents, {
+    wcId: 102,
+    bounds: { x: 0, y: 0, width: 900, height: 700 }
+  });
+  assert.deepEqual(
+    h.log.filter((x) => x[0] === 'visible' && x[1] === 102),
+    [['visible', 102, false]],
+    'applyGuestVisibility (via guestTakenOver) hides a crashed incoming tab'
+  );
+  assert.deepEqual(
+    h.log.filter((x) => x[0] === 'focus-wc' && x[1] === 102),
+    [],
+    'a crashed incoming tab never receives OS focus'
+  );
+});
+
+test('AC4/DD1: tab-set-active skips the page-focus re-arm for a crashed incoming tab', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  const outgoing = h.addTab(record, 101);
+  h.addTab(record, 102);
+  record.tabViews.get(102).crash = { reason: 'crashed', exitCode: 139, url: 'https://x.test/' };
+  record.activeTabWcId = 101;
+  outgoing.webContents.focused = true;
+  h.log.length = 0;
+  h.ipcMain.send('tab-set-active', record.chromeView.webContents, {
+    wcId: 102,
+    bounds: { x: 0, y: 0, width: 900, height: 700 }
+  });
+  assert.deepEqual(
+    h.log.filter((x) => x[0] === 'focus-wc' && x[1] === 102),
+    [],
+    'the re-arm is skipped even though the outgoing tab was page-focused'
+  );
+});
+
+test('AC4/DD1: tab-focus-guest refuses a crashed active tab without calling focus()', async () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  h.addTab(record, 101);
+  record.tabViews.get(101).crash = { reason: 'crashed', exitCode: 139, url: 'https://x.test/' };
+  record.activeTabWcId = 101;
+  h.log.length = 0;
+  const ok = await h.ipcMain.invoke('tab-focus-guest', record.chromeView.webContents);
+  assert.equal(ok, false);
+  assert.deepEqual(
+    h.log.filter((e) => e[0] === 'focus-wc'),
+    []
+  );
+});
+
+test('AC9/DD9: a move re-pushes tab-crash to the target AFTER adopt-tab when the moved entry carries a crash', () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  const target = h.makeRecord(2);
+  h.addTab(source, 101);
+  const crash = { reason: 'crashed', exitCode: 139, url: 'https://x.test/' };
+  source.tabViews.get(101).crash = crash;
+
+  const result = h.ipcMain.invoke('tab-move-to-window', source.chromeView.webContents, { wcId: 101, windowId: 2 });
+  assert.deepEqual(result, { ok: true, windowId: 2 });
+
+  const targetChromeId = target.chromeView.webContents.id;
+  const sends = h.log.filter((x) => x[0] === 'send' && x[1] === targetChromeId);
+  const adoptIdx = sends.findIndex((x) => x[2] === 'adopt-tab');
+  const crashIdx = sends.findIndex((x) => x[2] === 'tab-crash');
+  assert.ok(adoptIdx !== -1, 'adopt-tab was sent');
+  assert.ok(crashIdx !== -1, 'tab-crash was re-pushed');
+  assert.ok(crashIdx > adoptIdx, 'the re-push lands strictly AFTER the adopt payload');
+  assert.deepEqual(sends[crashIdx][3], { wcId: 101, crash });
+});
+
+test('AC9/DD9: a move re-pushes tab-hung to the target AFTER adopt-tab when the moved entry is hung', () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  const target = h.makeRecord(2);
+  h.addTab(source, 101);
+  source.tabViews.get(101).hung = true;
+
+  h.ipcMain.invoke('tab-move-to-window', source.chromeView.webContents, { wcId: 101, windowId: 2 });
+
+  const targetChromeId = target.chromeView.webContents.id;
+  const sends = h.log.filter((x) => x[0] === 'send' && x[1] === targetChromeId);
+  const adoptIdx = sends.findIndex((x) => x[2] === 'adopt-tab');
+  const hungIdx = sends.findIndex((x) => x[2] === 'tab-hung');
+  assert.ok(adoptIdx !== -1, 'adopt-tab was sent');
+  assert.ok(hungIdx !== -1, 'tab-hung was re-pushed');
+  assert.ok(hungIdx > adoptIdx, 'the re-push lands strictly AFTER the adopt payload');
+  assert.deepEqual(sends[hungIdx][3], { wcId: 101, hung: true });
+});
+
+test('AC9/DD9: a move of a clean (no crash/hung) entry sends neither tab-crash nor tab-hung', () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  const target = h.makeRecord(2);
+  h.addTab(source, 101);
+  h.ipcMain.invoke('tab-move-to-window', source.chromeView.webContents, { wcId: 101, windowId: 2 });
+  const targetChromeId = target.chromeView.webContents.id;
+  const sends = h.log.filter(
+    (x) => x[0] === 'send' && x[1] === targetChromeId && (x[2] === 'tab-crash' || x[2] === 'tab-hung')
+  );
+  assert.deepEqual(sends, []);
+});
+
+test('AC2: tab-navigate kill-reload sets killRequested then calls forcefullyCrashRenderer', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  h.addTab(record, 101);
+  h.ipcMain.send('tab-navigate', record.chromeView.webContents, { wcId: 101, verb: 'kill-reload' });
+  assert.equal(record.tabViews.get(101).killRequested, true);
+  assert.deepEqual(
+    h.log.filter((x) => x[0] === 'force-crash'),
+    [['force-crash', 101]]
+  );
+});
+
+test('AC2 edge case: kill-reload is refused for a TRUSTED (internal) entry', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  h.addTab(record, 101, true);
+  h.ipcMain.send('tab-navigate', record.chromeView.webContents, { wcId: 101, verb: 'kill-reload' });
+  assert.notEqual(record.tabViews.get(101).killRequested, true);
+  assert.deepEqual(
+    h.log.filter((x) => x[0] === 'force-crash'),
+    []
+  );
+});
+
+test('AC2 edge case: kill-reload is refused for a destroyed guest', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  const tab = h.addTab(record, 101);
+  tab.webContents.destroyed = true;
+  h.ipcMain.send('tab-navigate', record.chromeView.webContents, { wcId: 101, verb: 'kill-reload' });
+  assert.notEqual(record.tabViews.get(101).killRequested, true);
+});
+
+test('Edge case: reload falls back to loadURL(effectiveUrl(entry)) when the history is empty', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  const tab = h.addTab(record, 101);
+  tab.webContents._historyLength = 0;
+  tab.webContents.url = 'https://crashed-before-commit.test/';
+  record.tabViews.get(101).lastRequestedUrl = 'https://crashed-before-commit.test/';
+  h.log.length = 0;
+  h.ipcMain.send('tab-navigate', record.chromeView.webContents, { wcId: 101, verb: 'reload' });
+  assert.deepEqual(
+    h.log.filter((x) => x[0] === 'load' || x[0] === 'reload'),
+    [['load', 101, 'https://crashed-before-commit.test/']],
+    'wc.reload() is a no-op on empty history — loadURL(effectiveUrl(entry)) is the fallback'
+  );
+});
+
+test('reload calls wc.reload() as before when history is non-empty (no regression)', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  const tab = h.addTab(record, 101);
+  assert.equal(tab.webContents._historyLength, 1);
+  h.log.length = 0;
+  h.ipcMain.send('tab-navigate', record.chromeView.webContents, { wcId: 101, verb: 'reload' });
+  assert.deepEqual(
+    h.log.filter((x) => x[0] === 'load' || x[0] === 'reload'),
+    [['reload', 101]]
+  );
+});
+
+// ---------------------------------------------------------------------------
+// AC4 — grep-AC: every bare `entry.loadFailure` read across src/main/ is one
+// of the known, exempt state-management sites (never a focus/visibility
+// site, which now reads guestTakenOver(entry) exclusively).
+// ---------------------------------------------------------------------------
+
+test('AC4 grep-AC: entry.loadFailure occurrences in src/main/ are confined to the exempt files, at the expected count', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const repoRoot = path.join(__dirname, '..', '..');
+  const mainDir = path.join(repoRoot, 'src', 'main');
+
+  /** Recursively list every .js file under `dir`. */
+  function listJsFiles(dir) {
+    const out = [];
+    for (const name of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, name.name);
+      if (name.isDirectory()) out.push(...listJsFiles(full));
+      else if (name.isFile() && name.name.endsWith('.js')) out.push(full);
+    }
+    return out;
+  }
+
+  // The exempt sites (flight.md DD1 / the leg's AC4): the entry literal, the
+  // cert-summary reads, and the adopt re-push in register-tab-ipc.js; the
+  // did-start-navigation/did-fail-load stamps in guest-wiring.js; the
+  // cert-override-proceed cert read in register-overlay-ipc.js; and a
+  // documentation comment in tab-entry-url.js. Counts are occurrence counts
+  // (grep -o), not line counts — a real regression (a new bare read at a
+  // focus/visibility site) changes one of these numbers.
+  const EXPECTED = {
+    'register-tab-ipc.js': 4,
+    'guest-wiring.js': 6,
+    'register-overlay-ipc.js': 2,
+    'tab-entry-url.js': 1
+  };
+
+  const actual = {};
+  for (const file of listJsFiles(mainDir)) {
+    const src = fs.readFileSync(file, 'utf8');
+    const count = (src.match(/entry\.loadFailure/g) || []).length;
+    if (count > 0) actual[path.basename(file)] = count;
+  }
+
+  assert.deepEqual(
+    actual,
+    EXPECTED,
+    'entry.loadFailure occurrences drifted outside the exempt state-management sites — a new hit is real; ' +
+      'every focus/visibility site must read guestTakenOver(entry) instead'
+  );
+});
+
+test('AC4: guestTakenOver is the predicate at the four main-side focus/visibility sites (source-scan)', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const repoRoot = path.join(__dirname, '..', '..');
+
+  const registerTabIpcSrc = fs.readFileSync(path.join(repoRoot, 'src/main/register-tab-ipc.js'), 'utf8');
+  const windowFactorySrc = fs.readFileSync(path.join(repoRoot, 'src/main/window-factory.js'), 'utf8');
+
+  // applyGuestVisibility, tab-focus-guest, and the tab-set-active re-arm all
+  // live in register-tab-ipc.js; isFindableTab lives in window-factory.js.
+  const occurrences = (registerTabIpcSrc.match(/guestTakenOver\(entry\)/g) || []).length;
+  assert.equal(
+    occurrences,
+    3,
+    'expected exactly 3 guestTakenOver(entry) call sites in register-tab-ipc.js: applyGuestVisibility, ' +
+      'tab-focus-guest, the tab-set-active re-arm'
+  );
+  assert.ok(
+    /guestTakenOver\(entry\)/.test(windowFactorySrc),
+    'window-factory.js isFindableTab must read guestTakenOver(entry)'
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Mission 20 Flight 3 Leg 3 (DD5): queueChromeSend / createSendOrQueue /
+// pushTabStateFor — the module-level exports shared by guest-wiring.js's
+// sendToChrome, the move/adopt block above, and chrome-recovery.js's
+// buildRecoveryAdopts.
+// ---------------------------------------------------------------------------
+
+function makeSimpleRecord({ booted = true } = {}) {
+  const sent = [];
+  return {
+    bootConfigServed: booted,
+    pendingChromeSends: [],
+    chromeView: { webContents: { isDestroyed: () => false, send: (ch, p) => sent.push([ch, p]) } },
+    sent
+  };
+}
+
+test('queueChromeSend: booted record sends immediately via the chrome webContents', () => {
+  const record = makeSimpleRecord({ booted: true });
+  queueChromeSend(record, () => ['tab-title', { wcId: 1, title: 'A' }]);
+  assert.deepEqual(record.sent, [['tab-title', { wcId: 1, title: 'A' }]]);
+  assert.deepEqual(record.pendingChromeSends, []);
+});
+
+test('queueChromeSend: unbooted record queues the thunk instead of sending', () => {
+  const record = makeSimpleRecord({ booted: false });
+  const build = () => ['tab-title', { wcId: 1, title: 'A' }];
+  queueChromeSend(record, build);
+  assert.deepEqual(record.sent, []);
+  assert.equal(record.pendingChromeSends.length, 1);
+  assert.equal(record.pendingChromeSends[0], build);
+});
+
+test('queueChromeSend: a destroyed chrome webContents drops the send silently (booted branch)', () => {
+  const record = makeSimpleRecord({ booted: true });
+  record.chromeView.webContents.isDestroyed = () => true;
+  assert.doesNotThrow(() => queueChromeSend(record, () => ['tab-title', { wcId: 1, title: 'A' }]));
+  assert.deepEqual(record.sent, []);
+});
+
+test('queueChromeSend: a chromeRecoveryPaused record drops the message rather than sending or queueing (acceptance-run fix pass F1)', () => {
+  const bootedPaused = makeSimpleRecord({ booted: true });
+  bootedPaused.chromeRecoveryPaused = true;
+  queueChromeSend(bootedPaused, () => ['tab-title', { wcId: 1, title: 'A' }]);
+  assert.deepEqual(bootedPaused.sent, []);
+  assert.deepEqual(bootedPaused.pendingChromeSends, []);
+
+  const unbootedPaused = makeSimpleRecord({ booted: false });
+  unbootedPaused.chromeRecoveryPaused = true;
+  queueChromeSend(unbootedPaused, () => ['tab-title', { wcId: 1, title: 'A' }]);
+  assert.deepEqual(unbootedPaused.sent, []);
+  assert.deepEqual(unbootedPaused.pendingChromeSends, []);
+});
+
+test('createSendOrQueue: resolves the owning record by wcId and routes through queueChromeSend', () => {
+  const record = makeSimpleRecord({ booted: true });
+  const registry = { getWindowForGuest: (wcId) => (wcId === 42 ? record : null) };
+  const sendOrQueue = createSendOrQueue(registry);
+  sendOrQueue(42, 'tab-crash', { wcId: 42, crash: { reason: 'crashed' } });
+  assert.deepEqual(record.sent, [['tab-crash', { wcId: 42, crash: { reason: 'crashed' } }]]);
+});
+
+test('createSendOrQueue: unbooted → queued; replayed once the record boots (flushed in insertion order)', () => {
+  const record = makeSimpleRecord({ booted: false });
+  const registry = { getWindowForGuest: () => record };
+  const sendOrQueue = createSendOrQueue(registry);
+  sendOrQueue(1, 'tab-title', { wcId: 1, title: 'first' });
+  sendOrQueue(1, 'tab-loading', { wcId: 1, loading: true });
+  assert.deepEqual(record.sent, []);
+  // Simulate window-boot-config's flush.
+  record.bootConfigServed = true;
+  for (const build of record.pendingChromeSends.splice(0)) {
+    const [ch, p] = build();
+    record.chromeView.webContents.send(ch, p);
+  }
+  assert.deepEqual(record.sent, [
+    ['tab-title', { wcId: 1, title: 'first' }],
+    ['tab-loading', { wcId: 1, loading: true }]
+  ]);
+});
+
+test('createSendOrQueue: an unresolvable wcId (no owning record) is a silent no-op', () => {
+  const registry = { getWindowForGuest: () => null };
+  const sendOrQueue = createSendOrQueue(registry);
+  assert.doesNotThrow(() => sendOrQueue(999, 'tab-title', { wcId: 999, title: 'ghost' }));
+});
+
+test('pushTabStateFor: sends only the SET fields, then nav-state unconditionally', () => {
+  const wc = { isDestroyed: () => false, navigationHistory: { canGoBack: () => true, canGoForward: () => false } };
+  const entry = { loadFailure: null, security: 'secure', crash: null, hung: false };
+  const out = [];
+  const send = (ch, build) => out.push([ch, build()]);
+  pushTabStateFor({}, 5, entry, wc, send);
+  assert.deepEqual(out, [
+    ['tab-security', { wcId: 5, security: 'secure' }],
+    ['tab-nav-state', { wcId: 5, canGoBack: true, canGoForward: false }]
+  ]);
+});
+
+test('pushTabStateFor: all four optional fields set → all four re-pushed, then nav-state', () => {
+  const wc = { isDestroyed: () => false, navigationHistory: { canGoBack: () => false, canGoForward: () => true } };
+  const entry = {
+    loadFailure: { code: -1, name: 'refused' },
+    security: 'insecure',
+    crash: { reason: 'crashed', exitCode: 139, url: 'https://a.example/' },
+    hung: true
+  };
+  const out = [];
+  const send = (ch, build) => out.push([ch, build()]);
+  pushTabStateFor({}, 5, entry, wc, send);
+  assert.deepEqual(
+    out.map((o) => o[0]),
+    ['tab-load-failure', 'tab-security', 'tab-crash', 'tab-hung', 'tab-nav-state']
+  );
+});
+
+test('pushTabStateFor: nothing set beyond nav-state → exactly one send', () => {
+  const wc = { isDestroyed: () => true, navigationHistory: { canGoBack: () => false, canGoForward: () => false } };
+  const entry = { loadFailure: null, security: null, crash: null, hung: false };
+  const out = [];
+  const send = (ch, build) => out.push([ch, build()]);
+  pushTabStateFor({}, 5, entry, wc, send);
+  assert.deepEqual(out, [['tab-nav-state', { wcId: 5, canGoBack: false, canGoForward: false }]]);
 });

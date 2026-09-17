@@ -8,8 +8,15 @@
 // `LOAD_STATES` is the single source for the census `loadState` field's enum;
 // Flights 2 and 3 append `cert-blocked` / `crashed` / `hung` here, one place.
 
-/** @type {{ OK: 'ok', FAILED: 'failed', CERT_BLOCKED: 'cert-blocked' }} */
-export const LOAD_STATES = Object.freeze({ OK: 'ok', FAILED: 'failed', CERT_BLOCKED: 'cert-blocked' });
+/** @type {{ OK: 'ok', FAILED: 'failed', CERT_BLOCKED: 'cert-blocked', CRASHED: 'crashed', HUNG: 'hung' }} */
+export const LOAD_STATES = Object.freeze({
+  OK: 'ok',
+  FAILED: 'failed',
+  CERT_BLOCKED: 'cert-blocked',
+  // Mission 20 Flight 3 Leg 2 (DD1/DD3): a dead or frozen guest renderer.
+  CRASHED: 'crashed',
+  HUNG: 'hung'
+});
 
 /**
  * Match on `name` first (stable across Chromium releases) — any `ERR_CERT_*`
@@ -282,14 +289,79 @@ export function isChromeErrorUrl(url) {
  * the two can never drift (post-acceptance fix pass F2). Mirrors the strip's
  * own derivation exactly: `new URL(...).host` off the intended address,
  * falling back to the raw string when it doesn't parse.
- * @param {{ loadFailure?: { url?: string } | null, url?: string } | null | undefined} tab
+ *
+ * Mission 20 Flight 3 Leg 2 (DD1): a crashed tab's `crash.url` takes
+ * precedence over a stale `loadFailure` — a dead renderer clears
+ * `loadFailure` in the same step it stamps `crash` (never both at once), but
+ * this reads defensively either way.
+ * @param {{ crash?: { url?: string } | null, loadFailure?: { url?: string } | null, url?: string } | null | undefined} tab
  * @returns {string}
  */
 export function failedTabTitle(tab) {
-  const raw = (tab && tab.loadFailure && tab.loadFailure.url) || (tab && tab.url) || '';
+  const raw =
+    (tab && tab.crash && tab.crash.url) || (tab && tab.loadFailure && tab.loadFailure.url) || (tab && tab.url) || '';
   try {
     return new URL(raw).host;
   } catch {
     return raw;
   }
+}
+
+/**
+ * App-authored heading/body per crash `reason` (DD1). `killed` names a real,
+ * externally-delivered SIGKILL; `oom` names an out-of-memory kill; every
+ * other reason (`crashed`, `abnormal-exit`, `integrity-failure`,
+ * `launch-failed`, `memory-eviction`, or any unrecognized string) falls to
+ * the generic crash copy — engine reason strings never become prose (the
+ * `KIND_COPY` house rule above). Never throws — a non-string `reason`
+ * resolves the generic copy.
+ * @param {unknown} reason
+ * @returns {{ heading: string, body: string }}
+ */
+export function classifyCrash(reason) {
+  if (reason === 'killed') {
+    return {
+      heading: 'This page was closed by the system',
+      body: "The system ended this page's process, often to free memory."
+    };
+  }
+  if (reason === 'oom') {
+    return {
+      heading: 'This page ran out of memory',
+      body: 'This page used more memory than was available and had to be closed.'
+    };
+  }
+  return {
+    heading: 'This page crashed',
+    body: "Something went wrong inside the page's process. Reloading usually fixes it."
+  };
+}
+
+/**
+ * The strip's SOLE `data-load-state` derivation (DD1) — precedence crashed >
+ * failed > hung > none. A crashed tab is never also reported failed or hung
+ * (the crash handler clears both in the same step it stamps `crash`), but
+ * this precedence is defensive either way. Never throws.
+ * @param {{ crash?: unknown, loadFailure?: unknown, hung?: unknown } | null | undefined} tab
+ * @returns {'crashed' | 'failed' | 'hung' | null}
+ */
+export function deriveStripLoadState(tab) {
+  if (!tab) return null;
+  if (tab.crash) return 'crashed';
+  if (tab.loadFailure) return 'failed';
+  if (tab.hung) return 'hung';
+  return null;
+}
+
+/**
+ * The ONE two-axis-visibility-invariant's third term (DD1): a guest is taken
+ * over — hidden, focus-refused — while its entry carries a load failure OR a
+ * crash. Shared by main (`applyGuestVisibility` and the focus/visibility
+ * sites it replaces) so `src/main/` never re-derives this union inline (the
+ * grep-AC in AC4). Never throws.
+ * @param {{ loadFailure?: unknown, crash?: unknown } | null | undefined} entry
+ * @returns {boolean}
+ */
+export function guestTakenOver(entry) {
+  return !!(entry && (entry.loadFailure || entry.crash));
 }

@@ -17,7 +17,7 @@
  *
  * @typedef {{ isVisible?: () => boolean, getView?: () => any } | null | undefined} ManagerLike
  * @typedef {{ win: { id: number, [k: string]: any }, chromeView: { webContents: any, [k: string]: any }, tabViews?: Map<number, any>, activeTabWcId?: number | null, bootConfigServed?: boolean, findOverlay?: ManagerLike, sheet?: ManagerLike, [k: string]: any }} RecordLike
- * @typedef {{ windowId: number, chromeWcId: number, booted: boolean, activeTabWcId: number | null, lastFocused: boolean, sheetWcId?: number, sheetVisible: boolean, findWcId?: number, findVisible: boolean }} WindowCensusRow
+ * @typedef {{ windowId: number, chromeWcId: number, booted: boolean, activeTabWcId: number | null, lastFocused: boolean, sheetWcId?: number, sheetVisible: boolean, findWcId?: number, findVisible: boolean, chromePid: number | null, recoveryPaused: boolean }} WindowCensusRow
  * @typedef {{ popupWcId: number, openerWindowId: number, url: string, title: string }} PopupCensusEntry
  */
 
@@ -63,6 +63,24 @@ function viewVisible(mgr) {
     return typeof mgr?.isVisible === 'function' ? !!mgr.isVisible() : false;
   } catch {
     return false;
+  }
+}
+
+/**
+ * The chrome renderer's OS pid, or `null` on any miss — the same three-way
+ * coercion (`0`/`undefined`/a throw → `null`) `automation/tabs.js`'s per-tab
+ * `pid` field uses (Mission 20 Flight 3 Leg 3, DD9). `enumerateWindows` is
+ * admin-gated already, so this is added unconditionally on every row rather
+ * than re-gated here.
+ * @param {any} wc
+ * @returns {number | null}
+ */
+function chromePidOf(wc) {
+  try {
+    const raw = wc?.getOSProcessId?.();
+    return typeof raw === 'number' && raw > 0 ? raw : null;
+  } catch {
+    return null;
   }
 }
 
@@ -119,7 +137,12 @@ function buildWindowCensus(records, lastFocusedRecord, popupEntries) {
       // Identity compare, never an invented fallback — see the note above.
       lastFocused: !!lastFocusedRecord && rec === lastFocusedRecord,
       sheetVisible: viewVisible(rec.sheet),
-      findVisible: viewVisible(rec.findOverlay)
+      findVisible: viewVisible(rec.findOverlay),
+      // Mission 20 Flight 3 Leg 3 (DD9/AC9): the chrome renderer's OS pid
+      // (null once it has gone and before a reload lands) and whether this
+      // window's chrome recovery has stopped for its lifetime (DD6).
+      chromePid: chromePidOf(rec.chromeView?.webContents),
+      recoveryPaused: !!rec.chromeRecoveryPaused
     };
     // ABSENT ⇒ never created. Assigned conditionally so the key does not exist at
     // all (rather than existing as undefined/null) — pinned by test.

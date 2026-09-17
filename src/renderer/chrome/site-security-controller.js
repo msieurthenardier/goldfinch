@@ -170,12 +170,24 @@ export function createSiteSecurityController({
     if (!tab) return; // unknown wcId (e.g. onViewCreated pending) — no-op
     tab.security = security;
     // Acceptance-run fix pass F3 (tls-trust-surface checkpoint 6): this push
-    // lands AFTER tab-did-navigate's own updateAddressChip call (guest-wiring.js
-    // pushes did-navigate first), so the chip that call drew is stale by the
-    // time the real security state arrives. Re-sync it here — but only for
-    // the ACTIVE tab; a background tab's push must not touch the visible chip.
-    if (isActiveTab(tab)) updateAddressChip(tab);
+    // lands AFTER tab-did-navigate's own chip refresh (guest-wiring.js pushes
+    // did-navigate first), so the chip that call drew is stale by the time
+    // the real security state arrives. Re-sync it here — but only for the
+    // ACTIVE tab; a background tab's push must not touch the visible chip.
+    refreshTabIndicators(tab);
   });
+
+  // Mission 20 Flight 3 Leg 1 (DD11): the single chip-refresh owner — folds
+  // the five independent updateAddressChip call sites the Flight 2 debrief
+  // flagged (recommendation 2) behind one function. Active-tab-guarded by
+  // default; `{ force: true }` is CLAUDE.md's "Chrome indicators" rule (c) —
+  // the load-failure push's chip write must reflect real state even for a
+  // tab the operator is mid-typing in, so it alone forces the refresh
+  // regardless of activation.
+  /** @param {any} tab @param {{ force?: boolean }} [opts] */
+  function refreshTabIndicators(tab, { force } = {}) {
+    if (force || isActiveTab(tab)) updateAddressChip(tab);
+  }
 
   /**
    * Chained beside vaultController.handleClosed in handleOverlayClosed.
@@ -190,5 +202,12 @@ export function createSiteSecurityController({
     if (menuType === 'cert-override') certOverrideOpen = false;
   }
 
-  return { openSiteInfoOverlay, openCertOverrideOverlay, openCertificateViewer, handleActivation, handleClosed };
+  return {
+    openSiteInfoOverlay,
+    openCertOverrideOverlay,
+    openCertificateViewer,
+    handleActivation,
+    handleClosed,
+    refreshTabIndicators
+  };
 }

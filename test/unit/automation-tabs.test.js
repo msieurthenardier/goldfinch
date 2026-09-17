@@ -133,6 +133,59 @@ test('mapEnumeratedTabs: security defaults to none when absent from the raw row'
   assert.equal(result[0].security, 'none');
 });
 
+// ---------------------------------------------------------------------------
+// Mission 20 Flight 3 Leg 2 (DD9): the admin-only `pid` field
+// ---------------------------------------------------------------------------
+
+test('mapEnumeratedTabs: admin (allowInternal:true) rows carry pid from getOSProcessId()', () => {
+  const wc = makeGuestWc(30);
+  wc.getOSProcessId = () => 4242;
+  const rawTabs = [{ wcId: 30, url: 'https://a.test/', title: 'A', jarId: 'default', active: true }];
+  const result = mapEnumeratedTabs(rawTabs, { fromId: makeFakeFromId({ 30: wc }), allowInternal: true });
+  assert.equal(result[0].pid, 4242);
+});
+
+test('mapEnumeratedTabs: jar-key (allowInternal:false / default) rows never carry a pid key at all', () => {
+  const wc = makeGuestWc(31);
+  wc.getOSProcessId = () => 4242;
+  const rawTabs = [{ wcId: 31, url: 'https://a.test/', title: 'A', jarId: 'default', active: true }];
+  const result = mapEnumeratedTabs(rawTabs, { fromId: makeFakeFromId({ 31: wc }) });
+  assert.equal('pid' in result[0], false, 'a jar-scoped key must never see this field');
+});
+
+test('mapEnumeratedTabs: admin pid coerces 0 (crashed, not-yet-reloaded renderer — spike (j)) to null', () => {
+  const wc = makeGuestWc(32);
+  wc.getOSProcessId = () => 0;
+  const rawTabs = [{ wcId: 32, url: 'https://a.test/', title: 'A', jarId: 'default', active: true }];
+  const result = mapEnumeratedTabs(rawTabs, { fromId: makeFakeFromId({ 32: wc }), allowInternal: true });
+  assert.equal(result[0].pid, null);
+});
+
+test('mapEnumeratedTabs: admin pid coerces undefined to null', () => {
+  const wc = makeGuestWc(33);
+  wc.getOSProcessId = () => undefined;
+  const rawTabs = [{ wcId: 33, url: 'https://a.test/', title: 'A', jarId: 'default', active: true }];
+  const result = mapEnumeratedTabs(rawTabs, { fromId: makeFakeFromId({ 33: wc }), allowInternal: true });
+  assert.equal(result[0].pid, null);
+});
+
+test('mapEnumeratedTabs: admin pid coerces a throw to null (never propagates)', () => {
+  const wc = makeGuestWc(34);
+  wc.getOSProcessId = () => {
+    throw new Error('boom');
+  };
+  const rawTabs = [{ wcId: 34, url: 'https://a.test/', title: 'A', jarId: 'default', active: true }];
+  const result = mapEnumeratedTabs(rawTabs, { fromId: makeFakeFromId({ 34: wc }), allowInternal: true });
+  assert.equal(result[0].pid, null);
+});
+
+test('mapEnumeratedTabs: admin pid is null when getOSProcessId is absent entirely (older/fake wc shape)', () => {
+  const wc = makeGuestWc(35);
+  const rawTabs = [{ wcId: 35, url: 'https://a.test/', title: 'A', jarId: 'default', active: true }];
+  const result = mapEnumeratedTabs(rawTabs, { fromId: makeFakeFromId({ 35: wc }), allowInternal: true });
+  assert.equal(result[0].pid, null);
+});
+
 test('mapEnumeratedTabs: loadState defaults to ok and loadError to null when absent from the raw row', () => {
   const wc = makeGuestWc(12);
   const rawTabs = [{ wcId: 12, url: 'https://example.com', title: 'Example', jarId: 'default', active: false }];

@@ -439,9 +439,23 @@ enumeration, no window discriminator, no window discovery, a probe-walk for over
 
 - **`enumerateWindows()` is the single discovery primitive — admin-only.** It lists every open
   window: `{ windowId, chromeWcId, booted, activeTabWcId, lastFocused, sheetWcId?, sheetVisible,
-  findWcId?, findVisible }`. It answers "what windows exist", "which one am I bound to", "where is
-  this window's menu sheet / find bar", and "is this window's tab list complete yet". Every field
-  is read from the live window registry at call time — there is no cache to go stale.
+  findWcId?, findVisible, chromePid, recoveryPaused }`. It answers "what windows exist", "which one
+  am I bound to", "where is this window's menu sheet / find bar", "is this window's tab list
+  complete yet", and (Mission 20 Flight 3) "what is this window's chrome renderer's OS pid, and has
+  its crash recovery given up". Every field is read from the live window registry at call time —
+  there is no cache to go stale.
+  - **`chromePid`** (Mission 20 Flight 3) is the chrome renderer's OS process id
+    (`wc.getOSProcessId()`), `null` once the renderer has crashed and before a reload lands. Use it
+    to signal the chrome view itself for crash-recovery testing (`kill -SEGV <chromePid>`), the same
+    way `enumerateTabs`' admin-only `pid` targets a guest.
+  - **`recoveryPaused`** (Mission 20 Flight 3) is `true` once a window's chrome has crashed a fourth
+    time within 60 seconds — recovery stops for that window's lifetime (the window's title says so;
+    there is no re-arm short of closing the window or relaunching). Acceptance-run fix pass F1: a
+    paused window's `booted` also reads `false` from that point on (the dead chrome has no live
+    document) — `enumerateTabs` then contributes zero rows for it instead of hanging on a round-trip
+    to a chrome with nothing listening, and main-side per-tab pushes queued for it are dropped
+    rather than piling up forever. Poll `recoveryPaused` to distinguish this from an ordinary
+    mid-boot window, which also reads `booted: false` but transiently.
   - **Admin-only**, because window topology is an app-level cross-jar view: the census names
     windows a jar identity may hold no tabs in at all. Jar keys are refused with
     `automation: admin-only` — the same doctrine as `downloadsList` / `getChromeTarget`.
@@ -464,14 +478,18 @@ enumeration, no window discriminator, no window discovery, a probe-walk for over
   `{ wcId, url, title, jarId, active, windowId, loadState, loadError, security }` for every drivable
   tab in every window, ordered by window creation order, then each window's own tab creation order.
   The return is a **plain array** — no wrapper, no marker, no properties beyond the elements.
-  - **`loadState` / `loadError` (Mission 20 Flight 1, `cert-blocked` added Flight 2)**: `loadState`
-    is `'ok'`, `'failed'`, or `'cert-blocked'` — renderer-sourced, pushed the moment main records or
-    clears a top-frame navigation failure. The enum grows in later flights (`crashed`, `hung`).
-    `loadError` is `{ code, name }` (the raw engine error, e.g. `{ code: -202, name:
-    'ERR_CERT_AUTHORITY_INVALID' }`) when `loadState` is `'failed'`/`'cert-blocked'`, else `null`.
-    On a `'failed'`/`'cert-blocked'` row, `title` is the same host-derived label the tab strip shows
-    (never the guest's error-document title, which is stale, empty, or absent depending on how the
-    tab got there).
+  - **`loadState` / `loadError` (Mission 20 Flight 1, `cert-blocked` added Flight 2, `crashed`/`hung`
+    added Flight 3 — the enum is now complete: `ok | failed | cert-blocked | crashed | hung`)**:
+    renderer-sourced, pushed the moment main records or clears a top-frame navigation
+    failure/crash/hang. `crashed` reports a dead guest renderer (`render-process-gone`, any reason
+    other than a clean exit); `hung` reports a renderer Chromium's own hang monitor flagged
+    unresponsive (input-driven — no watchdog). A dead renderer is never ALSO reported failed or
+    hung. `loadError` is `{ code, name }` — for `'failed'`/`'cert-blocked'` the raw engine error
+    (e.g. `{ code: -202, name: 'ERR_CERT_AUTHORITY_INVALID' }`); for `'crashed'` the process exit
+    code and reason (e.g. `{ code: 133, name: 'crashed' }`); `null` for `'ok'`/`'hung'` (a hang has
+    no error — the renderer just hasn't answered yet). On a `'failed'`/`'cert-blocked'`/`'crashed'`
+    row, `title` is the same host-derived label the tab strip shows (never the guest's error-document
+    title, which is stale, empty, or absent depending on how the tab got there).
   - **`security` (Mission 20 Flight 2, DD5/DD7)**: the committed top-frame origin's TLS trust
     state, one of `'secure'`, `'insecure'`, `'overridden'`, `'internal'`, `'none'`. `'insecure'` is
     a plain `http:` page; `'overridden'` is an `https:` page loaded past a remembered certificate
@@ -479,6 +497,11 @@ enumeration, no window discriminator, no window discovery, a probe-walk for over
     unparseable URL, and any failed/cert-blocked load (the chip stays in Flight 1's
     scheme-derived web state for those). Renderer-sourced, pushed on its own `tab-security` channel
     at each main-frame commit.
+  - **`pid` (Mission 20 Flight 3, admin-tier only)**: the tab's renderer OS process id
+    (`wc.getOSProcessId()`), for diagnosing/injecting a crash from the shell (`kill -SEGV`/`-STOP` —
+    there is no in-app crash-injection seam). `null` for a crashed, not-yet-reloaded renderer (the
+    call returns `0`/`undefined`, or throws, depending on platform/timing — all three coerce to
+    `null`) and for any row a jar-scoped key requests — jar keys never see this field at all.
   - **The window registry is the ownership authority**; the renderer is authoritative only for
     `url` / `title` / `jarId`. A window's chrome reporting a tab is not evidence that it owns it:
     each window's rows are filtered to that window's registry-recorded membership, and `windowId`
@@ -572,7 +595,7 @@ below.
 
 | Tool | Input schema | Result shape |
 |------|--------------|--------------|
-| `enumerateTabs` | *(none)* | JSON text: array of `{ wcId, url, title, jarId, active, windowId, loadState, loadError, security }` for all drivable (dom-ready) tabs across **all windows** (M09 F7 — see *Multi-window semantics*). `windowId` is stamped from the window registry, which is authoritative for ownership. A window whose chrome has not finished booting contributes **zero rows** — poll `enumerateWindows()` until every `booted` is true for a guaranteed-total census. Admin listings include the internal `goldfinch://` tabs; jar-key listings never do (session filter). Script-opened **popup windows** append extra rows marked `popup: true` (`active: false`, `windowId` = the OWNER window's, `jarId` mapped main-side from the popup's captured partition) — see *Popup windows (M14 F2)* under *Multi-window semantics*. `loadState` is `'ok'`/`'failed'`/`'cert-blocked'` (Mission 20; grows in later flights), `loadError` is `{ code, name }` when failed/cert-blocked else `null`. `security` (Mission 20 Flight 2) is one of `'secure'`/`'insecure'`/`'overridden'`/`'internal'`/`'none'` — the committed top-frame origin's TLS trust state |
+| `enumerateTabs` | *(none)* | JSON text: array of `{ wcId, url, title, jarId, active, windowId, loadState, loadError, security }` (admin rows also carry `pid`) for all drivable (dom-ready) tabs across **all windows** (M09 F7 — see *Multi-window semantics*). `windowId` is stamped from the window registry, which is authoritative for ownership. A window whose chrome has not finished booting contributes **zero rows** — poll `enumerateWindows()` until every `booted` is true for a guaranteed-total census. Admin listings include the internal `goldfinch://` tabs; jar-key listings never do (session filter). Script-opened **popup windows** append extra rows marked `popup: true` (`active: false`, `windowId` = the OWNER window's, `jarId` mapped main-side from the popup's captured partition) — see *Popup windows (M14 F2)* under *Multi-window semantics*. `loadState` is `'ok'`/`'failed'`/`'cert-blocked'`/`'crashed'`/`'hung'` (Mission 20; the enum is complete as of Flight 3), `loadError` is `{ code, name }` when failed/cert-blocked/crashed else `null`. `security` (Mission 20 Flight 2) is one of `'secure'`/`'insecure'`/`'overridden'`/`'internal'`/`'none'` — the committed top-frame origin's TLS trust state. `pid` (Mission 20 Flight 3, admin-tier only) is the tab's renderer OS process id, `null` when unresolvable (crashed and not yet reloaded) — jar-key rows never carry this field |
 | `openTab` | `{ url: string, jarId?: string }` *(`url` required; `jarId` optional)* | JSON text: the new tab's `wcId` (number) — or `null` if the URL was rejected renderer-side or no handle appeared within the timeout (a **normal** result, not an error). `jarId`: a jar key may only supply its own jar id (foreign → `out-of-jar`); admin may supply any; an unknown id is refused (`unknown-jar`); omit to open in the current default jar (a fresh evaporating burner tab when Burner holds the flag) — admin identity only; a jar key's omitted `jarId` still forces that key's own jar. |
 | `closeTab` | `{ wcId: integer }` *(required)* | JSON text: boolean success signal (`true`/`false`) |
 | `activateTab` | `{ wcId: integer }` *(required)* | JSON text: boolean success signal. `true` — the tab was activated **and its owning window raised** (M09 F7 DD6: the dispatch goes to the tab's OWNING window's chrome, so this works across windows). `false` — the wcId is **not a registry-owned tab** (e.g. an overlay view probed by id, or a **popup** — a popup is not in any window's strip; no window is raised, drive it directly): no activation, no raise, no error. A third outcome is a **refusal**, not a boolean: if the registry says a window owns the tab but that window's chrome cannot activate it (a registry/renderer desync), the op errors with `automation: activate-refused — …` (isError) rather than silently returning `false`. |
@@ -670,7 +693,7 @@ refusal, mirroring `captureWindow`).
 | Tool | Input schema | Result shape |
 |------|--------------|--------------|
 | `getChromeTarget` | `windowId` *(optional, integer)* | JSON text: `{ wcId, kind: "chrome", url, windowId }` — a window's chrome renderer. `windowId` omitted → the **last-focused** window; supplied → that window; unknown → `automation: no-such-window` (never a silent fall-back). Pass the returned `wcId` to the drive/observe tools to act on / read the app shell (tab strip, toolbar, menus). See *Multi-window semantics*. |
-| `enumerateWindows` | *(none)* | **ADMIN ONLY.** JSON text: array of `{ windowId, chromeWcId, booted, activeTabWcId, lastFocused, sheetWcId?, sheetVisible, findWcId?, findVisible }` — one row per open window, in window creation order. The single window-topology discovery primitive: it resolves each window's chrome and overlay wcIds **exactly** (no id-space probing), and `booted` is `enumerateTabs`'s completeness signal. `sheetWcId`/`findWcId` are **absent** when that overlay has never been created (both are lazy); `sheetVisible`/`findVisible` are separate so "instantiated but hidden" is distinguishable from "never shown". `lastFocused` is main-side tracked — **not** an OS-focus claim. Script-opened **popup windows** append extra entries of the DISTINCT shape `{ popupWcId, openerWindowId, url, title }` — discriminate on `popupWcId` presence (popup entries carry no `windowId`); see *Popup windows*. Jar keys get `automation: admin-only`. |
+| `enumerateWindows` | *(none)* | **ADMIN ONLY.** JSON text: array of `{ windowId, chromeWcId, booted, activeTabWcId, lastFocused, sheetWcId?, sheetVisible, findWcId?, findVisible, chromePid, recoveryPaused }` — one row per open window, in window creation order. The single window-topology discovery primitive: it resolves each window's chrome and overlay wcIds **exactly** (no id-space probing), and `booted` is `enumerateTabs`'s completeness signal. `sheetWcId`/`findWcId` are **absent** when that overlay has never been created (both are lazy); `sheetVisible`/`findVisible` are separate so "instantiated but hidden" is distinguishable from "never shown". `lastFocused` is main-side tracked — **not** an OS-focus claim. `chromePid` (Mission 20 Flight 3) is the chrome renderer's OS pid, `null` once crashed and before a reload lands — signal it for chrome-recovery testing the way `enumerateTabs`' `pid` targets a guest. `recoveryPaused` (Mission 20 Flight 3) is `true` once that window's chrome recovery has given up (a 4th crash within 60s) — for that window's lifetime. Script-opened **popup windows** append extra entries of the DISTINCT shape `{ popupWcId, openerWindowId, url, title }` — discriminate on `popupWcId` presence (popup entries carry no `windowId`); see *Popup windows*. Jar keys get `automation: admin-only`. |
 | `downloadsList` | *(none)* | JSON text: the app-level downloads records — an array of `{ id, url, filename, savePath, state, received, total, … }` (in-progress + completed history, persisted across restart). `filename` is the sanitized save name; `savePath` is the real on-disk path (`null` until known); `state` is the download lifecycle (`progressing` / `completed` / `interrupted` / …); `received`/`total` are byte counts. The internal `goldfinch://downloads` **page** that renders this model lives in the internal session and is **not** readable via the eval/observe tools — `downloadsList` is the automation-surface view of the same model. |
 
 > **Admin-only.** Jar keys calling `getChromeTarget` receive `automation: admin-only` (mirroring

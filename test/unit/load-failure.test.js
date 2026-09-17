@@ -9,11 +9,21 @@ const {
   shouldRecordLoadFailure,
   isChromeErrorUrl,
   classifyCertError,
-  stripNetPrefix
+  stripNetPrefix,
+  failedTabTitle,
+  classifyCrash,
+  deriveStripLoadState,
+  guestTakenOver
 } = require('../../src/shared/load-failure');
 
-test('LOAD_STATES is frozen with exactly ok/failed/cert-blocked', () => {
-  assert.deepEqual(LOAD_STATES, { OK: 'ok', FAILED: 'failed', CERT_BLOCKED: 'cert-blocked' });
+test('LOAD_STATES is frozen with exactly ok/failed/cert-blocked/crashed/hung', () => {
+  assert.deepEqual(LOAD_STATES, {
+    OK: 'ok',
+    FAILED: 'failed',
+    CERT_BLOCKED: 'cert-blocked',
+    CRASHED: 'crashed',
+    HUNG: 'hung'
+  });
   assert.ok(Object.isFrozen(LOAD_STATES));
 });
 
@@ -184,4 +194,88 @@ test('isChromeErrorUrl: true for any chrome-error: URL, false otherwise', () => 
   assert.equal(isChromeErrorUrl(undefined), false);
   assert.equal(isChromeErrorUrl(null), false);
   assert.equal(isChromeErrorUrl(42), false);
+});
+
+// ---------------------------------------------------------------------------
+// Mission 20 Flight 3 Leg 2 (DD1/DD3): classifyCrash, deriveStripLoadState,
+// failedTabTitle's crash precedence, guestTakenOver
+// ---------------------------------------------------------------------------
+
+test('classifyCrash: killed -> "closed by the system" copy', () => {
+  const result = classifyCrash('killed');
+  assert.equal(result.heading, 'This page was closed by the system');
+  assert.equal(typeof result.body, 'string');
+  assert.ok(result.body.length > 0);
+});
+
+test('classifyCrash: oom -> "ran out of memory" copy', () => {
+  const result = classifyCrash('oom');
+  assert.equal(result.heading, 'This page ran out of memory');
+  assert.equal(typeof result.body, 'string');
+  assert.ok(result.body.length > 0);
+});
+
+const GENERIC_CRASH_REASONS = ['crashed', 'abnormal-exit', 'integrity-failure', 'launch-failed', 'memory-eviction'];
+for (const reason of GENERIC_CRASH_REASONS) {
+  test(`classifyCrash: ${reason} -> generic "This page crashed" copy`, () => {
+    const result = classifyCrash(reason);
+    assert.equal(result.heading, 'This page crashed');
+    assert.equal(typeof result.body, 'string');
+    assert.ok(result.body.length > 0);
+  });
+}
+
+test('classifyCrash: an unrecognized/non-string reason falls to the generic copy, never throws', () => {
+  assert.doesNotThrow(() => classifyCrash(undefined));
+  assert.doesNotThrow(() => classifyCrash(null));
+  assert.doesNotThrow(() => classifyCrash(42));
+  assert.equal(classifyCrash('some-future-reason').heading, 'This page crashed');
+  assert.equal(classifyCrash(undefined).heading, 'This page crashed');
+});
+
+test('deriveStripLoadState: precedence crashed > failed > hung > null', () => {
+  assert.equal(deriveStripLoadState({ crash: { reason: 'crashed' }, loadFailure: {}, hung: true }), 'crashed');
+  assert.equal(deriveStripLoadState({ crash: { reason: 'crashed' } }), 'crashed');
+  assert.equal(deriveStripLoadState({ loadFailure: {}, hung: true }), 'failed');
+  assert.equal(deriveStripLoadState({ loadFailure: {} }), 'failed');
+  assert.equal(deriveStripLoadState({ hung: true }), 'hung');
+  assert.equal(deriveStripLoadState({}), null);
+  assert.equal(deriveStripLoadState({ crash: null, loadFailure: null, hung: false }), null);
+});
+
+test('deriveStripLoadState never throws on missing/malformed input', () => {
+  assert.equal(deriveStripLoadState(undefined), null);
+  assert.equal(deriveStripLoadState(null), null);
+});
+
+test('failedTabTitle: a crash url takes precedence over a loadFailure url and the tab url', () => {
+  assert.equal(
+    failedTabTitle({
+      crash: { url: 'https://crash.example/' },
+      loadFailure: { url: 'https://failure.example/' },
+      url: 'https://tab.example/'
+    }),
+    'crash.example'
+  );
+  assert.equal(
+    failedTabTitle({ loadFailure: { url: 'https://failure.example/' }, url: 'https://tab.example/' }),
+    'failure.example'
+  );
+  assert.equal(failedTabTitle({ url: 'https://tab.example/' }), 'tab.example');
+  assert.equal(failedTabTitle({}), '');
+  assert.equal(failedTabTitle(null), '');
+});
+
+test('failedTabTitle: falls back to the raw string when it does not parse as a URL', () => {
+  assert.equal(failedTabTitle({ crash: { url: 'not a url' } }), 'not a url');
+});
+
+test('guestTakenOver: true iff the entry carries a load failure OR a crash', () => {
+  assert.equal(guestTakenOver({ loadFailure: { code: -1 } }), true);
+  assert.equal(guestTakenOver({ crash: { reason: 'crashed' } }), true);
+  assert.equal(guestTakenOver({ loadFailure: { code: -1 }, crash: { reason: 'crashed' } }), true);
+  assert.equal(guestTakenOver({ loadFailure: null, crash: null }), false);
+  assert.equal(guestTakenOver({}), false);
+  assert.equal(guestTakenOver(null), false);
+  assert.equal(guestTakenOver(undefined), false);
 });

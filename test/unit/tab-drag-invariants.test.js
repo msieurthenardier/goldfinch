@@ -40,13 +40,21 @@ const { maskComments, findMatchingBracket } = require('../helpers/source-scan');
 const REPO_ROOT = path.join(__dirname, '../..');
 const RENDERER_JS = path.join(REPO_ROOT, 'src/renderer/chrome/tab-controller.js');
 const RENDERER_COMPOSITION_JS = path.join(REPO_ROOT, 'src/renderer/renderer.js');
+// Mission 20 Flight 3 Leg 1 (DD11): the tab-context menu's drop-adopt
+// announce site (`tab:move-window:` → moveOutcomeMessage(result, 'another
+// window')) moved out of renderer.js's dispatchOverlayActivation switch into
+// this new module (a behaviour-preserving extraction) — folded into the same
+// concatenated source so the drop-adopt announce site is still counted.
+const OVERLAY_DISPATCH_JS = path.join(REPO_ROOT, 'src/renderer/chrome/overlay-dispatch.js');
 const STYLES_CSS = path.join(REPO_ROOT, 'src/renderer/styles.css');
 const MAIN_JS = path.join(REPO_ROOT, 'src/main/register-tab-ipc.js');
 
 /** @returns {string} */
 function rendererSource() {
   const owner = fs.readFileSync(RENDERER_JS, 'utf8').replace(/^ {2}/gm, '');
-  return `${owner}\n${fs.readFileSync(RENDERER_COMPOSITION_JS, 'utf8')}`;
+  return [owner, fs.readFileSync(RENDERER_COMPOSITION_JS, 'utf8'), fs.readFileSync(OVERLAY_DISPATCH_JS, 'utf8')].join(
+    '\n'
+  );
 }
 
 /** Assert a mutation actually applied — a no-op .replace() would "discharge" vacuously. */

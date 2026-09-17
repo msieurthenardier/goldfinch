@@ -120,6 +120,12 @@ or download **v0.16.4** directly:
     speller (`NSSpellChecker`) is used and **no download occurs**. This is the
     only network egress spellcheck introduces, it happens only after explicit
     opt-in, and it is documented here per Goldfinch's no-silent-egress posture.
+  - **Crash records are local-only.** Every renderer crash/hang-recovery event
+    appends one line to a local `crash-log.jsonl` with a closed, field-limited
+    shape (timestamp, kind, reason, exit code, origin — never a full URL, path,
+    query, title, or page content). Chromium's own crash minidumps are
+    collected locally (never uploaded — no upload endpoint exists) and pruned
+    to the newest 20; see `docs/dev-testing.md`'s "Crash records and dumps".
 - **Containers / cookie jars** (click the `▾` next-to-new-tab button):
   - Isolated containers, each backed by its own Electron session partition
     (separate cookies, storage, cache, and farble seed). New installs start

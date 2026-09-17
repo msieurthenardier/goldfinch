@@ -107,6 +107,12 @@ axe-core audit (`scripts/a11y-audit.mjs`) against the RUNNING app over the MCP s
   stays as the record of what is not covered; the script prints a notice listing the
   skipped labels and runs the chrome states to completion instead of treating the
   refusal as an apparatus failure.
+- **Chrome states audited, in order**: `base-chrome`, `media-panel`, `privacy-panel`,
+  `lightbox`, `devtools-button`, `downloads-button`, `load-failure`, `cert-blocked`
+  (opt-in, see below), `crashed`, `hung`. The last two (Mission 20 F3 Leg 2/4) stamp a
+  synthetic crash/hang record on the active tab via the `showCrashPanelForAudit()` /
+  `showHangNoticeForAudit()` evaluate-seam hooks — no real process signal needed — and
+  audit the load-failure panel's crash branch and the `#hang-notice` bar respectively.
 - **Gate**: violations are diffed against the curated `ACCEPTED` allowlist baked into the
   script — only NEW `(rule id, node-selector)` findings fail. Tag convention:
   `--tags=wcag2a,wcag2aa,wcag21a,wcag21aa` (axe's full default set adds non-conformance
@@ -150,6 +156,59 @@ Logs each step (tagged `[vault-capture]`) to the main process's console via `log
 What it prints is bounded **by construction** to non-secrets — the opaque main-minted
 `captureId`, the tab's `wcId`, the disposition mode, and the finalize outcome — **never** a
 password, a username, or an origin.
+
+## Crash records and dumps
+
+Mission 20 Flight 3 ("Crash and Hang Resilience") adds a local-only crash
+record and Chromium's own minidumps — both live under the profile directory
+(the dev profile, `~/.config/goldfinch-dev`, under a dev launch), never
+uploaded anywhere.
+
+- **`crash-log.jsonl`** (`userData/crash-log.jsonl`, `src/main/crash-log.js`):
+  one JSON line appended per crash/hang-recovery event (a guest crash, a
+  kill-and-reload, a chrome-view crash/reload/pause, a popup crash, a
+  GPU/utility/other child-process crash). The field set is CLOSED and
+  source-scan pinned — exactly `ts`, `kind`, `reason`, `exitCode`, `origin`,
+  `jarKind`, `windowId`, `recovery`. **The redaction rule**: `origin` is
+  scheme + host + non-default port ONLY — never a path, query, fragment, or
+  userinfo (`https://user:pass@host:8443/secret?x=1` → `https://host:8443`);
+  a `goldfinch://` internal tab's origin is reconstructed by hand
+  (`goldfinch://settings`) since Node's `URL.origin` returns the literal
+  string `'null'` for the custom scheme; a BURNER tab's origin is always
+  `null`, unconditionally. No title, jar name, cookie, header, referrer, or
+  page content ever reaches this file — the writer's input type has none of
+  those fields. The file rotates at 200 lines (keeps the newest 100).
+- **Minidumps** (`app.getPath('crashDumps')`): Chromium's own crash dumps,
+  started via `crashReporter.start({ uploadToServer: false, … })` with **no
+  `submitURL` key at all** — there is no upload path to configure, let alone
+  disable. `app.getPath('crashDumps')` **is the Crashpad database directory
+  itself** on Linux/Windows (confirmed against a live dev profile) — its
+  `pending`, `completed`, and `new` subdirectories sit directly under that
+  path, never nested under a second `Crashpad/` segment (`~/.config/
+  goldfinch-dev/Crashpad/pending/*.dmp`, not `.../Crashpad/Crashpad/
+  pending/*.dmp`). A minidump is a memory image of the crashed process and
+  **is exactly as sensitive as the rest of the profile directory it lives
+  in** (it may contain page content) — treat it accordingly: local-only,
+  deleted with the profile, never attach one to a bug report without
+  reviewing its contents first. Pruned to the newest 20 dumps (each `.dmp`
+  and its `.meta` sibling removed together) across `pending`/`completed`/
+  `new` at every `app.ready` (`crash-log.js`'s `pruneDumps`); there is no
+  in-app viewer or "clear dumps" control — delete the `crashDumps`
+  directory (or the whole profile) to remove them.
+- **Triggering a crash for testing**: read the target renderer's OS pid from
+  the admin census (`enumerateTabs`' `pid` field for a guest, or
+  `enumerateWindows`' `chromePid` for a window's chrome), then signal it from
+  the shell — `kill -SEGV <pid>` (→ `reason: 'crashed'`, the crash panel /
+  chrome reload), `kill -KILL <pid>` (→ `reason: 'killed'`), `kill -STOP
+  <pid>` then one `click` op on that tab (→ Chromium's hang monitor fires
+  `unresponsive`; a `SIGSTOP`ped renderer's kernel-frozen threads cannot
+  service `forcefullyCrashRenderer()`'s IPC, so the hang bar's
+  Kill-and-reload row needs a REAL hang — e.g.
+  `tests/behavior/fixtures/crash/busy.html`'s busy-loop button — not a
+  `SIGSTOP` proxy), `kill -CONT <pid>` to recover a stopped renderer. A
+  chrome view recovers in place (reload-and-reconcile, capped at 3 reloads
+  per 60 seconds per window, then paused for that window's lifetime — the
+  window title says so).
 
 ## Test layers
 

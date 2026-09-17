@@ -98,7 +98,13 @@ const A11Y_AUDIT_MJS = path.join(REPO_ROOT, 'scripts/a11y-audit.mjs');
 // opener for the active tab — the only automation-reachable route to a TRUSTED
 // page's viewer, since the popup's Certificate action lives on the sheet; the
 // M16 F2 L1 openNewTab precedent — a non-a11y, behavior-spec-driven addition).
-const SEAM_COUNT = 39;
+// M20 F3 L2 (guest-crash-and-hang-surfaces, FD ruling): +2, 39 → 41 —
+// showCrashPanelForAudit / showHangNoticeForAudit, synthetic crash/hang
+// records stamped on the active tab for the new 'crashed'/'hung' chrome
+// states (the showDownloadsIndicatorForAudit precedent — persist until the
+// tab's next real push clears them; not yet wired into scripts/a11y-audit.mjs,
+// that lands in the flight's acceptance-gate leg).
+const SEAM_COUNT = 41;
 // Renderer line budget: raised from M11's 1200 to absorb Mission 12's password-manager
 // renderer work (the chrome-owned vault sheets + indicator wiring). See the merge of
 // PR #112; renderer.js extraction remains banked architecture debt.
@@ -257,7 +263,41 @@ const SEAM_COUNT = 39;
 // own updateAddressChip call drew a stale (pre-navigation) security state.
 // Measured AFTER `npm run format` (this test's own split-array metric — one
 // above `wc -l` for a newline-terminated file).
-const RENDERER_LINE_BUDGET = 1806;
+//
+// Mission 20 Flight 3 Leg 1 (DD11): LOWERED, 1806 → 1572 — the substrate
+// leg the F2 debrief asked for (recommendation 2). Two moves: (1) the
+// generic `dispatchOverlayActivation` switch + `handleOverlayClosed` sink
+// (~300 lines) extracted verbatim into `src/renderer/chrome/overlay-
+// dispatch.js`'s `createOverlayDispatch(deps)` — the two names that remain
+// in renderer.js are function DECLARATIONS (hoisted), not `const` thunks:
+// `overlayMenuClient`'s construction references them by value well ABOVE
+// the extraction's construction site, and a `const` there is a TDZ
+// ReferenceError at that earlier line (caught by `npm run lint`'s
+// no-useless-assignment rule pointing at the dead `const`, then confirmed
+// live); (2) the five independent `updateAddressChip` call sites
+// (renderer.js x2, tab-controller.js, load-failure-controller.js,
+// site-security-controller.js) unified behind one
+// `refreshTabIndicators(tab, { force })` owned by
+// site-security-controller.js. Measured AFTER `npm run format`: 1532 lines
+// (this test's own split-array metric). Budget = measured + 40 headroom
+// (1572) for legs 2-3's two new surfaces (crash panel, hang bar) — the DD11
+// ceiling ("this flight's glue... must fit with ≥ 40 lines to spare").
+// Mission 20 Flight 3 Leg 2 (guest-crash-and-hang-surfaces): RAISED, 1572 →
+// 1577 — 5 lines over the leg's own pre-implementation ceiling. Glue added:
+// the hang-notice-controller.js import + construction (6 lines) + its
+// `window.goldfinch.onTabHung` subscription line, one `projectHangNotice`
+// wrapper function + its tabController dep line, the two seam hooks
+// (`showCrashPanelForAudit`/`showHangNoticeForAudit`, ~17 lines with
+// comments) and their two destructure/seam-tail lines, the `onTabTitle`
+// guard's one-token widening, and the seam-block comment-header growth
+// documenting the count bump. Measured AFTER `npm run format` (this test's
+// own split-array metric): 1577. Flagged as a Deviation in the flight log —
+// the same "estimate undercounts the wrapper-function/comment-block cost"
+// pattern Flight 1's load-failure-surface-chrome leg already recorded;
+// no architectural extraction is at fault, every added line is either an
+// import, a late-bound wrapper function, one named dep entry, or a seam hook
+// the leg's own Outputs specify.
+const RENDERER_LINE_BUDGET = 1577;
 
 // Bookmarks-bar line budget (squawk 0025, M15 debrief finding F25): bar/
 // overflow rendering, measurement, and dispatch business logic lives in

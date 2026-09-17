@@ -317,8 +317,18 @@ html.platform-darwin #window-controls {
   line-height: 14px;
   font-size: 12px;
 }
-.tab[data-load-state='failed'] .tab-fav {
+.tab[data-load-state='failed'] .tab-fav,
+.tab[data-load-state='crashed'] .tab-fav,
+.tab[data-load-state='hung'] .tab-fav {
   display: none;
+}
+/* HAT leg-5 fix (H1): the hung glyph is plain "!" (load-failure-controller.js
+   — hourglass renders as tofu on Linux/WSLg's default font), colored amber
+   here so it still reads as distinct from the crashed/failed "⚠" at a glance;
+   the accessible name carries the real signal either way. */
+.tab[data-load-state='hung'] .tab-status {
+  color: #ffb454;
+  font-weight: 700;
 }
 .tab .tab-close {
   flex: none;
@@ -789,6 +799,51 @@ a:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* ---------- Hang notice (Mission 20 F3 Leg 2, DD3) ---------- */
+#hang-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 12px;
+  /* Fixed literal — #main's flex:1 absorbs whatever this row is or isn't, so
+     the height must never itself depend on content (the #bookmarks-bar
+     precedent immediately above). */
+  height: 30px;
+  background: var(--bg-3);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  /* INSTANTLY — no transition, same rationale as #bookmarks-bar above:
+     showing/hiding this row changes #main's flex-computed height, which
+     changes the active guest's bounds via tabSetActive/tabSetBounds — a
+     SEPARATE COMPOSITING SURFACE whose bounds move in ONE discrete
+     `setBounds` step. window-controller.js's hang-notice-controller.js
+     equivalent calls sendActiveBounds() explicitly right after every net
+     visibility change — belt-and-suspenders over the #webviews
+     ResizeObserver.
+     INVARIANT: never animate #hang-notice's visibility/height. Animate only
+     things that float OVER the guest (find bar, menu sheet) — never this row. */
+}
+#hang-notice.hidden {
+  display: none;
+}
+/* HAT H3 fix (Leg 5): the "Stopping the page…" pending state
+   (hang-notice-controller.js's beginKilling()) — muted text only; the
+   buttons' own disabled look is the shared `.gf-btn:disabled` rule below (no
+   data-state scoping needed there). `--fg-dim` on `--bg-3` clears 4.5:1
+   (computed sRGB relative luminance, same formula as the `.lf-brand` note
+   below) — small/normal-weight body text, not a decorative icon, so it IS
+   contrast-graded. */
+#hang-notice[data-state='killing'] #hang-notice-text {
+  color: var(--fg-dim);
+}
+.hang-notice-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
 #bookmarks-overflow {
   flex: none;
   /* PINNED: mirrored as CHEVRON_WIDTH in bookmarks-bar.js (see the pinned-pair
@@ -1048,7 +1103,25 @@ a:focus-visible {
   gap: 12px;
   margin-top: 20px;
 }
-.lf-btn {
+
+/* ---------- Shared button primitives: .gf-btn trio (HAT H3 fix, Leg 5) ----------
+   Extracted from the load-failure panel's own button rules (formerly
+   `.lf-btn`/`.lf-btn-primary`/`.lf-btn-outline`, HAT H1 fix 1) so the
+   hang-notice bar's Wait/Kill-and-reload buttons render in the EXACT SAME
+   Goldfinch button style — typography, radius, padding scale, colour tokens
+   — instead of a second hand-copied set that can silently drift from the
+   panel over time. Reads the plain GLOBAL tokens (--accent/--accent-fg/
+   --border/--fg/--fg-dim/--bg-2) rather than the panel-local --lf-* aliases
+   declared on #load-failure-surface below — those aliases already resolve to
+   these exact same values (see that rule's own comment), so the panel's
+   rendering is BYTE-IDENTICAL post-extraction, not merely visually similar.
+   `.gf-btn-sm` is an ADDITIVE size modifier for a fixed-height row (the
+   hang bar) that cannot grow to fit a 36px pill — the row's height is the
+   load-bearing literal (CLAUDE.md's WebContentsView INVARIANT above: never
+   animate/resize chrome layout around the guest slot), so the BUTTON shrinks
+   to fit the row, never the other way around. The panel itself never applies
+   `.gf-btn-sm` — its buttons are unaffected by this modifier's existence. */
+.gf-btn {
   height: 36px;
   padding: 0 20px;
   border-radius: 18px;
@@ -1057,37 +1130,70 @@ a:focus-visible {
   font-weight: 600;
   cursor: pointer;
 }
-.lf-btn-primary {
+.gf-btn-primary {
   border: none;
-  background: var(--lf-accent);
+  background: var(--accent);
   color: var(--accent-fg);
 }
-.lf-btn-primary:hover {
-  background: color-mix(in srgb, var(--lf-accent) 85%, white);
+.gf-btn-primary:not(:disabled):hover {
+  background: color-mix(in srgb, var(--accent) 85%, white);
 }
-.lf-btn-outline {
-  border: 1px solid var(--lf-border);
+.gf-btn-outline {
+  border: 1px solid var(--border);
   background: transparent;
-  color: var(--lf-fg);
+  color: var(--fg);
 }
-.lf-btn-outline:hover {
+.gf-btn-outline:not(:disabled):hover {
   background: var(--bg-2);
-  border-color: var(--lf-fg-dim);
+  border-color: var(--fg-dim);
+}
+.gf-btn:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+/* Disabled look (hang-notice-controller.js's beginKilling(), HAT H3 fix):
+   WCAG's contrast requirement doesn't grade disabled/inactive controls, so a
+   flat opacity dim is sufficient here — no separate contrast computation
+   needed for this state. */
+.gf-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+/* Sized down for the hang bar's fixed 30px row — height/radius scale down
+   together (radius stays exactly height/2, the panel's own pill ratio);
+   colour/font-weight/font-family are untouched, inherited from .gf-btn. */
+.gf-btn-sm {
+  height: 22px;
+  padding: 0 12px;
+  border-radius: 11px;
+  font-size: 12px;
+  /* HAT H4 fix (Leg 5): .gf-btn's 600 weight reads as bold/wrong at this row
+     height — drop back to the toolbar's ordinary small-control weight
+     (.icon-btn/.text-btn/bookmarks-bar items set none, i.e. UA default
+     `normal`) so the hang bar's buttons match the rest of the toolbar. */
+  font-weight: normal;
 }
 
-/* Brand (HAT H1 fix 1): unobtrusive Goldfinch mark, bottom of the column —
-   the welcome-controller.js `.welcome-mark` precedent, same asset. Decorative
-   `alt=""` since the wordmark span already carries the visible name. */
+/* Brand (HAT H1 fix 1; contrast fix M20 F3 Leg 4): unobtrusive Goldfinch
+   mark, bottom of the column — the welcome-controller.js `.welcome-mark`
+   precedent, same asset. Decorative `alt=""` since the wordmark span already
+   carries the visible name. The dim/unobtrusive look is `--lf-fg-dim` alone
+   (already verified 6.0:1 against `--lf-bg`, comment above); the group used
+   to carry `opacity: 0.7` too, which alpha-blends the RENDERED text color
+   toward the background and drops `.lf-brand-name`'s EFFECTIVE contrast
+   below 4.5:1 (axe `color-contrast`, caught by the crash/hung a11y states
+   sharing this same panel markup) even though the token itself passes.
+   Opacity now applies only to the decorative, non-text-graded icon. */
 .lf-brand {
   display: flex;
   align-items: center;
   gap: 8px;
   margin-top: 40px;
-  opacity: 0.7;
 }
 .lf-brand-mark {
   width: 18px;
   height: 18px;
+  opacity: 0.7;
   -webkit-user-drag: none;
   user-select: none;
 }
@@ -1097,15 +1203,16 @@ a:focus-visible {
   color: var(--lf-fg-dim);
 }
 
-/* HAT fix (H1, finding 2; extended HAT H1 fix 1 to every interactive control
-   on the panel): explicit, panel-scoped keyboard-focus rings so the operator
-   can always tell where focus landed. Bare id selectors (1,0,0 each) and one
-   class selector (0,1,0) already out-specify any bare-type/class
-   :focus-visible rule elsewhere in this file, so no `!important` is needed.
-   Scoped to this panel only — squawk 0044 tracks the SAME gap on the chrome
-   toolbar separately; do not "fix" that here. */
-#load-failure-heading:focus-visible,
-.lf-btn:focus-visible {
+/* HAT fix (H1, finding 2): explicit, panel-scoped keyboard-focus ring on the
+   heading so the operator can always tell where focus landed after a
+   failure/crash steals it there. A bare id selector (1,0,0) already
+   out-specifies any bare-type/class :focus-visible rule elsewhere in this
+   file, so no `!important` is needed. Scoped to this element only — squawk
+   0044 tracks the SAME gap on the chrome toolbar separately; do not "fix"
+   that here. The panel's BUTTONS now get their ring from the shared
+   `.gf-btn:focus-visible` rule above (HAT H3 fix, Leg 5 — extraction, same
+   var(--accent) color as this panel's --lf-accent-strong alias). */
+#load-failure-heading:focus-visible {
   outline: 3px solid var(--lf-accent-strong);
   outline-offset: 2px;
 }

@@ -331,6 +331,42 @@ test("a BACKGROUND tab's tab-security push stores tab.security but does not refr
 });
 
 // ---------------------------------------------------------------------------
+// Mission 20 Flight 3 Leg 1 (DD11): refreshTabIndicators — the single
+// chip-refresh owner the five independent updateAddressChip call sites the
+// Flight 2 debrief flagged (recommendation 2) now share.
+// ---------------------------------------------------------------------------
+
+test('refreshTabIndicators refreshes the chip for the active tab', () => {
+  const active = { id: 'active' };
+  const h = setup({ activeTabState: active });
+  h.controller.refreshTabIndicators(active);
+  assert.deepEqual(h.updateAddressChipCalls, [active]);
+});
+
+test('refreshTabIndicators is a no-op for a background tab by default', () => {
+  const active = { id: 'active' };
+  const background = { id: 'background' };
+  const h = setup({ activeTabState: active });
+  h.controller.refreshTabIndicators(background);
+  assert.deepEqual(h.updateAddressChipCalls, []);
+});
+
+test('refreshTabIndicators({ force: true }) refreshes a background tab unconditionally (CLAUDE.md "Chrome indicators" rule (c) — the load-failure push\'s own site)', () => {
+  const active = { id: 'active' };
+  const background = { id: 'background' };
+  const h = setup({ activeTabState: active });
+  h.controller.refreshTabIndicators(background, { force: true });
+  assert.deepEqual(h.updateAddressChipCalls, [background]);
+});
+
+test('refreshTabIndicators with no opts object still respects the active-tab gate (the {} default)', () => {
+  const active = { id: 'active' };
+  const h = setup({ activeTabState: active });
+  h.controller.refreshTabIndicators(active, undefined);
+  assert.deepEqual(h.updateAddressChipCalls, [active]);
+});
+
+// ---------------------------------------------------------------------------
 // Mission 20 Flight 2 Leg 4 (DD9): the read-only cert-viewer sheet card.
 // ---------------------------------------------------------------------------
 

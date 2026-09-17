@@ -1,6 +1,9 @@
 // @ts-check
 'use strict';
 
+// Mission 20 Flight 3 Leg 2 (DD1): the shared guest-takeover predicate.
+const { guestTakenOver } = require('../shared/load-failure');
+
 /**
  * Register the sole sanctioned Electron `closed` listener. The primitive id is
  * captured while the window is alive, so the callback cannot reach through a
@@ -62,6 +65,12 @@ function createWindowFactory(deps) {
     // explicitly as a topology-changing site to cover. Optional-chained so an
     // offline harness that omits it stays unaffected.
     scheduleSnapshot,
+    // Mission 20 Flight 3 Leg 3 (DD5/DD6): chrome reload-and-reconcile
+    // (Electron-free — see chrome-recovery.js).
+    chromeRecovery,
+    // Mission 20 Flight 3 Leg 3 (DD7): the crash-record sink, threaded the
+    // same optional way guest-wiring.js receives it.
+    onCrash,
     logger
   } = deps;
 
@@ -242,10 +251,11 @@ function createWindowFactory(deps) {
       getTabContents,
       isFindableTab: (wcId) => {
         const entry = record.tabViews.get(wcId);
-        // Mission 20 Flight 1 (DD6/AC8): a failed tab has nothing to search — its
-        // guest is hidden under the visibility invariant, and the failure surface
+        // Mission 20 Flight 1 (DD6/AC8), widened Flight 3 Leg 2 (DD1): a
+        // taken-over tab (a load failure OR a crash) has nothing to search —
+        // its guest is hidden under the visibility invariant, and the panel
         // is the chrome panel, not the page.
-        return !!entry && !entry.trusted && !entry.loadFailure && !entry.view.webContents.isDestroyed();
+        return !!entry && !entry.trusted && !guestTakenOver(entry) && !entry.view.webContents.isDestroyed();
       },
       notifyChrome: sendToOwnChrome
     });
@@ -279,6 +289,29 @@ function createWindowFactory(deps) {
     record.findOverlay = findOverlay;
     record.sheet = sheet;
     record.tearoffOverlay = tearoffOverlay;
+
+    // Mission 20 Flight 3 Leg 3 (DD5/DD6): a dead chrome renderer. Registered
+    // AFTER the overlay slots above are assigned — every hook closure reads
+    // `record.sheet`/`record.findOverlay`/`record.tearoffOverlay` at CALL
+    // time (a bound value captured at registration would freeze `undefined`,
+    // the leg-1 TDZ anomaly class). The chrome wc is destroyed in `closed`
+    // via `setImmediate` (below), so a post-`closed` event cannot reach a
+    // live listener — the `isDestroyed()` guard covers the window itself
+    // (a crash arriving for an entry whose window is mid-teardown).
+    chromeView.webContents.on('render-process-gone', (_e, details) => {
+      if (chromeView.webContents.isDestroyed()) return;
+      chromeRecovery.onChromeGone(record, details, {
+        windowId: winId,
+        closeSheet: (r) => record.sheet?.closeMenuOverlay(r),
+        hideFind: () => record.findOverlay?.hide(),
+        hideTearoff: () => record.tearoffOverlay?.hide(),
+        reload: () => chromeView.webContents.reload(),
+        setTitle: (t) => {
+          if (!win.isDestroyed()) win.setTitle(t);
+        },
+        onCrash
+      });
+    });
 
     win.on('close', () => {
       // M14 F1 L2 (DD2): cancel the WHOLE per-window auth queue FIRST — the

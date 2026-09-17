@@ -76,6 +76,20 @@ function registerAppLifecycle({
   // provably live) — main re-keys any orphaned pending compromise reveal to
   // the freshly booted window there. Optional: offline harnesses omit it.
   onChromeBooted,
+  // Mission 20 Flight 3 Leg 3 (DD5): `window-boot-config`'s `recoverTabs`
+  // branch reconciles a reloaded chrome from the registry — chromeRecovery
+  // is the same instance window-factory.js's crash hook already resets
+  // `bootConfigServed`/`recoverTabs` through; `buildAdoptPayload`/
+  // `getDefaultJar` are the pieces `buildRecoveryAdopts` needs to rebuild
+  // each container main-side.
+  chromeRecovery,
+  buildAdoptPayload,
+  getDefaultJar,
+  // Mission 20 Flight 3 Leg 3 (DD8/AC7): pruned once at app.ready.
+  pruneCrashDumps,
+  // Mission 20 Flight 3 Leg 3 (DD2/DD7): gpu/utility/other child-process
+  // crashes, registered top-level beside 'login'/'certificate-error' below.
+  onChildProcessGone,
   getAllWindows,
   argv,
   env,
@@ -127,6 +141,12 @@ function registerAppLifecycle({
     certTrust.handleCertificateError(webContents, url, error, certificate, callback, isMainFrame);
   });
 
+  // Mission 20 Flight 3 Leg 3 (DD2/DD7): GPU/utility/other child-process
+  // crashes — a record with no `url`/`partition`/`windowId` (there is no
+  // guest, tab, or window a non-renderer child process belongs to).
+  // Registered top-level, same rationale as the auth/cert handlers above.
+  app.on('child-process-gone', (_event, details) => onChildProcessGone(details));
+
   // Mission 13 Flight 3 / Leg 3 (DD3, AC2): every webContents (chrome, overlays,
   // sheets, DevTools frontend, the built-in PDF viewer) gets a window-open denial
   // and a navigation guard — a catch-all net beneath the explicit guest wiring.
@@ -175,11 +195,46 @@ function registerAppLifecycle({
     // arrives (rejected by isSafeTabUrl at tab-create) must not gate the continuous
     // snapshot forever.
     rec.bootConfigServedAt = Date.now();
+
+    // Mission 20 Flight 3 Leg 3 (DD5): chrome reload-and-reconcile. Checked
+    // and consumed BEFORE the queue flush below, and BEFORE the `restoreTabs`
+    // branch — `recoverTabs` wins when both are set, and `restoreTabs` is
+    // left INTACT either way (never nulled: `isRestorePending` still needs
+    // it for the boot-restore hazard gate).
+    let recovered = false;
+    if (rec.recoverTabs) {
+      rec.recoverTabs = false;
+      recovered = true;
+      if (rec.tabViews.size > 0) {
+        for (const [channel, payload] of chromeRecovery.buildRecoveryAdopts(rec, {
+          jarsList: listJars(),
+          defaultJar: getDefaultJar(),
+          buildAdoptPayload
+        })) {
+          if (rec.chromeView.webContents.isDestroyed()) break;
+          rec.chromeView.webContents.send(channel, payload);
+        }
+      }
+    }
+
+    // The gap queue: built first (every thunk invoked exactly once), then
+    // deduped LAST-WINS per (payload.wcId, channel) — the survivor takes the
+    // LAST occurrence's position (a `Map` re-set after `delete` moves a key
+    // to the end); a message with no `wcId` gets a unique key so it is never
+    // collapsed and keeps its original relative order.
     const queued = rec.pendingChromeSends.splice(0);
+    const built = queued.map((buildMessage) => buildMessage());
+    const orderMap = new Map();
+    let anonSeq = 0;
+    for (const [channel, payload] of built) {
+      const hasWcId = payload && typeof payload === 'object' && 'wcId' in payload;
+      const key = hasWcId ? `${payload.wcId}:${channel}` : `__no-wcid-${anonSeq++}`;
+      if (orderMap.has(key)) orderMap.delete(key);
+      orderMap.set(key, [channel, payload]);
+    }
     const chrome = rec.chromeView.webContents;
-    for (const buildMessage of queued) {
+    for (const [channel, payload] of orderMap.values()) {
       if (chrome.isDestroyed()) break;
-      const [channel, payload] = buildMessage();
       chrome.send(channel, payload);
     }
     // M18 F2 L4 (H2 resurface): the chrome document's subscriptions are provably
@@ -187,6 +242,11 @@ function registerAppLifecycle({
     // registration), so this is the earliest safe point to re-open an orphaned
     // pending compromise reveal's recovery-show sheet on the new window.
     onChromeBooted?.(rec);
+    if (recovered) {
+      // A rebooted chrome with zero adoptable tabs boots a home/welcome tab
+      // through the normal path instead of an empty chrome (leg edge case).
+      return { bootTab: rec.tabViews.size === 0 ? !rec.noBootTab : false };
+    }
     return rec.restoreTabs ? { bootTab: false, restoreTabs: rec.restoreTabs } : { bootTab: !rec.noBootTab };
   });
   ipcMain.on('app-quit', () => app.quit());
@@ -197,6 +257,18 @@ function registerAppLifecycle({
     historyStore.open(userDataPath);
     sessionStore.load(userDataPath);
     setHistoryRecorder(createHistoryRecorder({ store: historyStore, listJars, broadcast }));
+
+    // Mission 20 Flight 3 Leg 3 (DD8/AC7): prune old minidumps to the newest
+    // 20 at every ready — after initProfileAndStores, so `app.getPath(
+    // 'crashDumps')` already resolves the -dev profile under a dev launch.
+    // Acceptance-run fix pass F2: `crashDumps` is already the Crashpad
+    // database directory itself (its `pending`/`completed`/`new`
+    // subdirectories sit directly under it, never nested under a second
+    // `Crashpad/` segment) — logged once at debug level so a live run can
+    // confirm the resolved root without any page/profile content in it.
+    const crashDumpsDir = app.getPath('crashDumps');
+    logger.debug?.('[app-lifecycle] pruning crash dumps under', crashDumpsDir);
+    pruneCrashDumps?.(crashDumpsDir);
 
     pruneAllJars();
     scheduleInterval(pruneAllJars, 60 * 60 * 1000).unref();

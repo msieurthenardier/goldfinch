@@ -363,6 +363,11 @@ contextBridge.exposeInMainWorld('goldfinch', {
   // committed origin's security state — its OWN channel, never riding
   // tab-did-navigate (see guest-wiring.js / register-tab-ipc.js).
   onTabSecurity: (cb) => ipcRenderer.on('tab-security', (_e, d) => cb(d)),
+  // Mission 20 Flight 3 Leg 2 (DD1/DD3): the owner-routed pushes for a dead
+  // (crashed) or frozen (hung) guest renderer — each its own channel, the
+  // onTabLoadFailure/onTabSecurity precedent.
+  onTabCrash: (cb) => ipcRenderer.on('tab-crash', (_e, d) => cb(d)),
+  onTabHung: (cb) => ipcRenderer.on('tab-hung', (_e, d) => cb(d)),
   onTabMediaList: (cb) => ipcRenderer.on('tab-media-list', (_e, d) => cb(d)),
   onTabPrivacyFp: (cb) => ipcRenderer.on('tab-privacy-fp', (_e, d) => cb(d)),
   // Guest self-close request (issue #119): window.close() in a page, forwarded

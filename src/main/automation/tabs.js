@@ -36,7 +36,7 @@ const { LOAD_STATES } = require('../../shared/load-failure'); // Mission 20 F1 L
  *
  * @param {Array<{wcId: number|null, url: string, title: string, jarId: string|null, active: boolean, loadState?: string, loadError?: {code: number, name: string}|null, security?: string}>|null} rawTabs
  * @param {{ fromId: (id: number) => any, chromeContents?: any, allowInternal?: boolean }} deps
- * @returns {{ wcId: number, url: string, title: string, jarId: string|null, active: boolean, loadState: string, loadError: {code: number, name: string}|null, security: string }[]}
+ * @returns {{ wcId: number, url: string, title: string, jarId: string|null, active: boolean, loadState: string, loadError: {code: number, name: string}|null, security: string, pid?: number|null }[]}
  */
 function mapEnumeratedTabs(rawTabs, { fromId, allowInternal = false }) {
   const out = [];
@@ -50,7 +50,7 @@ function mapEnumeratedTabs(rawTabs, { fromId, allowInternal = false }) {
     }
     if (!wc || wc.isDestroyed?.()) continue; // gone / destroyed
     if (!allowInternal && isInternalContents(wc)) continue; // DD5/DD6: internal dropped unless admin
-    out.push({
+    const row = {
       wcId: t.wcId,
       url: t.url,
       title: t.title,
@@ -63,7 +63,24 @@ function mapEnumeratedTabs(rawTabs, { fromId, allowInternal = false }) {
       // Mission 20 Flight 2 Leg 2 (AC4): the DD7 security enum, renderer-
       // sourced; defaulted to 'none' for any raw row predating this field.
       security: t.security || 'none'
-    });
+    };
+    // Mission 20 Flight 3 Leg 2 (DD9): admin-only renderer OS pid — the ONE new
+    // read this flight's acceptance apparatus needs (there is no product
+    // seam for injecting a crash; the operator signals the real OS process).
+    // `getOSProcessId()` on a crashed, not-yet-reloaded renderer returns `0`
+    // on this platform (spike (j)) but is coerced defensively for `undefined`
+    // and a throw too — jar-key rows never carry this field at all.
+    if (allowInternal) {
+      let pid;
+      try {
+        const raw = wc.getOSProcessId?.();
+        pid = typeof raw === 'number' && raw > 0 ? raw : null;
+      } catch {
+        pid = null;
+      }
+      row.pid = pid;
+    }
+    out.push(row);
   }
   return out;
 }

@@ -1,0 +1,29 @@
+<!--
+  crash fixture (Mission 20 Flight 3 Leg 1 — dispatch-extraction-and-crash-
+  spike; kept for leg 4's crash-and-hang-surfaces behavior spec). One button
+  that runs a SYNCHRONOUS busy loop for ~20 seconds when clicked — Chromium's
+  hung-renderer detection is input-driven (DD4), so a page nobody interacts
+  with may never fire `unresponsive`; a click that then blocks the renderer's
+  main thread is what proves the input-driven premise either way. No scripts
+  run until the button is clicked — opening the page alone must never hang.
+-->
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>crash fixture: busy</title>
+  </head>
+  <body>
+    <h1>Busy-loop fixture</h1>
+    <p>Click the button to block this page's renderer thread for about 20 seconds.</p>
+    <button id="busy" type="button">Busy loop 20 s</button>
+    <script>
+      document.getElementById('busy').addEventListener('click', () => {
+        const t = Date.now() + 20000;
+        while (Date.now() < t) {
+          /* synchronous busy loop — blocks this renderer's main thread */
+        }
+      });
+    </script>
+  </body>
+</html>

@@ -34,7 +34,13 @@ function makeHarness({
   dev = false,
   automationEnabled = false,
   hygieneMarker = null,
-  onChromeBooted = undefined
+  onChromeBooted = undefined,
+  // Mission 20 Flight 3 Leg 3 (DD5): the `recoverTabs` branch's collaborator —
+  // a recording FAKE (not the real chrome-recovery.js, which has its own
+  // suite) so these tests pin app-lifecycle.js's OWN orchestration: recovered
+  // checked before restoreTabs, adopts sent directly before the queue flush,
+  // the queue deduped, the zero-tabs fallback.
+  chromeRecoveryAdopts = []
 } = {}) {
   const events = [];
   const appListeners = new Map();
@@ -73,11 +79,16 @@ function makeHarness({
   // Mission 20 Flight 2 Leg 2: captured app.on('certificate-error') routings —
   // [webContents, url, error, certificate, callback, isMainFrame].
   const certErrorCalls = [];
+  const chromeRecoveryCalls = [];
+  const pruneCrashDumpsCalls = [];
+  const onChildProcessGoneCalls = [];
   const app = {
     isPackaged: !dev,
     on: (name, fn) => appListeners.set(name, fn),
     whenReady: () => Promise.resolve(),
-    quit: () => events.push('quit')
+    quit: () => events.push('quit'),
+    // Mission 20 Flight 3 Leg 3 (DD8/AC7): pruneCrashDumps reads this at ready.
+    getPath: (name) => `/profile/${name}`
   };
   const lifecycle = registerAppLifecycle({
     app,
@@ -221,6 +232,18 @@ function makeHarness({
     certTrust: {
       handleCertificateError: (...args) => certErrorCalls.push(args)
     },
+    // Mission 20 Flight 3 Leg 3 (DD5): `window-boot-config`'s `recoverTabs`
+    // branch collaborators.
+    chromeRecovery: {
+      buildRecoveryAdopts: (rec, ctx) => {
+        chromeRecoveryCalls.push({ rec, ctx });
+        return chromeRecoveryAdopts;
+      }
+    },
+    buildAdoptPayload: (p) => ({ ...p }),
+    getDefaultJar: () => ({ id: 'personal', name: 'Personal', color: '#123456', partition: 'persist:personal' }),
+    pruneCrashDumps: (dir) => pruneCrashDumpsCalls.push(dir),
+    onChildProcessGone: (details) => onChildProcessGoneCalls.push(details),
     getAllWindows: () => [],
     argv: [],
     env: {},
@@ -251,7 +274,10 @@ function makeHarness({
     parseMediaProxyUrlFake,
     getHygieneDocStoreCreatedFor: () => hygieneDocStoreCreatedFor,
     hygieneWrites,
-    getHygieneMarker: () => hygieneMarker
+    getHygieneMarker: () => hygieneMarker,
+    chromeRecoveryCalls,
+    pruneCrashDumpsCalls,
+    onChildProcessGoneCalls
   };
 }
 
@@ -584,6 +610,133 @@ test('window-boot-config fires the optional onChromeBooted hook AFTER the queued
   await bare.lifecycle.ready;
   bare.setBootRecord({ ...rec, pendingChromeSends: [] });
   assert.doesNotThrow(() => bare.handlers.get('window-boot-config')({ sender: {} }));
+});
+
+// ---------------------------------------------------------------------------
+// Mission 20 Flight 3 Leg 3 (DD5): window-boot-config's `recoverTabs` branch —
+// checked and consumed BEFORE `restoreTabs`, adopts sent DIRECTLY (never
+// queued) before the pendingChromeSends flush, the flush itself deduped
+// last-wins per (wcId, channel), and the zero-tabs fallback.
+// ---------------------------------------------------------------------------
+
+test('recoverTabs: sends chromeRecovery adopts directly, THEN flushes the queue, returns { bootTab: false }', async () => {
+  const sent = [];
+  const h = makeHarness({
+    chromeRecoveryAdopts: [
+      ['adopt-tab', { wcId: 1, active: true }],
+      ['tab-nav-state', { wcId: 1, canGoBack: false, canGoForward: false }]
+    ]
+  });
+  await h.lifecycle.ready;
+  const rec = {
+    bootConfigServed: false,
+    noBootTab: false,
+    recoverTabs: true,
+    restoreTabs: null,
+    tabViews: new Map([[1, { view: {} }]]),
+    activeTabWcId: 1,
+    pendingChromeSends: [() => ['tab-title', { wcId: 1, title: 'queued' }]],
+    chromeView: { webContents: { isDestroyed: () => false, send: (...args) => sent.push(args) } }
+  };
+  h.setBootRecord(rec);
+  const result = h.handlers.get('window-boot-config')({ sender: {} });
+  assert.deepEqual(result, { bootTab: false });
+  assert.equal(rec.recoverTabs, false, 'recoverTabs is consumed');
+  assert.equal(rec.bootConfigServed, true);
+  assert.deepEqual(sent, [
+    ['adopt-tab', { wcId: 1, active: true }],
+    ['tab-nav-state', { wcId: 1, canGoBack: false, canGoForward: false }],
+    ['tab-title', { wcId: 1, title: 'queued' }]
+  ]);
+  assert.equal(h.chromeRecoveryCalls.length, 1, 'buildRecoveryAdopts called exactly once');
+  assert.equal(h.chromeRecoveryCalls[0].rec, rec);
+  assert.equal(typeof h.chromeRecoveryCalls[0].ctx.buildAdoptPayload, 'function');
+  assert.deepEqual(h.chromeRecoveryCalls[0].ctx.defaultJar, {
+    id: 'personal',
+    name: 'Personal',
+    color: '#123456',
+    partition: 'persist:personal'
+  });
+});
+
+test('recoverTabs wins over restoreTabs — restoreTabs is left INTACT but never returned', async () => {
+  const h = makeHarness({ chromeRecoveryAdopts: [] });
+  await h.lifecycle.ready;
+  const rec = {
+    bootConfigServed: false,
+    noBootTab: false,
+    recoverTabs: true,
+    restoreTabs: [{ url: 'https://saved.example/' }],
+    tabViews: new Map([[1, { view: {} }]]),
+    activeTabWcId: 1,
+    pendingChromeSends: [],
+    chromeView: { webContents: { isDestroyed: () => false, send: () => {} } }
+  };
+  h.setBootRecord(rec);
+  const result = h.handlers.get('window-boot-config')({ sender: {} });
+  assert.deepEqual(result, { bootTab: false }, 'recoverTabs wins — never { bootTab: false, restoreTabs }');
+  assert.deepEqual(rec.restoreTabs, [{ url: 'https://saved.example/' }], 'restoreTabs is left INTACT, never nulled');
+});
+
+test('recoverTabs with zero tabViews returns { bootTab: !noBootTab } instead of an empty chrome', async () => {
+  const h = makeHarness({ chromeRecoveryAdopts: [] });
+  await h.lifecycle.ready;
+  const rec = {
+    bootConfigServed: false,
+    noBootTab: false,
+    recoverTabs: true,
+    restoreTabs: null,
+    tabViews: new Map(),
+    activeTabWcId: null,
+    pendingChromeSends: [],
+    chromeView: { webContents: { isDestroyed: () => false, send: () => {} } }
+  };
+  h.setBootRecord(rec);
+  assert.deepEqual(h.handlers.get('window-boot-config')({ sender: {} }), { bootTab: true });
+  assert.equal(h.chromeRecoveryCalls.length, 0, 'buildRecoveryAdopts is never called for zero tabs');
+});
+
+test('recoverTabs: the gap queue is deduped last-wins per (wcId, channel), survivor at the LAST occurrence position', async () => {
+  const sent = [];
+  const h = makeHarness({ chromeRecoveryAdopts: [['adopt-tab', { wcId: 1, active: true }]] });
+  await h.lifecycle.ready;
+  const rec = {
+    bootConfigServed: false,
+    noBootTab: false,
+    recoverTabs: true,
+    restoreTabs: null,
+    tabViews: new Map([[1, { view: {} }]]),
+    activeTabWcId: 1,
+    pendingChromeSends: [
+      () => ['tab-loading', { wcId: 1, loading: true }],
+      () => ['tab-title', { wcId: 1, title: 'first' }],
+      () => ['tab-loading', { wcId: 1, loading: false }] // survivor for (1, tab-loading) — last occurrence
+    ],
+    chromeView: { webContents: { isDestroyed: () => false, send: (...args) => sent.push(args) } }
+  };
+  h.setBootRecord(rec);
+  h.handlers.get('window-boot-config')({ sender: {} });
+  assert.deepEqual(sent, [
+    ['adopt-tab', { wcId: 1, active: true }],
+    ['tab-title', { wcId: 1, title: 'first' }],
+    ['tab-loading', { wcId: 1, loading: false }]
+  ]);
+});
+
+test('pruneCrashDumps is called at ready with app.getPath("crashDumps")', async () => {
+  const h = makeHarness();
+  await h.lifecycle.ready;
+  assert.equal(h.pruneCrashDumpsCalls.length, 1);
+});
+
+test("app.on('child-process-gone') routes to the injected onChildProcessGone", async () => {
+  const h = makeHarness();
+  await h.lifecycle.ready;
+  const handler = h.appListeners.get('child-process-gone');
+  assert.equal(typeof handler, 'function');
+  const details = { type: 'GPU', reason: 'crashed', exitCode: 1 };
+  handler({}, details);
+  assert.deepEqual(h.onChildProcessGoneCalls, [details]);
 });
 
 test('quit path snapshots and flushes before MCP stop, then closes stores at will-quit', async () => {
