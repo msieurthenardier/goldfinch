@@ -459,6 +459,24 @@ async function main() {
         console.log('\na11y-audit: skipping cert-blocked state — no --tls-url=<https url> given.');
       }
 
+      // 5e) Crashed-guest surface (Mission 20 F3 Leg 2/4, DD1/DD11). The active
+      // tab is whichever tab 5c)/5d) left active (a real failed load) —
+      // harmless, since showCrashPanelForAudit() stamps a synthetic crash
+      // record over whatever state that tab was already in (the same
+      // forceShowForAudit-style precedent as the downloads-button/load-failure
+      // states above) and renders the panel's crash branch directly, with no
+      // real process signal or navigation needed.
+      await evaluate(client, wcId, 'showCrashPanelForAudit()');
+      await sleep(400);
+      allViolations.push(...(await runAxe(client, wcId, axeSource, 'crashed')));
+
+      // 5f) Hung-tab notice bar (Mission 20 F3 Leg 2/4, DD3/DD11).
+      // showHangNoticeForAudit() stamps the active tab's synthetic hung flag
+      // and projects the bar directly — no real renderer hang needed.
+      await evaluate(client, wcId, 'showHangNoticeForAudit()');
+      await sleep(400);
+      allViolations.push(...(await runAxe(client, wcId, axeSource, 'hung')));
+
       // 6-10) Menu-overlay SHEET states — SKIPPED BY RULING, not run (squawk 0045).
       // Every popup menu renders in the transparent sheet WebContentsView. This
       // array is kept as the RECORD of what is not covered (each state's would-be

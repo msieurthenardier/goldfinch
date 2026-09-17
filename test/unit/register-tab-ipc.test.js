@@ -1984,6 +1984,20 @@ test('queueChromeSend: a destroyed chrome webContents drops the send silently (b
   assert.deepEqual(record.sent, []);
 });
 
+test('queueChromeSend: a chromeRecoveryPaused record drops the message rather than sending or queueing (acceptance-run fix pass F1)', () => {
+  const bootedPaused = makeSimpleRecord({ booted: true });
+  bootedPaused.chromeRecoveryPaused = true;
+  queueChromeSend(bootedPaused, () => ['tab-title', { wcId: 1, title: 'A' }]);
+  assert.deepEqual(bootedPaused.sent, []);
+  assert.deepEqual(bootedPaused.pendingChromeSends, []);
+
+  const unbootedPaused = makeSimpleRecord({ booted: false });
+  unbootedPaused.chromeRecoveryPaused = true;
+  queueChromeSend(unbootedPaused, () => ['tab-title', { wcId: 1, title: 'A' }]);
+  assert.deepEqual(unbootedPaused.sent, []);
+  assert.deepEqual(unbootedPaused.pendingChromeSends, []);
+});
+
 test('createSendOrQueue: resolves the owning record by wcId and routes through queueChromeSend', () => {
   const record = makeSimpleRecord({ booted: true });
   const registry = { getWindowForGuest: (wcId) => (wcId === 42 ? record : null) };

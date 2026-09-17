@@ -443,7 +443,7 @@ the crash-log field set (DD7). A HAT change is a spec re-author.
 - [x] CP3 — A killed chrome renderer comes back with every tab and the
       active tab; a fourth crash in 60 s pauses; `crash-log.jsonl` has
       redacted rows; a minidump exists; no network attempt
-- [ ] CP4 — `crash-and-hang-surfaces` run: pass; `npm run a11y` exit 0
+- [x] CP4 — `crash-and-hang-surfaces` run: partial (14/16 + 12b pass; row 6 by-eye → HAT); `npm run a11y` exit 0
 - [ ] CP5 — HAT complete; flight `landed`
 
 ### Adaptation Criteria
@@ -496,7 +496,7 @@ the crash-log field set (DD7). A HAT change is a spec re-author.
       flight-log for findings and two Anomalies (SEGV proved unreliable
       against a sandboxed guest renderer this run — KILL substituted; a
       driver return-shape bug, not a product defect).
-- [ ] `acceptance-and-docs` — the Witnessed run (operator present for
+- [x] `acceptance-and-docs` — the Witnessed run (operator present for
       nothing — every row is automatable), a11y states, README/CLAUDE.md.
 - [ ] `hat-and-alignment` *(optional, operator-elected)* — small walk.
 

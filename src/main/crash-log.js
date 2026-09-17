@@ -113,26 +113,42 @@ function createCrashLog({ dir, fs, now, cap = 200, keepDumps = 20, logger }) {
   }
 
   /**
-   * Deletes every `*.dmp` under `dumpDir` (probed flat, plus the two
-   * Crashpad subdirectories Electron may use — whichever exist) except the
-   * newest `keepDumps`, sorted by mtime. Fail-soft: an absent dump
-   * directory (no crash yet) returns silently.
+   * Deletes `*.dmp` files (plus each one's `.meta` sibling, if present)
+   * under `dumpDir` except the newest `keepDumps`, sorted by mtime.
+   *
+   * `dumpDir` is `app.getPath('crashDumps')`, which on Linux/Windows with
+   * Crashpad IS the Crashpad database directory itself — confirmed against
+   * a live dev profile, whose dumps sit at `<dumpDir>/pending`,
+   * `<dumpDir>/completed`, and `<dumpDir>/new`, never a nested
+   * `<dumpDir>/Crashpad/...` — so those three are probed directly under
+   * the given root; the root itself is also probed flat (tolerates a
+   * Breakpad-style flat layout, or any other caller). Fail-soft throughout:
+   * an absent subdirectory (no crash of that kind yet) is skipped, and the
+   * whole call never throws into `app.ready`.
    * @param {string} dumpDir
    */
   function pruneDumps(dumpDir) {
     try {
-      /** @type {{ full: string, mtime: number }[]} */
+      /** @type {{ dmp: string, meta: string | null, mtime: number }[]} */
       const candidates = [];
       const probe = (/** @type {string} */ d) => {
         try {
           for (const name of fs.readdirSync(d)) {
-            if (name.endsWith('.dmp')) {
-              const full = path.join(d, name);
+            if (!name.endsWith('.dmp')) continue;
+            const full = path.join(d, name);
+            try {
+              const mtime = fs.statSync(full).mtimeMs;
+              const metaPath = full.slice(0, -'.dmp'.length) + '.meta';
+              let meta = null;
               try {
-                candidates.push({ full, mtime: fs.statSync(full).mtimeMs });
+                fs.statSync(metaPath);
+                meta = metaPath;
               } catch {
-                // vanished between readdir and stat — skip
+                // no matching .meta sibling — nothing to remove alongside
               }
+              candidates.push({ dmp: full, meta, mtime });
+            } catch {
+              // vanished between readdir and stat — skip
             }
           }
         } catch {
@@ -140,18 +156,28 @@ function createCrashLog({ dir, fs, now, cap = 200, keepDumps = 20, logger }) {
         }
       };
       probe(dumpDir);
-      probe(path.join(dumpDir, 'Crashpad', 'pending'));
-      probe(path.join(dumpDir, 'Crashpad', 'completed'));
+      probe(path.join(dumpDir, 'pending'));
+      probe(path.join(dumpDir, 'completed'));
+      probe(path.join(dumpDir, 'new'));
       candidates.sort((a, b) => a.mtime - b.mtime);
       const excess = candidates.length - keepDumps;
       if (excess <= 0) return;
-      for (const c of candidates.slice(0, excess)) {
+      const toRemove = candidates.slice(0, excess);
+      for (const c of toRemove) {
         try {
-          fs.unlinkSync(c.full);
+          fs.unlinkSync(c.dmp);
         } catch {
           // best effort
         }
+        if (c.meta) {
+          try {
+            fs.unlinkSync(c.meta);
+          } catch {
+            // best effort
+          }
+        }
       }
+      logger?.warn?.('[crash-log] pruned', toRemove.length, 'dumps');
     } catch {
       // fail-soft — pruning must never throw into app.ready
     }

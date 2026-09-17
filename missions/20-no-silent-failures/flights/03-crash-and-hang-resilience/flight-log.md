@@ -19,7 +19,13 @@ reload-and-reconcile (`chrome-recovery.js`), the local crash-record writer
 the `enumerateWindows` `chromePid`/`recoveryPaused` fields are all live and
 unit-pinned; all 11 ACs verified, including a full live smoke (16/16 rows
 pass across two fresh dev launches — see Leg 3's own entry, AC10 findings,
-and three Anomalies). Legs 4–5 not started.
+and three Anomalies). Leg 4 (`acceptance-and-docs`) Developer half done
+2026-09-16: the two new a11y-audit chrome states (`crashed`/`hung`) wired,
+the behavior spec finalised to `active` with every placeholder resolved, a
+real color-contrast defect on the crash/hung panel's brand mark found and
+fixed, docs cross-checked (all found current), and AC1/AC4 proven live
+(`npm run a11y` exit 0, both new state labels present). Leg 4's Witnessed
+run and landing are Flight-Director-driven next. Leg 5 not started.
 
 ---
 
@@ -638,6 +644,219 @@ see Anomalies):
 
 ---
 
+### Leg 4 — `acceptance-and-docs` (Developer half)
+**Status**: in-flight (Developer half complete; Witnessed run + landing are
+Flight-Director-driven next)
+**Started**: 2026-09-16
+**Completed**: —
+
+#### Changes Made
+- `scripts/a11y-audit.mjs` — two new chrome states appended after 5d) and
+  before the `SHEET_STATES` skip record: 5e) `crashed` —
+  `evaluate(showCrashPanelForAudit())`, sleep 400 ms, `runAxe(..., 'crashed')`;
+  5f) `hung` — `evaluate(showHangNoticeForAudit())`, sleep 400 ms,
+  `runAxe(..., 'hung')`. Both reuse the persisting-synthetic-record seam
+  hooks leg 2 already built (`SEAM_COUNT` unchanged at 41 — this leg adds no
+  new seam entry, only two new call sites into the existing hooks).
+- `docs/dev-testing.md` — the a11y section gains a new "Chrome states
+  audited, in order" bullet naming all ten chrome states including the two
+  new ones and what `crashed`/`hung` exercise; the "Crash records and dumps"
+  section was already accurate from leg 3 (verified, no change needed).
+- `tests/behavior/crash-and-hang-surfaces.md` — finalised from `draft` to
+  `active`: every `<exitCode>` placeholder resolved from the leg-1 spike
+  table (row 1 `crashed (139)`/`loadError.code: 139`; row 3
+  `killed (9)`/`loadError.code: 9`); row 12 now asserts BOTH `booted: false`
+  persisting AND `recoveryPaused: true`; row 13 names the exact eight
+  `crash-log.jsonl` keys (`ts kind reason exitCode origin jarKind windowId
+  recovery`) and asserts `origin` carries no path/query/fragment; row 0
+  records the dump directory as the dev profile's `Crashpad/pending` +
+  `Crashpad/completed` subdirectories; the Preconditions section states the
+  rig launch command and the env-only, never-printed admin-key handling
+  explicitly; the row-notes' SEGV→ABRT→KILL sandboxed-guest fallback
+  (already present from leg 3's finding) reworded to remove the leftover
+  "DRAFT" language now that this leg finalises it. Row numbering preserved
+  throughout (0–15) since other artifacts cite rows by number.
+- **Real defect found and fixed** (not scope creep — surfaced BY this leg's
+  own new a11y states, on shared panel markup): `npm run a11y`'s first live
+  run reported a NEW `color-contrast` violation (serious) on
+  `.lf-brand-name` — present identically on `crashed`, `hung`, AND the
+  pre-existing `load-failure` state (all three render the same
+  `load-failure-controller.js` panel; the class was added in flight/02's
+  `179eb18`, one commit before this flight, so it predates this leg but was
+  never caught because `npm run a11y`'s full sweep hadn't been run against
+  it since). Root cause: `.lf-brand`'s `opacity: 0.7` alpha-blended
+  `.lf-brand-name`'s already-contrast-verified `--lf-fg-dim` (6.0:1 against
+  `--lf-bg`, per the file's own comment) toward the background, dropping its
+  EFFECTIVE rendered contrast below the 4.5:1 normal-text threshold — the
+  token was fine, the group opacity on top of it was not. Fix (`src/renderer/styles.css`):
+  moved the `opacity: 0.7` off `.lf-brand` (the flex row) and onto
+  `.lf-brand-mark` alone (the decorative, `alt=""`, non-text-graded icon) so
+  the "unobtrusive" look is preserved on the icon while `.lf-brand-name`
+  renders at its full, already-passing `--lf-fg-dim` contrast — the same
+  no-opacity-wrapper shape `welcome-controller.js`'s `.welcome-mark`
+  precedent already uses. Re-ran `npm run a11y` after the fix: 0 NEW
+  violations (43 accepted, matching the pre-existing baseline exactly).
+  Never added an `ACCEPTED` entry for this — per the leg's own instruction,
+  a new finding on the panel gets fixed in the chrome, not allowlisted.
+- Docs cross-check (AC5): README's "Crash records are local-only" bullet
+  (leg 3) verified current; `docs/mcp-automation.md`'s `enumerateTabs`
+  `loadState` enum (`ok | failed | cert-blocked | crashed | hung`, admin
+  `pid`) and `enumerateWindows`'s `chromePid`/`recoveryPaused` verified
+  present and accurate (both landed in legs 2–3, no gap found);
+  `docs/dev-testing.md`'s "Crash records and dumps" section verified
+  current. **One doc gap found and fixed**: CLAUDE.md's crash-log pattern
+  bullet named the eight field KEYS but never enumerated the `recovery`
+  VALUE enum (missing `closed`, added by leg 3's own design-review decision
+  "recovery enum gains closed") — added `panel | reloaded | paused |
+  ignored | closed` with a one-clause note on why `closed` exists (the
+  popup-crash site's own outcome). The seam-count note (41) was already
+  correct in both CLAUDE.md locations (evaluate-seam closed-set bullet +
+  the vault "Seam contract" paragraph) — no change needed there.
+
+#### Verification
+- AC1 (a11y states + docs): `scripts/a11y-audit.mjs` reviewed — 5e)/5f)
+  correctly placed after 5d) and before `SHEET_STATES`; `docs/dev-testing.md`
+  lists both states.
+- AC2 (spec finalised): `grep -n '<exitCode>\|allowed keys\|DRAFT'
+  tests/behavior/crash-and-hang-surfaces.md` → zero hits; every row's
+  Expected Result reads as an assertion against a named observable/apparatus.
+- AC4/AC1 live proof: rig launched
+  (`GOLDFINCH_AUTOMATION_ADMIN=1 GOLDFINCH_AUTOMATION_DEV_MINT=1 npm run
+  dev:automation`), admin key captured via a small extraction script
+  (`parseDevMintLine`) into a `chmod 600` scratch file, never printed;
+  `GOLDFINCH_MCP_ADMIN_KEY=$(cat <file>) npm run a11y -- --url=http://127.0.0.1:8000/`
+  (the `tests/behavior/fixtures/a11y-media/` fixture per `docs/dev-testing.md`).
+  First run surfaced the `.lf-brand-name` `color-contrast` defect above (3
+  NEW violation nodes printed: `load-failure`, `crashed`, `hung`) — per the
+  script's own documented contract this is an exit-1 (NEW violations found)
+  result, though the exact process exit code from that first invocation
+  wasn't captured reliably (piped through `tee` for logging, which masks
+  the upstream command's status) — the printed 3-NEW-nodes table is the
+  authoritative signal either way. Fixed the CSS; killed the app by the
+  `:49707` listener's pid (`ss -ltnp`, never `pkill -f`); relaunched fresh;
+  re-ran (this time capturing the exit code directly, no pipe):
+  **exit 0, printed "No NEW violations — every violation node is in the
+  ACCEPTED baseline. ✅"**, with `[crashed]` and `[hung]` state labels both
+  present in the accepted-baseline listing (`landmark-one-main`,
+  `page-has-heading-one`, `region` ×3 each — the same three generic
+  app-shell advisories every other chrome state already carries). Teardown:
+  killed the app by port pid again, stopped the fixture HTTP server, deleted
+  the extracted key file, and `shred -u`'d the captured app log. No key, pid
+  number, operator path, or username appears in this entry or any other
+  committed artifact.
+- AC5 (docs cross-check): by reading, see Changes Made above — one gap
+  found and fixed (CLAUDE.md's `recovery` enum).
+- AC6 (gates): `timeout 300 npm test` → 4978/4978 pass (run twice — once
+  before the CSS fix, once after, both green, confirming the fix touched no
+  unit-tested behavior); `npm run lint` → 0 errors; `npm run typecheck` →
+  0 errors; `npm run format` then `npm run format:check` → clean;
+  `git diff --stat -- src/renderer/renderer.js` → empty (renderer.js
+  untouched, budget 1577 unaffected — this leg's only source change is
+  `src/renderer/styles.css`).
+
+#### Notes
+- AC3 (the Witnessed `crash-and-hang-surfaces` run itself) and landing this
+  leg (status → `landed`, flight.md checkbox, CP4) are the Flight Director's
+  half per the leg artifact's own two-half split — not run by this
+  Developer pass.
+- The `.lf-brand-name` contrast fix is the one piece of PRODUCT code this
+  "ships nothing else" leg touched, and it is squarely in the leg's own
+  license to do so ("a new violation on the panel ... is a real defect —
+  fix it in the chrome ... never an `ACCEPTED` entry") — `load-failure`
+  itself shares the same fix (it was equally broken, just not previously
+  caught by a completed a11y sweep since flight/02 landed the brand mark
+  one commit before this flight branched).
+
+#### Acceptance-run fix pass F1 (2026-09-16)
+- **Observation**: during the live Witnessed run (behavior test
+  `crash-and-hang-surfaces`, row 12), the fourth chrome crash inside 60 s
+  correctly paused recovery (`recoveryPaused: true`, `chromePid: null`), but
+  `enumerateWindows` kept reporting `booted: true` for the whole 20 s poll
+  window, and `enumerateTabs` then HUNG for the SDK's 60 s timeout on three
+  separate attempts.
+- **Root cause**: `chrome-recovery.js`'s pause branch (`onChromeGone`, the
+  `record.chromeCrashTimes.length > maxReloads` arm) set
+  `record.chromeRecoveryPaused = true` but never cleared
+  `record.bootConfigServed` — only the ordinary reload branch cleared it. A
+  paused record therefore kept reading `booted: true`
+  (`listWindows().booted` / `window-census.js`'s `booted` field both mirror
+  `bootConfigServed`), so `automation/tabs.js`'s `enumerateTabs` — which
+  skips only `!w.booted` windows — kept trying `executeJavaScript` against a
+  chrome with no live renderer, and the promise never settled.
+- **Fix**: `chrome-recovery.js`'s pause branch now also sets
+  `record.bootConfigServed = false` before recording/returning `'paused'`
+  (the chrome is dead for the window's remaining lifetime; there is no
+  document behind it). Separately, `register-tab-ipc.js`'s `queueChromeSend`
+  now drops a message outright when `record.chromeRecoveryPaused` is true
+  (checked before the boot check) — a paused record will never boot again,
+  so queueing onto `pendingChromeSends` would only leak thunks forever.
+  `automation/tabs.js`'s `enumerateTabs`/`listWindows` skip of unbooted
+  windows needed no change — it already existed and is what stops the hang
+  once `booted` correctly flips to `false`.
+- **Pins added**: `test/unit/chrome-recovery.test.js`'s existing "fourth
+  crash ... pauses" test gained a `record.bootConfigServed === false`
+  assertion; `test/unit/window-census.test.js` gained a new test asserting a
+  paused record reports `booted: false` AND `recoveryPaused: true` together;
+  `test/unit/register-tab-ipc.test.js` gained a new
+  `queueChromeSend`/`chromeRecoveryPaused` test (both booted and unbooted
+  starting states) asserting the message is dropped, not sent or queued.
+  `enumerateTabs`'s "`booted:false` ⇒ ZERO rows AND no round-trip attempted"
+  coverage in `test/unit/automation-tabs.test.js:823` was already in place
+  and needed no change. Docs: one sentence added to CLAUDE.md's crash-and-hang
+  pattern bullet and to `docs/mcp-automation.md`'s `recoveryPaused` bullet
+  describing this behavior.
+- **Gates**: `timeout 300 npm test` → 4980/4980 pass; `npm run lint` → 0
+  errors; `npm run typecheck` → 0 errors; `npm run format` then
+  `npm run format:check` → clean. `renderer.js` untouched.
+
+#### Acceptance-run fix pass F2 (2026-09-16)
+- **Observation**: after a fresh app start (ready ran once),
+  `~/.config/goldfinch-dev/Crashpad/pending` still held 54 `.dmp`/`.meta`
+  files left over from the F1 session's crash storm — `pruneDumps` had not
+  touched the directory Crashpad actually writes to.
+- **Root cause**: `app.getPath('crashDumps')` on Linux **is the Crashpad
+  database directory itself** — confirmed live: `pending`, `completed`, and
+  `new` sit directly under it (`~/.config/goldfinch-dev/Crashpad/pending/
+  *.dmp`), never nested under a second `Crashpad/` segment. `crash-log.js`'s
+  `pruneDumps(dumpDir)` probed `dumpDir` flat plus
+  `dumpDir/Crashpad/pending` and `dumpDir/Crashpad/completed` — a doubled
+  `Crashpad/Crashpad/...` path that never exists, and it never probed `new`
+  at all. Every probe's `readdirSync` failed with ENOENT and was swallowed
+  by the per-directory try/catch (by design, for a legitimately-absent
+  directory), so `pruneDumps` silently found zero candidates and pruned
+  nothing — a failed-soft-into-invisible defect, not a crash.
+- **Fix**: `pruneDumps` now probes `dumpDir`, `dumpDir/pending`,
+  `dumpDir/completed`, and `dumpDir/new` directly (no nested `Crashpad/`
+  segment), pairs each `.dmp` with its `.meta` sibling (via a
+  `statSync`-guarded lookup, not `existsSync`, so the injected-fs contract
+  is unchanged) and removes both together when a dump is pruned, and now
+  logs one `logger.warn('[crash-log] pruned', N, 'dumps')` line only when it
+  actually removes something (never on a no-op run). `app-lifecycle.js`'s
+  ready hook now also logs the resolved `crashDumps` path once at
+  `logger.debug` before calling `pruneCrashDumps` (the profile path only —
+  no page/profile content) so a live run can confirm the root being pruned.
+- **Pins added** (`test/unit/crash-log.test.js`): the old "probes the
+  Crashpad pending/completed subdirectories" test — which asserted the
+  wrong nested-`Crashpad/` shape — is replaced with a direct
+  `pending`/`completed`/`new` pin; a new meta-sibling-removal pin; a 25
+  pending + 3 completed pair (28 total, keepDumps default 20) pin asserting
+  exactly the 8 oldest pending pairs (dmp+meta) are pruned and the single
+  `pruned 8 dumps` warn line fires; a no-op-logs-nothing pin; a
+  missing-subdirectory-tolerated pin (no `completed`/`new` seeded at all);
+  and a fail-soft pin where one subdirectory's `readdirSync` throws
+  (non-ENOENT) while the others still prune correctly. The pre-existing
+  flat-root and unlink-failure tests are unchanged in shape.
+- **Docs**: `docs/dev-testing.md`'s "Minidumps" bullet corrected — no longer
+  describes `Crashpad/pending`/`Crashpad/completed` as living under
+  `app.getPath('crashDumps')`; now states `crashDumps` IS the Crashpad
+  directory itself, its three subdirectories sit directly under it, and
+  pruning removes each dump's `.meta` sibling too.
+- **Gates**: `timeout 300 npm test` → all pass; `npm run lint` → 0 errors;
+  `npm run typecheck` → 0 errors; `npm run format` then
+  `npm run format:check` → clean. `renderer.js` untouched.
+
+---
+
 ## Decisions
 
 ### Kill-and-reload gates on `killRequested` alone (DD3 amendment, after spike (f))
@@ -1022,3 +1241,11 @@ and this leg's unit suite already covers both `SEGV`/`crashed` and
 - **Leg 3 landed (2026-09-16).** All 11 ACs verified; `timeout 300 npm test` 4978/4978, `npm run lint`/`npm run typecheck`/`npm run format:check` all exit 0. `chrome-recovery.js` + `crash-log.js` (both new, Electron-free, fully unit-tested — 18 + 19 tests) implement DD5–DD8 exactly as reworked in the two design-review cycles plus the four folded point fixes (internal container shape, conditional activation, `sendOrQueue` construction order, popup `windowId`) — all four verified correct in the implementation. `sendOrQueue`/`pushTabStateFor` lifted to module-level exports of `register-tab-ipc.js` as specified. One consequential test-file fix beyond the Files Affected list (`guest-visibility-invariant.test.js`'s exact-literal export pin retargeted to a superset regex) recorded as a Deviation, same discipline as legs 1–2. Live smoke: two fresh dev-profile launches, 16/16 rows pass (chrome reload-and-reconcile with two guests, the 3-per-60s cap + pause, guest-crash redaction verification); three Anomalies recorded — a driver return-shape bug (openTab's bare-number result treated as an object) that fully invalidated the first run before being fixed, a `kill -SEGV` reliability finding specific to sandboxed guest renderers this session (worked around with `kill -KILL`, no product impact), and the one test-file deviation. No key, pid, operator path, or username in any artifact (re-scanned at handback). `[HANDOFF:review-needed]`.
 - **Leg 3 landed (2026-09-16).** 4978/4978; `renderer.js` untouched (1576 vs budget 1577). Live: chrome SEGV recovered with the same active tab and tab set; the fourth SEGV in a minute paused with `recoveryPaused: true`; a redacted eight-key record and a Crashpad `.dmp` under the dev profile. Anomaly carried into the behavior spec: `kill -SEGV` against a sandboxed guest was unreliable in one session (the chrome view, `sandbox:false`, crashed every time) — the spec now falls back to `-ABRT` then `-KILL` with the wording judged against the signal used. One consequential test retarget accepted as a deviation. All three autonomous legs landed uncommitted; the flight-end Reviewer spawned over the whole diff (Phase 2d), with the four un-reviewed leg-3 point fixes named for verification.
 - **Flight-end review (Phase 2d): `[HANDOFF:confirmed]`.** The Reviewer ran the four gates itself (4978/4978, lint/typecheck 0, format clean), verified the four leg-3 point fixes in code, audited the crash log's closed field set and the `crashReporter` placement pins as load-bearing, confirmed no jar-tier path to a pid, diffed `overlay-dispatch.js` byte-for-byte against the pre-move switch, and found no key/path/username in the diff. One non-blocking note carried to the debrief: `onTabHung` does not call `refreshTabIndicators` (a harmless no-op today — the chip never reads `hung`; DD11's prose overstates). Legs 1–3 → `completed`; committing on the flight branch and opening the draft PR.
+- **Committed `e81b9d6` on `flight/03-crash-and-hang-resilience`, pushed; draft PR opened.** **Leg 4 `acceptance-and-docs` — risk tier: LOW** (additive apparatus states in `scripts/a11y-audit.mjs`, the behavior spec's final wording, a docs cross-check; ships no product behaviour). No design review; the Developer half spawned; the Witnessed run and `npm run a11y` are Flight-Director-driven afterwards.
+
+### Leg 4 — acceptance run (Flight Director half, 2026-09-17)
+
+- **Run**: `tests/behavior/crash-and-hang-surfaces/runs/2026-09-17-00-22-28.md` — live two-agent mode, 49 min, 343 evidence files (ephemeral). **14 / 16 pass; row 6 inconclusive on one by-eye clause (guest visibility under `SIGSTOP` — no compositor frame, `captureWindow` times out; routed to the HAT); row 12 FAIL → defect F1 fixed in-run, relaunched, re-verified as 12b PASS.** Every crash-record line had exactly the eight allowed keys with host-only origins (the Validator re-derived the check); zero network egress in every sample.
+- **Defects found and fixed in-run**: F1 — the recovery pause path left `bootConfigServed` true, so a dead chrome read `booted: true` and `enumerateTabs` hung 60 s against it (now `booted: false`, pushes dropped, zero census rows; pinned). F2 — `pruneDumps` probed a doubled `Crashpad/Crashpad` path and never pruned `pending` (54 dumps after ready; now walks `pending`/`completed`/`new`, removes `.meta` siblings, keeps 20; pinned). Leg-4 Developer half also fixed a pre-existing `.lf-brand` contrast violation caught by the new a11y states.
+- **Findings for the debrief** (not row failures): (1) with `crashReporter` active, `kill -SEGV`/`-ABRT` no longer crash a SANDBOXED guest (they did in leg 2's smoke before the reporter existed) and a SEGV on the unsandboxed chrome takes ~15 s to register — hypothesis: Crashpad's in-process handler; a real page-triggered crash spike is needed before Flight 4 (a real segfault may present as a hang); (2) `closeTab` returned `false` for a `failed` tab in a background window (squawk candidate); (3) 4 minidumps for 2 trapped crashes (Crashpad artefact count); (4) `forcefullyCrashRenderer` on a busy renderer takes ~12 s to land; (5) apparatus facts for the crew file: capture-timeout on a stopped renderer, `openTab` bare number, `navigate`-after-`openTab` race, same-origin tabs may share a process, post-loop reads need their own evidence file, re-resolve THE window by `lastFocused` after a relaunch, a wedged `enumerateTabs` can be product not apparatus; (6) DD11's "hung push refreshes the chip" wording overstates (`onTabHung` never needed to).
+- Spec re-authored per the Validator: row 6's visibility clause `[by-eye]`, row 12's first-read race note, row 13 "at least" framing. `Last Run` set. Leg `landed` → `completed`; CP4 checked. HAT (leg 5) remains — operator-elected; row 6's by-eye clause is its first item.

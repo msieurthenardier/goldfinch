@@ -35,10 +35,17 @@ function applyGuestVisibility(entry) {
  * TOP-LEVEL (like `applyGuestVisibility`) so `sendOrQueue` below and
  * `guest-wiring.js` — a different module, reached via `main.js` deps
  * threading — share this ONE implementation rather than a closure-local copy.
+ * Acceptance-run fix pass F1: a `chromeRecoveryPaused` record is dead for the
+ * rest of its life (chrome-recovery.js's pause branch never reloads it again,
+ * so nothing will ever flush `pendingChromeSends`) — queueing here would only
+ * leak thunks forever. Checked FIRST, ahead of the boot check, so a paused
+ * record's unbooted state (see chrome-recovery.js's pause branch) drops
+ * rather than queues.
  * @param {any} record
  * @param {() => [string, any]} buildMessage
  */
 function queueChromeSend(record, buildMessage) {
+  if (record.chromeRecoveryPaused) return;
   if (record.bootConfigServed) {
     const chrome = record.chromeView.webContents;
     if (chrome && !chrome.isDestroyed()) {

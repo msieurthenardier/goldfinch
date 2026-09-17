@@ -141,6 +141,11 @@ test('the fourth crash within 60s pauses: no reload, title set, recorded paused'
     ['reloaded', 'reloaded', 'reloaded', 'paused']
   );
   assert.equal(record.chromeRecoveryPaused, true);
+  // Acceptance-run fix pass F1: the pause branch must also clear
+  // bootConfigServed — the dead chrome has no live document, and
+  // window-census.js / automation/tabs.js both key "is this window usable"
+  // off this flag.
+  assert.equal(record.bootConfigServed, false);
   const fourth = allCalls[3].calls;
   assert.deepEqual(
     fourth.map((c) => c[0]),

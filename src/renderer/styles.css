@@ -1112,19 +1112,26 @@ a:focus-visible {
   border-color: var(--lf-fg-dim);
 }
 
-/* Brand (HAT H1 fix 1): unobtrusive Goldfinch mark, bottom of the column —
-   the welcome-controller.js `.welcome-mark` precedent, same asset. Decorative
-   `alt=""` since the wordmark span already carries the visible name. */
+/* Brand (HAT H1 fix 1; contrast fix M20 F3 Leg 4): unobtrusive Goldfinch
+   mark, bottom of the column — the welcome-controller.js `.welcome-mark`
+   precedent, same asset. Decorative `alt=""` since the wordmark span already
+   carries the visible name. The dim/unobtrusive look is `--lf-fg-dim` alone
+   (already verified 6.0:1 against `--lf-bg`, comment above); the group used
+   to carry `opacity: 0.7` too, which alpha-blends the RENDERED text color
+   toward the background and drops `.lf-brand-name`'s EFFECTIVE contrast
+   below 4.5:1 (axe `color-contrast`, caught by the crash/hung a11y states
+   sharing this same panel markup) even though the token itself passes.
+   Opacity now applies only to the decorative, non-text-graded icon. */
 .lf-brand {
   display: flex;
   align-items: center;
   gap: 8px;
   margin-top: 40px;
-  opacity: 0.7;
 }
 .lf-brand-mark {
   width: 18px;
   height: 18px;
+  opacity: 0.7;
   -webkit-user-drag: none;
   user-select: none;
 }

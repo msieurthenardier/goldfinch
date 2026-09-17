@@ -232,7 +232,7 @@ test('record() rotates: over cap keeps the newest cap/2 lines', () => {
 // pruneDumps
 // ---------------------------------------------------------------------------
 
-test('pruneDumps keeps the newest N and deletes the rest', () => {
+test('pruneDumps keeps the newest N and deletes the rest (flat root)', () => {
   const fs = makeFakeFs();
   const dumpDir = '/fake/userData/crashDumps';
   for (let i = 0; i < 5; i++) {
@@ -244,22 +244,118 @@ test('pruneDumps keeps the newest N and deletes the rest', () => {
   assert.deepEqual(remaining.sort(), [path.join(dumpDir, 'dump-3.dmp'), path.join(dumpDir, 'dump-4.dmp')].sort());
 });
 
-test('pruneDumps probes the Crashpad pending/completed subdirectories too', () => {
+// Acceptance-run fix pass F2: a live dev profile showed `app.getPath(
+// 'crashDumps')` IS the Crashpad database directory itself — its
+// `pending`/`completed`/`new` subdirectories sit DIRECTLY under the given
+// root, never nested under a second `Crashpad/` segment. The old pin below
+// asserted the wrong (nested) shape, which is why a live run's 54-file
+// `pending` directory was never touched.
+test('pruneDumps probes pending/completed/new directly under the given root', () => {
   const fs = makeFakeFs();
-  const dumpDir = '/fake/userData/crashDumps';
-  fs.seed(path.join(dumpDir, 'Crashpad', 'pending', 'a.dmp'), 'x', 1);
-  fs.seed(path.join(dumpDir, 'Crashpad', 'pending', 'b.dmp'), 'x', 2);
-  fs.seed(path.join(dumpDir, 'Crashpad', 'completed', 'c.dmp'), 'x', 3);
+  const dumpDir = '/fake/userData/Crashpad';
+  fs.seed(path.join(dumpDir, 'pending', 'a.dmp'), 'x', 1);
+  fs.seed(path.join(dumpDir, 'pending', 'b.dmp'), 'x', 2);
+  fs.seed(path.join(dumpDir, 'completed', 'c.dmp'), 'x', 3);
+  fs.seed(path.join(dumpDir, 'new', 'd.dmp'), 'x', 4);
   const crashLog = createCrashLog({ dir: DIR, fs, now: () => new Date(), keepDumps: 1 });
   crashLog.pruneDumps(dumpDir);
   const remaining = [...fs.files.keys()].filter((p) => p.endsWith('.dmp'));
-  assert.deepEqual(remaining, [path.join(dumpDir, 'Crashpad', 'completed', 'c.dmp')]);
+  assert.deepEqual(remaining, [path.join(dumpDir, 'new', 'd.dmp')]);
+});
+
+test("pruneDumps removes each pruned dump's .meta sibling alongside it", () => {
+  const fs = makeFakeFs();
+  const dumpDir = '/fake/userData/Crashpad';
+  fs.seed(path.join(dumpDir, 'pending', 'a.dmp'), 'x', 1);
+  fs.seed(path.join(dumpDir, 'pending', 'a.meta'), 'x', 1);
+  fs.seed(path.join(dumpDir, 'pending', 'b.dmp'), 'x', 2);
+  fs.seed(path.join(dumpDir, 'pending', 'b.meta'), 'x', 2);
+  const crashLog = createCrashLog({ dir: DIR, fs, now: () => new Date(), keepDumps: 1 });
+  crashLog.pruneDumps(dumpDir);
+  assert.deepEqual(
+    [...fs.files.keys()].sort(),
+    [path.join(dumpDir, 'pending', 'b.dmp'), path.join(dumpDir, 'pending', 'b.meta')].sort()
+  );
+});
+
+test('pruneDumps keeps the newest 20 dumps across pending+completed and logs once', () => {
+  const fs = makeFakeFs();
+  const dumpDir = '/fake/userData/Crashpad';
+  let mtime = 0;
+  for (let i = 0; i < 25; i++) {
+    mtime += 1;
+    fs.seed(path.join(dumpDir, 'pending', `p${i}.dmp`), 'x', mtime);
+    fs.seed(path.join(dumpDir, 'pending', `p${i}.meta`), 'x', mtime);
+  }
+  for (let i = 0; i < 3; i++) {
+    mtime += 1;
+    fs.seed(path.join(dumpDir, 'completed', `c${i}.dmp`), 'x', mtime);
+    fs.seed(path.join(dumpDir, 'completed', `c${i}.meta`), 'x', mtime);
+  }
+  const logger = makeLogger();
+  // default keepDumps (20) — DD8's "newest 20 at every ready".
+  const crashLog = createCrashLog({ dir: DIR, fs, now: () => new Date(), logger });
+  crashLog.pruneDumps(dumpDir);
+  const remainingDmps = [...fs.files.keys()].filter((p) => p.endsWith('.dmp'));
+  assert.equal(remainingDmps.length, 20);
+  // 25 pending + 3 completed = 28; the 8 oldest (p0..p7, the earliest-seeded
+  // pending pairs) are pruned, dmp and meta together.
+  for (let i = 0; i < 8; i++) {
+    assert.equal(fs.files.has(path.join(dumpDir, 'pending', `p${i}.dmp`)), false);
+    assert.equal(fs.files.has(path.join(dumpDir, 'pending', `p${i}.meta`)), false);
+  }
+  for (let i = 8; i < 25; i++) {
+    assert.equal(fs.files.has(path.join(dumpDir, 'pending', `p${i}.dmp`)), true);
+  }
+  for (let i = 0; i < 3; i++) {
+    assert.equal(fs.files.has(path.join(dumpDir, 'completed', `c${i}.dmp`)), true);
+  }
+  assert.ok(logger.warns.some((w) => w[0] === '[crash-log] pruned' && w[1] === 8 && w[2] === 'dumps'));
+});
+
+test('pruneDumps does not log when nothing needs pruning', () => {
+  const fs = makeFakeFs();
+  const dumpDir = '/fake/userData/Crashpad';
+  fs.seed(path.join(dumpDir, 'pending', 'a.dmp'), 'x', 1);
+  const logger = makeLogger();
+  const crashLog = createCrashLog({ dir: DIR, fs, now: () => new Date(), keepDumps: 20, logger });
+  crashLog.pruneDumps(dumpDir);
+  assert.deepEqual(logger.warns, []);
 });
 
 test('pruneDumps on an absent dump directory returns silently', () => {
   const fs = makeFakeFs();
   const crashLog = createCrashLog({ dir: DIR, fs, now: () => new Date() });
   assert.doesNotThrow(() => crashLog.pruneDumps('/fake/userData/crashDumps'));
+});
+
+test('pruneDumps tolerates a missing subdirectory (e.g. no "new" yet)', () => {
+  const fs = makeFakeFs();
+  const dumpDir = '/fake/userData/Crashpad';
+  fs.seed(path.join(dumpDir, 'pending', 'a.dmp'), 'x', 1);
+  // 'completed' and 'new' are never seeded — absent entirely.
+  const crashLog = createCrashLog({ dir: DIR, fs, now: () => new Date(), keepDumps: 0 });
+  assert.doesNotThrow(() => crashLog.pruneDumps(dumpDir));
+  assert.equal(fs.files.has(path.join(dumpDir, 'pending', 'a.dmp')), false);
+});
+
+test('pruneDumps fail-softs a subdirectory whose readdir throws, still pruning the others', () => {
+  const fs = makeFakeFs();
+  const dumpDir = '/fake/userData/Crashpad';
+  fs.seed(path.join(dumpDir, 'completed', 'a.dmp'), 'x', 1);
+  const realReaddir = fs.readdirSync.bind(fs);
+  fs.readdirSync = (d) => {
+    if (d === path.join(dumpDir, 'pending')) {
+      const err = new Error('EACCES');
+      // @ts-ignore
+      err.code = 'EACCES';
+      throw err;
+    }
+    return realReaddir(d);
+  };
+  const crashLog = createCrashLog({ dir: DIR, fs, now: () => new Date(), keepDumps: 0 });
+  assert.doesNotThrow(() => crashLog.pruneDumps(dumpDir));
+  assert.equal(fs.files.has(path.join(dumpDir, 'completed', 'a.dmp')), false);
 });
 
 test('pruneDumps never throws even if unlink fails', () => {

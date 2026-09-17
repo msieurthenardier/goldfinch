@@ -261,7 +261,14 @@ function registerAppLifecycle({
     // Mission 20 Flight 3 Leg 3 (DD8/AC7): prune old minidumps to the newest
     // 20 at every ready — after initProfileAndStores, so `app.getPath(
     // 'crashDumps')` already resolves the -dev profile under a dev launch.
-    pruneCrashDumps?.(app.getPath('crashDumps'));
+    // Acceptance-run fix pass F2: `crashDumps` is already the Crashpad
+    // database directory itself (its `pending`/`completed`/`new`
+    // subdirectories sit directly under it, never nested under a second
+    // `Crashpad/` segment) — logged once at debug level so a live run can
+    // confirm the resolved root without any page/profile content in it.
+    const crashDumpsDir = app.getPath('crashDumps');
+    logger.debug?.('[app-lifecycle] pruning crash dumps under', crashDumpsDir);
+    pruneCrashDumps?.(crashDumpsDir);
 
     pruneAllJars();
     scheduleInterval(pruneAllJars, 60 * 60 * 1000).unref();

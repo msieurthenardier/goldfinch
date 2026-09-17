@@ -1,6 +1,6 @@
 # Leg: acceptance-and-docs
 
-**Status**: planning
+**Status**: completed
 **Flight**: [Crash and Hang Resilience](../flight.md)
 
 ## Objective

@@ -116,6 +116,16 @@ function createChromeRecovery({ now = Date.now, logger, windowMs = 60_000, maxRe
       // record hit the `chromeRecoveryPaused` branch above forever; no
       // re-arm exists.
       record.chromeRecoveryPaused = true;
+      // Acceptance-run fix pass F1: the chrome is dead and will never reload
+      // again for this record's lifetime, so there is no live document behind
+      // it — `bootConfigServed` must go false here too (only the reload
+      // branch above used to clear it). `listWindows().booted` /
+      // `window-census.js`'s `booted` field both mirror this flag, and
+      // `automation/tabs.js`'s `enumerateTabs` skips any window whose
+      // `booted` is false — without this, a paused window kept reporting
+      // `booted: true` and every `enumerateTabs`/`readDom`-class call against
+      // it hung on `executeJavaScript` against a chrome with no renderer.
+      record.bootConfigServed = false;
       setTitle('Goldfinch — chrome crashed (recovery paused)');
       onCrash?.({ kind: 'chrome', reason, exitCode, url: null, partition: null, windowId, recovery: 'paused' });
       return 'paused';

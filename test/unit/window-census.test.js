@@ -99,6 +99,18 @@ test('window-census: recoveryPaused reflects rec.chromeRecoveryPaused, coerced t
   assert.equal(buildWindowCensus([notPaused], null)[0].recoveryPaused, false);
 });
 
+test('window-census: a paused window reports booted:false AND recoveryPaused:true together (acceptance-run fix pass F1)', () => {
+  // chrome-recovery.js's pause branch clears bootConfigServed on the SAME
+  // record it sets chromeRecoveryPaused on — a real paused record can never
+  // present as booted:true, which is what previously left enumerateTabs
+  // trying (and hanging) against a dead chrome.
+  const paused = rec({ id: 1, booted: false });
+  paused.chromeRecoveryPaused = true;
+  const [row] = buildWindowCensus([paused], null);
+  assert.equal(row.booted, false);
+  assert.equal(row.recoveryPaused, true);
+});
+
 test('window-census: two records → INSERTION ORDER preserved', () => {
   const a = rec({ id: 1 });
   const b = rec({ id: 2 });

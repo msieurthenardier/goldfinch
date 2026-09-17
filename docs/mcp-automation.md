@@ -450,7 +450,12 @@ enumeration, no window discriminator, no window discovery, a probe-walk for over
     way `enumerateTabs`' admin-only `pid` targets a guest.
   - **`recoveryPaused`** (Mission 20 Flight 3) is `true` once a window's chrome has crashed a fourth
     time within 60 seconds — recovery stops for that window's lifetime (the window's title says so;
-    there is no re-arm short of closing the window or relaunching).
+    there is no re-arm short of closing the window or relaunching). Acceptance-run fix pass F1: a
+    paused window's `booted` also reads `false` from that point on (the dead chrome has no live
+    document) — `enumerateTabs` then contributes zero rows for it instead of hanging on a round-trip
+    to a chrome with nothing listening, and main-side per-tab pushes queued for it are dropped
+    rather than piling up forever. Poll `recoveryPaused` to distinguish this from an ordinary
+    mid-boot window, which also reads `booted: false` but transiently.
   - **Admin-only**, because window topology is an app-level cross-jar view: the census names
     windows a jar identity may hold no tabs in at all. Jar keys are refused with
     `automation: admin-only` — the same doctrine as `downloadsList` / `getChromeTarget`.
