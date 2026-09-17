@@ -1223,6 +1223,7 @@ window.goldfinch.onTabDidNavigate(({ wcId, url }) => {
   const tab = findTabByWcId(wcId);
   if (!tab) return;
   tab.url = url;
+  [loadFailureController, hangNoticeController].forEach((c) => c.onTabDidNavigate(tab)); // HAT H2b
   if (tab.id === ctx.activeTabId) {
     els.address.value = tab.url;
     siteSecurityController.refreshTabIndicators(tab); // Mission 20 F3 Leg 1 (DD11): the single chip-refresh owner
@@ -1467,10 +1468,9 @@ Promise.all([
 });
 
 // Mission 20 F3 Leg 2 (DD11 seam ruling): synthetic crash/hang records on the
-// active tab for the a11y audit's two new chrome states. Persist until the
-// tab's next real push clears them — the showDownloadsIndicatorForAudit
-// precedent never reverts either, and the audit visits each state in its own
-// fresh tab, so persistence never occludes a later capture.
+// active tab for the a11y audit's two new chrome states. HAT H2b: cleared by
+// the tab's next committed navigation (both controllers' onTabDidNavigate
+// hooks, wired above) or a real push — the audit visits each state fresh.
 function showCrashPanelForAudit() {
   const tab = activeTab();
   if (!tab || tab.wcId == null) return;

@@ -18,9 +18,11 @@ const moduleUrl = pathToFileURL(path.join(__dirname, '../../src/renderer/chrome/
 function createHarness() {
   const hangNotice = new FakeElement('div');
   hangNotice.classList.add('hidden'); // mirrors index.html's initial class="hidden"
+  const hangNoticeText = new FakeElement('span');
+  hangNoticeText.textContent = "This page isn't responding"; // mirrors index.html's static initial text
   const hangNoticeWait = new FakeElement('button');
   const hangNoticeKill = new FakeElement('button');
-  const els = { hangNotice, hangNoticeWait, hangNoticeKill };
+  const els = { hangNotice, hangNoticeText, hangNoticeWait, hangNoticeKill };
 
   const tabsByWcId = new Map();
   const findTabByWcId = (wcId) => tabsByWcId.get(wcId) || null;
@@ -209,6 +211,102 @@ test('Kill with no current tab (bar not showing) is a harmless no-op', async () 
   assert.deepEqual(h.tabNavigateCalls, []);
 });
 
+// ---------------------------------------------------------------------------
+// HAT H3 follow-up: the forced kill of a busy renderer takes several seconds
+// to land, so Kill must give SYNCHRONOUS, visible feedback (text + disabled
+// buttons + data-state) before the verb is even sent, and a second click
+// while that pending state is up must be a no-op.
+// ---------------------------------------------------------------------------
+
+test('HAT H3: Kill click gives immediate feedback — text, disabled buttons, data-state — before the verb lands', async () => {
+  const h = createHarness();
+  const tab = { id: 'tab-1', wcId: 10, hung: false };
+  h.addTab(tab);
+  h.setActive('tab-1');
+  const controller = await loadController(h);
+  controller.onTabHung({ wcId: 10, hung: true });
+
+  h.els.hangNoticeKill.click();
+
+  assert.equal(h.els.hangNoticeText.textContent, 'Stopping the page…');
+  assert.equal(h.els.hangNoticeWait.disabled, true);
+  assert.equal(h.els.hangNoticeKill.disabled, true);
+  assert.equal(h.els.hangNotice.dataset.state, 'killing');
+  assert.deepEqual(h.tabNavigateCalls, [{ wcId: 10, verb: 'kill-reload' }]);
+});
+
+test('HAT H3: a second Kill click while already killing sends no additional tabNavigate and leaves state as-is', async () => {
+  const h = createHarness();
+  const tab = { id: 'tab-1', wcId: 10, hung: false };
+  h.addTab(tab);
+  h.setActive('tab-1');
+  const controller = await loadController(h);
+  controller.onTabHung({ wcId: 10, hung: true });
+  h.els.hangNoticeKill.click();
+
+  h.els.hangNoticeKill.click();
+
+  assert.deepEqual(h.tabNavigateCalls, [{ wcId: 10, verb: 'kill-reload' }], 'no second kill-reload dispatch');
+  assert.equal(h.els.hangNoticeText.textContent, 'Stopping the page…', 'still showing the pending copy');
+  assert.equal(h.els.hangNotice.dataset.state, 'killing');
+});
+
+test('HAT H3: a tab-hung false push for the killed tab restores the bar (hung-false clears the pending-kill state)', async () => {
+  const h = createHarness();
+  const tab = { id: 'tab-1', wcId: 10, hung: false };
+  h.addTab(tab);
+  h.setActive('tab-1');
+  const controller = await loadController(h);
+  controller.onTabHung({ wcId: 10, hung: true });
+  h.els.hangNoticeKill.click();
+
+  controller.onTabHung({ wcId: 10, hung: false });
+
+  assert.equal(h.els.hangNoticeText.textContent, "This page isn't responding");
+  assert.equal(h.els.hangNoticeWait.disabled, false);
+  assert.equal(h.els.hangNoticeKill.disabled, false);
+  assert.equal(h.els.hangNotice.dataset.state, undefined);
+});
+
+test('HAT H3: onTabDidNavigate for the killed tab also restores the pending-kill state', async () => {
+  const h = createHarness();
+  const tab = { id: 'tab-1', wcId: 10, hung: false };
+  h.addTab(tab);
+  h.setActive('tab-1');
+  const controller = await loadController(h);
+  controller.onTabHung({ wcId: 10, hung: true });
+  h.els.hangNoticeKill.click();
+
+  controller.onTabDidNavigate(tab);
+
+  assert.equal(h.els.hangNoticeText.textContent, "This page isn't responding");
+  assert.equal(h.els.hangNoticeWait.disabled, false);
+  assert.equal(h.els.hangNoticeKill.disabled, false);
+  assert.equal(h.els.hangNotice.dataset.state, undefined);
+});
+
+test('HAT H3: a tab-hung false push for an UNRELATED background tab never touches an in-flight kill on the active tab', async () => {
+  const h = createHarness();
+  const active = { id: 'tab-active', wcId: 1, hung: false };
+  const background = { id: 'tab-bg', wcId: 2, hung: true };
+  h.addTab(active);
+  h.addTab(background);
+  h.setActive('tab-active');
+  const controller = await loadController(h);
+  controller.onTabHung({ wcId: 1, hung: true });
+  h.els.hangNoticeKill.click();
+
+  controller.onTabHung({ wcId: 2, hung: false });
+
+  assert.equal(
+    h.els.hangNoticeText.textContent,
+    'Stopping the page…',
+    "the active tab's pending-kill copy is untouched"
+  );
+  assert.equal(h.els.hangNoticeKill.disabled, true);
+  assert.equal(h.els.hangNotice.dataset.state, 'killing');
+});
+
 test('project(tab) (activateTab projection) shows the bar for an already-hung newly-active tab', async () => {
   const h = createHarness();
   const tab = { id: 'tab-1', wcId: 10, hung: true };
@@ -242,4 +340,67 @@ test('project(null) is a harmless no-op', async () => {
   const h = createHarness();
   const controller = await loadController(h);
   assert.doesNotThrow(() => controller.project(null));
+});
+
+// ---------------------------------------------------------------------------
+// HAT H2b: showHangNoticeForAudit() stamps a SYNTHETIC tab.hung chrome-side
+// that main never learns about, so main's did-start-navigation clear-and-push
+// never fires for it — onTabDidNavigate is the fix, clearing any hung state
+// (synthetic or real) the moment the tab's next navigation commits.
+// ---------------------------------------------------------------------------
+
+test('HAT H2b: onTabDidNavigate clears a SYNTHETIC hung record, refreshes the strip, and hides the bar on the active tab', async () => {
+  const h = createHarness();
+  const tab = { id: 'tab-1', wcId: 10, hung: false };
+  h.addTab(tab);
+  h.setActive('tab-1');
+  const controller = await loadController(h);
+  // Simulate showHangNoticeForAudit()'s synthetic stamp (main never told the
+  // chrome about this hang, so no tab-hung push will ever clear it).
+  tab.hung = true;
+  controller.project(tab);
+  assert.equal(h.els.hangNotice.classList.contains('hidden'), false, 'sanity: the bar is showing');
+  tab.hangDismissed = true; // a stale dismissal lingering from an earlier episode must also be cleared
+
+  controller.onTabDidNavigate(tab);
+
+  assert.equal(tab.hung, false, 'the synthetic hung record must be cleared on the next committed navigation');
+  assert.equal(tab.hangDismissed, false);
+  assert.ok(h.refreshStripCalls.includes(tab), 'the strip must be refreshed');
+  assert.equal(h.els.hangNotice.classList.contains('hidden'), true, 'the bar must be hidden');
+});
+
+test('HAT H2b: onTabDidNavigate on a tab that is not hung is a harmless no-op', async () => {
+  const h = createHarness();
+  const tab = { id: 'tab-1', wcId: 10, hung: false };
+  h.addTab(tab);
+  h.setActive('tab-1');
+  const controller = await loadController(h);
+
+  // A REAL hang is already cleared by main's own tab-hung false push (which
+  // arrives before did-navigate) — this call must be a no-op, not throw, and
+  // must not re-show the bar.
+  assert.doesNotThrow(() => controller.onTabDidNavigate(tab));
+  assert.equal(h.els.hangNotice.classList.contains('hidden'), true);
+});
+
+test('HAT H2b: onTabDidNavigate on a BACKGROUND tab clears its hung record but never touches the bar shown for the real active tab', async () => {
+  const h = createHarness();
+  const active = { id: 'tab-1', wcId: 10, hung: true };
+  const bg = { id: 'tab-2', wcId: 20, hung: true };
+  h.addTab(active);
+  h.addTab(bg);
+  h.setActive('tab-1');
+  const controller = await loadController(h);
+  controller.project(active);
+
+  controller.onTabDidNavigate(bg);
+
+  assert.equal(bg.hung, false, 'the background tab still clears its own hung record');
+  assert.equal(active.hung, true);
+  assert.equal(
+    h.els.hangNotice.classList.contains('hidden'),
+    false,
+    "a background tab's navigation must not hide the bar shown for the real active tab"
+  );
 });

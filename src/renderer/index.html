@@ -354,12 +354,17 @@
          shape: fixed height, #main's flex:1 absorbs the change INSTANTLY (see
          the styles.css INVARIANT comment on #bookmarks-bar — never animated).
          Static content (no per-item render): hang-notice-controller.js only
-         toggles visibility and drives the two buttons. -->
+         toggles visibility and drives the two buttons. The buttons are the
+         shared `.gf-btn`/`.gf-btn-sm` trio (HAT H3 fix, Leg 5) — the SAME
+         Goldfinch button look the load-failure panel uses, sized down for
+         this bar's fixed height; Kill and reload is the filled primary,
+         Wait the outline secondary. `#hang-notice-text` is the one node
+         hang-notice-controller.js's beginKilling()/endKilling() rewrite. -->
     <div id="hang-notice" class="hidden" role="status">
-      <span>This page isn't responding</span>
+      <span id="hang-notice-text">This page isn't responding</span>
       <div class="hang-notice-actions">
-        <button id="hang-notice-wait" type="button" class="text-btn small">Wait</button>
-        <button id="hang-notice-kill" type="button" class="text-btn small">Kill and reload</button>
+        <button id="hang-notice-wait" type="button" class="gf-btn gf-btn-outline gf-btn-sm">Wait</button>
+        <button id="hang-notice-kill" type="button" class="gf-btn gf-btn-primary gf-btn-sm">Kill and reload</button>
       </div>
     </div>
 

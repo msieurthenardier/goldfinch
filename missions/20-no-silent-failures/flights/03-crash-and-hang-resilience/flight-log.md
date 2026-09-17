@@ -857,6 +857,75 @@ Flight-Director-driven next)
 
 ---
 
+### Leg 5 — `hat-and-alignment`
+
+- **HAT H1 fix**: the hung-tab strip glyph `⏳` (U+231B) rendered as tofu on
+  the operator's Linux/WSLg rig; replaced with plain ASCII `!`, coloured
+  amber via a new CSS rule so it stays visually distinct from `⚠` — the
+  `— not responding` accessible name (unchanged) remains the real signal.
+- Gates: `timeout 300 npm test` (4985/4985), lint, typecheck, format +
+  format:check all clean; `renderer.js` untouched; no test pinned the old
+  character so none needed updating.
+- **HAT H2b fix**: `showCrashPanelForAudit`/`showHangNoticeForAudit` stamped a
+  synthetic `tab.crash`/`tab.hung` chrome-side that main never knew about, so
+  no real push ever cleared it; added `onTabDidNavigate(tab)` to both
+  `load-failure-controller.js` and `hang-notice-controller.js`, wired from
+  `renderer.js`'s existing `onTabDidNavigate` handler in one line, clearing
+  either record (synthetic or already-cleared-real) on the tab's next
+  committed navigation. Gates: `timeout 300 npm test` (4991/4991), lint,
+  typecheck, format + format:check all clean; `renderer.js` stays exactly at
+  `RENDERER_LINE_BUDGET` (1577, split-array metric) via an offsetting comment
+  trim.
+- **HAT H3 fix (bar buttons + Kill feedback)**: two operator findings on the
+  hang bar. (1) `#hang-notice-wait`/`#hang-notice-kill` were plain
+  `.text-btn.small` — restyled to the load-failure panel's own Goldfinch
+  button look. Extracted the panel's `.lf-btn`/`.lf-btn-primary`/
+  `.lf-btn-outline` (id-independent, but panel-only) into a shared
+  `.gf-btn`/`.gf-btn-primary`/`.gf-btn-outline` trio in `styles.css`, reading
+  the plain global tokens (`--accent`/`--accent-fg`/`--border`/`--fg`/
+  `--fg-dim`/`--bg-2`) instead of the panel-local `--lf-*` aliases — those
+  aliases already resolved to the same values, so the panel's rendering is
+  unchanged, byte-for-byte. `load-failure-controller.js`'s four button
+  `classList.add(...)` calls and the `#load-failure-heading:focus-visible`
+  combined selector were updated to match (the button half of that selector
+  is now covered by the shared `.gf-btn:focus-visible` rule). Added a
+  `.gf-btn-sm` additive modifier (22px height / 11px radius / 12px font,
+  same pill ratio as the panel's 36px/18px) since the bar's row height is a
+  fixed, load-bearing literal (CLAUDE.md's WebContentsView INVARIANT — never
+  resize chrome layout around the guest slot) — the button shrinks to fit
+  the row, not the reverse. Kill and reload got `gf-btn-primary` (filled),
+  Wait got `gf-btn-outline` (outline); both keep `.gf-btn:focus-visible`
+  rings and pass 4.5:1 (verified by computed sRGB relative luminance, same
+  method as the `.lf-brand` contrast note). (2) The forced kill takes several
+  seconds to land, so the click looked like a no-op — added
+  `hang-notice-controller.js`'s `beginKilling()`/`endKilling()`: on click,
+  synchronously (before `tabNavigate('kill-reload')`) sets
+  `#hang-notice-text` to "Stopping the page…", disables both buttons, and
+  stamps `#hang-notice[data-state="killing"]` (muted-text CSS keyed off it);
+  cleared by the episode's next `tab-hung false` push OR its next
+  `onTabDidNavigate`, both scoped to the tab the bar is currently
+  showing/killing so an unrelated background tab's push/navigation can't
+  touch it. A second Kill click while `killing` is a no-op (no duplicate
+  `tabNavigate` dispatch). Added `#hang-notice-text` id (`index.html`,
+  `context.js`'s `IDS` map) so the controller can address the text node on
+  its own, independent of the buttons. Six new unit tests in
+  `hang-notice-controller.test.js` pin: click → text/disabled/data-state;
+  hung-false → restored; onTabDidNavigate → restored; second click while
+  killing → no-op; an unrelated background tab's hung-false leaves an
+  in-flight kill untouched. Gates: `timeout 300 npm test` (4996/4996), lint,
+  typecheck, format + format:check all clean; `renderer.js` untouched (no
+  new dep needed — `hangNoticeText` rides the existing whole-`els` object
+  already passed into `createHangNoticeController`).
+- **HAT H4 fix (bar button weight)**: `.gf-btn-sm`'s Wait/Kill-and-reload
+  buttons inherited `.gf-btn`'s 600 font-weight, which read as bold/wrong at
+  the hang bar's small size; added `font-weight: normal` to `.gf-btn-sm`
+  (matching the toolbar's `.icon-btn`/`.text-btn`/bookmarks-bar items, which
+  set no font-weight at all) — the panel's full-size `.gf-btn` buttons are
+  untouched. Gates: `timeout 300 npm test` (4996/4996), lint, format +
+  format:check all clean.
+
+---
+
 ## Decisions
 
 ### Kill-and-reload gates on `killRequested` alone (DD3 amendment, after spike (f))
@@ -1250,3 +1319,13 @@ and this leg's unit suite already covers both `SEGV`/`crashed` and
 - **Findings for the debrief** (not row failures): (1) with `crashReporter` active, `kill -SEGV`/`-ABRT` no longer crash a SANDBOXED guest (they did in leg 2's smoke before the reporter existed) and a SEGV on the unsandboxed chrome takes ~15 s to register — hypothesis: Crashpad's in-process handler; a real page-triggered crash spike is needed before Flight 4 (a real segfault may present as a hang); (2) `closeTab` returned `false` for a `failed` tab in a background window (squawk candidate); (3) 4 minidumps for 2 trapped crashes (Crashpad artefact count); (4) `forcefullyCrashRenderer` on a busy renderer takes ~12 s to land; (5) apparatus facts for the crew file: capture-timeout on a stopped renderer, `openTab` bare number, `navigate`-after-`openTab` race, same-origin tabs may share a process, post-loop reads need their own evidence file, re-resolve THE window by `lastFocused` after a relaunch, a wedged `enumerateTabs` can be product not apparatus; (6) DD11's "hung push refreshes the chip" wording overstates (`onTabHung` never needed to).
 - Spec re-authored per the Validator: row 6's visibility clause `[by-eye]`, row 12's first-read race note, row 13 "at least" framing. `Last Run` set. Leg `landed` → `completed`; CP4 checked. HAT (leg 5) remains — operator-elected; row 6's by-eye clause is its first item.
 - **Committed `52ea651` (leg 4 + fix passes F1/F2 + run log), pushed; PR #219 body updated.** Legs 1–4 `completed`, CP1–CP4 checked. The flight stays `in-flight`: the operator-elected HAT leg (`hat-and-alignment`) is the remaining leg and needs the operator present — first item: row 6's by-eye clause (the stopped guest stays painted under the hang bar), then the crash copy per reason, chrome recovery by eye, the paused title, and the crash log's contents.
+
+### Leg 5 — HAT walk (Flight Director notes, 2026-09-17)
+
+- **H1 PASS** (row 6's by-eye clause closed): the page stayed painted under the bar over a stopped renderer; Wait hid the bar; CONT cleared it. Fix: the hung glyph rendered as a tofu box (no hourglass in the rig's font) → amber bold `!`.
+- **H2 PASS**: killed wording and Reload with history (Back reached the previous page). H2b: the synthetic `crashed` panel via the audit seam exposed a seam gap (a chrome-only synthetic record never cleared on a real navigation) → fix: both controllers clear `crash`/`hung` on `tab-did-navigate`; `renderer.js` held at budget by a net-zero edit.
+- **H3 PASS with a fix**: Kill and reload on a real busy-loop hang took 5+ s to land with no feedback → "Stopping the page…" with disabled buttons the instant Kill is clicked; the bar's buttons restyled to the panel's `.gf-btn` family (operator request), then the small variant's weight corrected to normal (operator: bold looked wrong).
+- **H4 PASS**: chrome crash rebuilt strip and toolbar with all four tabs and the same active tab; the guest never flickered.
+- **H5 — design gap, feature for the debrief**: after the fourth crash the window paused as designed, but the operator saw a black chrome area, a guest that no longer resized with the window, and no way out from inside a frameless window (no title bar, no close button — the chrome owned both). The title-only signal is not perceivable. Two directions recorded: (1) a main-owned recovery overlay in the dead chrome area with "Reload once more" / "Close window", main keeping guest bounds in sync; (2) close the window on pause after a snapshot write. Recommendation: (1). Operator ruling pending at the debrief.
+- **H6**: records read as intended (host-only origins, eight fields); the F2 prune verified live (54 → 42 files at launch). **H7 PASS** after the weight fix.
+- Rig torn down: app killed by port pid, fixture servers stopped, key file deleted, app log shredded. Leg 5 `completed`; flight `landed`; mission criteria 6–9 checked, 10 partial; Flight 3 checked in the mission.

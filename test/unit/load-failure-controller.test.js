@@ -948,6 +948,101 @@ test('a crash push for an unknown wcId is a no-op', async () => {
   assert.doesNotThrow(() => h.pushCrash({ wcId: 999, crash: { reason: 'crashed', exitCode: 139, url: 'x' } }));
 });
 
+// ---------------------------------------------------------------------------
+// HAT H2b: showCrashPanelForAudit() stamps a SYNTHETIC tab.crash chrome-side
+// that main never learns about, so main's did-start-navigation clear-and-push
+// never fires for it — onTabDidNavigate is the fix, clearing any crash record
+// (synthetic or real) the moment the tab's next navigation commits.
+// ---------------------------------------------------------------------------
+
+test('HAT H2b: onTabDidNavigate clears a SYNTHETIC crash record, restores the strip, and hides the panel on the active tab', async () => {
+  const h = createHarness();
+  const tab = {
+    id: 'tab-1',
+    wcId: 10,
+    url: 'https://crashed.test/',
+    title: 'Crashed',
+    btn: makeBtn(),
+    loadFailure: null,
+    crash: null
+  };
+  h.addTab(tab);
+  h.setActive('tab-1');
+  const controller = await loadController(h);
+  // Simulate showCrashPanelForAudit()'s synthetic stamp (main never told the
+  // chrome about this crash, so no tab-crash push will ever clear it).
+  tab.crash = { reason: 'crashed', exitCode: 139, url: tab.url };
+  controller.applyStripState(tab);
+  controller.show(tab);
+  assert.equal(h.els.loadFailureSurface.classList.contains('hidden'), false, 'sanity: the panel is showing');
+
+  controller.onTabDidNavigate(tab);
+
+  assert.equal(tab.crash, null, 'the synthetic crash record must be cleared on the next committed navigation');
+  assert.equal(tab.btn.dataset.loadState, undefined, 'the strip must be restored');
+  assert.equal(h.els.loadFailureSurface.classList.contains('hidden'), true, 'the panel must be hidden');
+});
+
+test('HAT H2b: onTabDidNavigate on a tab with no crash record is a harmless no-op', async () => {
+  const h = createHarness();
+  const tab = {
+    id: 'tab-1',
+    wcId: 10,
+    url: 'https://x.test/',
+    title: 'X',
+    btn: makeBtn(),
+    loadFailure: null,
+    crash: null
+  };
+  h.addTab(tab);
+  h.setActive('tab-1');
+  const controller = await loadController(h);
+
+  // A REAL crash is already cleared by main's own tab-crash null push (which
+  // arrives before did-navigate, since did-start-navigation precedes it) —
+  // this call must be a no-op, not throw, and must not re-show the panel.
+  assert.doesNotThrow(() => controller.onTabDidNavigate(tab));
+  assert.equal(h.els.loadFailureSurface.classList.contains('hidden'), true);
+});
+
+test('HAT H2b: onTabDidNavigate on a BACKGROUND tab clears its crash record but never touches the panel shown for the real active tab', async () => {
+  const h = createHarness();
+  const active = {
+    id: 'tab-1',
+    wcId: 10,
+    url: 'https://active.test/',
+    title: 'Active',
+    btn: makeBtn(),
+    loadFailure: null,
+    crash: { reason: 'crashed', exitCode: 139, url: 'https://active.test/' }
+  };
+  const bg = {
+    id: 'tab-2',
+    wcId: 20,
+    url: 'https://bg.test/',
+    title: 'BG',
+    btn: makeBtn(),
+    loadFailure: null,
+    crash: { reason: 'crashed', exitCode: 139, url: 'https://bg.test/' }
+  };
+  h.addTab(active);
+  h.addTab(bg);
+  h.setActive('tab-1');
+  const controller = await loadController(h);
+  controller.applyStripState(active);
+  controller.show(active);
+
+  controller.onTabDidNavigate(bg);
+
+  assert.equal(bg.crash, null, 'the background tab still clears its own crash record');
+  assert.deepEqual(active.crash, { reason: 'crashed', exitCode: 139, url: 'https://active.test/' });
+  assert.equal(
+    h.els.loadFailureSurface.classList.contains('hidden'),
+    false,
+    "a background tab's navigation must not hide the panel shown for the real active tab"
+  );
+});
+
 test('DD1: a fresh failed load clears a prior crash (crash then a fresh failed load)', async () => {
   const h = createHarness();
   const tab = {

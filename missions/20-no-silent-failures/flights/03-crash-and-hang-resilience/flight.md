@@ -1,21 +1,21 @@
 # Flight: Crash and Hang Resilience
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [No Silent Failures](../../mission.md)
 
 ## Contributing to Criteria
 
-- [ ] A crashed tab recovers in place — crash surface with a working reload;
+- [x] A crashed tab recovers in place — crash surface with a working reload;
       back/forward history intact; strip shows the crashed state; reason in
       the copy where it helps (killed / out of memory / crashed)
-- [ ] A crashed chrome view recovers without losing the window — strip,
+- [x] A crashed chrome view recovers without losing the window — strip,
       toolbar, and active tab rebuilt from main's record; open guests survive
       untouched; several simultaneous crashes recover without a reload storm
-- [ ] A hung tab offers wait-or-kill — non-blocking notice; kill-and-reload
+- [x] A hung tab offers wait-or-kill — non-blocking notice; kill-and-reload
       recovers; a renderer that recovers on its own clears the notice
-- [ ] Every crash leaves a local record — reason, exit code, origin; dumps
+- [x] Every crash leaves a local record — reason, exit code, origin; dumps
       collected locally; no upload, no network request
-- [ ] *(partial — `crashed` / `hung` census values; keyboard-operable new
+- [x] *(partial — `crashed` / `hung` census values; keyboard-operable new
       surfaces subject to Known Issue #216)* New surfaces are safe and
       accessible
 
@@ -401,7 +401,7 @@ the crash-log field set (DD7). A HAT change is a spec re-author.
 
 - [x] All open questions resolved
 - [x] Design decisions documented
-- [ ] Prerequisites verified
+- [x] Prerequisites verified
 - [x] Validation approach defined
 - [x] Legs defined
 
@@ -444,7 +444,7 @@ the crash-log field set (DD7). A HAT change is a spec re-author.
       active tab; a fourth crash in 60 s pauses; `crash-log.jsonl` has
       redacted rows; a minidump exists; no network attempt
 - [x] CP4 — `crash-and-hang-surfaces` run: partial (14/16 + 12b pass; row 6 by-eye → HAT); `npm run a11y` exit 0
-- [ ] CP5 — HAT complete; flight `landed`
+- [x] CP5 — HAT complete; flight `landed`
 
 ### Adaptation Criteria
 
@@ -498,7 +498,7 @@ the crash-log field set (DD7). A HAT change is a spec re-author.
       driver return-shape bug, not a product defect).
 - [x] `acceptance-and-docs` — the Witnessed run (operator present for
       nothing — every row is automatable), a11y states, README/CLAUDE.md.
-- [ ] `hat-and-alignment` *(optional, operator-elected)* — small walk.
+- [x] `hat-and-alignment` *(optional, operator-elected)* — small walk.
 
 ---
 
@@ -506,11 +506,11 @@ the crash-log field set (DD7). A HAT change is a spec re-author.
 
 ### Completion Checklist
 
-- [ ] All legs completed
-- [ ] Code merged
-- [ ] Tests passing (`npm test`, `npm run lint`, `npm run typecheck`,
+- [x] All legs completed
+- [ ] Code merged (PR #219 ready for review)
+- [x] Tests passing (`npm test`, `npm run lint`, `npm run typecheck`,
       `npm run format:check`, `npm run a11y` exit 0)
-- [ ] Documentation updated (`docs/mcp-automation.md`, `docs/dev-testing.md`,
+- [x] Documentation updated (`docs/mcp-automation.md`, `docs/dev-testing.md`,
       README privacy notes, CLAUDE.md patterns)
 
 ### Verification

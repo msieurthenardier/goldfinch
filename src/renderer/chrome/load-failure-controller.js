@@ -96,7 +96,7 @@ export function createLoadFailureController(deps) {
   retry.type = 'button';
   retry.id = 'load-failure-retry';
   retry.textContent = 'Retry';
-  retry.classList.add('lf-btn', 'lf-btn-primary');
+  retry.classList.add('gf-btn', 'gf-btn-primary');
   actions.appendChild(retry);
 
   // Mission 20 Flight 3 Leg 2 (DD1): Reload — the crash branch's ONLY
@@ -108,7 +108,7 @@ export function createLoadFailureController(deps) {
   reload.type = 'button';
   reload.id = 'load-failure-reload';
   reload.textContent = 'Reload';
-  reload.classList.add('hidden', 'lf-btn', 'lf-btn-primary');
+  reload.classList.add('hidden', 'gf-btn', 'gf-btn-primary');
   actions.appendChild(reload);
 
   // Mission 20 Flight 2 Leg 4 (DD9): View certificate — opens the read-only
@@ -120,7 +120,7 @@ export function createLoadFailureController(deps) {
   viewCert.type = 'button';
   viewCert.id = 'load-failure-view-cert';
   viewCert.textContent = 'View certificate';
-  viewCert.classList.add('hidden', 'lf-btn', 'lf-btn-outline');
+  viewCert.classList.add('hidden', 'gf-btn', 'gf-btn-outline');
   actions.appendChild(viewCert);
 
   // Mission 20 Flight 2 Leg 3 (DD3/DD4): the ADDITIVE Advanced hook — opens
@@ -132,7 +132,7 @@ export function createLoadFailureController(deps) {
   advanced.type = 'button';
   advanced.id = 'load-failure-advanced';
   advanced.textContent = 'Advanced';
-  advanced.classList.add('hidden', 'lf-btn', 'lf-btn-outline');
+  advanced.classList.add('hidden', 'gf-btn', 'gf-btn-outline');
   actions.appendChild(advanced);
 
   // HAT H1 fix 1: the Goldfinch brand mark — unobtrusive, bottom-left of the
@@ -277,9 +277,15 @@ export function createLoadFailureController(deps) {
       return;
     }
     if (state === 'hung') {
+      // HAT leg-5 fix (H1): plain ASCII, not the hourglass — the hourglass
+      // (U+231B) renders as tofu on Linux/WSLg's default font stack, and the
+      // accessible name below (`— not responding`) is the real signal per
+      // the state-in-words rule, so the glyph itself can safely be the
+      // simplest thing that's guaranteed to render everywhere. Amber comes
+      // from CSS keyed off `data-load-state='hung'` (styles.css).
       if (statusEl) {
         statusEl.hidden = false;
-        statusEl.textContent = '⏳';
+        statusEl.textContent = '!';
       }
       const name = tab.title || tab.url;
       if (titleEl) titleEl.textContent = name;
@@ -423,5 +429,24 @@ export function createLoadFailureController(deps) {
     }
   });
 
-  return { show, hide, focusHeading, applyStripState };
+  // onTabDidNavigate(tab): HAT H2b fix. A renderer that just committed a
+  // navigation is neither crashed nor hung — but `showCrashPanelForAudit()`
+  // (renderer.js) stamps a SYNTHETIC `tab.crash` chrome-side that main never
+  // knows about, so main's own did-start-navigation clear-and-push-null
+  // (guest-wiring.js) never fires for it and the synthetic record (and this
+  // panel, and the census's `crashed` loadState) would otherwise outlive the
+  // navigation that superseded it. Called from renderer.js's own
+  // onTabDidNavigate handler for every committed nav, real or post-synthetic;
+  // a REAL crash has already been cleared by main's `tab-crash null` push by
+  // the time did-navigate fires (did-start-navigation always precedes
+  // did-navigate), so this is a harmless no-op in that case.
+  /** @param {any} tab */
+  function onTabDidNavigate(tab) {
+    if (!tab || !tab.crash) return;
+    tab.crash = null;
+    applyStripState(tab);
+    if (currentTab === tab) hide();
+  }
+
+  return { show, hide, focusHeading, applyStripState, onTabDidNavigate };
 }

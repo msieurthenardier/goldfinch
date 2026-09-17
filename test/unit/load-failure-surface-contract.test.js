@@ -64,10 +64,12 @@ test('load-failure-controller.js never assigns innerHTML from data (house rule: 
   assert.ok(!/\.innerHTML\s*=/.test(src), 'load-failure-controller.js must build/update its DOM via textContent only');
 });
 
-test('load-failure-controller.js exports createLoadFailureController returning show/hide/focusHeading/applyStripState', () => {
+test('load-failure-controller.js exports createLoadFailureController returning show/hide/focusHeading/applyStripState/onTabDidNavigate', () => {
   const src = fs.readFileSync(CONTROLLER_PATH, 'utf8');
   assert.ok(/export function createLoadFailureController\(deps\)/.test(src));
-  assert.ok(/return \{ show, hide, focusHeading, applyStripState \};/.test(src));
+  // HAT H2b: onTabDidNavigate added — clears a (possibly synthetic) crash
+  // record on the tab's next committed navigation.
+  assert.ok(/return \{ show, hide, focusHeading, applyStripState, onTabDidNavigate \};/.test(src));
 });
 
 // Mission 20 Flight 3 Leg 2 (DD1): REWRITTEN, not deleted — the strip now has

@@ -77,6 +77,10 @@ const IDS = {
   // toolbar shown while the active tab's renderer is unresponsive;
   // hang-notice-controller.js owns it.
   hangNotice: 'hang-notice',
+  // HAT H3 fix (Leg 5): the bar's text node, addressed on its own id so
+  // hang-notice-controller.js can rewrite it (beginKilling()/endKilling())
+  // without touching the buttons.
+  hangNoticeText: 'hang-notice-text',
   hangNoticeWait: 'hang-notice-wait',
   hangNoticeKill: 'hang-notice-kill'
 };

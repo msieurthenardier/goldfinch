@@ -93,21 +93,21 @@ Open Questions below.
 - [x] **A site's certificate is inspectable.** From the address chip the
   operator can read the current page's certificate: subject, issuer,
   validity window, fingerprints, and the chain. Read-only.
-- [ ] **A crashed tab recovers in place.** When a tab's renderer dies, the
+- [x] **A crashed tab recovers in place.** When a tab's renderer dies, the
   tab shows a crash surface with a working reload; reloading restores the
   page with back/forward history intact; the strip shows the crashed state
   until recovery. The crash reason is reflected in the copy where it helps
   (killed / out of memory / crashed).
-- [ ] **A crashed chrome view recovers without losing the window.** When the
+- [x] **A crashed chrome view recovers without losing the window.** When the
   chrome renderer dies, the window's tab strip, toolbar, and active tab are
   rebuilt from main's own record; open guests survive untouched and the
   previously active tab is active again. Several simultaneous crashes
   (the sleep/resume pattern) recover without a reload storm.
-- [ ] **A hung tab offers wait-or-kill.** A renderer that stops responding
+- [x] **A hung tab offers wait-or-kill.** A renderer that stops responding
   surfaces a non-blocking notice with a wait option and a kill-and-reload
   option; kill-and-reload recovers the tab; a renderer that recovers on its
   own clears the notice.
-- [ ] **Every crash leaves a local record.** Reason, exit code, and the page
+- [x] **Every crash leaves a local record.** Reason, exit code, and the page
   origin are logged for every renderer crash, and crash dumps are collected
   locally. Nothing is uploaded and no network request is made by any of
   this — the no-silent-egress posture is unchanged.
@@ -265,7 +265,7 @@ Emergent blockers and issues discovered during execution.
   "not secure" chip/popup/census state for `http:` and overridden origins;
   read-only certificate viewer fed by a session verification observer;
   throwaway-CA fixture behavior spec.
-- [ ] Flight 3: **Crash and hang resilience** (#133 + hung renderers) —
+- [x] Flight 3: **Crash and hang resilience** (#133 + hung renderers) —
   guest crash surface with reload; chrome-view reload-and-reconcile from
   the registry with a multi-crash storm guard; `unresponsive` wait-or-kill;
   local crash records and dump collection; OS-signal-injected behavior spec for
