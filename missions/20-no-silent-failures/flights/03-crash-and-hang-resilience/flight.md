@@ -1,6 +1,6 @@
 # Flight: Crash and Hang Resilience
 
-**Status**: landed
+**Status**: completed
 **Mission**: [No Silent Failures](../../mission.md)
 
 ## Contributing to Criteria
@@ -507,7 +507,7 @@ the crash-log field set (DD7). A HAT change is a spec re-author.
 ### Completion Checklist
 
 - [x] All legs completed
-- [ ] Code merged (PR #219 ready for review)
+- [x] Code merged (PR #219)
 - [x] Tests passing (`npm test`, `npm run lint`, `npm run typecheck`,
       `npm run format:check`, `npm run a11y` exit 0)
 - [x] Documentation updated (`docs/mcp-automation.md`, `docs/dev-testing.md`,
