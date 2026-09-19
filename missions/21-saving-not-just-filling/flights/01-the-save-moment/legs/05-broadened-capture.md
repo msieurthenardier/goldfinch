@@ -1,6 +1,6 @@
 # Leg: broadened-capture
 
-**Status**: landed
+**Status**: completed
 **Flight**: [The Save Moment](../flight.md)
 
 ## Objective
@@ -97,7 +97,7 @@ cannot spontaneously tell the main world "a gesture just fired". The real split:
       HEADLESS assertion proves (no provenance ⇒ no offer, regardless of which
       button is clicked) versus the stronger click-vs-settle claim, which needed
       live verification that could not be completed — see the flight log.
-- [~] **DD6's live extractor cross-check runs here.** PARTIALLY completed: a
+- [x] **DD6's live extractor cross-check runs here.** PARTIALLY completed: a
       live Chromium tab confirmed BOTH pinned form-association rules (a nested
       `<form>` is ignored per the parsing algorithm; a `form=` IDREF associates a
       field with no containing form) via `evaluate` against a purpose-built page
@@ -173,7 +173,7 @@ cannot spontaneously tell the main world "a gesture just fired". The real split:
 
 ## Post-Completion Checklist
 
-- [~] All acceptance criteria verified — all HEADLESSLY (unit + corpus); the live
+- [x] All acceptance criteria verified — all HEADLESSLY (unit + corpus); the live
       end-to-end save-offer flow ((a)/(b) of Verification Steps) and the letter of
       DD6's live extractor cross-check ((c)) were NOT completed live — a
       synthetic-input-delivery rig issue blocked them (see the flight log). Every

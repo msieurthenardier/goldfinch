@@ -283,7 +283,10 @@ that follows it fires.
 
 ## Known Issues
 
-- [ ] **Flight 1's live acceptance is outstanding.** The dev sandbox's compositor
+- [x] ~~**Flight 1's live acceptance is outstanding.**~~ **CLOSED 2026-09-19** by
+      Flight 1's HAT leg — the operator drove all seven checks on the dev build and
+      every one passed, including the motivating submit-outside-every-form shape
+      raising a real card save offer that persisted to the vault. Original text: The dev sandbox's compositor
       is broken (synthetic input and screenshots fail with GPU/DRM errors while
       `evaluate` works), so nobody has yet watched the broadened trigger raise a
       real save offer on a real page. A rig problem rather than an app one —
@@ -304,7 +307,7 @@ that follows it fires.
 > **Note:** These are tentative suggestions, not commitments. Flights are planned
 > and created one at a time as work progresses.
 
-- [x] Flight 1: **The save moment** *(landed 2026-09-19, PR #222 — live acceptance outstanding, see Known Issues)* — replace the single `submit` trigger with a
+- [x] Flight 1: **The save moment** *(landed 2026-09-19, PR #222 — live acceptance CLOSED via HAT)* — replace the single `submit` trigger with a
       broadened, forgery-resistant trigger set for logins and cards, and stand up
       the committed fixture corpus that proves it. Carries the mission's central
       risk and its hardest design decision; everything else depends on it.

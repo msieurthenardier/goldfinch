@@ -1862,3 +1862,53 @@ mission's own docs.
 **Outstanding**: the leg's own HAT checklist (`legs/06-hat-and-alignment.md`)
 still needs the live walk steps completed/checked off by the operator; this
 entry covers only the corpus-defect fix that walk surfaced.
+
+### Leg 6 HAT — all seven checks passed; two findings, one fixed inline
+
+Operator drove every step on the dev build. Results:
+
+1. **Motivating shape offers.** A card typed into a form whose submit control sits
+   outside every form raised a real card save offer, which PERSISTED to the vault.
+   This is the mission's headline criterion, demonstrated live — the failure that
+   started this whole mission is fixed.
+2. **Ordinary login form still offers** — no regression from removing the submit
+   listener.
+3. **Page-authored values raise nothing.** Clicking submit on a fixture whose
+   fields arrive pre-filled by `value` attributes produced no offer, twice, for
+   both families. The hard-zero property holding live, not just in unit tests.
+4. **Settle without a gesture raises nothing** — typing then navigating away via
+   the address bar released nothing, because nothing was held.
+5. **Fill-then-resave works and raises no spurious offer.** This one mattered most:
+   our own fills dispatch UNTRUSTED events by construction, so a keystroke-only
+   provenance rule would have silently broken it. DD3h holds live.
+6. **`form=` IDREF cross-check passes** — a submit control outside the form,
+   associated by the HTML `form=` attribute, offers. Chromium associates it the way
+   our hand-rolled extractor claims, which is the behavioural form of DD6's
+   cross-check.
+7. **Cross-window state is correct** — an offer raised in a second window lands in
+   the window owning the tab, with no leakage.
+
+**Finding 1 (fixed inline, commit 50fac36).** The corpus asserted
+capture-worthiness, not offer release — `assert: 'offers'` proved only that a
+gesture resolved an entry worth holding. Exposed live: the gated motivating fixture
+has no script and no navigation, so it can NEVER offer in a real browser, yet the
+suite gated on it. Third instance of this defect class in the flight, in a new
+guise ("asserts a narrower property than its name claims"), and the first one a
+human rather than a review caught. Fixed by renaming the weak assertion to
+`assertCapturesEntry`, building a genuinely stronger `assertOffersEntry` around
+native-submit settle, demoting the un-settleable fixture (never deleting it), adding
+a `form=` variant that honestly gates the motivating DOM shape, and adding a canary
+requiring `assertOffersEntry` to FAIL on the demoted fixture. Production code
+untouched — verified `git diff HEAD~1 HEAD -- src/` empty.
+
+**Finding 2 (NOT fixed — squawk material, pre-existing and out of charter).**
+A hand-typed expiry of `2/27` saves fine and can never be filled back.
+`parseExpiry` accepts only 4 or 6 digits, so a single-digit month returns null and
+the fill silently writes nothing. Two halves: the parser rejects a common human
+input form, and capture stores the raw string without normalising or validating, so
+the vault holds an unusable value while appearing to succeed. Pre-existing — it
+predates this flight (the old submit path had the identical hole) and no production
+code here caused it. Deliberately NOT folded into the flight: out of charter,
+bounded, and the flight's acceptance is not blocked by it. It deserves a sharp
+squawk, because "stores something it can never use, silently" is exactly the failure
+class this mission is named after.

@@ -563,7 +563,7 @@ sheet and Flight 3's generator surface — do not budget slack here for them.
       live extractor cross-check is a required acceptance criterion of this leg**
       (DD6) — at least one canonical fixture's detection result compared against
       the real app, validating the parser rather than trusting it.
-- [~] **Leg 5** `broadened-capture` (landed; live acceptance OUTSTANDING) — the gesture trigger, per-field provenance (DD3) and
+- [x] **Leg 5** `broadened-capture` — the gesture trigger, per-field provenance (DD3) and
       offer-on-settle together (they are entangled; a capture-without-settle
       intermediate would be pure noise, and provenance is what makes the trigger
       safe rather than a separable polish step), promoting gated shapes as solved.
@@ -574,7 +574,7 @@ sheet and Flight 3's generator surface — do not budget slack here for them.
       implicit in "provenance" — this is the codebase's established per-tab owner-routed push
       class, and event-time resolution is precisely what makes a tab moved to
       another window between capture and settle work automatically.
-- [ ] **Leg 6** `hat-and-alignment` *(optional)* — guided HAT over the end-to-end save
+- [x] **Leg 6** `hat-and-alignment` — guided HAT over the end-to-end save
       experience, including DD4's cross-origin-settle exposure check and at least
       one state the operator is not looking at (a second window, a background tab).
       The extractor cross-check is NOT here — it is a required criterion of
