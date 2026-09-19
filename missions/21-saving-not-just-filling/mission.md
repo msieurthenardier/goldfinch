@@ -283,14 +283,28 @@ that follows it fires.
 
 ## Known Issues
 
-*(Populated as flights surface blockers.)*
+- [ ] **Flight 1's live acceptance is outstanding.** The dev sandbox's compositor
+      is broken (synthetic input and screenshots fail with GPU/DRM errors while
+      `evaluate` works), so nobody has yet watched the broadened trigger raise a
+      real save offer on a real page. A rig problem rather than an app one —
+      synthetic input works against the installed build. Closes via Flight 1's
+      optional HAT leg, which the operator runs.
+- [ ] **Bounded plaintext retention in the isolated world** (Flight 1, DD3i). A
+      provenanced value is held as a JS string for a TTL-bounded window, where
+      before the flight a plaintext copy existed only transiently inside one
+      synchronous submit handler. Exposure duration, not value forgery — budgeted
+      deliberately, and the one thing the new architecture made worse.
+- [ ] **Gesture-initiated fill on a page with MULTIPLE detected forms** resolves
+      by entry ordinal rather than the clicked node, because no node reference may
+      cross the isolated-world boundary. Correct in the common case; a DOM
+      mutation between the two enumerations can still misassociate.
 
 ## Flights
 
 > **Note:** These are tentative suggestions, not commitments. Flights are planned
 > and created one at a time as work progresses.
 
-- [ ] Flight 1: **The save moment** — replace the single `submit` trigger with a
+- [x] Flight 1: **The save moment** *(landed 2026-09-19, PR #222 — live acceptance outstanding, see Known Issues)* — replace the single `submit` trigger with a
       broadened, forgery-resistant trigger set for logins and cards, and stand up
       the committed fixture corpus that proves it. Carries the mission's central
       risk and its hardest design decision; everything else depends on it.
