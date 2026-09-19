@@ -1,0 +1,24 @@
+<!--
+  Fixture: unhinted-billing-fields
+  Corpus tier: negative-detection (gated NOW — asserted by assertNoDetectableEntry)
+  Models: a checkout-adjacent form (e.g. a billing-address step laid out the
+  way a card form often is) whose fields carry NO autocomplete cc-* token and
+  NO name/id matching the card fallback patterns (vault-card-fields.js's
+  FALLBACK_PATTERNS are deliberately strict — see its own header comment on
+  false positives being the risk to manage). A genuinely adversarial near-miss:
+  a heuristic that fired on "three text inputs in a checkout-looking form"
+  WOULD fire here; findAllCardFields correctly does not.
+  Why negative-detection: findAllCardFields must return [] (no `number` role
+  ever resolves, so no entry is ever anchored), and findAllLoginFields must
+  return [] (no password field present).
+  Added: 2026-09-19 (Mission 21, Flight 1, Leg 4 — fixture-corpus).
+-->
+<form id="billing">
+  <label for="field1">Address line 1</label>
+  <input type="text" id="field1" name="field1" placeholder="123 Main St" />
+  <label for="field2">City</label>
+  <input type="text" id="field2" name="field2" placeholder="Springfield" />
+  <label for="field3">Postal code</label>
+  <input type="text" id="field3" name="field3" placeholder="00000" />
+  <button type="submit">Continue</button>
+</form>

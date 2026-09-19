@@ -173,45 +173,63 @@ function registerBrowserIpc({
     popupVaultIconMenu?.({ wcId, win });
   });
 
-  // Vault capture (M12 F2 Leg 4, DD7/DD9): a submitted login form's credential arrives
-  // here as { username, password } (password a Uint8Array). The trusted wcId is
-  // event.sender.id; the ORIGIN is derived in main from the sender URL (never the
-  // guest-supplied value — none is sent). getVaultHuman().capture applies the
-  // set-up/unlocked/persistent-jar gate and holds the password in a MAIN-SIDE record;
-  // it returns { captureId, model } (model carries NO password) or null (dropped). On a
-  // returned offer, forward it to the owning window's chrome — the guest-media-list →
-  // chromeForTab idiom. Gated on the getVaultHuman injection (offline tests omit it).
+  // Vault capture — GESTURE-TIME HOLD (Mission 21 F1 Leg 5, broadened-capture,
+  // superseding the M12 F2 Leg 4 submit-only version). A qualifying gesture's
+  // credential arrives here as { username, usernameDetected, password }
+  // (password a Uint8Array) — READ at gesture time in the guest, already
+  // provenance-filtered by the isolated-world observer. The trusted wcId is
+  // event.sender.id; the ORIGIN is derived in main from the sender URL (never
+  // the guest-supplied value — none is sent) and FROZEN at hold time
+  // (`holdGestureLogin`), never re-derived at settle. This handler does NOT
+  // dispose or offer anything — `getVaultHuman().holdGestureLogin` only gates
+  // (set up / persistent jar / origin) and HOLDS; the offer is raised only at
+  // SETTLE (guest-wiring.js's did-navigate hook, or the guest-vault-gesture-
+  // settle handler below for the SPA/detachment case) — DD3f/DD4. Gated on the
+  // getVaultHuman injection (offline tests omit it).
   ipcMain.on('guest-vault-capture', (event, payload) => {
     if (!getVaultHuman) return;
     const wcId = event.sender.id;
-    const { username, password } = /** @type {any} */ (payload || {});
-    const offer = getVaultHuman().capture({ wcId, username, passwordBytes: password });
-    vaultTrace('capture', { wcId, offered: !!offer, mode: offer && offer.model && offer.model.mode });
-    if (offer) {
-      chromeForTab(wcId)?.send('vault-capture-offer', { captureId: offer.captureId, model: offer.model });
-    }
+    const { username, usernameDetected, password } = /** @type {any} */ (payload || {});
+    const held = getVaultHuman().holdGestureLogin({
+      wcId,
+      username,
+      usernameDetected: usernameDetected === true,
+      passwordBytes: password
+    });
+    vaultTrace('gesture-hold', { wcId, held: !!held, kind: 'login' });
   });
 
-  // Vault CARD capture (issue #152): a submitted payment form's card arrives here as
-  // { number, cvv } (both Uint8Array) + the non-secret cardholder / expiry strings.
-  // Identical trust shape to guest-vault-capture above — the trusted wcId is
-  // event.sender.id and the ORIGIN is derived in main from the sender URL, never from
-  // the guest. getVaultHuman().captureCard applies the set-up / persistent-jar gate
-  // AND the card-plausibility gate (Luhn + length), holds the PAN and CVV in a
-  // main-side zeroizable record, and returns { captureId, model } (model carries NO
-  // card number) or null. The offer rides the SAME vault-capture-offer channel as a
-  // login — the model's `kind` selects the sheet copy.
+  // Vault CARD capture (issue #152) — the card twin of the gesture-time hold
+  // above. { number, cvv } (both Uint8Array) + the non-secret cardholder /
+  // expiry strings. Same trust shape: wcId from event.sender.id, origin
+  // derived + frozen main-side, held (never disposed) here.
   ipcMain.on('guest-vault-capture-card', (event, payload) => {
     if (!getVaultHuman) return;
     const wcId = event.sender.id;
     const { number, cvv, cardholder, expiry } = /** @type {any} */ (payload || {});
-    const offer = getVaultHuman().captureCard({
+    const held = getVaultHuman().holdGestureCard({
       wcId,
       numberBytes: number,
       cvvBytes: cvv,
       cardholder,
       expiry
     });
+    vaultTrace('gesture-hold', { wcId, held: !!held, kind: 'card' });
+  });
+
+  // Settle — the DETACHMENT signal (DD4's SPA case). A bare, payload-free
+  // trigger — main derives the trusted wcId from event.sender.id, the
+  // guest-vault-gesture idiom — reported by the guest-side gesture-detachment
+  // watch (webview-preload.js) when the fields a held gesture read came from
+  // are removed from the DOM without any navigation ever committing. The
+  // navigation-commit settle signal lives in guest-wiring.js's did-navigate
+  // handler instead — this is the SECOND of DD4's two settle paths, never the
+  // only one.
+  ipcMain.on('guest-vault-gesture-settle', (event) => {
+    if (!getVaultHuman) return;
+    const wcId = event.sender.id;
+    const offer = getVaultHuman().captureRelease(wcId);
+    vaultTrace('settle', { wcId, via: 'detachment', offered: !!offer, mode: offer && offer.model && offer.model.mode });
     if (offer) {
       chromeForTab(wcId)?.send('vault-capture-offer', { captureId: offer.captureId, model: offer.model });
     }

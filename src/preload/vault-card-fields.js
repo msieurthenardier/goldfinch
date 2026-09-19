@@ -272,12 +272,16 @@ function setFieldValue(field, value) {
  * valued `28`.
  * @param {any} field
  * @param {string[]} candidates  preferred value spellings, most preferred first.
+ * @returns {string | null}  the string ACTUALLY written, or null when nothing
+ *   matched and the select was left untouched (M21 F1 Leg 3, DD3h) — a `<select>`
+ *   match can diverge from the requested candidate (option value vs. text, short
+ *   vs. full year), so the caller must bind provenance to what was really written.
  */
 function setChoiceValue(field, candidates) {
   const tag = String(field.tagName == null ? '' : field.tagName).toLowerCase();
   if (tag !== 'select') {
     setFieldValue(field, candidates[0]);
-    return;
+    return candidates[0];
   }
   const options = Array.from(field.options || []);
   for (const candidate of candidates) {
@@ -287,12 +291,14 @@ function setChoiceValue(field, candidates) {
       return value === candidate || text === candidate;
     });
     if (hit) {
-      setFieldValue(field, /** @type {any} */ (hit).value);
-      return;
+      const written = /** @type {any} */ (hit).value;
+      setFieldValue(field, written);
+      return written;
     }
   }
   // No option matched — leave the select untouched rather than forcing an invalid
   // value that the page would reject on submit.
+  return null;
 }
 
 /**
@@ -321,49 +327,65 @@ function formatCombinedExpiry(field, exp) {
  * @param {any} doc
  * @param {{ number?: string|null, cardholder?: string|null, expiry?: string|null, cvv?: string|null } | null | undefined} card
  * @param {any} [targetNumber]  the gesture-bound card-number field.
- * @returns {{ filled: boolean }}
+ * @returns {{ filled: boolean, fields: Array<{ field: any, value: string }> }}
+ *   `fields` carries the exact string WRITTEN to each field that was actually
+ *   filled, keyed by the field's own node reference (M21 F1 Leg 3, DD3h) — the
+ *   card twin of fillLoginForm's same contract. A `<select>` expiry field's entry
+ *   carries whatever `setChoiceValue` actually wrote, which can differ from the
+ *   requested candidate; a select with no matching option contributes no entry.
  */
 function fillCardForm(doc, card, targetNumber) {
   // `typeof window` is 'undefined' under the headless unit test (which drives this
   // pure helper directly); in the guest main world it is the page window.
-  if (typeof window !== 'undefined' && window.top !== window) return { filled: false };
-  if (!card) return { filled: false };
+  if (typeof window !== 'undefined' && window.top !== window) return { filled: false, fields: [] };
+  if (!card) return { filled: false, fields: [] };
 
   let entry = null;
   if (isLiveCardNumberField(doc, targetNumber)) {
     entry = findAllCardFields(doc).find((e) => e.number === targetNumber) || null;
   }
   if (!entry) entry = findCardFields(doc);
-  if (!entry || !entry.number) return { filled: false };
+  if (!entry || !entry.number) return { filled: false, fields: [] };
 
+  const written = [];
   if (card.number != null) {
     // Strip formatting: a stored "4242 4242 4242 4242" must land as digits, which
     // is what every payment input accepts (and what its maxlength is sized for).
-    setFieldValue(entry.number, String(card.number).replace(/\D/g, ''));
+    const value = String(card.number).replace(/\D/g, '');
+    setFieldValue(entry.number, value);
+    written.push({ field: entry.number, value });
   }
   if (entry.cardholder && card.cardholder != null) {
-    setFieldValue(entry.cardholder, String(card.cardholder));
+    const value = String(card.cardholder);
+    setFieldValue(entry.cardholder, value);
+    written.push({ field: entry.cardholder, value });
   }
   if (entry.csc && card.cvv != null) {
-    setFieldValue(entry.csc, String(card.cvv));
+    const value = String(card.cvv);
+    setFieldValue(entry.csc, value);
+    written.push({ field: entry.csc, value });
   }
 
   const exp = parseExpiry(card.expiry);
   if (exp) {
     if (entry.expiry) {
-      setFieldValue(entry.expiry, formatCombinedExpiry(entry.expiry, exp));
+      const value = formatCombinedExpiry(entry.expiry, exp);
+      setFieldValue(entry.expiry, value);
+      written.push({ field: entry.expiry, value });
     }
     if (entry.expMonth) {
       // `MM` first, then the unpadded month — select options use both spellings.
-      setChoiceValue(entry.expMonth, [exp.month, String(Number(exp.month))]);
+      const value = setChoiceValue(entry.expMonth, [exp.month, String(Number(exp.month))]);
+      if (value != null) written.push({ field: entry.expMonth, value });
     }
     if (entry.expYear) {
       // `YYYY` first, then `YY` — a 2-char input/select takes the short form.
-      setChoiceValue(entry.expYear, [exp.year, exp.year.slice(-2)]);
+      const value = setChoiceValue(entry.expYear, [exp.year, exp.year.slice(-2)]);
+      if (value != null) written.push({ field: entry.expYear, value });
     }
   }
 
-  return { filled: true };
+  return { filled: true, fields: written };
 }
 
 module.exports = {

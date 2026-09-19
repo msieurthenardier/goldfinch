@@ -61,7 +61,13 @@ test('fills both fields and dispatches input+change on a normal login form', () 
 
   const result = fillLoginForm(doc, { username: 'alice@example.com', password: 's3cr3t!' });
 
-  assert.deepEqual(result, { filled: true });
+  assert.deepEqual(result, {
+    filled: true,
+    fields: [
+      { field: user, value: 'alice@example.com' },
+      { field: pass, value: 's3cr3t!' }
+    ]
+  });
   assert.equal(user.value, 'alice@example.com');
   assert.equal(pass.value, 's3cr3t!');
   assert.deepEqual(user.events, [
@@ -81,7 +87,7 @@ test('no password field on the page → fills nothing', () => {
   assert.equal(findLoginFields(doc), null);
   const result = fillLoginForm(doc, { username: 'alice', password: 'pw' });
 
-  assert.deepEqual(result, { filled: false });
+  assert.deepEqual(result, { filled: false, fields: [] });
   assert.equal(search.value, '');
   assert.deepEqual(search.events, []);
 });
@@ -132,7 +138,7 @@ test('password-only form fills the password and no username', () => {
   assert.equal(fields.username, null);
   const result = fillLoginForm(doc, { username: 'ignored', password: 'pw-only' });
 
-  assert.deepEqual(result, { filled: true });
+  assert.deepEqual(result, { filled: true, fields: [{ field: pass, value: 'pw-only' }] });
   assert.equal(pass.value, 'pw-only');
 });
 
@@ -235,7 +241,13 @@ test('targetPassword fills the SECOND login form, not the document-first (findin
   // The gesture targeted form B's password field — fill THAT form, not the first.
   const result = fillLoginForm(doc, { username: 'bob@example.com', password: 'hunter2' }, passB);
 
-  assert.deepEqual(result, { filled: true });
+  assert.deepEqual(result, {
+    filled: true,
+    fields: [
+      { field: userB, value: 'bob@example.com' },
+      { field: passB, value: 'hunter2' }
+    ]
+  });
   assert.equal(passB.value, 'hunter2', 'the clicked form B is filled');
   assert.equal(userB.value, 'bob@example.com');
   assert.equal(passA.value, '', 'the document-first form A is NOT filled');
@@ -280,7 +292,7 @@ test('top-frame guard: never fills inside an iframe (window.top !== window)', ()
     // A framed context: window.top is a different object than window.
     global.window = { top: {} };
     const result = fillLoginForm(doc, { username: 'alice', password: 'pw' });
-    assert.deepEqual(result, { filled: false });
+    assert.deepEqual(result, { filled: false, fields: [] });
     assert.equal(user.value, '', 'iframe fill is refused');
     assert.equal(pass.value, '');
   } finally {

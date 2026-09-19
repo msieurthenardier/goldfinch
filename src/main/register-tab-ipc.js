@@ -147,6 +147,14 @@ function registerTabIpc(deps) {
     popupRegistry,
     schedule: setTimeout,
     cancelScheduled: clearTimeout,
+    // Leg 1 (capture-hold-safety): a GETTER CLOSURE (`() => _vaultHuman` in
+    // main.js), never a value — registerTabIpc is called once at boot with a
+    // deps object literal while vault-human is lazily memoized and still null
+    // at that moment, so a value-style dep would snapshot null permanently.
+    // Optional-chained to match this module's existing defensive style for
+    // injected deps (`authChallenges?.cancelForTab`); both current call sites
+    // supply full deps.
+    vaultHuman,
     // Squawk 0073: arms the continuous session-snapshot debounce (built + owned in
     // main.js) — called from every site below that changes tab topology or the
     // active-tab flag, so the on-disk snapshot tracks live browsing instead of only
@@ -334,6 +342,11 @@ function registerTabIpc(deps) {
     // are cancelled (exactly-once ledger) BEFORE any teardown — the later sheet
     // close below re-resolves idempotently.
     authChallenges?.cancelForTab(wcId, 'tab-close');
+    // Leg 1 (capture-hold-safety): a held vault capture must not outlive its tab.
+    // Lazily resolved via the getter closure AT CALL TIME (see the deps comment
+    // above) — a capture held in a tab closed later in the session is still
+    // dropped, never missed by a boot-time snapshot of a still-null memo.
+    vaultHuman?.()?.dropCapturesForTab(wcId);
     // M09 F4 Leg 1 (DD2) — closed-tab-stack capture. Sits strictly BEFORE destroy()/
     // tabViews.delete below (the webContents and its navigationHistory must still be
     // alive to read). The allowlist/exclusion body lives in captureClosedTabEntry

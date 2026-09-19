@@ -1,0 +1,25 @@
+<!--
+  Fixture: spa-submit-no-navigation
+  Corpus tier: known-unsolved (positive). Family: login.
+  Models: a single-page-app login form whose submit handler calls
+  event.preventDefault() and posts credentials via fetch/XHR, with NO
+  navigation and NO removal of the form/fields afterward — a common "stay on
+  the same screen, show a spinner, then redirect via history.pushState only
+  on success" pattern. DD4's own named trade-off: "a flow that neither
+  navigates nor detaches its fields will never offer."
+  Why known-unsolved: findAllLoginFields correctly detects the login entry
+  today. What is unsolved is SETTLE: DD4 defines "settled" as a main-side
+  navigation commit OR a preload-reported field detachment — by construction,
+  NEITHER occurs here — so even once Leg 5's broadened trigger fires on the
+  submit button's trusted click, there is (today) no settle signal to raise
+  the offer on. Recorded here rather than silently dropped, per DD4's own
+  trade-off note in flight.md.
+  Added: 2026-09-19 (Mission 21, Flight 1, Leg 4 — fixture-corpus).
+-->
+<form id="spa-login" data-spa-handled="true">
+  <label for="user">Username</label>
+  <input type="text" id="user" name="username" autocomplete="username" value="alice" />
+  <label for="pw">Password</label>
+  <input type="password" id="pw" name="password" autocomplete="current-password" value="hunter2" />
+  <button type="submit" id="submit">Sign in</button>
+</form>

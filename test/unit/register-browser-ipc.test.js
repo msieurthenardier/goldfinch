@@ -38,14 +38,23 @@ function makeHarness(options = {}) {
   // Vault fill-icon native-menu delegate capture (I8): the owning window + recorded calls.
   const iconMenuWin = { id: 17, isDestroyed: () => false };
   const iconMenuCalls = [];
-  // Leg 4 (capture-save): a fake human whose capture() returns a settable offer (or
-  // null when the gate drops) and records the dismiss ids.
+  // Leg 5 (broadened-capture): a fake human whose holdGestureLogin/holdGestureCard
+  // record their args (recording ONLY the gesture-hold call — this leg's IPC
+  // handlers never dispose/offer anything themselves) and whose captureRelease
+  // returns a settable offer (or null), plus captureDismiss recording dismiss ids.
   const human = {
     captures: [],
     dismissed: [],
     nextOffer: null,
-    capture(arg) {
+    holdGestureLogin(arg) {
       human.captures.push(arg);
+      return { captureId: 'held' };
+    },
+    holdGestureCard(arg) {
+      human.captures.push(arg);
+      return { captureId: 'held' };
+    },
+    captureRelease() {
       return human.nextOffer;
     },
     captureDismiss(id) {
@@ -273,18 +282,55 @@ test('AC2/AC5: a non-chrome sender is refused across the browser chrome-trust ch
   assert.deepEqual(h.events, [], 'rescan-media refuses a non-chrome sender');
 });
 
-test('vault capture: an offer forwards to the owning chrome (no password on the wire); a dropped gate forwards nothing', () => {
+test('vault capture (Leg 5, broadened-capture): guest-vault-capture HOLDS only — no offer is sent at gesture time', () => {
   const h = makeHarness();
-  // The main-side capture derives origin itself; the guest sends only { username, password }.
+  // The main-side hold derives/freezes origin itself; the guest sends only
+  // { username, usernameDetected, password }.
   const passwordBytes = new TextEncoder().encode('typed-secret');
 
-  // GATE DROP: capture() returns null → no vault-capture-offer is sent.
-  h.human.nextOffer = null;
-  h.listeners.get('guest-vault-capture')({ sender: { id: 5 } }, { username: 'me@a', password: passwordBytes });
-  assert.deepEqual(h.human.captures[0], { wcId: 5, username: 'me@a', passwordBytes });
-  assert.deepEqual(h.events, [], 'no forward when the gate drops (null offer)');
+  h.listeners.get('guest-vault-capture')(
+    { sender: { id: 5 } },
+    { username: 'me@a', usernameDetected: true, password: passwordBytes }
+  );
+  assert.deepEqual(h.human.captures[0], {
+    wcId: 5,
+    username: 'me@a',
+    usernameDetected: true,
+    passwordBytes
+  });
+  // GESTURE-TIME HOLD never forwards an offer — settle does that (guest-wiring.js's
+  // did-navigate hook, or guest-vault-gesture-settle below).
+  assert.deepEqual(h.events, [], 'a gesture hold never itself forwards a vault-capture-offer');
+});
 
-  // OFFER: capture() returns { captureId, model } → forwarded to the owning chrome.
+test('vault capture card (Leg 5): guest-vault-capture-card HOLDS only', () => {
+  const h = makeHarness();
+  const numberBytes = new TextEncoder().encode('4111111111111111');
+  const cvvBytes = new TextEncoder().encode('123');
+
+  h.listeners.get('guest-vault-capture-card')(
+    { sender: { id: 5 } },
+    { number: numberBytes, cvv: cvvBytes, cardholder: 'Ada', expiry: '12/28' }
+  );
+  assert.deepEqual(h.human.captures[0], {
+    wcId: 5,
+    numberBytes,
+    cvvBytes,
+    cardholder: 'Ada',
+    expiry: '12/28'
+  });
+  assert.deepEqual(h.events, [], 'a gesture hold never itself forwards a vault-capture-offer');
+});
+
+test('vault capture settle (Leg 5, DD4 detachment path): guest-vault-gesture-settle releases via captureRelease and forwards the resulting offer (no password on the wire); nothing pending forwards nothing', () => {
+  const h = makeHarness();
+
+  // NOTHING PENDING: captureRelease() returns null → no vault-capture-offer is sent.
+  h.human.nextOffer = null;
+  h.listeners.get('guest-vault-gesture-settle')({ sender: { id: 5 } });
+  assert.deepEqual(h.events, [], 'no forward when captureRelease finds nothing pending / drops');
+
+  // RELEASED: captureRelease() returns { captureId, model } → forwarded to the owning chrome.
   h.human.nextOffer = {
     captureId: 'cap123',
     model: {
@@ -295,7 +341,7 @@ test('vault capture: an offer forwards to the owning chrome (no password on the 
       choices: ['personal', 'global']
     }
   };
-  h.listeners.get('guest-vault-capture')({ sender: { id: 5 } }, { username: 'me@a', password: passwordBytes });
+  h.listeners.get('guest-vault-gesture-settle')({ sender: { id: 5 } });
   assert.deepEqual(h.events, [
     ['chrome-send', 'vault-capture-offer', { captureId: 'cap123', model: h.human.nextOffer.model }]
   ]);

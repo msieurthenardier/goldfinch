@@ -1,0 +1,42 @@
+<!--
+  Fixture: two-login-forms-second-target
+  Corpus tier: known-unsolved (positive; multi-form disambiguation
+  groundwork). Family: login. Manifest expectedOrdinal: 1.
+  Models: a page with two independent login forms — e.g. a primary "sign in"
+  widget plus a secondary "sign in as a different account" panel below it —
+  real sites that offer both a quick-login shortcut and a full login form on
+  one page. The manifest entry records expectedOrdinal: 1 — the SECOND
+  detected login entry (zero-based; an INTEGER index, never a node reference,
+  per this leg's own pinned manifest shape) is the one a gesture on its own
+  submit button should resolve to.
+  Why known-unsolved: findAllLoginFields correctly detects BOTH entries
+  today, in document order. What is unsolved is GESTURE-DRIVEN
+  disambiguation: per Leg 3's own accepted, documented regression (DD3g's
+  node-identity world boundary — see the flight log's Leg 3 completion
+  notes), a gesture-initiated fill currently falls back to the FIRST detected
+  entry regardless of which form's control was actually clicked. Leg 5 is
+  expected to revisit this with an entry ORDINAL crossing the world boundary
+  rather than a node reference.
+  Added: 2026-09-19 (Mission 21, Flight 1, Leg 4 — fixture-corpus).
+  Promoted (Leg 5 — broadened-capture): both forms carry pre-filled `value`s
+  (the corpus's own stand-in for "the operator typed this" —
+  `assertOffersEntry` grants provenance for every non-empty value it finds)
+  so the assertion proves the gesture resolves the SECOND form's own values,
+  not merely the second ordinal in the abstract — a bug that swapped the
+  entries but kept ordinal 1 would still be caught, since ordinal 1 must
+  ALSO carry ITS OWN provenanced secret.
+-->
+<form id="primary-login">
+  <label for="user1">Username</label>
+  <input type="text" id="user1" name="username" autocomplete="username" value="alice" />
+  <label for="pw1">Password</label>
+  <input type="password" id="pw1" name="password" autocomplete="current-password" value="hunter2" />
+  <button type="submit">Sign in</button>
+</form>
+<form id="secondary-login">
+  <label for="user2">Username (other account)</label>
+  <input type="text" id="user2" name="username" autocomplete="username" value="bob" />
+  <label for="pw2">Password (other account)</label>
+  <input type="password" id="pw2" name="password" autocomplete="current-password" value="correcthorse" />
+  <button type="submit" id="submit2">Sign in to another account</button>
+</form>

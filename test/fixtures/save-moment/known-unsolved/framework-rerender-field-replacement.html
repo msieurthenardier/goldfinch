@@ -1,0 +1,31 @@
+<!--
+  Fixture: framework-rerender-field-replacement
+  Corpus tier: known-unsolved (positive; handed over from Leg 3 — see
+  flight.md's DD4 implementation note and the flight's named
+  "framework-re-render field replacement" shape). Family: login.
+  Models: a React/Vue-style component re-render that unmounts the password
+  <input> the operator typed into and mounts a NEW, equivalent-looking
+  <input> in its place — same visual position, same name/id/attributes, a
+  DIFFERENT DOM NODE. A legitimate capture silently lost to ordinary
+  framework churn — no attacker involved, which is what distinguishes this
+  from the security-adversarial fixtures elsewhere in this corpus.
+  This file holds only the BEFORE markup, because the shape is inherently
+  dynamic and cannot be expressed as static markup alone — the manifest's own
+  `simulate(doc)` hook performs the AFTER mutation (remove the old node,
+  parse and graft a fresh equivalent one in its place) after this file is
+  extracted. See manifest.js's entry for this fixture.
+  Why known-unsolved: BEFORE the re-render, findAllLoginFields detects the
+  original field normally (not itself interesting). What is unsolved is
+  provenance SURVIVING the swap: the isolated-world observer's provenance map
+  is keyed by the OLD node reference (DD3g/DD3h), so a granted-then-replaced
+  field is, correctly, no longer provenanced after the swap — an honest,
+  documented gap in this flight's design, not a bug to paper over.
+  Added: 2026-09-19 (Mission 21, Flight 1, Leg 4 — fixture-corpus).
+-->
+<form id="app-root">
+  <label for="user">Username</label>
+  <input type="text" id="user" name="username" autocomplete="username" />
+  <label for="pw">Password</label>
+  <input type="password" id="pw" name="password" autocomplete="current-password" />
+  <button type="submit">Sign in</button>
+</form>

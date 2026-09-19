@@ -26,6 +26,9 @@ test-time.txt
 # built).
 src/preload/webview-preload.bundle.js
 src/preload/internal-preload.bundle.js
+# Isolated-world entry-observer install script (M21 F1 Leg 3, DD3h) — same
+# regenerated-every-entry-point discipline as the two bundles above.
+src/preload/vault-entry-observer-bundle.generated.js
 
 # Throwaway TLS fixture certs/keys (web-compat client-cert leg) — generated
 # locally by tests/behavior/fixtures/web-compat/gen-certs.mjs, never committed

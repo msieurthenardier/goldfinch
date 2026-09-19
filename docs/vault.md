@@ -36,7 +36,10 @@ Module layout:
 | Pure crypto core (KDFs, AES-256-GCM, four envelope ops, `.gfvault` serialize/parse, TOTP) | `src/main/vault/vault-crypto.js` |
 | Stateful store (`manager.json` + `.gfvault` persistence, MRK model, unlock lifecycle, rotations, export/import, delete) | `src/main/vault/vault-store.js` |
 | Per-session automation vault context (fill-only) | `src/main/vault/vault-context.js` |
-| Human fill orchestration (picker model, gesture fill, capture) | `src/main/vault/vault-human.js` |
+| Human fill orchestration (picker model, gesture fill, capture hold/settle) | `src/main/vault/vault-human.js` |
+| Broadened capture-gesture classification + entry-ordinal resolution (main world) | `src/preload/vault-gesture-policy.js` |
+| Isolated-world entry observer (detection, value-bound provenance, DD3h snapshot) | `src/preload/vault-entry-observer.js` |
+| Main-world entry-tracker policy (install lifecycle, gesture-time snapshot read, fill routing) | `src/preload/vault-entry-tracker.js` |
 | Item schema SSOT (per-type secret/non-secret maps) | `src/shared/vault-item-schema.js` |
 | Origin matcher (exact vs. registrable-domain opt-in) | `src/shared/origin-match.js` |
 | Vendored Public Suffix List resolver (shared with `trackers.js`, squawk 0035) | `src/main/psl.js` (+ `public_suffix_list.dat`) |
@@ -372,6 +375,69 @@ the picker row, the capture offer and the sheet carry only `title` / `cardholder
 `last4`. The **MCP automation surface stays login-only** — `vaultList` and `vaultFill` still
 refuse non-login items, and the documented "never card data" guarantee in
 `docs/mcp-automation.md` is unchanged by this work.
+
+### The save moment: broadened capture, value-bound provenance, and the null-username collapse
+
+Mission 21, Flight 1 replaced the original single-`submit`-listener capture trigger
+(`webview-preload.js`) with a broader one: a trusted `click` on any button-like element (no
+`type` requirement — the motivating shape is a plain `<button>` OUTSIDE every `<form>`, wired to
+a JS click handler and posting via fetch/XHR), or a trusted `Enter` keystroke while focus is in a
+field. Broadening the trigger past a structurally-unambiguous `submit` event meant the *value*
+axis needed its own defense, since a page can dispatch a same-origin script-authored click far
+more easily than it can forge a real `submit`.
+
+**Value-bound provenance is that defense.** A field's value is admitted into a capture snapshot
+**only if** the field carries operator provenance, and that provenance is bound to the **exact
+string** it certifies:
+
+- Provenance is **granted** at the instant of a trusted `input`/`keydown` on the field, or a
+  Goldfinch-originated fill (`src/preload/vault-entry-observer.js`, running in a dedicated
+  **isolated world** immune to main-world prototype/accessor spoofing — `vault-fill-fields.js`'s
+  own `setFieldValue` proves a page can write `.value` and dispatch untrusted events with no
+  trusted event at all, which is exactly what value-binding closes).
+- At snapshot time, the field is admitted **only while its live value still equals the value
+  recorded at the granting instant**. A mismatch — the operator typed something, then a script
+  silently overwrote it — is treated as **unprovenanced, never as "trust the newer value."** A
+  field that was never granted at all is likewise absent, never an empty-or-untrusted value used
+  anyway.
+- Provenance is also **bounded in time** (15 minutes, `PROVENANCE_TTL_MS`) — an active timer
+  evicts a grant on expiry, alongside the existing eviction on field detachment, value change
+  (implicit in the equality check), and document unload. This is a genuinely **worse** exposure
+  profile than the pre-flight design (a plaintext password previously existed only transiently
+  inside one synchronous `submit` handler; the isolated world's provenance map now holds a
+  plaintext string for a bounded window, with more un-zeroable hops before the `Uint8Array`
+  encode) — stated as a deliberate, bounded trade-off rather than claimed as parity.
+
+**The wire shape is three-state, not binary**, per detected field: `{ detected: true, value }`
+(provenanced and matching), `{ detected: true, value: null }` (detected but unprovenanced or
+mismatched), or the key **absent entirely** (never detected at all). The third state matters
+because `normUsername` (`vault-human.js`) deliberately collapses `''`/`null`/`undefined` into a
+single `null` bucket, so that a genuine password-only submit compares equal to a stored
+null-username item — correct behavior for that case. Left unaddressed, an
+absent-because-unprovenanced username would land in the SAME bucket, letting a page suppress
+provenance on a real username field and steer disposition into matching (and overwriting) an
+unrelated stored item that happens to have no username. **The fix**: the capture payload carries
+an explicit `usernameDetected: boolean`, separate from the (possibly-null) `username` value —
+"a username field was detected on the page" is not the same claim as "that field's value is
+trustworthy." When `usernameDetected` is true and `username` is null, disposition may only offer
+`save`, never `update` — applied as a downgrade immediately AFTER the ordinary disposition
+computation (`disposeCapture` itself is unmodified). When NO username field was detected at all,
+existing null-username matching is unchanged. Never overwrite; a duplicate save is the
+recoverable failure mode.
+
+**Read at gesture, release at settle.** The isolated-world snapshot is read via a same-process
+`webFrame.executeJavaScriptInIsolatedWorld` call issued synchronously in response to the trigger
+gesture — never at settle, since a navigation's `did-navigate` fires AFTER the new document
+commits, by which point the old page's isolated world (and its provenance map) no longer exists.
+The read result is held **main-side**, in a new `mode: 'pending-settle'` capture record
+(`vault-human.js`), distinct from `mode: 'locked'` — until "settled": a per-tab navigation
+commit, or a preload-reported field detachment (the SPA case, where a submit handler
+`preventDefault()`s and posts via fetch with no navigation). A gesture that never settles — a
+decoy Cancel button, a flow that neither navigates nor removes its fields — is dropped, silently,
+never offered; the existing `CAPTURE_DROP_MS` safety-timeout continues to cover this new held
+state via the same drop choke point Leg 1 hardened (vault lock, window close, tab close, TTL).
+Origin is derived and **frozen at gesture time** — never re-derived at settle, since the tab may
+already show a different origin by the time a navigation-commit settle fires.
 
 ## Portability
 

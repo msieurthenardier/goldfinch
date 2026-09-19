@@ -234,7 +234,15 @@ test('fills every detected field and dispatches input+change', () => {
   const f = cardForm();
   const doc = makeDoc([new FakeForm([f.number, f.name, f.exp, f.csc])]);
 
-  assert.deepEqual(fillCardForm(doc, CARD), { filled: true });
+  assert.deepEqual(fillCardForm(doc, CARD), {
+    filled: true,
+    fields: [
+      { field: f.number, value: '4242424242424242' },
+      { field: f.name, value: 'A Lovelace' },
+      { field: f.csc, value: '123' },
+      { field: f.exp, value: '12/28' }
+    ]
+  });
   assert.equal(f.number.value, '4242424242424242', 'formatting stripped to digits');
   assert.equal(f.name.value, 'A Lovelace');
   assert.equal(f.exp.value, '12/28');
@@ -290,7 +298,13 @@ test('an unparseable stored expiry leaves the expiry fields alone but still fill
   const f = cardForm();
   const doc = makeDoc([new FakeForm([f.number, f.exp, f.csc])]);
 
-  assert.deepEqual(fillCardForm(doc, { ...CARD, expiry: 'whenever' }), { filled: true });
+  assert.deepEqual(fillCardForm(doc, { ...CARD, expiry: 'whenever' }), {
+    filled: true,
+    fields: [
+      { field: f.number, value: '4242424242424242' },
+      { field: f.csc, value: '123' }
+    ]
+  });
   assert.equal(f.number.value, '4242424242424242');
   assert.equal(f.exp.value, '', 'a bad expiry must not write garbage into the form');
 });
@@ -299,14 +313,14 @@ test('no card form → fills nothing', () => {
   const search = new FakeInput({ name: 'q' });
   const doc = makeDoc([new FakeForm([search])]);
 
-  assert.deepEqual(fillCardForm(doc, CARD), { filled: false });
+  assert.deepEqual(fillCardForm(doc, CARD), { filled: false, fields: [] });
   assert.equal(search.value, '');
 });
 
 test('a null card is a no-op', () => {
   const f = cardForm();
   const doc = makeDoc([new FakeForm([f.number])]);
-  assert.deepEqual(fillCardForm(doc, null), { filled: false });
+  assert.deepEqual(fillCardForm(doc, null), { filled: false, fields: [] });
   assert.equal(f.number.value, '');
 });
 
