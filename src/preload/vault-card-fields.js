@@ -96,6 +96,26 @@ function isCardCapableField(field) {
 }
 
 /**
+ * Insert a space at every camelCase hump (a lowercase letter or digit
+ * immediately followed by an uppercase letter) — `ccExpMonth` becomes
+ * `cc Exp Month`. FALLBACK_PATTERNS rely on `\b` to anchor a role word, but `\b`
+ * never fires between two adjacent letters regardless of case, so a role word
+ * buried mid-camelCase (`ccExpMonth`'s `Exp`) had no boundary to match against —
+ * only a role word landing at the very start or end of the name (where a real
+ * string boundary already exists) was reachable (squawk 0087). Normalizing the
+ * haystack, rather than loosening the regexes, is what keeps the existing
+ * false-positive resistance: the patterns themselves are untouched, so anything
+ * they didn't already match as a contiguous/boundary-anchored word still doesn't
+ * match — `tenderNumber` (normalized `tender Number`) still has no `card|cc|
+ * creditcard|pan` prefix to anchor on, so it stays undetected.
+ * @param {string} str
+ * @returns {string}
+ */
+function splitCamelHumps(str) {
+  return str.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
+}
+
+/**
  * The fallback role of a field from its name / id / placeholder, or null. Only
  * consulted for scopes with NO `cc-*` autocomplete token anywhere (see header).
  * @param {any} field
@@ -107,8 +127,9 @@ function fallbackRoleOf(field) {
     .filter((v) => v != null && v !== '')
     .join(' ');
   if (!hay) return null;
+  const normalized = splitCamelHumps(hay);
   for (const [role, re] of FALLBACK_PATTERNS) {
-    if (/** @type {RegExp} */ (re).test(hay)) return /** @type {string} */ (role);
+    if (/** @type {RegExp} */ (re).test(normalized)) return /** @type {string} */ (role);
   }
   return null;
 }
@@ -234,14 +255,40 @@ function isLiveCardNumberField(doc, field) {
 /**
  * Parse a stored expiry string into `{ month: 'MM', year: 'YYYY' }`, or null when
  * it does not parse. Accepts the shapes operators actually type: `MM/YY`,
- * `MM/YYYY`, `MM-YY`, `MM YY`, `MMYY`, `MMYYYY`. A 2-digit year resolves into the
- * 2000s — a payment card expiring in the 1900s is not a case worth modeling.
+ * `MM/YYYY`, `MM-YY`, `MM YY`, `MMYY`, `MMYYYY` — PLUS a single-digit month with
+ * any of those separators (`M/YY`, `M/YYYY`, `M-YY`, `M YY`; squawk 0086: a
+ * hand-typed `2/27` must round-trip). A 2-digit year resolves into the 2000s — a
+ * payment card expiring in the 1900s is not a case worth modeling.
+ *
+ * Two branches, and the separator is what makes a single-digit month safe:
+ *   - WITH a recognized separator (`/`, `-`, or whitespace), the separator marks
+ *     exactly where the month ends, so a 1- or 2-digit month is unambiguous and
+ *     gets zero-padded.
+ *   - WITHOUT one, only the two lengths that were always unambiguous (4 digits =
+ *     `MMYY`, 6 = `MMYYYY`, both fixed 2-digit month) are accepted, exactly as
+ *     before. A separator-less single-digit month is deliberately NOT supported:
+ *     a 3-digit run like `227` is genuinely ambiguous (`2/27` vs `22/7`) with no
+ *     separator to disambiguate it, so it is rejected rather than guessed — the
+ *     reported defect's input always carries a separator (`2/27`), so this is not
+ *     a gap against the actual symptom.
  * @param {any} raw
  * @returns {{ month: string, year: string } | null}
  */
 function parseExpiry(raw) {
   if (raw == null) return null;
-  const digits = String(raw).replace(/\D/g, '');
+  const str = String(raw).trim();
+
+  const sep = str.match(/^(\d{1,2})[/\- ]+(\d{2}|\d{4})$/);
+  if (sep) {
+    const month = sep[1].padStart(2, '0');
+    const monthNum = Number(month);
+    if (!(monthNum >= 1 && monthNum <= 12)) return null;
+    const yearPart = sep[2];
+    const year = yearPart.length === 2 ? `20${yearPart}` : yearPart;
+    return { month, year };
+  }
+
+  const digits = str.replace(/\D/g, '');
   if (digits.length !== 4 && digits.length !== 6) return null;
   const month = digits.slice(0, 2);
   const monthNum = Number(month);
