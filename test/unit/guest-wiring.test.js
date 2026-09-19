@@ -66,7 +66,7 @@ class FakeContents extends EventEmitter {
   }
 }
 
-function setup() {
+function setup({ vaultHuman } = {}) {
   const sends = [];
   const calls = [];
   // Mission 20 Flight 1 (AC3): a THIRD, independent log — additive only, so no
@@ -186,6 +186,11 @@ function setup() {
       calls.push(['on-crash', record]);
       events.push(['on-crash', record]);
     },
+    // Mission 21 Flight 1 Leg 5 (broadened-capture, DD4): the settle release
+    // gate's navigation-commit half — OMITTED by default (every pre-Leg-5 test
+    // is unaffected: `vaultHuman?.()?.captureRelease(...)` optional-chains to
+    // nothing). Tests that care pass it explicitly via `setup({ vaultHuman })`.
+    vaultHuman,
     logger: { warn() {} }
   });
   return {
@@ -599,6 +604,66 @@ test('page-favicon-updated forwards nothing when the fetch resolves to null (fai
   await pending.promise;
   await Promise.resolve();
   assert.deepEqual(h.sends, []);
+});
+
+// --- Mission 21 Flight 1 Leg 5 (broadened-capture, DD3f/DD4): the settle
+// release gate's navigation-commit half. ---------------------------------
+
+test('did-navigate releases a held gesture capture via vaultHuman().captureRelease and forwards the resulting offer BEFORE tab-did-navigate', () => {
+  const releaseCalls = [];
+  const h = setup({
+    vaultHuman: () => ({
+      captureRelease: (wcId) => {
+        releaseCalls.push(wcId);
+        return { captureId: 'cap1', model: { origin: 'https://a.example', username: 'me', mode: 'save' } };
+      }
+    })
+  });
+  const wc = new FakeContents(60);
+  h.wiring.wireTabViewEvents({ webContents: wc }, 60, 'persist:jar-a');
+
+  wc.emit('did-navigate');
+
+  assert.deepEqual(releaseCalls, [60]);
+  assert.deepEqual(h.sends[0], [
+    'vault-capture-offer',
+    { captureId: 'cap1', model: { origin: 'https://a.example', username: 'me', mode: 'save' } }
+  ]);
+  assert.deepEqual(h.sends[1], ['tab-did-navigate', { wcId: 60, url: wc.url }]);
+});
+
+test('did-navigate calls captureRelease every time, but forwards NOTHING when it returns null (the ordinary, no-held-capture case)', () => {
+  const releaseCalls = [];
+  const h = setup({
+    vaultHuman: () => ({
+      captureRelease: (wcId) => {
+        releaseCalls.push(wcId);
+        return null;
+      }
+    })
+  });
+  const wc = new FakeContents(61);
+  h.wiring.wireTabViewEvents({ webContents: wc }, 61, 'persist:jar-a');
+
+  wc.emit('did-navigate');
+
+  assert.deepEqual(releaseCalls, [61]);
+  assert.equal(
+    h.sends.some(([channel]) => channel === 'vault-capture-offer'),
+    false
+  );
+});
+
+test('did-navigate with vaultHuman OMITTED (the default, every pre-Leg-5 caller) never throws and sends no vault-capture-offer', () => {
+  const h = setup(); // no vaultHuman override
+  const wc = new FakeContents(62);
+  h.wiring.wireTabViewEvents({ webContents: wc }, 62, 'persist:jar-a');
+
+  assert.doesNotThrow(() => wc.emit('did-navigate'));
+  assert.equal(
+    h.sends.some(([channel]) => channel === 'vault-capture-offer'),
+    false
+  );
 });
 
 test('destroyed tab guards every tab-event side effect and history recorder is read live', () => {

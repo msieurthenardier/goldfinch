@@ -1,0 +1,20 @@
+<!--
+  Fixture: search-box
+  Corpus tier: negative-detection (gated NOW — asserted by assertNoDetectableEntry)
+  Models: a generic site header search box (e.g. a documentation site's global
+  search field). Real-world shape, trimmed to its form-relevant markup.
+  Why negative-detection: no <input type=password> anywhere, and no
+  autocomplete cc-* hint or card-shaped name/id anywhere, so BOTH
+  findAllLoginFields and findAllCardFields must return []. A near-miss, not a
+  strawman: the field carries a name ("query") and role that a careless
+  heuristic scanning for "anything typed into" could latch onto — the real
+  detectors correctly ignore it, because they key on structural signals
+  (input[type=password]; autocomplete cc-* tokens / a narrow name fallback),
+  not on "this field exists and gets typed into."
+  Added: 2026-09-19 (Mission 21, Flight 1, Leg 4 — fixture-corpus).
+-->
+<form id="site-search" role="search">
+  <label for="q">Search the site</label>
+  <input id="q" type="search" name="query" placeholder="Search…" />
+  <button type="submit">Go</button>
+</form>

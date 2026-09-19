@@ -10,7 +10,8 @@ export default [
       'tests/behavior/fixtures/**',
       'eslint.config.mjs',
       'src/preload/webview-preload.bundle.js',
-      'src/preload/internal-preload.bundle.js'
+      'src/preload/internal-preload.bundle.js',
+      'src/preload/vault-entry-observer-bundle.generated.js'
     ]
   }, // standalone — ONLY the ignores key
   js.configs.recommended,
@@ -132,11 +133,27 @@ export default [
     // vault-card-fields.js (issue #152) is the payment-card twin of
     // vault-fill-fields.js — same main-world context, same CJS-required-by-the-preload
     // shape, so it carries the identical globals.
+    // vault-entry-observer.js / vault-entry-tracker.js / vault-entry-observer-handle.js
+    // (M21 F1 Leg 3 — entry-tracker, DD3f/DD3g/DD3h) are the DD3f/DD3g hybrid's
+    // testable cores — same CJS-required-by-the-preload shape (vault-entry-observer.js
+    // is ALSO bundled standalone into the isolated-world install script by
+    // scripts/build-preload.mjs, but its SOURCE is identical either way).
+    // vault-entry-observer-bootstrap.js is the isolated-world entry point esbuild
+    // bundles — never required directly by webview-preload.js or by `node --test`,
+    // but it shares the same globals/sourceType so lint still runs over it.
+    // vault-gesture-policy.js (M21 F1 Leg 5 — broadened-capture) is the main-world
+    // gesture-classification/ordinal-resolution pure core — same
+    // CJS-required-by-the-preload shape.
     files: [
       'src/preload/webview-preload.js',
       'src/preload/vault-fill-fields.js',
       'src/preload/vault-card-fields.js',
       'src/preload/vault-fill-icon.js',
+      'src/preload/vault-entry-observer.js',
+      'src/preload/vault-entry-tracker.js',
+      'src/preload/vault-entry-observer-handle.js',
+      'src/preload/vault-entry-observer-bootstrap.js',
+      'src/preload/vault-gesture-policy.js',
       'src/preload/guest-bookmark-drop.js'
     ],
     languageOptions: { sourceType: 'commonjs', globals: { ...globals.node, ...globals.browser } },

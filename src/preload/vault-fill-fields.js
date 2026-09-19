@@ -127,23 +127,33 @@ function isLivePasswordField(doc, field) {
  * @param {any} doc
  * @param {{ username?: string|null, password?: string|null } | null | undefined} cred
  * @param {any} [targetPassword]  the gesture-bound password field, validated live here.
- * @returns {{ filled: boolean }}
+ * @returns {{ filled: boolean, fields: Array<{ field: any, value: string }> }}
+ *   `fields` carries the exact string WRITTEN to each field that was actually
+ *   filled, keyed by the field's own node reference (M21 F1 Leg 3, DD3h) — this is
+ *   what lets a caller in the SAME realm (the isolated-world observer) grant
+ *   provenance for exactly what a Goldfinch fill wrote, with no read-back and no
+ *   cross-world correlation. Empty when nothing was filled.
  */
 function fillLoginForm(doc, cred, targetPassword) {
   // `typeof window` is 'undefined' under the headless unit test (which drives
   // this pure helper directly); in the guest main world it is the page window.
-  if (typeof window !== 'undefined' && window.top !== window) return { filled: false };
+  if (typeof window !== 'undefined' && window.top !== window) return { filled: false, fields: [] };
   const fields = isLivePasswordField(doc, targetPassword)
     ? resolveLoginEntry(targetPassword) // the clicked form's { username, password, form }
     : findLoginFields(doc); // first-password-field fallback (MCP / no-gesture)
-  if (!fields || !fields.password) return { filled: false };
+  if (!fields || !fields.password) return { filled: false, fields: [] };
+  const written = [];
   if (fields.username && cred && cred.username != null) {
-    setFieldValue(fields.username, String(cred.username));
+    const value = String(cred.username);
+    setFieldValue(fields.username, value);
+    written.push({ field: fields.username, value });
   }
   if (cred && cred.password != null) {
-    setFieldValue(fields.password, String(cred.password));
+    const value = String(cred.password);
+    setFieldValue(fields.password, value);
+    written.push({ field: fields.password, value });
   }
-  return { filled: true };
+  return { filled: true, fields: written };
 }
 
 module.exports = { findLoginFields, findAllLoginFields, fillLoginForm, isLivePasswordField };

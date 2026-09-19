@@ -1,0 +1,27 @@
+<!--
+  Fixture: plain-login-form
+  Corpus tier: known-unsolved (positive). Family: login.
+  Models: the most ordinary login form shape — a single <form>, username +
+  password + a native submit button, no tricks. Included as the corpus's
+  canonical baseline: the easiest shape for Leg 5's trigger to solve first,
+  and a natural candidate for DD6's live extractor cross-check whenever that
+  check is run (a canonical, low-risk shape to compare against the real app).
+  Also used by the harness's own standing canary test
+  (test/unit/save-moment-corpus.test.js) as the "known-positive fixture" a
+  negative assertion is inverted against, since it is guaranteed to carry a
+  detectable password field.
+  Why known-unsolved: like every positive fixture at this leg's landing, the
+  OFFER outcome (not detection) is what's unsolved — the trigger/settle
+  machinery lands in Leg 5.
+  Added: 2026-09-19 (Mission 21, Flight 1, Leg 4 — fixture-corpus).
+  Promoted (Leg 5 — broadened-capture): pre-filled `value`s added — the
+  corpus's stand-in for "the operator typed this" that lets
+  `assertOffersEntry` grant real provenance headlessly.
+-->
+<form id="login" action="/login" method="post">
+  <label for="user">Username</label>
+  <input type="text" id="user" name="username" autocomplete="username" value="alice" />
+  <label for="pw">Password</label>
+  <input type="password" id="pw" name="password" autocomplete="current-password" value="hunter2" />
+  <button type="submit">Log in</button>
+</form>

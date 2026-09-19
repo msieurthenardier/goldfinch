@@ -81,6 +81,12 @@ function originOf(url) {
  * @property {(fn: () => void, ms: number) => any} [setTimeout]  capture drop-timer arm (default global) — injected so the timeout is unit-testable.
  * @property {(handle: any) => void} [clearTimeout]  capture drop-timer clear (default global).
  * @property {() => number} [now]  clock (default Date.now) — the record's capturedAt stamp.
+ * @property {(chromeId: number) => number[]} [tabWcIdsForChrome]  Leg 1 (capture-hold-safety):
+ *   resolve a WINDOW's (chrome-id-keyed) owned tab wcIds, so `dropCapturesForWindow` can match
+ *   this module's tab-keyed `captures` against a chrome id. vault-human.js is Electron-free and
+ *   has no registry access, so the chromeId→wcIds lookup is injected rather than reached for
+ *   (main.js: `webContents.fromId(chromeId)` → `registry.getWindowForChrome(wc)` →
+ *   `[...rec.tabViews.keys()]`, null-safe at every hop). An omitted dep resolves no tabs.
  */
 
 /**
@@ -93,8 +99,14 @@ function originOf(url) {
  * @property {number} wcId  the owning tab (for last-wins-per-tab supersession).
  * @property {'login' | 'card'} [kind]  the item family (issue #152; absent = 'login',
  *   so every pre-card record shape is unchanged).
- * @property {string} origin  derived in main from the sender URL (never guest-supplied).
+ * @property {string} origin  derived in main from the sender URL (never guest-supplied),
+ *   FROZEN at capture/hold time — never re-derived at settle (Leg 5 Edge Case).
  * @property {string | null} username
+ * @property {boolean} [usernameDetected]  Leg 5 / DD3c: a username FIELD was detected on the
+ *   page, independent of whether it carried operator provenance (`username` can be `null`
+ *   either because no field was detected at all, or because one was detected but
+ *   unprovenanced — this flag is what tells the two apart). Absent/false for every pre-Leg-5
+ *   caller, so the DD3c downgrade never fires for them (existing behaviour unchanged).
  * @property {Buffer} password
  * @property {Buffer} [number]  card only — the PAN, zeroized by dropCapture.
  * @property {Buffer} [cvv]  card only — the security code, zeroized by dropCapture.
@@ -103,8 +115,12 @@ function originOf(url) {
  * @property {string | null} [brand]  card only — derived from the PAN (non-secret).
  * @property {string | null} [last4]  card only — derived from the PAN (non-secret).
  * @property {string} jarId  the tab's persistent jar id (fixed at capture; disposition uses it).
- * @property {'save' | 'update' | 'locked'} mode  'locked' = held pending an unlock; the save/update
- *   disposition is deferred to `captureFinalize` (it needs the vault unlocked).
+ * @property {'save' | 'update' | 'locked' | 'pending-settle'} mode  'locked' = held pending an
+ *   unlock; the save/update disposition is deferred to `captureFinalize` (it needs the vault
+ *   unlocked). 'pending-settle' (Leg 5, DD4/DD5) = held pending a navigation-commit or
+ *   field-detachment settle signal; NOT YET disposed/offered at all — distinct from 'locked',
+ *   which HAS been disposed (a settle already released it) but needs an unlock before the
+ *   disposition can be computed. `captureRelease` is the only transition out of this mode.
  * @property {string} [vaultId]  update: the existing item's fixed vault.
  * @property {string} [itemId]  update: the existing item's fixed id.
  * @property {string[]} choices  save: the selectable vault ids ([jar.id, 'global']).
@@ -350,7 +366,51 @@ function createVaultHuman(deps) {
     };
   }
 
-  function capture({ wcId, username, passwordBytes }) {
+  /**
+   * DD3c: downgrade a computed `'update'` disposition to `'save'` when the username was
+   * DETECTED but UNPROVENANCED — `rec.usernameDetected === true` and `rec.username == null`
+   * (the `normUsername` collapse of `''`/`null`/`undefined`, which is exactly the bucket a
+   * page could otherwise steer into a false match by suppressing provenance on a real
+   * username field). Never applied when no username field was detected at all
+   * (`usernameDetected !== true`) — that case's existing null-username matching behaviour is
+   * unchanged, per DD3c's own carve-out. Applied AFTER `disposeCapture`, which stays
+   * unmodified (DD3b) — this never touches its logic or its no-op/unchanged guard.
+   * @param {CaptureRecord} rec
+   * @param {{ origin: string, username: string|null, mode: 'save'|'update', defaultVaultId: string, choices: string[] } | null} model
+   * @returns {{ origin: string, username: string|null, mode: 'save'|'update', defaultVaultId: string, choices: string[] } | null}
+   */
+  function applyUsernameDowngrade(rec, model) {
+    if (!model || model.mode !== 'update') return model;
+    if (rec.username != null || rec.usernameDetected !== true) return model;
+    rec.mode = 'save';
+    rec.vaultId = undefined;
+    rec.itemId = undefined;
+    rec.choices = [rec.jarId, 'global'];
+    return {
+      origin: rec.origin,
+      username: rec.username,
+      mode: 'save',
+      defaultVaultId: rec.jarId,
+      choices: [rec.jarId, 'global']
+    };
+  }
+
+  /**
+   * Gate + hold + (when unlocked) dispose a login credential. `origin`/`jar` are normally
+   * DERIVED HERE from the tab's CURRENT state — the shape every pre-Leg-5 call site (direct,
+   * immediate capture) still relies on unmodified. Leg 5's gesture-release path (below) is
+   * the ONE caller that supplies `origin`/`jar` EXPLICITLY, frozen at gesture time, to avoid
+   * re-deriving them from a tab that may have already navigated by the time settle calls
+   * this (Edge Case: "the capture's origin is main-derived at capture time, never re-derived
+   * at settle") — an explicit override always wins over a fresh derive.
+   * `usernameDetected` (Leg 5, DD3c) is threaded onto the record and consulted by
+   * `applyUsernameDowngrade` after disposition; omitted (every pre-Leg-5 caller) defaults to
+   * `false`, so the downgrade never fires and existing null-username matching behaviour for
+   * those callers is unchanged.
+   * @param {{ wcId: number, username: any, passwordBytes: any, usernameDetected?: boolean, origin?: string|null, jar?: {id: string}|null }} arg
+   * @returns {{ captureId: string, model: { origin: string, username: string|null, mode: 'save'|'update'|'locked', defaultVaultId?: string, choices?: string[] } } | null}
+   */
+  function capture({ wcId, username, passwordBytes, usernameDetected, origin: originOverride, jar: jarOverride }) {
     const store = deps.getVaultStore();
 
     // GATE — set up AND a persistent jar (DD9) AND an origin. Unlocked is NO LONGER required:
@@ -358,8 +418,8 @@ function createVaultHuman(deps) {
     // then saves (mode 'locked'). Not-set-up / no-jar / no-origin still drop with no offer.
     // A miss wipes the incoming bytes below.
     const bytes = passwordBytes instanceof Uint8Array ? passwordBytes : null;
-    const origin = tabOriginFor(wcId);
-    const jar = tabJarFor(wcId);
+    const origin = originOverride !== undefined ? originOverride : tabOriginFor(wcId);
+    const jar = jarOverride !== undefined ? jarOverride : tabJarFor(wcId);
     if (!store.isSetUp() || !jar || !origin) {
       if (bytes) bytes.fill(0);
       return null;
@@ -382,6 +442,7 @@ function createVaultHuman(deps) {
       wcId,
       origin,
       username: normUser,
+      usernameDetected: usernameDetected === true,
       password,
       jarId: jar.id,
       mode: 'save', // provisional — set by disposeCapture (unlocked) or 'locked' below.
@@ -401,14 +462,187 @@ function createVaultHuman(deps) {
       return { captureId, model: { origin, username: normUser, mode: /** @type {'locked'} */ ('locked') } };
     }
 
-    // UNLOCKED: compute the disposition now. An UNCHANGED login (disposeCapture → null)
-    // has nothing to save — drop the held record and make no offer.
-    const model = disposeCapture(rec);
+    // UNLOCKED: compute the disposition now, applying DD3c's post-dispose downgrade. An
+    // UNCHANGED login (disposeCapture → null) has nothing to save — drop the held record and
+    // make no offer.
+    const model = applyUsernameDowngrade(rec, disposeCapture(rec));
     if (!model) {
       dropCapture(captureId);
       return null;
     }
     return { captureId, model };
+  }
+
+  /**
+   * Hold a GESTURE-TIME login read, pending SETTLE (Leg 5 — DD3f corrected at design
+   * review, DD4, DD5-extended). The isolated-world snapshot is read at GESTURE time (a
+   * same-process `webFrame` call, never a cross-process
+   * `webContents.executeJavaScriptInIsolatedWorld`) and arrives here as plain data; this
+   * function's ONLY job is to survive, unmolested, from that moment until settle — a
+   * navigation commit or a preload-reported field detachment — calls `captureRelease`.
+   *
+   * `origin` AND `jar` are resolved HERE, at gesture time, and FROZEN on the record.
+   * `captureRelease` never re-derives either: by the time a navigation-commit settle fires,
+   * the tab may already be showing a different origin (`did-navigate` fires AFTER commit),
+   * and re-deriving would silently attribute the capture to the WRONG site (Edge Case: "the
+   * capture's origin is main-derived at capture time, never re-derived at settle").
+   *
+   * Same gate as `capture()` (set up + persistent jar + origin), same last-wins-per-tab
+   * supersession (a second gesture on the same tab, pending or already-disposed, is
+   * evicted+zeroized first), and the SAME `captures` map + `dropCapture` choke point — so
+   * this new held state needs NO new drop-rule wiring: Leg 1's three bulk-drop functions
+   * (vault lock / window close / tab close) and the existing TTL timer already cover it,
+   * because it is never a second, parallel hold structure.
+   * @param {{ wcId: number, username: any, usernameDetected: boolean, passwordBytes: any }} arg
+   * @returns {{ captureId: string } | null}
+   */
+  function holdGestureLogin({ wcId, username, usernameDetected, passwordBytes }) {
+    const store = deps.getVaultStore();
+    const bytes = passwordBytes instanceof Uint8Array ? passwordBytes : null;
+    const origin = tabOriginFor(wcId);
+    const jar = tabJarFor(wcId);
+    if (!store.isSetUp() || !jar || !origin || !bytes) {
+      if (bytes) bytes.fill(0);
+      return null;
+    }
+
+    for (const [id, rec] of captures) {
+      if (rec.wcId === wcId) dropCapture(id);
+    }
+
+    const captureId = crypto.randomBytes(12).toString('hex');
+    const password = Buffer.from(bytes);
+    bytes.fill(0);
+
+    /** @type {CaptureRecord} */
+    const rec = {
+      captureId,
+      wcId,
+      origin,
+      username: normUsername(username),
+      usernameDetected: usernameDetected === true,
+      password,
+      jarId: jar.id,
+      mode: 'pending-settle',
+      choices: [],
+      timer: null,
+      capturedAt: _now()
+    };
+    rec.timer = _setTimeout(() => dropCapture(captureId), CAPTURE_DROP_MS);
+    if (rec.timer && typeof rec.timer.unref === 'function') rec.timer.unref();
+    captures.set(captureId, rec);
+    return { captureId };
+  }
+
+  /**
+   * Hold a GESTURE-TIME card read, pending SETTLE — the card twin of `holdGestureLogin`.
+   * No plausibility (Luhn) gate here: `captureRelease` runs the held read back through
+   * `captureCard`, which still applies it before anything is offered — holding an
+   * implausible read for up to `CAPTURE_DROP_MS` costs nothing security-relevant (it is
+   * dropped, never offered, same as any other gesture that leads nowhere).
+   * @param {{ wcId: number, numberBytes: any, cvvBytes: any, cardholder?: any, expiry?: any }} arg
+   * @returns {{ captureId: string } | null}
+   */
+  function holdGestureCard({ wcId, numberBytes, cvvBytes, cardholder, expiry }) {
+    const store = deps.getVaultStore();
+    const numBytes = numberBytes instanceof Uint8Array ? numberBytes : null;
+    const cvcBytes = cvvBytes instanceof Uint8Array ? cvvBytes : null;
+    const wipe = () => {
+      if (numBytes) numBytes.fill(0);
+      if (cvcBytes) cvcBytes.fill(0);
+    };
+
+    const origin = tabOriginFor(wcId);
+    const jar = tabJarFor(wcId);
+    if (!store.isSetUp() || !jar || !origin || !numBytes) {
+      wipe();
+      return null;
+    }
+
+    for (const [id, rec] of captures) {
+      if (rec.wcId === wcId) dropCapture(id);
+    }
+
+    const captureId = crypto.randomBytes(12).toString('hex');
+    /** @type {any} */
+    const rec = {
+      captureId,
+      wcId,
+      kind: 'card',
+      origin,
+      number: Buffer.from(numBytes),
+      cvv: cvcBytes ? Buffer.from(cvcBytes) : Buffer.alloc(0),
+      cardholder: cardholder == null || cardholder === '' ? null : String(cardholder),
+      expiry: expiry == null || expiry === '' ? null : String(expiry),
+      jarId: jar.id,
+      mode: 'pending-settle',
+      choices: [],
+      timer: null,
+      capturedAt: _now()
+    };
+    wipe();
+    rec.timer = _setTimeout(() => dropCapture(captureId), CAPTURE_DROP_MS);
+    if (rec.timer && typeof rec.timer.unref === 'function') rec.timer.unref();
+    captures.set(captureId, rec);
+    return { captureId };
+  }
+
+  /**
+   * SETTLE: release a tab's held gesture-time read (if any) into an actual gate+dispose
+   * pass, via the SAME `capture`/`captureCard` those functions already run for a direct
+   * call — never a reimplementation. Called from BOTH settle signals (DD4): a per-tab
+   * `did-navigate` commit, and a preload-reported field detachment (the SPA case). Returns
+   * `null` when nothing is pending for this tab (the ordinary case — most gestures/settles
+   * have no held record at all — or a resistant fixture whose values never carried a
+   * provenanced secret, so no hold was ever created), or the same `{ captureId, model }`
+   * shape `capture`/`captureCard` return.
+   *
+   * The pending record's secret Buffer(s) are COPIED before the pending record is dropped —
+   * never the SAME Buffer object handed to `capture`/`captureCard`, which would otherwise be
+   * zeroized by THIS function's own `dropCapture` before those functions ever read it (an
+   * aliasing hazard caught at implementation time, not assumed safe).
+   * @param {number} wcId
+   * @returns {{ captureId: string, model: any } | null}
+   */
+  function captureRelease(wcId) {
+    let pendingId = null;
+    let rec = null;
+    for (const [id, r] of captures) {
+      if (r.wcId === wcId && r.mode === 'pending-settle') {
+        pendingId = id;
+        rec = r;
+        break;
+      }
+    }
+    if (!rec) return null;
+
+    if (rec.kind === 'card') {
+      const numberCopy = Buffer.from(rec.number);
+      const cvvCopy = Buffer.from(rec.cvv);
+      const { cardholder, expiry, jarId, origin } = rec;
+      dropCapture(pendingId);
+      return captureCard({
+        wcId,
+        numberBytes: numberCopy,
+        cvvBytes: cvvCopy,
+        cardholder,
+        expiry,
+        origin,
+        jar: { id: jarId }
+      });
+    }
+
+    const passwordCopy = Buffer.from(rec.password);
+    const { username, usernameDetected, jarId, origin } = rec;
+    dropCapture(pendingId);
+    return capture({
+      wcId,
+      username,
+      passwordBytes: passwordCopy,
+      usernameDetected,
+      origin,
+      jar: { id: jarId }
+    });
   }
 
   /**
@@ -498,10 +732,14 @@ function createVaultHuman(deps) {
    *
    * Like the login path, a LOCKED vault HOLDS the capture (mode 'locked') and defers
    * the disposition to `captureFinalize` after an unlock.
-   * @param {{ wcId: number, numberBytes: any, cvvBytes: any, cardholder?: any, expiry?: any }} arg
+   *
+   * `origin`/`jar` follow `capture`'s own override shape (Leg 5): normally DERIVED HERE
+   * from the tab's current state; `captureRelease` is the one caller that supplies them
+   * explicitly, frozen at gesture time.
+   * @param {{ wcId: number, numberBytes: any, cvvBytes: any, cardholder?: any, expiry?: any, origin?: string|null, jar?: {id: string}|null }} arg
    * @returns {{ captureId: string, model: any } | null}
    */
-  function captureCard({ wcId, numberBytes, cvvBytes, cardholder, expiry }) {
+  function captureCard({ wcId, numberBytes, cvvBytes, cardholder, expiry, origin: originOverride, jar: jarOverride }) {
     const store = deps.getVaultStore();
     const numBytes = numberBytes instanceof Uint8Array ? numberBytes : null;
     const cvcBytes = cvvBytes instanceof Uint8Array ? cvvBytes : null;
@@ -510,8 +748,8 @@ function createVaultHuman(deps) {
       if (cvcBytes) cvcBytes.fill(0);
     };
 
-    const origin = tabOriginFor(wcId);
-    const jar = tabJarFor(wcId);
+    const origin = originOverride !== undefined ? originOverride : tabOriginFor(wcId);
+    const jar = jarOverride !== undefined ? jarOverride : tabJarFor(wcId);
     if (!store.isSetUp() || !jar || !origin || !numBytes) {
       wipe();
       return null;
@@ -599,8 +837,10 @@ function createVaultHuman(deps) {
       return { reason: /** @type {'tab-changed'} */ ('tab-changed') };
     }
     // Unchanged item after unlock (dispose → null) → drop, no offer. The card twin
-    // disposes by PAN identity; the login twin by origin+username.
-    const model = rec.kind === 'card' ? disposeCardCapture(rec) : disposeCapture(rec);
+    // disposes by PAN identity; the login twin by origin+username, with DD3c's
+    // post-dispose downgrade applied (unlock-to-save must not skip it — a locked-at-
+    // gesture capture reaches disposition ONLY through this path).
+    const model = rec.kind === 'card' ? disposeCardCapture(rec) : applyUsernameDowngrade(rec, disposeCapture(rec));
     if (!model) {
       dropCapture(captureId);
       return { reason: /** @type {'unchanged'} */ ('unchanged') };
@@ -632,12 +872,18 @@ function createVaultHuman(deps) {
    * @returns {{ saved: boolean, reason?: string }}
    */
   function captureSave({ captureId, vaultId }) {
+    const store = deps.getVaultStore();
+    // Leg 1 (capture-hold-safety): checked BEFORE the record lookup, not after.
+    // A vault lock now drops every held record (dropAllCaptures), so a Save
+    // clicked against an already-dropped record must still report the SAME
+    // actionable 'locked' reason it always has — not degrade to the generic
+    // `{ saved: false }` a bare `!rec` would produce. This also covers the
+    // pre-existing idle-lock race (offer shown, vault auto-locks, Save clicked
+    // before the record itself is dropped) with the identical check.
+    if (!store.isUnlocked()) return { saved: false, reason: 'locked' };
+
     const rec = captures.get(captureId);
     if (!rec) return { saved: false };
-
-    const store = deps.getVaultStore();
-    // Idle-lock race: the vault may have auto-locked between the offer and the save.
-    if (!store.isUnlocked()) return { saved: false, reason: 'locked' };
 
     // CARD (issue #152) — the same save/update shape as a login, with the card's own
     // field set. An update MERGES over the existing item for exactly the login path's
@@ -749,7 +995,97 @@ function createVaultHuman(deps) {
     dropCapture(captureId);
   }
 
-  return { reachableItems, fillHuman, capture, captureCard, captureFinalize, captureSave, captureDismiss };
+  // ---------------------------------------------------------------------------
+  // Leg 1 (capture-hold-safety, DD5): bulk drops for the three teardown conditions
+  // a held capture must not outlive — vault lock, owning-window close, tab close —
+  // on top of the existing TTL/dismiss/save/supersession exits. Every one of the
+  // three delegates to `dropCapture`, the single zeroizing choke point: no second
+  // eviction path exists that could diverge from its zeroization.
+  //
+  // RETURN VALUE IS TEST-ONLY. `captures` is private and the returned API exposes
+  // no record, while `capture()`/`captureCard()` deliberately COPY the caller's
+  // bytes into an internal Buffer and zero the caller's own array immediately — so
+  // a test has no other way to reach a record's secret buffer from outside. Every
+  // production call site (onLock, releaseVaultHoldsForWindow, the tab-close hook)
+  // discards the return value — bare calls, no assignment. `dropCapture` zeroizes
+  // the secret Buffers in place before eviction, so a returned record's
+  // password/number/cvv already read back as all-zero — but the SAME record still
+  // carries plaintext `origin`/`username`/`cardholder` and the like, so a future
+  // "helpful" log or trace on a returned array would leak that metadata even
+  // though the passwords themselves stay safe. Never log/trace what these return.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Bulk-drop every held capture for one TAB (tab close). See the block comment
+   * above for the return-value contract.
+   * @param {number} wcId
+   * @returns {CaptureRecord[]}
+   */
+  function dropCapturesForTab(wcId) {
+    const dropped = [];
+    for (const id of [...captures.keys()]) {
+      const rec = captures.get(id);
+      if (rec && rec.wcId === wcId) {
+        dropped.push(rec);
+        dropCapture(id);
+      }
+    }
+    return dropped;
+  }
+
+  /**
+   * Bulk-drop every held capture owned by one WINDOW (window close), via the
+   * injected `tabWcIdsForChrome` chromeId→wcIds resolver (`captures` is keyed by
+   * tab wcId, not chrome id, and this module has no registry access to bridge the
+   * two itself). An omitted dep or an unresolved/dead chrome id drops nothing,
+   * never throws. See the block comment above for the return-value contract.
+   * @param {number} chromeId
+   * @returns {CaptureRecord[]}
+   */
+  function dropCapturesForWindow(chromeId) {
+    const wcIds = new Set(deps.tabWcIdsForChrome ? deps.tabWcIdsForChrome(chromeId) : []);
+    const dropped = [];
+    for (const id of [...captures.keys()]) {
+      const rec = captures.get(id);
+      if (rec && wcIds.has(rec.wcId)) {
+        dropped.push(rec);
+        dropCapture(id);
+      }
+    }
+    return dropped;
+  }
+
+  /**
+   * Bulk-drop EVERY held capture (vault lock — manual `lockNow()` or the idle
+   * autolock timer, both routed through the store's single `onLock` hook). See
+   * the block comment above for the return-value contract.
+   * @returns {CaptureRecord[]}
+   */
+  function dropAllCaptures() {
+    const dropped = [];
+    for (const id of [...captures.keys()]) {
+      const rec = captures.get(id);
+      if (rec) dropped.push(rec);
+      dropCapture(id);
+    }
+    return dropped;
+  }
+
+  return {
+    reachableItems,
+    fillHuman,
+    capture,
+    captureCard,
+    holdGestureLogin,
+    holdGestureCard,
+    captureRelease,
+    captureFinalize,
+    captureSave,
+    captureDismiss,
+    dropCapturesForTab,
+    dropCapturesForWindow,
+    dropAllCaptures
+  };
 }
 
 module.exports = { createVaultHuman, originOf };

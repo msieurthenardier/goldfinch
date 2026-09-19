@@ -113,6 +113,13 @@ function createGuestWiring(deps) {
     // register-tab-ipc.js and constructed once in main.js BEFORE this module
     // and registerTabIpc both receive it — one implementation.
     sendOrQueue,
+    // Mission 21 Flight 1 Leg 5 (broadened-capture, DD4): the SETTLE release
+    // gate's navigation-commit half — a GETTER CLOSURE (`() => _vaultHuman` in
+    // main.js), the SAME lazy-resolve shape register-tab-ipc.js's own
+    // `vaultHuman` dep uses, so a window that never touches the vault feature
+    // never force-constructs it merely by navigating. Optional-chained at
+    // every call site; an offline harness that omits it is unaffected.
+    vaultHuman,
     logger
   } = deps;
 
@@ -723,6 +730,16 @@ function createGuestWiring(deps) {
         // "chrome-initiated navigation in flight" window has closed.
         if (entry) entry.chromeNavPending = false;
         const url = entry ? effectiveUrl(entry) : wc.getURL();
+        // Mission 21 Flight 1 Leg 5 (DD3f/DD4): SETTLE, navigation-commit half.
+        // A held gesture-time read (if any) for this tab is released HERE —
+        // never re-deriving origin (the record already froze it at gesture
+        // time; by now the tab may already show a DIFFERENT origin, since
+        // did-navigate fires AFTER commit). Most navigations have nothing
+        // pending — captureRelease is a cheap no-op in that case.
+        const gestureOffer = vaultHuman?.()?.captureRelease(wcId);
+        if (gestureOffer) {
+          sendToChrome('vault-capture-offer', { captureId: gestureOffer.captureId, model: gestureOffer.model });
+        }
         sendToChrome('tab-did-navigate', { wcId, url });
         // Mission 20 Flight 2 Leg 2 (DD6/DD7, FD amendment to DD7): certificate +
         // security state at each main-frame commit. Its OWN owner-routed push

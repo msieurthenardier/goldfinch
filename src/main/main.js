@@ -905,6 +905,21 @@ function getVaultStore() {
       onLock: () => {
         _pendingVaultImports.dropAll();
         _pendingBrowserImports.dropAll();
+        // Leg 1 (capture-hold-safety, DD5): drop every held capture too — the
+        // safety valve this leg closes before Leg 4 makes holding the normal
+        // state. Uses the MEMOIZED reference, not the force-constructing
+        // getVaultHuman(), so a lock in a session that never captured anything
+        // never constructs vault-human. This is safe even for a `mode:'locked'`
+        // record — NOT because "every live record was created while unlocked"
+        // (false: captureFinalize can leave a 'locked' record live across an
+        // unlock, see its own reason table) but because the chrome's
+        // `pendingCaptureUnlock` is a ONE-SHOT cleared BEFORE the first
+        // `vaultCaptureFinalize` call (vault-controller.js, "so an unrelated
+        // later unlock can't re-fire it") — such a record therefore has no live
+        // client retry waiting on it; it is already an orphan bound for the TTL,
+        // and dropping it now instead of up to two minutes later changes nothing
+        // observable.
+        _vaultHuman?.dropAllCaptures();
         closeVaultCredentialSheetsOnLock();
         broadcastVaultLockState();
       },
@@ -1014,6 +1029,11 @@ function releaseVaultHoldsForWindow(chromeId) {
   _pendingVaultImports.clear(chromeId);
   _pendingBrowserImports.clear(chromeId);
   _autolockSuppression.releaseWindow(chromeId);
+  // Leg 1 (capture-hold-safety, DD5): drop this window's held captures too.
+  // Memoized reference (not getVaultHuman()) so an unrelated window close never
+  // force-constructs vault-human; `close` fires before `closed`, so the record is
+  // still resolvable at this point.
+  _vaultHuman?.dropCapturesForWindow(chromeId);
 }
 
 // M18 F2 L4 (design-review H1/H2): the per-window pending vault-credential reveals — the
@@ -1359,7 +1379,16 @@ function getVaultHuman() {
       // ~2-min timeout is unit-testable (mirrors the vault-store idle timer).
       setTimeout: (fn, ms) => setTimeout(fn, ms),
       clearTimeout: (handle) => clearTimeout(handle),
-      now: () => Date.now()
+      now: () => Date.now(),
+      // Leg 1 (capture-hold-safety): chromeId → owned tab wcIds, so
+      // dropCapturesForWindow can bridge its tab-keyed captures against a
+      // chrome id. Null-safe at every hop — a destroyed/unknown chrome id
+      // resolves [], never a throw.
+      tabWcIdsForChrome: (chromeId) => {
+        const wc = webContents.fromId(chromeId);
+        const rec = wc ? registry.getWindowForChrome(wc) : null;
+        return rec ? [...rec.tabViews.keys()] : [];
+      }
     });
   }
   return _vaultHuman;
@@ -1785,6 +1814,11 @@ const { wireGuestContents, wireTabViewEvents } = createGuestWiring({
   // Mission 20 Flight 2 Leg 2 (DD6): the verify-proc observer's read seam
   // (did-navigate's durable `entry.certificate` copy).
   certObserver,
+  // Mission 21 Flight 1 Leg 5 (broadened-capture, DD4): the SAME lazy getter
+  // closure registerTabIpc's own `vaultHuman` dep uses below — a window that
+  // never touches the vault feature never force-constructs it merely by
+  // navigating.
+  vaultHuman: () => _vaultHuman,
   // Mission 20 Flight 1 (DD1/AC7): the ONE two-axis visibility helper, owned by
   // register-tab-ipc.js — threaded here so guest-wiring's own failure/clear
   // transitions call the SAME helper every other guest-show site does.
@@ -2026,6 +2060,15 @@ registerTabIpc({
   schedule: setTimeout,
   cancelScheduled: clearTimeout,
   scheduleSnapshot: scheduleSessionSnapshot,
+  // Leg 1 (capture-hold-safety): a GETTER CLOSURE, not a value — registerTabIpc
+  // is called once at boot with this deps object literal, while `_vaultHuman` is
+  // lazily memoized and still null at that moment. A value-style
+  // `vaultHuman: _vaultHuman` would snapshot null permanently and the tab-close
+  // drop would silently never fire. Mirrors `getHistoryRecorder` above, consumed
+  // the same way: `vaultHuman?.()?.dropCapturesForTab(wcId)`. Never
+  // `getVaultHuman` — that force-constructs, which a tab close in a
+  // vault-untouched session must never do.
+  vaultHuman: () => _vaultHuman,
   logger: console
 });
 

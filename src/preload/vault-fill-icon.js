@@ -140,6 +140,13 @@ function isFieldVisible(field) {
  * @param {() => boolean} deps.getEnabled  true iff top-frame AND vault-eligible
  * @param {() => boolean} [deps.getVaultLocked]  initial vault lock state (default true — locked).
  * @param {() => number} [deps.now]  clock for the gesture-target TTL (default Date.now).
+ * @param {(anchor: any) => ({ kind: 'login'|'card', field: any } | null)} [deps.resolveTarget]
+ *   the shared entry-resolution walk (vault-entry-tracker.js's
+ *   resolveTargetForAnchor, M21 F1 Leg 3, DD3g "same pure module, two execution
+ *   contexts"). OPTIONAL, with an internal fallback below that is the byte-for-byte
+ *   pre-Leg-3 inline walk — every existing createVaultIconController call site
+ *   (none of which inject this) keeps its exact prior behavior, which is what
+ *   keeps test/unit/vault-fill-icon.test.js passing UNMODIFIED.
  */
 function createVaultIconController({
   document: doc,
@@ -150,7 +157,8 @@ function createVaultIconController({
   findAllCardFields,
   getEnabled,
   getVaultLocked,
-  now
+  now,
+  resolveTarget
 }) {
   const cardEntries = typeof findAllCardFields === 'function' ? findAllCardFields : () => [];
   const clock = typeof now === 'function' ? now : Date.now;
@@ -180,6 +188,7 @@ function createVaultIconController({
   // the anchor is not part of any detected entry.
   /** @returns {{ kind: 'login'|'card', field: any } | null} */
   function targetForAnchor(anchor) {
+    if (typeof resolveTarget === 'function') return resolveTarget(anchor);
     if (!anchor) return null;
     for (const entry of findAllLoginFields(doc)) {
       if (entry.password === anchor || entry.username === anchor) {

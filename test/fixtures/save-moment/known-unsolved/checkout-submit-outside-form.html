@@ -1,0 +1,40 @@
+<!--
+  Fixture: checkout-submit-outside-form
+  Corpus tier: known-unsolved (positive — promoted by Leg 5 as its trigger
+  solves it). Family: card.
+  Models: a payment checkout whose card fields sit in one container and whose
+  "Place order" submit control lives OUTSIDE that container and outside any
+  <form> entirely — a real, observed e-commerce shape where a plain <button>
+  (no type=submit, nothing to submit) runs a JS click handler that posts the
+  order via fetch/XHR. THIS IS THE MOTIVATING SHAPE for this whole flight
+  (see flight.md's Jostens reference and DD1's rationale for broadening the
+  trigger past `submit`).
+  Why known-unsolved: findAllCardFields correctly detects the card entry
+  TODAY — detection does not care where the submit control lives, only where
+  the card fields are. What is unsolved is the TRIGGER: the old submit-only
+  capture never fires here (there is no <form> to submit), so no offer is
+  ever raised no matter how long the operator sits on this page. Promotion
+  happens once Leg 5's broadened trigger (a trusted click on any button-like
+  element) lands.
+  Sample card number (4111111111111111, the standard Visa test PAN) is
+  Luhn-valid, per the corpus's own rule: findAllCardFields's detection is
+  independent of DD7's Luhn/plausibility gate (applied later, main-side), but
+  a non-Luhn sample here would confuse a future end-to-end "does this offer"
+  reader for reasons unrelated to shape.
+  Added: 2026-09-19 (Mission 21, Flight 1, Leg 4 — fixture-corpus).
+-->
+<div class="checkout">
+  <div class="card-fields">
+    <label for="cc-number">Card number</label>
+    <input type="text" id="cc-number" name="cardnumber" autocomplete="cc-number" value="4111111111111111" />
+    <label for="cc-name">Name on card</label>
+    <input type="text" id="cc-name" name="ccname" autocomplete="cc-name" value="Ada Lovelace" />
+    <label for="cc-exp">Expiry (MM/YY)</label>
+    <input type="text" id="cc-exp" name="cc-exp" autocomplete="cc-exp" maxlength="5" value="04/29" />
+    <label for="cc-csc">Security code</label>
+    <input type="text" id="cc-csc" name="cvc" autocomplete="cc-csc" value="123" />
+  </div>
+</div>
+<div class="checkout-footer">
+  <button type="button" id="place-order">Place order</button>
+</div>
