@@ -640,8 +640,23 @@ natively awaited.
 
 | Tool | Input schema | Result shape |
 |------|--------------|--------------|
-| `evaluate` | `{ wcId: integer, expression: string }` *(required)* | JSON text: the evaluated value. A returned Promise is awaited; the resolved value **must be JSON-serializable** — a non-serializable return (function, DOM node, circular object) is refused with `automation: evaluate — return value is not JSON-serializable` (isError). An in-page throw surfaces as an error result (isError). **Does NOT foreground its target** (M09 F7 DD6): the tab is evaluated where it sits — a background tab is not brought to front and its window is not raised. |
-| `injectScript` | `{ wcId: integer, script: string }` *(required)* | JSON text `{"ok":true}` (void). Defines globals / patches prototypes (e.g. the axe-core source, a farbling hook). **Skips foreground-to-act** (defining a global needs no paint). Makes **no persistence guarantee** — globals it defines are not promised to survive across a later `evaluate` gap (a navigation clears them); pair `injectScript` immediately with one `evaluate`. An in-page throw surfaces as an error result (isError). |
+| `evaluate` | `{ wcId: integer, expression: string }` *(required)* | JSON text: the evaluated value. A returned Promise is awaited; the resolved value **must be JSON-serializable** — a non-serializable return (function, DOM node, circular object) is refused with `automation: evaluate — return value is not JSON-serializable` (isError). An in-page throw surfaces as an error result (isError). **A resolved value of `undefined` serializes to `{"ok":true}`** — the same shape a void op returns; see the gotcha below and *Result and refusal semantics*. **Does NOT foreground its target** (M09 F7 DD6): the tab is evaluated where it sits — a background tab is not brought to front and its window is not raised. |
+| `injectScript` | `{ wcId: integer, script: string }` *(required)* | JSON text `{"ok":true}` (void, **by contract** — the underlying `executeJavaScript` return is discarded regardless of what the injected script evaluates to, so there is no ambiguity here the way there is for `evaluate`). Defines globals / patches prototypes (e.g. the axe-core source, a farbling hook). **Skips foreground-to-act** (defining a global needs no paint). Makes **no persistence guarantee** — globals it defines are not promised to survive across a later `evaluate` gap (a navigation clears them); pair `injectScript` immediately with one `evaluate`. An in-page throw surfaces as an error result (isError). |
+
+> **Gotcha — a successful `evaluate` expression that returns nothing is indistinguishable from a
+> void op's success.** `serialize()` (`src/main/automation/mcp-tools.js`) has one rule for
+> collapsing a return value to JSON text: `value === undefined` → `{"ok":true}`, else
+> `JSON.stringify(value)`. `evaluate`'s resolved value rides that same rule — so an ordinary
+> mutation one-liner (`setAttribute(...)`, `console.log(...)`, most statements with no explicit
+> return/trailing expression) evaluates to `undefined`, comes back as `{"ok":true}`, and is
+> **byte-for-byte the same response a void op like `navigate` returns, and the same response a
+> no-op would produce**. The expression still ran — the response shape just can't say so. If a
+> caller needs the response itself to confirm execution, end the expression with an explicit
+> sentinel value (e.g. `; true`, or the value just written) rather than relying on `{"ok":true}`
+> to mean anything beyond "no throw, no non-serializable value". This is exactly what caused
+> squawk 0088: a genuinely-successful `evaluate` call was read as broken because its response was
+> indistinguishable from a no-op. See *Result and refusal semantics* below for the full
+> enumeration.
 
 > **Security invariant — internal session gated by tier.** Non-admin (jar) keys are refused the internal
 > `goldfinch://settings` session with `automation: internal-session` at the resolver (`resolve.js`'s
@@ -827,13 +842,33 @@ from *genuine errors*:
   verbatim — never JSON-wrapped.
 - **JSON text** — every other tool returns one text block whose `text` is JSON. Void ops
   (`navigate`, `goBack`, `goForward`, `reload`, `click`, `typeText`, `scroll`, `pressKey`,
-  `dragPointer`, `stopFindInPage`)
-  serialize to the single consistent shape `{"ok":true}`. Ops with a real return value
+  `dragPointer`, `stopFindInPage`, `injectScript`)
+  serialize to the single consistent shape `{"ok":true}` — `injectScript`'s is by *contract*
+  (its underlying return is discarded regardless of what the injected script evaluates to; see
+  below). Ops with a real return value
   (`enumerateTabs`, `openTab`, `closeTab`, `activateTab`, `getZoom`, `setZoom`, `printToPDF`,
   `findInPage`,
   `readDom`, `readAxTree`) serialize their
   actual value (array / number / boolean / `null` / object / string — `getZoom`/`setZoom` return
   `{factor}`, `printToPDF` returns a base64 string, `findInPage` returns `{activeMatchOrdinal, matches}`).
+- **`evaluate` belongs to neither list above, and that is the source of a real gotcha.** Its
+  result is whatever the expression actually evaluates to — a JSON-serializable value serializes
+  to its own JSON text (`evaluate(wcId, "1+1")` → `2`), exactly like the real-return-value ops.
+  But `serialize()` (`src/main/automation/mcp-tools.js`) has exactly one collapsing rule —
+  `value === undefined` → `{"ok":true}` — and that rule cannot tell "the expression legitimately
+  produced no value" from "this was a void op". An ordinary mutation expression
+  (`document.documentElement.setAttribute(...)`, `console.log(...)`, most statements with no
+  explicit `return`/trailing expression) evaluates to `undefined` and therefore comes back as
+  `{"ok":true}` — **indistinguishable from a void op's success, and from a no-op**. The mutation
+  still happened; the response shape alone cannot confirm it. If a caller needs the response
+  itself to confirm the expression ran, make the expression return an explicit value (e.g. end it
+  with a sentinel like `; true`, or the value just written) rather than relying on `{"ok":true}`
+  to mean anything beyond "no throw, no non-serializable value". Contrast `injectScript`, listed
+  above: it *always* returns `{"ok":true}` **by contract** (its return is discarded regardless of
+  what the injected script evaluates to), so its `{"ok":true}` carries no such ambiguity. The two
+  tools sit adjacent in the tool list and are described similarly — don't read one's guarantee
+  onto the other. (This exact confusion cost squawk 0088: a genuinely-successful `evaluate` call
+  whose expression happened to evaluate to `undefined` was read as a broken op.)
 - **Refusal-as-normal-result** — two outcomes are **normal results the agent should read and react
   to**, *not* errors:
   - `openTab` returning `null` (URL rejected renderer-side, or no handle within the timeout).

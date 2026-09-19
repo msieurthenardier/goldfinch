@@ -1,6 +1,6 @@
 # Squawk 0090: camelCase normalisation widened expiry-role false positives
 
-**Status**: open
+**Status**: escalated
 **Type**: defect
 **Severity**: routine
 **Reported**: 2026-09-19
@@ -40,7 +40,7 @@ Separately confirmed as PRE-EXISTING and out of scope here: `accNumber` resolves
 to `number` both before and after 0087, because the `number` pattern's
 `(card|cc|creditcard|pan)` group has no leading `\b`.
 
-## Disposition
+## Disposition at logging (superseded)
 
 **Logged open, deliberately NOT folded into 0087.** It fails squawk qualification
 criterion 2 (*no design decisions*): the obvious tightening — requiring a
@@ -54,10 +54,29 @@ site (Jostens' `card_cardExpMonth` / `card_cardExpYear` were undetected) and tra
 it for a bounded, lower-harm mis-tag risk on mixed forms. A wrong expiry fails a
 checkout; it does not leak a secret.
 
-## Corrective Action
+## Disposition
 
-*(written at completion)*
+**Escalated** 2026-09-19. Failed squawk qualification criterion 2 (no design decisions).
 
-## Verification
+Tightening the `expiry`/`expMonth`/`expYear` patterns to require a `card`/`cc`
+token would break `expirationMonth`, which is detected today on genuine card forms
+and should stay detected. Choosing between narrower patterns, a co-occurrence rule
+scoped to the form rather than the field, proximity-to-the-number-field, or
+accepting the trade is a real design decision.
 
-*(written at completion)*
+**Escalated to**: Mission 21 ("Saving, Not Just Filling") **Flight 2 — identity
+items**, rather than a dedicated flight. Flight 2 must design detection heuristics
+for a family with NO structural anchor at all — no `input[type=password]`, no Luhn
+— so it is already solving the fallback-pattern problem from scratch. Taking these
+two there means one coherent conversation about pattern design instead of hardening
+card patterns now and rediscovering the same trade-offs a flight later.
+
+Link the flight artifact here once Flight 2 is planned.
+
+**Watch item (raised at review, recorded deliberately):** this is a regression
+this project shipped, deferred to a flight with no firm date — Mission 21's
+flights are planned one at a time. If Flight 2 slips significantly, re-escalate
+THIS squawk to `grounding` rather than leaving it riding an indefinitely
+postponed flight. The deferral is defensible because the fix needs a design
+decision and the impact is bounded; it stops being defensible if "later" becomes
+"never".
