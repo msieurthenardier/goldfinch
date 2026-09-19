@@ -11,6 +11,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const {
   autocompleteRoleOf,
+  fallbackRoleOf,
   findCardFields,
   findAllCardFields,
   isLiveCardNumberField,
@@ -204,6 +205,84 @@ test('fallback ignores number-ish fields that are not card numbers', () => {
   }
 });
 
+// --- squawk 0087: camelCase role names ------------------------------------
+// FALLBACK_PATTERNS anchor on \b, which never fires at a camelCase hump (a
+// letter-to-letter transition, regardless of case) — only a role word landing
+// at the very start or end of the name reached an existing string boundary.
+// splitCamelHumps (internal, exercised here through fallbackRoleOf/
+// findCardFields) inserts a space at each hump so the SAME regexes can match
+// mid-name.
+
+test('squawk 0087: camelCase role names are now detected by name alone', () => {
+  const cases = [
+    ['ccExpMonth', 'expMonth'],
+    ['ccExpYear', 'expYear'],
+    ['creditCardExpirationMonth', 'expMonth'],
+    ['creditCardExpirationYear', 'expYear'],
+    ['cardNumberDisplay', 'number'],
+    ['ccNumberInput', 'number'],
+    ['cardSecurityCode', 'csc'],
+    ['cvvNumber', 'csc'],
+    ['cardholderName', 'cardholder'],
+    // The real-world Jostens spellings that motivated this squawk.
+    ['card_cardExpMonth', 'expMonth'],
+    ['card_cardExpYear', 'expYear']
+  ];
+  for (const [name, expected] of cases) {
+    assert.equal(fallbackRoleOf(new FakeInput({ name })), expected, `"${name}" must resolve to "${expected}"`);
+  }
+});
+
+test('squawk 0087: the real Jostens field set now detects a complete card entry', () => {
+  // Zero autocomplete attributes anywhere — exactly the captured markup — so the
+  // fallback is the only detection path, matching the live investigation. Number/
+  // month/year are name-only (the underscore-joined `card_cardExpMonth` spelling
+  // this squawk fixes); cardholder/csc carry the placeholder copy a real payment
+  // page ships, which is what made them already-detected before this fix — this
+  // test's new coverage is the previously-missed expMonth/expYear pair.
+  const number = new FakeInput({ name: 'card_cardNumber' });
+  const cardholder = new FakeInput({ name: 'card_nameOnCard', placeholder: 'Name on Card' });
+  const csc = new FakeInput({ name: 'card_securityCode', placeholder: 'Security Code' });
+  const expMonth = new FakeInput({ name: 'card_cardExpMonth' });
+  const expYear = new FakeInput({ name: 'card_cardExpYear' });
+  const doc = makeDoc([new FakeForm([number, cardholder, csc, expMonth, expYear])]);
+
+  const entry = findCardFields(doc);
+  assert.equal(entry.number, number);
+  assert.equal(entry.cardholder, cardholder);
+  assert.equal(entry.csc, csc);
+  assert.equal(entry.expMonth, expMonth, 'previously missed — left the stored expiry with a null month');
+  assert.equal(entry.expYear, expYear, 'previously missed — left the stored expiry with a null year');
+});
+
+test('squawk 0087: previously-working non-camelCase and boundary-adjacent names are unaffected', () => {
+  const cases = [
+    ['creditCardNumber', 'number'],
+    ['cardNumber', 'number'],
+    ['ccNumber', 'number'],
+    ['cc_number', 'number'],
+    ['card-number', 'number'],
+    ['cardNo', 'number'],
+    ['CCNumber', 'number'],
+    ['payment.cardNumber', 'number'],
+    ['cvv', 'csc'],
+    ['securityCode', 'csc'],
+    ['expirationMonth', 'expMonth'],
+    ['nameOnCard', 'cardholder']
+  ];
+  for (const [name, expected] of cases) {
+    assert.equal(fallbackRoleOf(new FakeInput({ name })), expected, `"${name}" must still resolve to "${expected}"`);
+  }
+});
+
+test('squawk 0087: camelCase splitting introduces no new false positives', () => {
+  // The point of normalizing the haystack instead of loosening the regexes: none
+  // of these should start matching just because they now carry internal spaces.
+  for (const name of ['pan', 'acctNum', 'tenderNumber', 'paymentNumber', 'creditCard', 'number']) {
+    assert.equal(fallbackRoleOf(new FakeInput({ name })), null, `"${name}" must stay undetected`);
+  }
+});
+
 // --- expiry parsing --------------------------------------------------------
 
 test('parseExpiry accepts the shapes operators actually type', () => {
@@ -213,12 +292,45 @@ test('parseExpiry accepts the shapes operators actually type', () => {
   assert.deepEqual(parseExpiry('12 28'), { month: '12', year: '2028' });
   assert.deepEqual(parseExpiry('1228'), { month: '12', year: '2028' });
   assert.deepEqual(parseExpiry('01/27'), { month: '01', year: '2027' });
+  // Separator-less exact-width forms still parse exactly as before (squawk 0086
+  // touches only the reader's month width, not these already-unambiguous forms).
+  assert.deepEqual(parseExpiry('0429'), { month: '04', year: '2029' });
+  assert.deepEqual(parseExpiry('042029'), { month: '04', year: '2029' });
+  assert.deepEqual(parseExpiry('04/2029'), { month: '04', year: '2029' });
+});
+
+test('squawk 0086: a single-digit month with a separator now parses, zero-padded', () => {
+  assert.deepEqual(parseExpiry('2/27'), { month: '02', year: '2027' });
+  assert.deepEqual(parseExpiry('4/29'), { month: '04', year: '2029' });
+  assert.deepEqual(parseExpiry('2/2027'), { month: '02', year: '2027' });
+  assert.deepEqual(parseExpiry('2-27'), { month: '02', year: '2027' });
+  assert.deepEqual(parseExpiry('2 27'), { month: '02', year: '2027' });
 });
 
 test('parseExpiry rejects nonsense rather than filling a wrong date', () => {
-  for (const bad of ['', null, undefined, 'soon', '13/28', '00/28', '1/2', '123456789']) {
+  for (const bad of [
+    '',
+    null,
+    undefined,
+    'soon',
+    '13/28',
+    '00/28',
+    '1/2',
+    '123456789',
+    '13/27', // out-of-range month, single-digit-month path
+    '0/27' // month 0 is invalid even once zero-padded to '00'
+  ]) {
     assert.equal(parseExpiry(bad), null, `${JSON.stringify(bad)} must not parse`);
   }
+});
+
+test('squawk 0086: a separator-less 3-digit run is ambiguous and is rejected, not guessed', () => {
+  // `227` could be read as `2/27` (1-digit month) or `22/7` (2-digit month, 1-digit
+  // year — itself not a supported year width). With no separator to disambiguate,
+  // this stays rejected exactly as it was before this fix; only the separated form
+  // (`2/27`) gained support.
+  assert.equal(parseExpiry('227'), null);
+  assert.equal(parseExpiry('429'), null);
 });
 
 // --- filling ---------------------------------------------------------------
@@ -262,6 +374,16 @@ test('a combined expiry field honors maxLength for the 4-digit year', () => {
 
   fillCardForm(doc, CARD);
   assert.equal(exp.value, '12/2028');
+});
+
+test('squawk 0086: a stored single-digit-month expiry now fills back (the reported symptom)', () => {
+  const number = new FakeInput({ autocomplete: 'cc-number' });
+  const exp = new FakeInput({ autocomplete: 'cc-exp', maxLength: 7 });
+  const doc = makeDoc([new FakeForm([number, exp])]);
+
+  const result = fillCardForm(doc, { ...CARD, expiry: '2/27' });
+  assert.equal(result.filled, true);
+  assert.equal(exp.value, '02/2027', 'the field previously stayed blank for a hand-typed 2/27');
 });
 
 test('split month/year selects match on option value, including the short year', () => {
