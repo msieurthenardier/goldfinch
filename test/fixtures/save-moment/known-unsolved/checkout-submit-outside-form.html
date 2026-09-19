@@ -1,7 +1,7 @@
 <!--
   Fixture: checkout-submit-outside-form
-  Corpus tier: known-unsolved (positive — promoted by Leg 5 as its trigger
-  solves it). Family: card.
+  Corpus tier: known-unsolved (positive; DEMOTED from 'gated' at Leg 6 —
+  hat-and-alignment, a live HAT finding — see below). Family: card.
   Models: a payment checkout whose card fields sit in one container and whose
   "Place order" submit control lives OUTSIDE that container and outside any
   <form> entirely — a real, observed e-commerce shape where a plain <button>
@@ -9,19 +9,41 @@
   order via fetch/XHR. THIS IS THE MOTIVATING SHAPE for this whole flight
   (see flight.md's Jostens reference and DD1's rationale for broadening the
   trigger past `submit`).
-  Why known-unsolved: findAllCardFields correctly detects the card entry
-  TODAY — detection does not care where the submit control lives, only where
-  the card fields are. What is unsolved is the TRIGGER: the old submit-only
-  capture never fires here (there is no <form> to submit), so no offer is
-  ever raised no matter how long the operator sits on this page. Promotion
-  happens once Leg 5's broadened trigger (a trusted click on any button-like
-  element) lands.
+  Detection: findAllCardFields correctly detects the card entry — detection
+  does not care where the submit control lives, only where the card fields
+  are. Leg 5's broadened trigger (a trusted click on any button-like element)
+  also correctly resolves this button's click to this card entry, which
+  carries a provenanced secret worth holding — see assert: 'captures' below.
+  Why known-unsolved / assert: 'captures' (NOT 'offers'): promoted to 'gated'/
+  'offers' at Leg 5, then DEMOTED here after a live HAT walk exposed that the
+  headless assertOffersEntry of the time proved only capture-worthiness, never
+  that an offer is actually RELEASED (DD4: a main-side navigation commit or a
+  preload-reported field detachment). THIS EXACT PAGE — a plain, UNASSOCIATED
+  `type="button"` with no `<form>`, no `form=` attribute, and (being a static
+  fixture) no script — has no way to satisfy either settle signal: it never
+  navigates and its fields never detach. In a real, unscripted rendering of
+  this markup, clicking "Place order" does literally nothing, so the capture
+  would be held and then dropped by the TTL, never offered. That is NOT a
+  defect in the shipped mechanism — a live HAT walk against an equivalent page
+  that DOES navigate on click produced a real card save offer, saved to the
+  vault (see flight-log.md, Leg 6). The gap is that THIS static fixture omits
+  the JS click handler the real Jostens page has, and this corpus's extractor
+  never parses/executes <script> at all (DD6) — so the settle half of this
+  shape is provably headlessly unmodelable for the unassociated-button
+  sub-mechanism specifically, same permanent-trade-off category as
+  spa-submit-no-navigation. The DOM-shape half of the motivating pattern IS
+  gated headlessly, honestly, by checkout-submit-outside-form-formattr.html
+  (assert: 'offers') — see that fixture's own header for what it changes and
+  why. This fixture's own full "does it really offer" claim can be verified
+  only live, against the real app (Leg 6's own required HAT step).
   Sample card number (4111111111111111, the standard Visa test PAN) is
   Luhn-valid, per the corpus's own rule: findAllCardFields's detection is
   independent of DD7's Luhn/plausibility gate (applied later, main-side), but
   a non-Luhn sample here would confuse a future end-to-end "does this offer"
   reader for reasons unrelated to shape.
   Added: 2026-09-19 (Mission 21, Flight 1, Leg 4 — fixture-corpus).
+  Demoted 'gated'/'offers' -> 'known-unsolved'/'captures': 2026-09-19
+  (Mission 21, Flight 1, Leg 6 — hat-and-alignment).
 -->
 <div class="checkout">
   <div class="card-fields">

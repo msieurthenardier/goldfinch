@@ -1,0 +1,53 @@
+<!--
+  Fixture: checkout-submit-outside-form-formattr
+  Corpus tier: gated (positive). Family: card.
+  Added at Leg 6 (hat-and-alignment), in response to a live HAT finding — see
+  checkout-submit-outside-form.html's own header for the full story and
+  flight-log.md for the finding itself.
+  Models the SAME structural shape as checkout-submit-outside-form.html (a
+  card entry whose submit control lives OUTSIDE the DOM subtree that carries
+  its fields) but wired for a REAL native HTML form submission instead of a
+  script-driven fetch/XHR handler: the card fields live inside a real <form>,
+  and the "Place order" button sits OUTSIDE that <form> element entirely,
+  associated with it only via the HTML5 `form=` IDREF attribute — the
+  standards mechanism that exists specifically so a submit control can live
+  outside the <form> it submits (a real, common pattern wherever a page's
+  layout puts an action bar/footer outside the form markup but still wants a
+  native submit, e.g. a modal's fixed footer). No <script> anywhere in this
+  file, and none is needed: the browser's OWN implicit-submission algorithm
+  fires a real navigation on click.
+  Why this fixture exists rather than teaching checkout-submit-outside-form.html
+  itself to settle: this corpus's extractor never parses or executes
+  <script> (DD6), so the ACTUAL Jostens mechanism (a plain, unassociated
+  button wired to a JS click handler that calls fetch/XHR) is settle-provable
+  only live, never headlessly, by construction — inventing a headless
+  "settle simulation" for it would prove nothing (see
+  save-moment-assertions.js's module header). This fixture instead proves the
+  DOM-shape half of the motivating pattern — "the submit control is not a
+  descendant of the fields' form" — using the ONE sub-mechanism (form=
+  association) that both (a) keeps the control physically outside the form,
+  matching the shape, and (b) settles via REAL native navigation with zero
+  script, which this headless corpus CAN honestly verify
+  (wouldNativelySubmit in save-moment-assertions.js). It is a genuinely
+  different wiring from the live Jostens page's fetch handler, not a stand-in
+  claimed to be the same thing — recorded here so a future reader does not
+  conflate the two.
+  Sample card number (4111111111111111, the standard Visa test PAN) is
+  Luhn-valid, matching every other positive card fixture in this corpus.
+  Added: 2026-09-19 (Mission 21, Flight 1, Leg 6 — hat-and-alignment).
+-->
+<div class="checkout">
+  <form id="payment" class="card-fields" action="/checkout/submit" method="post">
+    <label for="cc-number">Card number</label>
+    <input type="text" id="cc-number" name="cardnumber" autocomplete="cc-number" value="4111111111111111" />
+    <label for="cc-name">Name on card</label>
+    <input type="text" id="cc-name" name="ccname" autocomplete="cc-name" value="Ada Lovelace" />
+    <label for="cc-exp">Expiry (MM/YY)</label>
+    <input type="text" id="cc-exp" name="cc-exp" autocomplete="cc-exp" maxlength="5" value="04/29" />
+    <label for="cc-csc">Security code</label>
+    <input type="text" id="cc-csc" name="cvc" autocomplete="cc-csc" value="123" />
+  </form>
+</div>
+<div class="checkout-footer">
+  <button id="place-order" form="payment">Place order</button>
+</div>

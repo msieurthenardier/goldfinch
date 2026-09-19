@@ -23,15 +23,33 @@
 // exercise headlessly (the gesture-policy layer) versus what stays a required
 // LIVE verification step (settle itself — DD3f/DD4 fire main-process-side).
 //
+// Leg 6 (hat-and-alignment) CORRECTION — 'offers' split into 'captures' and
+// 'offers': a live HAT walk found that Leg 5's 'offers' assertion actually
+// proved only CAPTURE-WORTHINESS (a gesture resolves a detected entry carrying
+// a provenanced secret worth holding) and never exercised DD4's release/settle
+// half at all. checkout-submit-outside-form was promoted to 'gated'/'offers'
+// at Leg 5 despite having NO possible settle signal (no navigation, no form,
+// no script) — the third instance in this flight of an assertion proving less
+// than its name claimed. Fixed: 'captures' is the renamed, honestly-scoped
+// Leg 5 behavior; 'offers' is now STRENGTHENED to additionally require a real,
+// headlessly-provable settle signal (native HTML form submission — the one
+// settle path this corpus can prove without executing page script). A shape
+// earns 'offers' only when that holds for its own gesture; otherwise it earns,
+// at most, 'captures'. See test/helpers/save-moment-assertions.js's own header
+// for the full mechanism and flight-log.md for the live finding.
+//
 // Entry shape:
 //   id               string, unique, matches the fixture's own file-header title.
 //   tier             'gated' | 'known-unsolved' | 'negative-detection' |
 //                     'negative-gesture'
-//   assert           'detects' | 'no-detect' | 'offers' | 'no-offer' — which
-//                     assertion function in
-//                     test/helpers/save-moment-assertions.js runs.
+//   assert           'detects' | 'no-detect' | 'captures' | 'offers' |
+//                     'no-offer' — which assertion function in
+//                     test/helpers/save-moment-assertions.js runs. 'captures'
+//                     proves only capture-worthiness; 'offers' proves that PLUS
+//                     a real, headlessly-provable settle signal (Leg 6 —
+//                     hat-and-alignment — see that helper's own module header).
 //   family           'login' | 'card' | null — required when assert is
-//                     'detects' or 'offers'.
+//                     'detects', 'captures', or 'offers'.
 //   file             path to the fixture HTML, relative to this manifest's own
 //                     directory. Omitted only for a fixture that is built
 //                     entirely by `simulate` (none currently need this).
@@ -42,8 +60,9 @@
 //   expectedOrdinal  optional integer (never a node reference) — which detected
 //                     entry, among all entries of `family`, is the one this
 //                     fixture is about. Defaults to 0.
-//   gestureSelector  optional selector string for `assert: 'offers'|'no-offer'`
-//                     — which element `assertOffersEntry`/`assertNoOffer`
+//   gestureSelector  optional selector string for `assert:
+//                     'captures'|'offers'|'no-offer'` — which element
+//                     assertCapturesEntry/assertOffersEntry/assertNoOffer
 //                     synthesize the trusted click on. A leading `#` resolves
 //                     by id; otherwise it is handed to the extractor's own
 //                     (deliberately narrow) `querySelectorAll`. Defaults to the
@@ -102,13 +121,40 @@ module.exports = [
 
   // --- gated: positive shapes, promoted by Leg 5 (tier AND assert both moved) --
   {
+    // DEMOTED 'gated'/'offers' -> 'known-unsolved'/'captures' at Leg 6
+    // (hat-and-alignment) — a live HAT finding. THE MOTIVATING SHAPE (see the
+    // fixture's own header): a plain <button>, no `type` attribute, sitting
+    // OUTSIDE every form, no script (this corpus's extractor never
+    // parses/executes <script> — DD6). Detection and the gesture/ordinal/
+    // provenance layer are all correct for it TODAY — assert: 'captures'
+    // proves exactly that. What is NOT proven, and cannot be proven
+    // headlessly for THIS unassociated-button sub-mechanism, is that an
+    // offer is ever RELEASED: the real page's settle signal is a script-
+    // driven fetch/XHR completion this static fixture has no script to model
+    // (DD4's own settle gate — navigation commit or field detachment — never
+    // fires for a page with no script at all). See the fixture's own header
+    // for the full accounting and flight-log.md for the live finding that
+    // caught this. checkout-submit-outside-form-formattr (below) gates the
+    // same DOM shape via a sub-mechanism this corpus CAN prove settles.
     id: 'checkout-submit-outside-form',
+    tier: 'known-unsolved',
+    assert: 'captures',
+    family: 'card',
+    file: 'known-unsolved/checkout-submit-outside-form.html',
+    gestureSelector: '#place-order'
+  },
+  {
+    // Added at Leg 6 (hat-and-alignment) alongside the demotion above — see
+    // the fixture's own header for the full rationale. Same "submit control
+    // lives outside the fields' <form>" shape, wired via the HTML5 `form=`
+    // IDREF so a real, script-free native form submission (and therefore a
+    // real navigation — DD4's settle signal) fires on click, honestly
+    // provable headlessly by `wouldNativelySubmit`.
+    id: 'checkout-submit-outside-form-formattr',
     tier: 'gated',
     assert: 'offers',
     family: 'card',
-    file: 'known-unsolved/checkout-submit-outside-form.html',
-    // THE MOTIVATING SHAPE (see the fixture's own header): a plain <button>,
-    // no `type` attribute, sitting OUTSIDE every form.
+    file: 'known-unsolved/checkout-submit-outside-form-formattr.html',
     gestureSelector: '#place-order'
   },
   {

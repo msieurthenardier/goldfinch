@@ -2,7 +2,25 @@
 
 // The PINNED assertion vocabulary for the save-moment fixture corpus (Mission 21,
 // Flight 1, Leg 4 — fixture-corpus; `offers`/`assertNoOffer` made REAL at Leg 5 —
-// broadened-capture).
+// broadened-capture; `offers` split into `captures`/`offers` at Leg 6 —
+// hat-and-alignment, see below).
+//
+// ⚠ Leg 6 (hat-and-alignment) HISTORY, recorded because it is the THIRD time
+// this flight asserted a narrower property than it appeared to (Leg 4's design
+// review caught the negative-tier version; Leg 5's design review caught the
+// promotion-without-changing-`assert` version; this one was caught LIVE, by a
+// human, against the running app). Leg 5's `assertOffersEntry` proved only that
+// a gesture resolves a detected entry carrying a provenanced secret "worth
+// holding" — i.e. CAPTURE-WORTHINESS. It never exercised DD4's RELEASE/SETTLE
+// half (a main-side navigation commit or a preload-reported field detachment)
+// at all, so a shape that can NEVER settle (checkout-submit-outside-form.html —
+// a plain, unassociated `type="button"` outside any form, no script, no
+// navigation) still passed a test named `assertOffersEntry`, gated at 100%,
+// while never producing a real offer in an actual browser. The fix: the old
+// body is renamed to `assertCapturesEntry` (it proves exactly what it always
+// proved — nothing more), and a NEW, genuinely stronger `assertOffersEntry`
+// additionally proves the ONE settle signal this headless corpus can honestly
+// model without executing page script — see `wouldNativelySubmit` below.
 //
 //   assertDetectsEntry(doc, family, opts)   — pure detection. Gates the
 //                                              detection-negative tier and any
@@ -20,9 +38,12 @@
 //                                              spa-submit-no-navigation).
 //   assertNoDetectableEntry(doc)            — REAL, gates the detection-negative
 //                                              tier.
-//   assertOffersEntry(doc, family, opts)    — REAL (Leg 5). Exercises the
-//                                              main-world GESTURE-POLICY layer
-//                                              headlessly: builds a REAL
+//   assertCapturesEntry(doc, family, opts)  — REAL (Leg 5; renamed from
+//                                              `assertOffersEntry` at Leg 6 —
+//                                              hat-and-alignment, same body).
+//                                              Exercises the main-world
+//                                              GESTURE-POLICY layer headlessly:
+//                                              builds a REAL
 //                                              `vault-entry-observer` over
 //                                              `doc`, grants provenance for
 //                                              every detected field that
@@ -46,7 +67,36 @@
 //                                              settle-pending capture. Never a
 //                                              reimplementation of the policy
 //                                              — the exact production modules
-//                                              run.
+//                                              run. **Proves CAPTURE-WORTHINESS
+//                                              ONLY** — a fixture asserting
+//                                              only `captures` may legitimately
+//                                              NEVER produce a real save offer
+//                                              (see checkout-submit-outside-
+//                                              form.html, tier known-unsolved).
+//   assertOffersEntry(doc, family, opts)    — REAL, STRENGTHENED (Leg 6 —
+//                                              hat-and-alignment). Runs
+//                                              everything `assertCapturesEntry`
+//                                              does, THEN additionally asserts
+//                                              `wouldNativelySubmit(target)` —
+//                                              that clicking the resolved
+//                                              gesture element triggers a REAL
+//                                              native HTML form submission
+//                                              (DD4's navigation-commit settle
+//                                              signal), the ONE settle path
+//                                              this headless corpus can prove
+//                                              without executing page script
+//                                              (fixtures carry no `<script>` —
+//                                              DD6's extractor never parses/
+//                                              executes one — so a script-
+//                                              driven fetch/XHR settle path,
+//                                              the literal Jostens mechanism,
+//                                              is unmodelable headlessly by
+//                                              construction, not by omission).
+//                                              A fixture only earns
+//                                              `assert: 'offers'` when this
+//                                              holds for its designated
+//                                              gesture element; otherwise it
+//                                              earns, at most, `captures`.
 //   assertNoOffer(doc, opts)                — REAL (Leg 5). The inverse: the
 //                                              designated gesture element (for
 //                                              decoy-cancel-beside-password,
@@ -62,6 +112,12 @@
 //                                              provenanced — every one of
 //                                              those is "no offer" and this
 //                                              helper does not care which.
+//                                              (Unaffected by the Leg 6 split:
+//                                              "never captures" already implies
+//                                              "never offers" — capture is a
+//                                              strict prerequisite of settle —
+//                                              so this negative direction was
+//                                              never the vacuous one.)
 
 const assert = require('node:assert/strict');
 const { findAllLoginFields } = require('../../src/preload/vault-fill-fields');
@@ -157,15 +213,17 @@ function resolveGestureElement(doc, selector) {
 }
 
 /**
- * REAL policy-level assertion (Leg 5): the fixture's designated gesture
- * element, clicked, resolves via the real gesture-policy module to a detected
- * `family` entry at `expectedOrdinal` that carries a provenanced secret worth
- * holding.
+ * Shared core (Leg 5, extracted at Leg 6 — hat-and-alignment): the fixture's
+ * designated gesture element, clicked, resolves via the real gesture-policy
+ * module to a detected `family` entry at `expectedOrdinal` that carries a
+ * provenanced secret worth holding. Proves CAPTURE-WORTHINESS only — see the
+ * module header for why that is a deliberately narrower claim than "offers".
  * @param {any} doc
  * @param {'login'|'card'} family
  * @param {{ expectedOrdinal?: number, gestureSelector?: string }} [opts]
+ * @returns {{ target: any, resolved: { kind: 'login'|'card', ordinal: number }, entrySnapshot: any }}
  */
-function assertOffersEntry(doc, family, opts = {}) {
+function resolveCaptureWorthyGesture(doc, family, opts = {}) {
   const expectedOrdinal = opts.expectedOrdinal ?? 0;
   const { logins, cards, snapshot } = buildProvenancedObserver(doc);
 
@@ -191,6 +249,73 @@ function assertOffersEntry(doc, family, opts = {}) {
   assert.ok(
     snapshotHasProvenancedSecret(entrySnapshot, resolved.kind),
     `expected the resolved ${family} entry at ordinal ${expectedOrdinal} to carry a provenanced secret worth capturing`
+  );
+
+  return { target, resolved, entrySnapshot };
+}
+
+/**
+ * REAL policy-level assertion (Leg 5, renamed from `assertOffersEntry` at
+ * Leg 6 — hat-and-alignment; body unchanged). See the module header:
+ * CAPTURE-WORTHINESS only, never a claim that an offer is ever released.
+ * @param {any} doc
+ * @param {'login'|'card'} family
+ * @param {{ expectedOrdinal?: number, gestureSelector?: string }} [opts]
+ */
+function assertCapturesEntry(doc, family, opts = {}) {
+  resolveCaptureWorthyGesture(doc, family, opts);
+}
+
+/**
+ * Does clicking `target` trigger a REAL native HTML form submission — the ONE
+ * settle signal (DD4's navigation-commit path) this headless corpus can prove
+ * without executing page script? (Leg 6 — hat-and-alignment.) NOT a
+ * reimplementation of any production decision: production never computes
+ * this at all — a real browser's own navigation is what fires `did-navigate`
+ * main-side. This predicate exists solely so a static fixture can honestly
+ * claim its gesture settles, per the HTML Standard's own "implicit submission"
+ * rule: a submit-type control (a `<button>` with no `type` attribute or
+ * `type="submit"`/`"image"`, or an `<input type="submit"|"image">`) whose
+ * `.form` resolves — via containment OR a `form=` IDREF, the extractor's own
+ * DD6 rule (b), now wired for `<button>` too (fixture-extractor.js) —
+ * natively submits that form on click, with nothing in a script-free fixture
+ * to intercept it. `type="button"`/`"reset"`, or no resolvable `.form` at
+ * all (the unassociated "outside every form" shape wired to a JS click
+ * handler in a real page — e.g. checkout-submit-outside-form.html), never
+ * does.
+ * @param {any} target
+ * @returns {boolean}
+ */
+function wouldNativelySubmit(target) {
+  if (!target || typeof target.tagName !== 'string') return false;
+  const tag = target.tagName.toUpperCase();
+  const rawType = typeof target.getAttribute === 'function' ? target.getAttribute('type') : null;
+  const type = rawType ? rawType.toLowerCase() : '';
+  const isSubmitter =
+    (tag === 'BUTTON' && type !== 'button' && type !== 'reset') ||
+    (tag === 'INPUT' && (type === 'submit' || type === 'image'));
+  if (!isSubmitter) return false;
+  return !!target.form;
+}
+
+/**
+ * REAL, STRENGTHENED policy-level assertion (Leg 6 — hat-and-alignment; see
+ * the module header for why the Leg 5 version of this name was vacuous for
+ * the settle half). Everything `assertCapturesEntry` proves, PLUS
+ * `wouldNativelySubmit(target)` — the resolved gesture element must actually
+ * settle via native navigation for a fixture to earn `assert: 'offers'`.
+ * @param {any} doc
+ * @param {'login'|'card'} family
+ * @param {{ expectedOrdinal?: number, gestureSelector?: string }} [opts]
+ */
+function assertOffersEntry(doc, family, opts = {}) {
+  const { target } = resolveCaptureWorthyGesture(doc, family, opts);
+  assert.ok(
+    wouldNativelySubmit(target),
+    "expected the gesture element to trigger a REAL native form submission (DD4's navigation-commit " +
+      "settle signal) — this fixture's gesture element is not a resolvable submit-type control, so it " +
+      'would never settle in a real, script-free rendering of this markup; such a shape can only honestly ' +
+      "earn assert:'captures', not assert:'offers' (see save-moment-assertions.js's module header)"
   );
 }
 
@@ -227,4 +352,11 @@ function assertNoOffer(doc, opts = {}) {
   );
 }
 
-module.exports = { assertDetectsEntry, assertNoDetectableEntry, assertOffersEntry, assertNoOffer };
+module.exports = {
+  assertDetectsEntry,
+  assertNoDetectableEntry,
+  assertCapturesEntry,
+  assertOffersEntry,
+  assertNoOffer,
+  wouldNativelySubmit
+};

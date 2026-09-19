@@ -622,6 +622,15 @@ function makeElement(tagLower, attrs, doc) {
     defineFormOwner(el);
   } else if (tagLower === 'option') {
     defineOptionProperties(el);
+  } else if (tagLower === 'button') {
+    // A real DOM gives every form-associated element (button included) a
+    // `.form` property, same rule (b) as input/select — a `form=` IDREF wins
+    // over containment. Needed by the corpus's settle-modeling assertion
+    // (Leg 6 — hat-and-alignment): a submit-type <button> OUTSIDE its <form>
+    // but wired via `form=` still natively submits that form on click, and
+    // `wouldNativelySubmit` (save-moment-assertions.js) reads `.form` to
+    // detect exactly that shape.
+    defineFormOwner(el);
   }
 
   return el;

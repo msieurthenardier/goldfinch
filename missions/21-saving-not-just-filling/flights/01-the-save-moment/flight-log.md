@@ -1785,3 +1785,80 @@ production failure mode the finding described.
 `test/unit/vault-entry-observer.test.js`, and
 `test/unit/vault-entry-observer-bundle.test.js` touched — nothing else in the
 flight's working tree changed.
+
+### 2026-09-19 — Leg 6 `hat-and-alignment` — corpus defect found and fixed mid-HAT
+
+A live human acceptance walk found a real defect in the fixture corpus (NOT in
+the shipped mechanism — see below): `save-moment-assertions.js`'s
+`assertOffersEntry` asserted only that a gesture resolves a detected entry
+carrying a provenanced secret "worth capturing." It never exercised the
+RELEASE/SETTLE half of DD4 (a main-side navigation commit or a preload-
+reported field detachment) at all. `checkout-submit-outside-form.html` (tier
+`gated`, assert `offers` — the flight's motivating Jostens shape) has no
+script, no form action, and no navigation; clicking its "Place order" button
+does literally nothing in a real, unscripted rendering of that markup, so
+under the shipped read-at-gesture/release-at-settle design the capture is
+held and then TTL-dropped, never released — yet the headless suite reported
+"offers" and gated on it at 100%. This is the THIRD instance in this flight of
+an assertion proving a narrower property than its name claimed (Leg 4's and
+Leg 5's design reviews caught the first two; this one was caught live).
+
+**Confirmed NOT a production defect.** The same walk drove an equivalent page
+that DOES navigate on click through the real app and got a genuine card save
+offer, saved to the vault. The gap was entirely in how the corpus modeled
+"offers" — no production code was touched.
+
+**Fix** (`test/helpers/save-moment-assertions.js`):
+- The Leg 5 `assertOffersEntry` body is renamed `assertCapturesEntry` (same
+  behavior, honestly named — capture-worthiness only) and factored through a
+  shared `resolveCaptureWorthyGesture` core.
+- A NEW, genuinely stronger `assertOffersEntry` runs that core PLUS a new
+  `wouldNativelySubmit(target)` predicate: does clicking `target` trigger a
+  REAL native HTML form submission (a submit-type `<button>`/`<input>` whose
+  `.form` resolves via containment or a `form=` IDREF)? This is the ONE settle
+  signal (DD4's navigation-commit path) provable headlessly without executing
+  page script — fixtures carry no `<script>` at all (the extractor never
+  parses/executes one, DD6), so the literal Jostens fetch/XHR mechanism stays
+  unmodelable headlessly BY CONSTRUCTION, not by omission; no attempt was made
+  to fake that half. `wouldNativelySubmit` is not a reimplementation of any
+  production decision — production never computes this; a real browser's own
+  navigation is what fires `did-navigate` main-side.
+- `test/helpers/fixture-extractor.js` gained `.form` support for `<button>`
+  elements (it previously defined `.form` only for `input`/`select`, matching
+  what the pure detection modules need) — a one-line, test-only DOM-fidelity
+  fix so `wouldNativelySubmit` can read a button's form association exactly
+  the way a real browser exposes it.
+
+**Corpus changes** (`test/fixtures/save-moment/manifest.js`):
+- `checkout-submit-outside-form` DEMOTED `gated`/`offers` → `known-unsolved`/
+  `captures` — it is genuinely capture-worthy (detection and the gesture/
+  ordinal/provenance layer are all correct for it today) but can never settle
+  as a static, script-free fixture. NOT deleted; its header comment and the
+  manifest entry both record the reason and point to its replacement.
+- Added `checkout-submit-outside-form-formattr` (new fixture, tier `gated`,
+  assert `offers`, family `card`) — models the SAME "submit control lives
+  outside the fields' `<form>`" DOM shape, wired via the HTML5 `form=` IDREF
+  attribute instead of a JS click handler, so it settles via a REAL native
+  form submission with zero script — honestly gating the motivating shape's
+  DOM-structure half headlessly. Its own header comment is explicit that this
+  is a genuinely different sub-mechanism from the live Jostens fetch handler,
+  not a stand-in claimed to be the same thing.
+- `test/unit/save-moment-corpus.test.js` gained the `'captures'` assert kind
+  and a second STANDING CANARY (paralleling the existing negative-tier one):
+  `assertOffersEntry` must FAIL against `checkout-submit-outside-form` while
+  `assertCapturesEntry` still passes against the same document — the direct
+  regression test for this finding.
+
+**Verified**: `node --test --test-timeout=60000 test/unit/*.test.js` and
+`npm test` — 5166 tests (+2: the new fixture entry, the new canary), 5163
+pass, 0 fail, 3 todo (+1 from the prior landed state — `checkout-submit-
+outside-form` moved back to a todo tier; the other two todo entries are
+unchanged). `npm run lint`, `npm run typecheck`, `npm run format` (reformatted
+only quote style in the new assertion's message string; `format:check` clean
+afterward, full suite re-run post-format, still green). `git diff --stat`
+confirms zero `src/**` changes — every touched file is under `test/` or this
+mission's own docs.
+
+**Outstanding**: the leg's own HAT checklist (`legs/06-hat-and-alignment.md`)
+still needs the live walk steps completed/checked off by the operator; this
+entry covers only the corpus-defect fix that walk surfaced.
