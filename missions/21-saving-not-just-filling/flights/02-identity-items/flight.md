@@ -1,6 +1,6 @@
 # Flight: Identity Foundations
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Saving, Not Just Filling](../../mission.md)
 
 > **Scope reduced at design review.** This flight was drafted as "Identity Items" —
@@ -257,7 +257,7 @@ note at the top.)*
 - [x] Tests passing
 - [x] Documentation updated (`docs/vault.md`, CLAUDE.md)
 - [x] Squawks 0090 and 0091 marked completed and linked here
-- [ ] Mission flight list updated to reflect the split
+- [x] Mission flight list updated to reflect the split
 
 ### Verification
 
