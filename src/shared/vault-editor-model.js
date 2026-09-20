@@ -23,7 +23,7 @@
 /** The placeholder shown for a masked (unrevealed) secret field. */
 const MASK = '••••••••';
 
-/** @type {Record<'login'|'card'|'note', TypeLayout>} */
+/** @type {Record<'login'|'card'|'note'|'identity', TypeLayout>} */
 const EDITOR_LAYOUT = {
   login: {
     nonSecret: [
@@ -57,18 +57,40 @@ const EDITOR_LAYOUT = {
     // keep their `notes` field for annotations ON a credential; a note doesn't need one.
     nonSecret: [{ name: 'title', label: 'Name' }],
     secret: [{ name: 'body', label: 'Note', multiline: true }]
+  },
+  // Mission 21 Flight 2 Leg 3 / LD1 — field set + labels for the identity profile. The
+  // secret/non-secret SETS below are pinned to vault-item-schema.js's SCHEMA.identity by this
+  // file's own drift-guard test; field NAMES match Leg 2's detector role names verbatim (no
+  // translation layer).
+  identity: {
+    nonSecret: [
+      { name: 'title', label: 'Name' },
+      { name: 'fullName', label: 'Full name' }
+    ],
+    secret: [
+      { name: 'firstName', label: 'First name' },
+      { name: 'lastName', label: 'Last name' },
+      { name: 'email', label: 'Email' },
+      { name: 'phone', label: 'Phone' },
+      { name: 'street', label: 'Street address' },
+      { name: 'street2', label: 'Street address 2' },
+      { name: 'city', label: 'City' },
+      { name: 'region', label: 'State / Region' },
+      { name: 'country', label: 'Country' },
+      { name: 'postalCode', label: 'Postal code' }
+    ]
   }
 };
 
-/** @type {Array<'login'|'card'|'note'>} */
-const EDITOR_TYPES = /** @type {Array<'login'|'card'|'note'>} */ (Object.keys(EDITOR_LAYOUT));
+/** @type {Array<'login'|'card'|'note'|'identity'>} */
+const EDITOR_TYPES = /** @type {Array<'login'|'card'|'note'|'identity'>} */ (Object.keys(EDITOR_LAYOUT));
 
 /**
  * @param {string} type
  * @returns {TypeLayout}
  */
 function layoutFor(type) {
-  const l = EDITOR_LAYOUT[/** @type {'login'|'card'|'note'} */ (type)];
+  const l = EDITOR_LAYOUT[/** @type {'login'|'card'|'note'|'identity'} */ (type)];
   if (!l) throw new Error(`vault-editor-model: unknown item type "${type}"`);
   return l;
 }
@@ -193,13 +215,13 @@ function assembleSave({ type, id, nonSecretValues = {}, secretStates = {}, match
 /**
  * Partition a vault's item list into per-type buckets for the typed subsections
  * (M12 F5 HAT). DEFENSIVE by design: an item is bucketed ONLY when its `type` is a
- * known editor type (EDITOR_TYPES: login/card/note — the same taxonomy pinned to the
- * main-side security schema by the drift guard). An item with a missing/unknown type
- * is NOT silently dropped — it goes into the separate `unknown` bucket so the page can
- * SURFACE it (a visible row + a console warning). Order within a bucket is the input
+ * known editor type (EDITOR_TYPES: login/card/note/identity — the same taxonomy pinned
+ * to the main-side security schema by the drift guard). An item with a missing/unknown
+ * type is NOT silently dropped — it goes into the separate `unknown` bucket so the page
+ * can SURFACE it (a visible row + a console warning). Order within a bucket is the input
  * order (a stable list read). Returns a record keyed by every known type plus `unknown`.
  * @param {Array<any>} items
- * @returns {{ login: any[], card: any[], note: any[], unknown: any[] }}
+ * @returns {{ login: any[], card: any[], note: any[], identity: any[], unknown: any[] }}
  */
 function partitionItemsByType(items) {
   /** @type {Record<string, any[]>} */
@@ -211,7 +233,7 @@ function partitionItemsByType(items) {
     if (type && known.has(/** @type {any} */ (type))) buckets[type].push(item);
     else buckets.unknown.push(item);
   }
-  return /** @type {{ login: any[], card: any[], note: any[], unknown: any[] }} */ (buckets);
+  return /** @type {{ login: any[], card: any[], note: any[], identity: any[], unknown: any[] }} */ (buckets);
 }
 
 /**

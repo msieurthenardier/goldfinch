@@ -144,10 +144,20 @@ export default [
     // vault-gesture-policy.js (M21 F1 Leg 5 — broadened-capture) is the main-world
     // gesture-classification/ordinal-resolution pure core — same
     // CJS-required-by-the-preload shape.
+    // field-tokenizer.js (M21 F2 Leg 1 — squawks 0090/0091) is the family-agnostic
+    // tokenizing primitive vault-card-fields.js requires — same
+    // CJS-required-by-the-preload shape, no DOM globals of its own but grouped
+    // here so its require graph stays uniform with its one consumer.
+    // vault-identity-fields.js (M21 F2 Leg 2 — identity-boundary) is the identity
+    // twin of vault-card-fields.js — same main-world context, same
+    // CJS-required-by-the-preload shape; it additionally requires
+    // vault-fill-fields.js (for LD3's isClaimedByLogin), already in this group.
     files: [
       'src/preload/webview-preload.js',
       'src/preload/vault-fill-fields.js',
       'src/preload/vault-card-fields.js',
+      'src/preload/field-tokenizer.js',
+      'src/preload/vault-identity-fields.js',
       'src/preload/vault-fill-icon.js',
       'src/preload/vault-entry-observer.js',
       'src/preload/vault-entry-tracker.js',

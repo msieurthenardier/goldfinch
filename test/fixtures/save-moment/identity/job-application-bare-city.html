@@ -1,0 +1,24 @@
+<!--
+  Fixture: job-application-bare-city
+  Corpus tier: negative-detection (identity family) — asserted by
+  assertNoDetectableEntry once it is extended to the identity family.
+  Models a job-application form that asks, among other things, which city the
+  applicant is based in. `city` is BARE (no billing/shipping/delivery/
+  mailing/contact/home/work prefix), so it is NOT anchor-eligible (LD2) — and
+  no other postal role (street, postal code, prefixed city/country) exists
+  anywhere in the form. The scope anchor therefore fails outright, and
+  findAllIdentityFields must return [] for it, regardless of the applicant's
+  name/email fields also being present (they resolve non-postal roles fine
+  in isolation — they just never get the chance, because no field is
+  inspected past a failed anchor).
+  Added: 2026-09-20 (Mission 21, Flight 2, Leg 2 — identity-boundary).
+-->
+<form id="application">
+  <label for="ja-name">Full name</label>
+  <input type="text" id="ja-name" name="applicantName" />
+  <label for="ja-email">Email</label>
+  <input type="email" id="ja-email" name="applicantEmail" />
+  <label for="ja-city">City</label>
+  <input type="text" id="ja-city" name="city" placeholder="Which city are you based in?" />
+  <button type="submit">Submit application</button>
+</form>

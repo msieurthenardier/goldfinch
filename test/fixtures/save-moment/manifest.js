@@ -48,8 +48,14 @@
 //                     proves only capture-worthiness; 'offers' proves that PLUS
 //                     a real, headlessly-provable settle signal (Leg 6 —
 //                     hat-and-alignment — see that helper's own module header).
-//   family           'login' | 'card' | null — required when assert is
-//                     'detects', 'captures', or 'offers'.
+//   family           'login' | 'card' | 'identity' | null — required when
+//                     assert is 'detects', 'captures', or 'offers'. Three-way
+//                     as of Mission 21, Flight 2, Leg 2 (identity-boundary) —
+//                     the identity family is DETECTION ONLY at this leg
+//                     (no store, no capture/offer machinery yet — Flight 3),
+//                     so every identity-family entry currently carries
+//                     assert: 'detects' or lives in the negative-detection
+//                     tier with family: null.
 //   file             path to the fixture HTML, relative to this manifest's own
 //                     directory. Omitted only for a fixture that is built
 //                     entirely by `simulate` (none currently need this).
@@ -92,6 +98,42 @@ module.exports = [
     assert: 'no-detect',
     family: null,
     file: 'negative-detection/unhinted-billing-fields.html'
+    // Also serves as this leg's (Mission 21, Flight 2, Leg 2 —
+    // identity-boundary) required "existing anonymous field1/field2/field3
+    // shape" adversarial fixture for the identity family — reused, not
+    // paralleled, per flight.md's own Technical Approach. Now that
+    // assertNoDetectableEntry covers identity too, this single fixture
+    // proves the shape for all three families at once.
+  },
+
+  // --- identity family (Leg 2 — identity-boundary): adversarial REFUSED set --
+  {
+    id: 'job-application-bare-city',
+    tier: 'negative-detection',
+    assert: 'no-detect',
+    family: null,
+    file: 'identity/job-application-bare-city.html'
+  },
+  {
+    id: 'flight-search-destination',
+    tier: 'negative-detection',
+    assert: 'no-detect',
+    family: null,
+    file: 'identity/flight-search-destination.html'
+  },
+  {
+    id: 'newsletter-name-and-email',
+    tier: 'negative-detection',
+    assert: 'no-detect',
+    family: null,
+    file: 'identity/newsletter-name-and-email.html'
+  },
+  {
+    id: 'shipping-cost-estimator',
+    tier: 'negative-detection',
+    assert: 'no-detect',
+    family: null,
+    file: 'identity/shipping-cost-estimator.html'
   },
 
   // --- negative-gesture: REAL as of Leg 5 (assertNoOffer is no longer a stub) --
@@ -219,5 +261,30 @@ module.exports = [
     assert: 'offers',
     family: 'login',
     file: 'known-unsolved/plain-login-form.html'
+  },
+
+  // --- identity family (Leg 2 — identity-boundary): DETECTION ONLY -----------
+  // 'gated'/'detects', never 'captures'/'offers' at this leg — no store, no
+  // capture/offer machinery for identity exists yet (Flight 3).
+  {
+    // THE MOTIVATING PAGE. See the fixture's own header for the full
+    // accounting: every field carries autocomplete="on" (a useless hint), so
+    // detection runs entirely off the LD1 alternatives-model fallback
+    // vocabulary.
+    id: 'billing-jostens',
+    tier: 'gated',
+    assert: 'detects',
+    family: 'identity',
+    file: 'identity/billing-jostens.html'
+  },
+  {
+    // ACCEPTED, NAMED false positive — see the fixture's own header and
+    // flight.md DD1/LD4 decision 3. Stays 'gated'/'detects', pinned
+    // admitted-with-reasoning, not a defect to chase.
+    id: 'incident-report-third-party',
+    tier: 'gated',
+    assert: 'detects',
+    family: 'identity',
+    file: 'identity/incident-report-third-party.html'
   }
 ];

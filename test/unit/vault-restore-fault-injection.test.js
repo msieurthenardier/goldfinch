@@ -239,7 +239,7 @@ test('EXISTING-profile restore fault injection: a mid-list new-jar verify failur
   }
 });
 
-test('zeroize discipline: a mid-loop throw leaves zero live bundle-vault-key buffers (per-iteration finally, ruling 11) — pinned via a monkeypatched decryptItems that throws on the SECOND vault', async () => {
+test('zeroize discipline: a mid-loop throw leaves zero live bundle-vault-key buffers (per-iteration finally, ruling 11) — pinned via a monkeypatched decryptItems that throws on the SECOND vault. CAUGHT per-entry (DD3, Mission 21 F2 L3) — the throw marks only that entry "failed" and no longer rejects the whole restore, but the zeroize-on-throw guarantee must hold regardless of whether the error propagates or is swallowed', async () => {
   const src = await makeSourceProfile(['Alpha', 'Bravo']);
   try {
     const vc = require('../../src/main/vault/vault-crypto');
@@ -262,18 +262,18 @@ test('zeroize discipline: a mid-loop throw leaves zero live bundle-vault-key buf
       try {
         const dest = makeStore(destDir, deps);
         await dest.setup({ masterPassword: 'dest pw' });
-        await assert.rejects(
-          dest.restoreProfile(JSON.parse(JSON.stringify(src.bundle)), {
-            secret: Buffer.from(MASTER, 'utf8'),
-            secretKind: 'master',
-            mapping: {
-              [src.entries.global]: { directive: 'skip' },
-              [src.entries.alpha]: { directive: 'new', newJar: { name: 'Alpha', color: '#000' } },
-              [src.entries.bravo]: { directive: 'new', newJar: { name: 'Bravo', color: '#000' } }
-            }
-          }),
-          (e) => /injected mid-loop failure/.test(e.message)
-        );
+        const res = await dest.restoreProfile(JSON.parse(JSON.stringify(src.bundle)), {
+          secret: Buffer.from(MASTER, 'utf8'),
+          secretKind: 'master',
+          mapping: {
+            [src.entries.global]: { directive: 'skip' },
+            [src.entries.alpha]: { directive: 'new', newJar: { name: 'Alpha', color: '#000' } },
+            [src.entries.bravo]: { directive: 'new', newJar: { name: 'Bravo', color: '#000' } }
+          }
+        });
+        const outcomes = new Map(res.results.map((r) => [r.entryHandle, r]));
+        assert.equal(outcomes.get(src.entries.alpha).outcome, 'landed', 'the entry BEFORE the throw still lands');
+        assert.equal(outcomes.get(src.entries.bravo).outcome, 'failed', 'the throwing entry is caught, not fatal');
         assert.equal(seenKeys.length, 1);
         assert.ok(seenKeys[0].equals(Buffer.alloc(32, 0)), 'the per-iteration finally zeroized the vault key on throw');
       } finally {

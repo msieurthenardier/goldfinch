@@ -24,6 +24,16 @@ test('EDITOR_LAYOUT secret/non-secret sets EXACTLY match the security schema per
   assert.deepEqual([...m.EDITOR_TYPES].sort(), [...schema.ITEM_TYPES].sort());
 });
 
+test('every EDITOR_LAYOUT field (every type, incl. identity) carries a non-empty UI label', () => {
+  for (const type of m.EDITOR_TYPES) {
+    const layout = m.EDITOR_LAYOUT[type];
+    for (const spec of [...layout.nonSecret, ...layout.secret]) {
+      assert.equal(typeof spec.label, 'string', `${type}.${spec.name} label must be a string`);
+      assert.ok(spec.label.length > 0, `${type}.${spec.name} label must be non-empty`);
+    }
+  }
+});
+
 /* ---------------------------------------------------------------- assembleSave */
 
 test('assembleSave: masked-untouched secrets go to unchangedSecrets (placeholder value)', () => {
@@ -170,7 +180,7 @@ test('partitionItemsByType SURFACES unknown/missing types in the unknown bucket 
 test('partitionItemsByType degrades safely on a non-array / empty input', () => {
   for (const bad of [undefined, null, {}, 'x', 0]) {
     const p = m.partitionItemsByType(/** @type {any} */ (bad));
-    assert.deepEqual(p, { login: [], card: [], note: [], unknown: [] });
+    assert.deepEqual(p, { login: [], card: [], note: [], identity: [], unknown: [] });
   }
 });
 

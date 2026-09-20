@@ -1,0 +1,22 @@
+<!--
+  Fixture: shipping-cost-estimator
+  Corpus tier: negative-detection (identity family) — asserted by
+  assertNoDetectableEntry once it is extended to the identity family.
+  Models a shipping-cost calculator widget (zip + country, nothing else) —
+  the exact adversarial shape flight DD1's second round-2 amendment (LD4)
+  exists to refuse. `zip` anchors on its own (postalCode's {zip}
+  alternative, anchor-eligible) and `country` resolves the bare,
+  non-anchor-eligible-but-otherwise-admissible country role — so WITHOUT the
+  non-postal-role requirement this scope would incorrectly anchor as an
+  identity. No name, email or phone field exists anywhere in the form, so
+  LD4's additional requirement (>=1 non-postal role) refuses it: a postal
+  anchor alone is not a person.
+  Added: 2026-09-20 (Mission 21, Flight 2, Leg 2 — identity-boundary).
+-->
+<form id="estimator">
+  <label for="sc-zip">ZIP code</label>
+  <input type="text" id="sc-zip" name="zip" />
+  <label for="sc-country">Country</label>
+  <input type="text" id="sc-country" name="country" />
+  <button type="submit">Estimate shipping</button>
+</form>

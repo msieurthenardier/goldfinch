@@ -376,6 +376,150 @@ the picker row, the capture offer and the sheet carry only `title` / `cardholder
 refuse non-login items, and the documented "never card data" guarantee in
 `docs/mcp-automation.md` is unchanged by this work.
 
+### Identity items (Mission 21, Flight 2 — foundations only)
+
+A fourth item type, `identity` — one name/email/phone/address profile, at most one per vault.
+**This flight shipped the detector and the item type only; no fill, capture or sheet wiring
+exists yet** — `classifyCapture`/`identityProfileOf` (below) have no live caller until the
+follow-on flight. The scope split mirrors Flight 1's own lesson: a single leg that tried to
+design detection, fill, capture *and* the sheets at once would have repeated a mistake that cost
+Flight 1 six review rounds.
+
+**Schema** (`src/shared/vault-item-schema.js`'s `SCHEMA.identity`) is conservative: only `title`
+and `fullName` are non-secret (metadata a picker row can show without unmasking); everything
+else — `firstName` / `lastName` / `email` / `phone` / `street` / `street2` / `city` / `region` /
+`country` / `postalCode` — is secret, same as a login's password. Field names are the detector's
+own role names verbatim (below), with no translation layer, so the schema and the detector cannot
+drift on naming.
+
+**Admissibility has neither of the other two families' anchors.** Login has a structural one
+(`input[type=password]`); card has a narrow, well-known vocabulary plus a plausibility gate
+(Luhn). Identity has neither — "name", "email", "phone", "address" are among the most common
+words on the web — so admissibility is the entire security story
+(`src/preload/vault-identity-fields.js`):
+
+- **A SCOPE ANCHOR gates the form; token rules then gate the field.** A scope (a `<form>`, or the
+  whole document for a form-less field) is an identity context only if it contains BOTH (1) an
+  admissible **postal** role — `street`, `street2`, `postalCode`, or a PREFIX-qualified `city` /
+  `region` / `country` (prefixes: `billing`, `shipping`, `delivery`, `mailing`, `contact`, `home`,
+  `work` — one list, reused for `street`'s compound alternatives too, which settles
+  `billingAddress`) — AND (2) a **non-postal** role: `fullName`, `firstName`, `lastName`, `email`,
+  or `phone`. Absent either, the scope contributes NOTHING — not even fields that would otherwise
+  resolve a role. Both conditions exist for a reason found only at design review, not at first
+  draft: a postal anchor alone is not a person (a shipping-cost estimator — `zip` + `country`, no
+  name — would otherwise qualify as an identity form), and a non-postal role alone over-admits a
+  bare `email` field, which is one of the most overloaded widgets on the web (newsletter signup,
+  contact form, password reset, "email a friend" — none of them identity contexts).
+- **`address` is NEVER admissible bare** — neither at the anchor nor as a field, always prefixed
+  or compound (`address1`, `addr1`, `streetAddress`, `address-line1`, `billingAddress`, …). A bare
+  `{address}` alternative would create a reachable TIE: `emailAddress` tokenizes to
+  `["email","address"]`, which would match `email`'s `{email}` and a bare street `{address}` at
+  EQUAL length, decided by whichever the code happens to check first — exactly the ambiguity the
+  next point exists to remove. (Found in two passes: round 1 of design review made bare
+  `address` non-anchor-eligible, which stops it from anchoring a scope on its own; round 2 found
+  that protects only the ANCHOR phase and leaves the identical tie reachable at FIELD-role
+  resolution once some other field has already anchored the scope — closed by dropping bare
+  `address` from the vocabulary entirely, not just from anchor-eligibility.)
+- **Matching is ALTERNATIVES, not a flat token set.** A role is a list of alternatives, each an
+  all-tokens-required set; matching is conjunctive WITHIN an alternative, disjunctive ACROSS
+  alternatives (and across roles), and the alternative matching the MOST tokens wins
+  (`fallbackResolution`). A flat token set cannot reach the motivating page's own street field —
+  `billingAddress1` tokenizes to `["billing","address1"]`, which contains no bare `"address"`
+  token at all — and cannot tell `firstName`/`lastName`/`fullName` apart, since `billingFirstName`
+  and `billingLastName` both carry a `"name"` token; only alternative length (`{first,name}` at 2
+  tokens beating `{name}` at 1) disambiguates them.
+- **The vocabulary is written TWICE, in two structurally different tables — this is a trap, not
+  an oversight, and a future edit must not "consolidate" them.** Autocomplete VALUES are resolved
+  by `resolveAutocompleteToken`, which splits only on whitespace — a hyphen survives, so
+  `AUTOCOMPLETE_ROLES` is written as literal (possibly hyphenated) WHATWG token strings like
+  `'postal-code'`. Name/id FALLBACK haystacks go through `normalizeFieldHaystack`, which turns
+  BOTH `-` and `_` into spaces before matching — so `ROLE_ALTERNATIVES` must be written as
+  already-split, hyphen-free token arrays (`['postal', 'code']`). A literal `"postal-code"`
+  pasted into `ROLE_ALTERNATIVES` would be a DEAD ENTRY that can never fire, silently — the
+  fallback token set never contains a hyphenated string. The shared tokenizing primitives
+  themselves (`normalizeFieldHaystack`, `resolveAutocompleteToken`, `fieldHaystack` — the
+  name/id/placeholder/aria-label haystack builder) live in the family-agnostic
+  `src/preload/field-tokenizer.js`, extracted from and now also consumed by
+  `vault-card-fields.js`, so card and identity read the identical four attributes and cannot
+  silently drift on which ones feed detection.
+- **Login wins a contested field.** `resolveLoginEntry` (`vault-fill-fields.js`, untouched by this
+  work) picks the login username as the LAST text/email/tel input preceding a password field, by
+  DOCUMENT POSITION ONLY — it never reads name, id or autocomplete. So any identity-admissible
+  field sitting before a password is claimed by login regardless of spelling; the contest is
+  structural, not a naming coincidence. `isClaimedByLogin` (built on the already-exported
+  `findAllLoginFields`) filters every login-claimed field out of identity's candidate list BEFORE
+  role resolution — including as the scope's own anchor candidate, so a scope whose ONLY
+  street-shaped field sits immediately before a password loses its anchor entirely, not just that
+  field's role.
+- **Named accepted false positive.** A form carrying a third party's address plus the reporter's
+  own name and email clears every gate above. The detector's founding principle — nothing is
+  inferred from shape, position or value — structurally forbids the one signal (label proximity)
+  that could tell whose address it is, so this shape is irreducible to a vocabulary-only detector.
+  Accepted rather than pretended away; the backstop is the conflict rule below, which guarantees a
+  differing captured value never silently overwrites a stored one.
+
+**One profile per vault, enforced at every write path, not only the interactive one.**
+`_saveItem` refuses outright (no write at all) when saving an `identity` item that has a
+different id from an already-stored profile — a straightforward caller error there, since a human
+editor can ask "which one did you mean." The two BULK write paths cannot ask that, so they use a
+weaker, non-interactive rule instead: `mergeVaultItems` KEEPS the destination's existing profile
+and reports the incoming one as skipped (never as a conflict copy, which is exactly how every
+OTHER item type diverges — landing a second identity item as a copy would recreate the very
+one-profile invariant this rule exists to protect), and `capSingleIdentity` caps a bundle's own
+item array to at most one identity item before it is ever compared to a destination (used at
+`_importVault`'s writes and at `restoreProfile`'s COMMIT and PREVIEW). All three read the same
+canonical accessor, `identityProfileOf(items)` (`src/main/vault/identity-profile.js`) — never
+`items.find(it => it.type === 'identity')`, which would silently pick whichever item sorts first
+and hide a duplicate instead of surfacing one via the accessor's `extra` return.
+
+**Bundle import is now tolerant of unknown item types, and REPORTS them.** A new sibling to the
+existing (unchanged, still strict) `validateImportedItems`, `partitionImportedItems` drops any
+item whose `type` isn't recognized and records its type name in a deduplicated `skippedTypes`
+list instead of throwing — at all three call sites that decrypt and validate a bundle's items:
+`_importVault`, `restoreProfile`'s COMMIT (which additionally now catches per-entry, so one
+malformed or unrecognized entry no longer aborts an entire multi-vault restore including vaults
+that already landed), and `restoreProfile`'s PREVIEW (so the Secret step's `itemCount` never
+silently under-counts before any destination is even chosen — filtering silently at preview would
+itself be the swallow this rule forbids). **This deliberately softens Mission 18's "load loudly"
+stance, but ONLY for these three bundle-import call sites** — `validateImportedItems` itself is
+unchanged, and the `.gfvault` PARSE path (which never called it in the first place) keeps loading
+loudly on any malformed vault. A merge collision on an identity profile (previous bullet) folds
+into this SAME `skippedTypes` array rather than a second reporting mechanism.
+
+**`classifyCapture(stored, captured)`** (`src/main/vault/identity-profile.js`, pure, no live
+caller until the follow-on flight) is the conflict rule made real and unit-tested rather than left
+as a paper decision: `{ kind: 'match' | 'gap-fill' | 'conflict', gapFilled: [{field, to}],
+conflicting: [{field, from, to}] }`. Only fields PRESENT in the capture are judged. Equality is
+BYTE-EXACT — no trimming, no case-folding, no normalisation — so `"555-1234"` vs `"5551234"` IS a
+conflict; softening that would be a judgement call this module has no business making silently.
+`kind` is `'conflict'` if any field conflicts (an operator-facing "here's what would change, never
+overwritten silently" prompt), else `'gap-fill'` if at least one gap was filled (an offer to
+merge), else `'match'` (no offer). **Named residual, stated rather than hidden**: on a FRESH
+profile every captured field is a gap, so the rule's own motivating scenario — a gift-shipping
+checkout carrying a stranger's name and address — classifies as an ordinary gap-fill merge if it
+happens to be the very first identity capture the vault ever sees. Still an offer, never a silent
+write, so the rule's hard invariant holds; it just doesn't catch its own headline case in that one
+situation.
+
+**Four type sources must be edited in parallel to add (or change) an item type — not one
+cascading into the other, and the fourth is easy to miss.** `vault-item-schema.js`'s `SCHEMA`;
+`vault-store.js`'s own independent `ITEM_TYPES` `Set` literal, checked at three separate call
+sites; `vault-editor-model.js`'s `EDITOR_LAYOUT` / `EDITOR_TYPES`, pinned to the schema by an
+`assert.deepEqual` drift-guard test that goes red the moment a type is added to the schema until
+the editor layout gains a UI label for every one of its fields; and `vault.js`'s
+`ITEM_SUBSECTIONS`, a separately hardcoded list that renders only the types it names. That fourth
+one is the trap: `partitionItemsByType` learning a new type buckets an item of that type
+correctly — but if `ITEM_SUBSECTIONS` doesn't also name it, the bucket is simply never rendered,
+and the item is not `unknown` either, so it also misses `renderUnknownItems`'s "nothing
+unbucketable is silently lost" guarantee. It would ship as a correctly-stored, invisible item.
+This was found at design review, not by any test.
+
+**The MCP automation surface stays login-only for identity too, structurally, with no code
+change required.** `vault-context.js` filters every vault-tool resolution (`listItems`, the
+`vaultFill`/`vaultTotp` item lookup) to `item.type === 'login'` — the same mechanism that already
+excludes `card` items. `vaultList` and `vaultFill` therefore never see or expose an identity
+profile.
+
 ### The save moment: broadened capture, value-bound provenance, and the null-username collapse
 
 Mission 21, Flight 1 replaced the original single-`submit`-listener capture trigger

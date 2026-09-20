@@ -1071,10 +1071,16 @@ function init() {
   // Logins / Cards / Notes are the item-editor types; each renders its OWN list + an Add button
   // that opens a blank editor modal OF THAT TYPE (the old type <select> is gone — each Add knows
   // its type). Access keys is a jar-only fourth subsection, built separately (its Add mints).
+  // Mission 21 Flight 2 Leg 3 design review [HIGH]: `partitionItemsByType` learning
+  // `identity` without a matching entry here would bucket an identity item correctly and
+  // then never render it — and it is not `unknown` either, so it would also miss
+  // `renderUnknownItems`'s "nothing unbucketable is silently lost" guarantee. This one line
+  // is the leg's sole permitted exception to its own "no page work" boundary.
   const ITEM_SUBSECTIONS = [
     { type: 'login', title: 'Logins', empty: 'No logins yet.' },
     { type: 'card', title: 'Cards', empty: 'No cards yet.' },
-    { type: 'note', title: 'Notes', empty: 'No notes yet.' }
+    { type: 'note', title: 'Notes', empty: 'No notes yet.' },
+    { type: 'identity', title: 'Identity', empty: 'No identity saved yet.' }
   ];
 
   // Fallback dot color when a jar carries no safe color — the nav-dot idiom

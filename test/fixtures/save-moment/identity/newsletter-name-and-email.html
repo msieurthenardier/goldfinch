@@ -1,0 +1,24 @@
+<!--
+  Fixture: newsletter-name-and-email
+  Corpus tier: negative-detection (identity family) — asserted by
+  assertNoDetectableEntry once it is extended to the identity family.
+  A newsletter/contact-list signup carrying BOTH a name and an email field —
+  the two non-postal roles DD1's field gate would happily resolve — but no
+  postal field of any kind anywhere in the form. This is the mirror image of
+  the shipping-cost-estimator fixture below: LD4 amendment 2's requirement is
+  symmetric (an anchored scope needs a NON-postal role in addition to a
+  postal one), so this fixture proves the scope anchor's OWN requirement
+  (>=1 admissible postal role) independently — name + email alone, with zero
+  postal signal, must not anchor. (Distinct from the existing
+  negative-detection/newsletter-signup.html, which carries only a bare email
+  field — this one adds a name field too, to prove the refusal survives a
+  second non-postal role being present.)
+  Added: 2026-09-20 (Mission 21, Flight 2, Leg 2 — identity-boundary).
+-->
+<form id="newsletter">
+  <label for="nl2-name">Name</label>
+  <input type="text" id="nl2-name" name="name" />
+  <label for="nl2-email">Email</label>
+  <input type="email" id="nl2-email" name="email" />
+  <button type="submit">Subscribe</button>
+</form>
