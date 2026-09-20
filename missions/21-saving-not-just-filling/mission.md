@@ -317,15 +317,26 @@ that follows it fires.
       login-only design cannot carry the card family. Accepted cost: this is a
       large flight, and design review flagged it as the mission's one oversized
       piece.
-- [ ] Flight 2: **Identity items** — a new vault item type for name, address, email
-      and phone, with detection, fill, and capture, riding Flight 1's trigger.
+- [x] Flight 2: **Identity foundations** *(landed 2026-09-20)* — what an identity IS and how it is
+      stored: the admissibility boundary (a specific token stands alone, a generic
+      one needs a qualifying prefix), proven against adversarial fixtures; the card
+      fallback-pattern fixes escalated from squawks 0090/0091; and the identity
+      item type in the vault substrate including a bundle importer that survives an
+      unknown type. Nothing page-facing ships. *(Split at design review from a
+      single larger "Identity items" flight — review judged that a repeat of
+      Flight 1's sizing mistake.)*
+- [ ] Flight 3: **Identity fill and capture** — in-world detection wiring, fill,
+      capture, the three-way sheet templates, and the fill-precision regression
+      Flight 1 accepted (still live: the gesture's ordinal fix reached capture, not
+      fill). Starts in budget deficit — `renderer.js` is 1576 lines against a 1577
+      budget — so its sheet work must plan an extraction from day one.
       Comparable in scope to the original card-type work, not a small addition: it
       touches the schema and its cross-consistency test, the store's type set and
       its three enforcement sites, a new detection module (anchored on nothing, the
       hardest of the three families), a third arm in the reachable-items merge, and
       the capture and picker sheet templates — both of which currently hand-branch
       on a binary `isCard` and become three-way.
-- [ ] Flight 3: **The in-field affordance** — what the injected icon *is* and what
+- [ ] Flight 4: **The in-field affordance** — what the injected icon *is* and what
       it *offers*: password generation at account creation and password rotation
       (including new-password-field discrimination), and the redesigned Goldfinch
       mark-plus-lock badge that replaces the generic padlock. Grouped because both
@@ -333,5 +344,5 @@ that follows it fires.
       flight carries little of its security risk — generation is triggered by a
       trusted click on Goldfinch's own injected element, which is already gated
       today — and is instead the mission's highest UI-craft risk.
-- [ ] Flight 4 *(optional)*: Alignment — vibe coding session for the feel of the
+- [ ] Flight 5 *(optional)*: Alignment — vibe coding session for the feel of the
       offers, the generator affordance, and the identity sheet.

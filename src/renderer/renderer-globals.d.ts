@@ -918,7 +918,7 @@ interface GoldfinchInternalBridge {
 interface VaultItemMeta {
   vaultId: string;
   id: string;
-  type: 'login' | 'card' | 'note';
+  type: 'login' | 'card' | 'note' | 'identity';
   hasTotp: boolean;
   title?: string | null;
   username?: string | null;

@@ -10,6 +10,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const {
+  EXPIRY_ANCHOR_WINDOW,
   autocompleteRoleOf,
   fallbackRoleOf,
   findCardFields,
@@ -84,6 +85,14 @@ function makeDoc(forms, loose = []) {
       return selector === 'input, select' ? all.slice() : [];
     }
   };
+}
+
+// Card-capable, role-inert filler fields — occupy candidateFields() positions
+// without matching any FALLBACK_PATTERNS role, so they can pad the distance
+// between an anchor and a gated candidate without interfering with role
+// resolution themselves.
+function fillerFields(n) {
+  return Array.from({ length: n }, (_, i) => new FakeInput({ name: `unrelated_field_${i}` }));
 }
 
 function cardForm() {
@@ -476,4 +485,228 @@ test('isLiveCardNumberField only accepts a live detected number field', () => {
   assert.equal(isLiveCardNumberField(doc, f.csc), false, 'the csc is not a fill anchor');
   assert.equal(isLiveCardNumberField(doc, new FakeInput({ autocomplete: 'cc-number' })), false);
   assert.equal(isLiveCardNumberField(doc, null), false);
+});
+
+// --- squawk 0091: underscore-joined prefixes, WITHOUT the placeholder crutch --
+// The pre-existing Jostens test above supplies `placeholder: 'Name on Card'` /
+// 'Security Code' — the exact crutch squawk 0091 names as non-general (those
+// two fields were detected only because the haystack also picked up the
+// placeholder text). These variants supply NO placeholder at all, so they fail
+// before the field-tokenizer's underscore→space normalisation and pass after.
+
+test('squawk 0091: card_nameOnCard is detected from name alone, no placeholder', () => {
+  assert.equal(fallbackRoleOf(new FakeInput({ name: 'card_nameOnCard' })), 'cardholder');
+});
+
+test('squawk 0091: card_securityCode is detected from name alone, no placeholder', () => {
+  assert.equal(fallbackRoleOf(new FakeInput({ name: 'card_securityCode' })), 'csc');
+});
+
+test('squawk 0091: form_expMonth is detected from name alone (underscore-joined prefix)', () => {
+  assert.equal(fallbackRoleOf(new FakeInput({ name: 'form_expMonth' })), 'expMonth');
+});
+
+test('squawk 0091: the Jostens field set detects a complete card entry from name alone, no placeholders anywhere', () => {
+  const number = new FakeInput({ name: 'card_cardNumber' });
+  const cardholder = new FakeInput({ name: 'card_nameOnCard' });
+  const csc = new FakeInput({ name: 'card_securityCode' });
+  const expMonth = new FakeInput({ name: 'card_cardExpMonth' });
+  const expYear = new FakeInput({ name: 'card_cardExpYear' });
+  const doc = makeDoc([new FakeForm([number, cardholder, csc, expMonth, expYear])]);
+
+  const entry = findCardFields(doc);
+  assert.equal(entry.number, number);
+  assert.equal(entry.cardholder, cardholder, 'previously null without the placeholder crutch');
+  assert.equal(entry.csc, csc, 'previously null without the placeholder crutch');
+  assert.equal(entry.expMonth, expMonth);
+  assert.equal(entry.expYear, expYear);
+});
+
+// --- squawk 0090 turnaround: the number pattern's leading \b ---------------
+// `cc` substring-matched inside `acc`, because the `(card|cc|creditcard|pan)`
+// group had no leading word boundary. Same class, same patterns this leg
+// already edits.
+
+test('accNumber/acctNumber/successNumber no longer resolve as a card number', () => {
+  for (const name of ['accNumber', 'acctNumber', 'successNumber']) {
+    assert.equal(fallbackRoleOf(new FakeInput({ name })), null, `"${name}" must not resolve as a card number`);
+  }
+});
+
+test('the leading \\b does not break real card-number spellings', () => {
+  const cases = [
+    'payment.cardNumber',
+    'card_cardNumber',
+    'cc_number',
+    'ccNumber',
+    'cardNumber',
+    'creditCardNumber',
+    'cardNo',
+    'CCNumber',
+    'cardNumberDisplay',
+    'ccNumberInput'
+  ];
+  for (const name of cases) {
+    assert.equal(fallbackRoleOf(new FakeInput({ name })), 'number', `"${name}" must still resolve to "number"`);
+  }
+});
+
+// --- the literal no-separator anchored spellings ----------------------------
+// The ONLY cases the `^…$` anchored alternatives still cover — pinned so a
+// future edit that removes those dead-looking alternatives regresses loudly.
+
+test('the literal no-separator spellings ccmonth/ccyear/ccexp are pinned', () => {
+  assert.equal(fallbackRoleOf(new FakeInput({ name: 'ccmonth' })), 'expMonth');
+  assert.equal(fallbackRoleOf(new FakeInput({ name: 'ccyear' })), 'expYear');
+  assert.equal(fallbackRoleOf(new FakeInput({ name: 'ccexp' })), 'expiry');
+});
+
+// --- squawk 0090: the expiry-family two-condition gate, full pipeline ------
+// Every test in this section goes through findAllCardFields/findCardFields
+// (never a bare fallbackRoleOf probe) — the gate is PIPELINE-level (it lives in
+// rolesIn and depends on the resolved card-number anchor), so only a full-scope
+// reproduction can exercise it. A bare field-level probe has no notion of an
+// anchor at all — see the "trap" test at the end of this section.
+
+test('EXPIRY_ANCHOR_WINDOW is a named constant in the design-review-derived 4-6 range', () => {
+  assert.ok(
+    Number.isInteger(EXPIRY_ANCHOR_WINDOW) && EXPIRY_ANCHOR_WINDOW >= 4 && EXPIRY_ANCHOR_WINDOW <= 6,
+    `EXPIRY_ANCHOR_WINDOW (${EXPIRY_ANCHOR_WINDOW}) must be an integer in [4, 6]`
+  );
+});
+
+test('squawk 0090: the window is BIDIRECTIONAL — an expiry field PRECEDING the number is admitted', () => {
+  // No card-context token on `expMonth` itself: this is condition (b) only. A
+  // forward-only window (candidate.index - anchor.index, unsigned) would reject
+  // this — the anchor is AFTER the candidate here — which is exactly the new
+  // false negative a forward-only fix would have introduced.
+  const expMonth = new FakeInput({ name: 'expMonth' });
+  const number = new FakeInput({ name: 'card_number' });
+  const doc = makeDoc([new FakeForm([expMonth, number])]);
+
+  const entry = findCardFields(doc);
+  assert.equal(entry.number, number);
+  assert.equal(entry.expMonth, expMonth, 'a forward-only window would have missed this');
+});
+
+test('squawk 0090: the window boundary is inclusive — exactly EXPIRY_ANCHOR_WINDOW positions away is admitted', () => {
+  const number = new FakeInput({ name: 'card_number' });
+  const filler = fillerFields(EXPIRY_ANCHOR_WINDOW - 1);
+  const candidate = new FakeInput({ name: 'expMonth' }); // no card-context token — condition (b) only
+  const doc = makeDoc([new FakeForm([number, ...filler, candidate])]);
+
+  const entry = findCardFields(doc);
+  assert.equal(entry.expMonth, candidate, `distance ${EXPIRY_ANCHOR_WINDOW} must be admitted (inclusive boundary)`);
+});
+
+test('squawk 0090: one candidate-position past the window is rejected', () => {
+  const number = new FakeInput({ name: 'card_number' });
+  const filler = fillerFields(EXPIRY_ANCHOR_WINDOW);
+  const candidate = new FakeInput({ name: 'expMonth' }); // no card-context token — condition (b) only
+  const doc = makeDoc([new FakeForm([number, ...filler, candidate])]);
+
+  const entry = findCardFields(doc);
+  assert.equal(entry.expMonth, null, `distance ${EXPIRY_ANCHOR_WINDOW + 1} must be rejected`);
+});
+
+test('squawk 0090: condition (a) admits a card-context expiry regardless of distance from the anchor', () => {
+  const cases = [
+    ['cc-exp', 'expiry'],
+    ['ccExpMonth', 'expMonth'],
+    ['card_cardExpMonth', 'expMonth'],
+    ['cardExpiry', 'expiry'],
+    ['creditCardExpirationMonth', 'expMonth'],
+    ['payment_exp_month', 'expMonth']
+  ];
+  for (const [name, role] of cases) {
+    const number = new FakeInput({ name: 'card_number' });
+    const filler = fillerFields(EXPIRY_ANCHOR_WINDOW + 5); // well past the window
+    const candidate = new FakeInput({ name });
+    const doc = makeDoc([new FakeForm([number, ...filler, candidate])]);
+
+    const entry = findCardFields(doc);
+    assert.equal(entry[role], candidate, `"${name}" must resolve to "${role}" via condition (a) alone`);
+  }
+});
+
+test('squawk 0090: expirationMonth stays admitted near the anchor — condition (b) preserves this pre-existing pinned spelling', () => {
+  const number = new FakeInput({ name: 'card_number' });
+  const exp = new FakeInput({ name: 'expirationMonth' });
+  const doc = makeDoc([new FakeForm([number, exp])]);
+
+  const entry = findCardFields(doc);
+  assert.equal(entry.expMonth, exp);
+});
+
+test('squawk 0090: a full-pipeline scope with a card number plus only a sessionExpiry is now rejected', () => {
+  // The required regression reproduction: through findAllCardFields, a card
+  // number plus a sessionExpiry field carrying no card-context token, placed
+  // realistically outside the anchor window (an unrelated session field is not
+  // laid out inside the card entry itself). Contrast with the NAMED ACCEPTED
+  // RESIDUAL test below, where the same unhinted shape stays admitted
+  // specifically because it sits adjacent to the anchor.
+  const number = new FakeInput({ name: 'card_number' });
+  const filler = fillerFields(EXPIRY_ANCHOR_WINDOW + 3);
+  const sessionExpiry = new FakeInput({ name: 'sessionExpiry' });
+  const doc = makeDoc([new FakeForm([number, ...filler, sessionExpiry])]);
+
+  const entries = findAllCardFields(doc);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].number, number);
+  assert.equal(entries[0].expiry, null, 'sessionExpiry must not resolve as the card expiry');
+});
+
+test('squawk 0090: unrelated expiry-shaped fields with no card-context token are rejected when far from the anchor', () => {
+  for (const name of ['passwordExpirationDate', 'licenseExpirationDate', 'membershipExpMonth']) {
+    const number = new FakeInput({ name: 'card_number' });
+    const filler = fillerFields(EXPIRY_ANCHOR_WINDOW + 3);
+    const candidate = new FakeInput({ name });
+    const doc = makeDoc([new FakeForm([number, ...filler, candidate])]);
+
+    const entry = findCardFields(doc);
+    assert.equal(entry.expiry, null, `"${name}" must not resolve as expiry when far from the anchor`);
+    assert.equal(entry.expMonth, null, `"${name}" must not resolve as expMonth when far from the anchor`);
+  }
+});
+
+test('squawk 0090: multiple qualifying candidates — first document-order match wins, not nearest-to-anchor', () => {
+  // Design is gate-then-first-match, NOT anchor-proximity selection (the
+  // superseded round-1 design). Both candidates qualify unconditionally via
+  // condition (a) regardless of distance, so this isolates the tie-break rule:
+  // `far` sits BEFORE the anchor at a distance beyond the window and is FIRST in
+  // document order; `near` sits immediately AFTER the anchor (nearest possible)
+  // but SECOND in document order. First-match-wins must pick `far`.
+  const leadingFiller = fillerFields(EXPIRY_ANCHOR_WINDOW + 3);
+  const far = new FakeInput({ name: 'cardExpMonth' });
+  const number = new FakeInput({ name: 'card_number' });
+  const near = new FakeInput({ name: 'ccExpMonth' });
+  const doc = makeDoc([new FakeForm([...leadingFiller, far, number, near])]);
+
+  const entry = findCardFields(doc);
+  assert.equal(entry.number, number);
+  assert.equal(
+    entry.expMonth,
+    far,
+    'first document-order qualifying candidate wins even though "near" sits closer to the anchor'
+  );
+});
+
+test('squawk 0090: NAMED ACCEPTED RESIDUAL — couponExpirationDate adjacent to the anchor still resolves', () => {
+  // Honest residual (leg AC), not silently papered over: an unrelated
+  // expiry-shaped field laid out ADJACENT to the card number still qualifies
+  // via condition (b) alone. Narrower than before this fix, and named.
+  const number = new FakeInput({ name: 'card_number' });
+  const coupon = new FakeInput({ name: 'couponExpirationDate' });
+  const doc = makeDoc([new FakeForm([number, coupon])]);
+
+  const entry = findCardFields(doc);
+  assert.equal(entry.expiry, coupon, 'accepted residual: an unrelated adjacent expiry field still resolves');
+});
+
+test('squawk 0090 trap: fallbackRoleOf in isolation still returns "expiry" for sessionExpiry', () => {
+  // The gate lives in rolesIn/findAllCardFields, which needs a resolved anchor
+  // — a bare field-level probe has no notion of one, so it is UNCHANGED by this
+  // leg. Correct, not a regression: see the full-pipeline test above for the
+  // actual coverage. The 0090 fix is PIPELINE-level, not field-level.
+  assert.equal(fallbackRoleOf(new FakeInput({ name: 'sessionExpiry' })), 'expiry');
 });

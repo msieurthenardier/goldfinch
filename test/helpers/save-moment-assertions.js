@@ -122,6 +122,7 @@
 const assert = require('node:assert/strict');
 const { findAllLoginFields } = require('../../src/preload/vault-fill-fields');
 const { findAllCardFields } = require('../../src/preload/vault-card-fields');
+const { findAllIdentityFields } = require('../../src/preload/vault-identity-fields');
 const { createEntryObserver, LOGIN_ROLES, CARD_ROLES } = require('../../src/preload/vault-entry-observer');
 const {
   isCaptureGesture,
@@ -130,36 +131,53 @@ const {
 } = require('../../src/preload/vault-gesture-policy');
 
 /**
- * Assert that detection finds an entry for `family` ('login' | 'card') at
- * `expectedOrdinal` (default 0) among ALL detected entries of that family — an
- * INTEGER index into the detector's own result array, never a node reference
- * (the corpus's own pinned manifest shape for multi-form disambiguation).
- * Returns the matched entry.
+ * Assert that detection finds an entry for `family` ('login' | 'card' |
+ * 'identity') at `expectedOrdinal` (default 0) among ALL detected entries of
+ * that family — an INTEGER index into the detector's own result array, never
+ * a node reference (the corpus's own pinned manifest shape for multi-form
+ * disambiguation). Returns the matched entry.
+ *
+ * THREE-WAY DISPATCH (Mission 21, Flight 2, Leg 2 — identity-boundary): before
+ * this leg, this function was `family === 'card' ? findAllCardFields :
+ * findAllLoginFields` — so `'identity'` silently fell through to the LOGIN
+ * detector, meaning every positive identity fixture would have asserted
+ * against the wrong family and could have passed for entirely the wrong
+ * reason. Do not collapse this back to a binary ternary.
  * @param {any} doc
- * @param {'login'|'card'} family
+ * @param {'login'|'card'|'identity'} family
  * @param {{ expectedOrdinal?: number }} [opts]
  * @returns {any}
  */
 function assertDetectsEntry(doc, family, opts = {}) {
   const expectedOrdinal = opts.expectedOrdinal ?? 0;
-  const entries = family === 'card' ? findAllCardFields(doc) : findAllLoginFields(doc);
+  const entries =
+    family === 'card'
+      ? findAllCardFields(doc)
+      : family === 'identity'
+        ? findAllIdentityFields(doc)
+        : findAllLoginFields(doc);
   assert.ok(
     entries.length > expectedOrdinal,
     `expected a detectable ${family} entry at ordinal ${expectedOrdinal}, found ${entries.length} ${family} entries`
   );
   const entry = entries[expectedOrdinal];
-  const anchor = family === 'card' ? entry.number : entry.password;
+  const anchor = family === 'card' ? entry.number : family === 'identity' ? entry.anchor : entry.password;
   assert.ok(anchor, `${family} entry at ordinal ${expectedOrdinal} has no anchor field`);
   return entry;
 }
 
 /**
- * Assert that NEITHER family detects anything at all in `doc`.
+ * Assert that NO family (login, card, or identity) detects anything at all in
+ * `doc`. Extended to identity at Leg 2 (identity-boundary) — without this,
+ * every existing negative-detection fixture would silently stop covering the
+ * new family the moment it was added: the corpus would look green while
+ * testing less than it did before.
  * @param {any} doc
  */
 function assertNoDetectableEntry(doc) {
   assert.deepEqual(findAllLoginFields(doc), [], 'expected no detectable login entry');
   assert.deepEqual(findAllCardFields(doc), [], 'expected no detectable card entry');
+  assert.deepEqual(findAllIdentityFields(doc), [], 'expected no detectable identity entry');
 }
 
 /**

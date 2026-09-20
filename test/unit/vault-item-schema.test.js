@@ -11,8 +11,8 @@ const assert = require('node:assert/strict');
 const schema = require('../../src/shared/vault-item-schema');
 const { SCHEMA, ITEM_TYPES, secretFieldsFor, nonSecretFieldsFor, metadataOf } = schema;
 
-test('the three item types are exactly login/card/note', () => {
-  assert.deepEqual([...ITEM_TYPES].sort(), ['card', 'login', 'note']);
+test('the four item types are exactly login/card/note/identity', () => {
+  assert.deepEqual([...ITEM_TYPES].sort(), ['card', 'identity', 'login', 'note']);
 });
 
 test('COMPLEMENT invariant: nonSecret ∩ secret = ∅ for every type', () => {
@@ -66,16 +66,48 @@ test('metadataOf emits NO secret key for any type, even when the item carries se
       expiry: '12/30',
       notes: 'N'
     },
-    note: { id: 'n1', type: 'note', title: 'T', body: 'BODY', notes: 'N' }
+    note: { id: 'n1', type: 'note', title: 'T', body: 'BODY', notes: 'N' },
+    // Identity's non-secret set (LD1) is title/fullName — `fullName` is EXPECTED to
+    // appear in metadata, so its value is deliberately distinct from every SECRET
+    // field's value below (no accidental substring collision either way).
+    identity: {
+      id: 'i1',
+      type: 'identity',
+      title: 'T',
+      fullName: 'Jane Doe',
+      firstName: 'SECRET-FIRST',
+      lastName: 'SECRET-LAST',
+      email: 'jane@example.com',
+      phone: '555-0100',
+      street: '123 Main St',
+      street2: 'Apt 4',
+      city: 'Springfield',
+      region: 'IL',
+      country: 'US',
+      postalCode: '62704'
+    }
   };
   for (const type of ITEM_TYPES) {
     const meta = metadataOf(items[type]);
     for (const s of secretFieldsFor(type)) {
       assert.equal(s in meta, false, `metadataOf(${type}) leaked secret key "${s}"`);
     }
-    // No secret VALUE appears either.
+    // No secret VALUE appears either — one flat blacklist across every type's secret
+    // values (none share a substring with `fullName`'s legitimately-non-secret
+    // "Jane Doe", so a single list stays unambiguous).
     const json = JSON.stringify(meta);
-    for (const needle of ['PW', 'SEED', '4111111111111111', 'BODY']) {
+    for (const needle of [
+      'PW',
+      'SEED',
+      '4111111111111111',
+      'BODY',
+      'SECRET-FIRST',
+      'SECRET-LAST',
+      'jane@example.com',
+      '555-0100',
+      '123 Main St',
+      '62704'
+    ]) {
       assert.equal(json.includes(needle), false, `metadataOf(${type}) leaked value "${needle}"`);
     }
     // Positive: id/type/hasTotp + every non-secret field is present.

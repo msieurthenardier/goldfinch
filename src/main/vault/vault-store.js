@@ -62,6 +62,13 @@ const { GLOBAL_ID } = require('../../shared/reserved-ids');
 // Electron-free / app-db-free (the reserved-ids.js precedent).
 const { metadataOf, secretFieldsFor } = require('../../shared/vault-item-schema');
 
+// LD2 (Mission 21 F2 L3): one identity profile per vault, enforced at every write
+// path this module owns — `_saveItem`'s refusal, `mergeVaultItems`'s collision skip,
+// and `capSingleIdentity`'s import-time cap all live HERE (vault-store owns writes);
+// `identityProfileOf`/`classifyCapture` are pure, no-store-state helpers that live in
+// their own module so they stay unit-testable without a live store instance.
+const { identityProfileOf } = require('./identity-profile');
+
 // Fill matcher (M12 F4 Leg 4 / DD5) — exact-origin by default, optionally widened to
 // the registrable domain for `matchMode:'registrable-domain'` items behind the
 // fail-closed PSL matcher. reachableLoginItems passes `widen` through per call.
@@ -122,8 +129,11 @@ const BUNDLE_VERSION = 1;
 const BUNDLE_VERSION_V2 = 2;
 
 // The item types this store recognizes. vault-crypto treats items as opaque
-// JSON; the schema is validated HERE.
-const ITEM_TYPES = new Set(['login', 'card', 'note']);
+// JSON; the schema is validated HERE. `identity` added Mission 21 Flight 2 Leg 3 —
+// this Set is an INDEPENDENT copy of vault-item-schema.js's SCHEMA keys (flight DD4:
+// three ITEM_TYPES sources, not one cascading into the other — see also
+// vault-editor-model.js's EDITOR_TYPES). Edit all three by hand; none derive the others.
+const ITEM_TYPES = new Set(['login', 'card', 'note', 'identity']);
 
 // ---------------------------------------------------------------------------
 // Typed errors — a locked / not-set-up / unknown-jar condition throws these; the
@@ -201,12 +211,12 @@ class VaultCollisionError extends VaultStateError {
 // ---------------------------------------------------------------------------
 
 /**
- * The item payload shape (opaque to vault-crypto, validated here). One of three
- * kinds — Login / Card / Secure note — sharing an id + type + timestamps and
- * carrying kind-specific fields verbatim.
+ * The item payload shape (opaque to vault-crypto, validated here). One of four
+ * kinds — Login / Card / Secure note / Identity — sharing an id + type + timestamps
+ * and carrying kind-specific fields verbatim.
  * @typedef {Object} VaultItem
  * @property {string} id  stable per-item id (minted here if absent).
- * @property {'login' | 'card' | 'note'} type
+ * @property {'login' | 'card' | 'note' | 'identity'} type
  * @property {number} createdAt  epoch ms (from the injected clock).
  * @property {number} updatedAt  epoch ms.
  */
@@ -560,6 +570,83 @@ function validateImportedItems(items) {
   return items;
 }
 
+/**
+ * DD3's TOLERANT counterpart to `validateImportedItems`, for the bundle-import call
+ * sites ONLY (`_importVault`, `restoreProfile` COMMIT + PREVIEW). Every check
+ * `validateImportedItems` makes still THROWS here — non-array, oversized, a
+ * non-object item, a missing/duplicate id — genuine corruption, not softened. The
+ * ONE thing that changes: an item whose `type` is not in `ITEM_TYPES` is DROPPED
+ * from the returned array and its type name recorded in `skippedTypes` (first-seen
+ * order, deduped) instead of throwing — "fixing it tolerantly once fixes it for
+ * every future type" (flight DD3's own rationale). The `.gfvault` PARSE path
+ * (`parseVault`/`_readManager`) is UNTOUCHED and keeps loading loudly —
+ * `validateImportedItems` above is unchanged and still used there; this function
+ * exists ONLY for the three call sites DD3 names.
+ * @param {any} items  the value returned by decryptItems.
+ * @returns {{ items: any[], skippedTypes: string[] }}
+ */
+function partitionImportedItems(items) {
+  if (!Array.isArray(items)) {
+    throw new vc.VaultFormatError('vault-store: bundle vault did not decrypt to an item array');
+  }
+  if (items.length > MAX_IMPORT_ITEMS) {
+    throw new vc.VaultFormatError(`vault-store: bundle vault has too many items (${items.length})`);
+  }
+  const seen = new Set();
+  const kept = [];
+  /** @type {string[]} */
+  const skippedTypes = [];
+  for (const item of items) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      throw new vc.VaultFormatError('vault-store: bundle vault item must be an object');
+    }
+    if (typeof item.id !== 'string' || item.id.length === 0) {
+      throw new vc.VaultFormatError('vault-store: bundle vault item is missing a string id');
+    }
+    if (seen.has(item.id)) {
+      throw new vc.VaultFormatError(`vault-store: bundle vault has a duplicate item id "${item.id}"`);
+    }
+    seen.add(item.id);
+    if (!ITEM_TYPES.has(item.type)) {
+      if (!skippedTypes.includes(item.type)) skippedTypes.push(item.type);
+      continue;
+    }
+    kept.push(item);
+  }
+  return { items: kept, skippedTypes };
+}
+
+/**
+ * LD2 (Mission 21 F2 L3): at most one `identity` item survives a write. For the
+ * write paths that assemble a full item array directly with NO pre-existing
+ * destination to compare against (`_importVault`'s fresh + existing writes —
+ * both whole-vault replaces, never a merge — and `restoreProfile`'s COMMIT fresh
+ * write; also used at PREVIEW, which is destination-independent by construction),
+ * this keeps the FIRST identity item (array order) and drops any further ones —
+ * a bundle vault carrying two identity items is itself the violation, independent
+ * of any destination. `mergeVaultItems` below enforces the SAME rule against an
+ * actual destination (keep-destination / skip-incoming, reported), and `_saveItem`
+ * refuses outright — three write paths, three call sites, one invariant.
+ * @param {any[]} items
+ * @returns {{ items: any[], droppedIdentity: boolean }}
+ */
+function capSingleIdentity(items) {
+  let seenIdentity = false;
+  const kept = [];
+  let droppedIdentity = false;
+  for (const item of items) {
+    if (item && item.type === 'identity') {
+      if (seenIdentity) {
+        droppedIdentity = true;
+        continue;
+      }
+      seenIdentity = true;
+    }
+    kept.push(item);
+  }
+  return { items: kept, droppedIdentity };
+}
+
 // ---------------------------------------------------------------------------
 // Shared bundle-envelope validation (M18 F3 Leg 2 — extracted so `_importVault`
 // (v1-only gate) and `restoreProfile` ({1,2} gate, via `normalizeRestoreBundle`
@@ -774,9 +861,22 @@ function deepValueEqual(a, b) {
  * `existing` items. Non-interactive; zero data loss (every pre-merge
  * destination item survives, whether untouched, confirmed-identical, or —
  * on divergence — joined by a marked copy of the incoming version).
+ *
+ * LD2 (Mission 21 F2 L3) exception, deliberate: an `identity` item never joins as a
+ * conflict COPY the way every other type does — that would create a SECOND identity
+ * profile, which the store's write-path invariant forbids everywhere else. Instead,
+ * once the destination already has an identity profile (from `existing`, or from an
+ * identity item this SAME merge already landed), every further incoming identity
+ * item is refused: the destination's profile is KEPT untouched and the incoming one
+ * is counted in `identitySkipped` — DD2's "never silently overwrite" ruling applied
+ * at the one write path `saveItem` never sees, reported via `identitySkipped` rather
+ * than a second reporting mechanism (the caller folds this into DD3's `skippedTypes`
+ * list, the exact reporting shape already built for an unrecognized item type).
+ * Same-id identical identity items still fall through to the ordinary
+ * `skippedIdentical` path below (a genuine no-op, not a collision).
  * @param {VaultItem[]} existing
  * @param {VaultItem[]} incoming
- * @returns {{ items: VaultItem[], mergeReport: { imported: number, skippedIdentical: number, conflictCopies: number } }}
+ * @returns {{ items: VaultItem[], mergeReport: { imported: number, skippedIdentical: number, conflictCopies: number }, identitySkipped: boolean }}
  */
 function mergeVaultItems(existing, incoming) {
   const byId = new Map(existing.map((it) => [it.id, it]));
@@ -784,12 +884,23 @@ function mergeVaultItems(existing, incoming) {
   let imported = 0;
   let skippedIdentical = 0;
   let conflictCopies = 0;
+  let identitySkipped = false;
+  let hasIdentity = existing.some((it) => it && it.type === 'identity');
   for (const item of incoming) {
     const current = byId.get(item.id);
+    const isIdenticalIdentityUpdate =
+      /** @type {any} */ (item) && item.type === 'identity' && current !== undefined && deepValueEqual(current, item);
+    if (item && item.type === 'identity' && hasIdentity && !isIdenticalIdentityUpdate) {
+      // A different identity profile (disjoint id) or a diverged same-id one —
+      // LD2 refuses both the same way merge refuses any second profile.
+      identitySkipped = true;
+      continue;
+    }
     if (current === undefined) {
       merged.push(item);
       byId.set(item.id, item);
       imported++;
+      if (item && item.type === 'identity') hasIdentity = true;
       continue;
     }
     if (deepValueEqual(current, item)) {
@@ -800,6 +911,8 @@ function mergeVaultItems(existing, incoming) {
     // (same-id) item is untouched; different ids always coexist by construction.
     // `title` is every type's non-secret display field (vault-item-schema.js) but
     // not part of the base VaultItem typedef — read/write it through `any`.
+    // (Never reached for `identity` — the LD2 guard above intercepts every
+    // diverged identity item before this branch.)
     const itemAny = /** @type {any} */ (item);
     const copy = {
       ...item,
@@ -809,7 +922,7 @@ function mergeVaultItems(existing, incoming) {
     merged.push(copy);
     conflictCopies++;
   }
-  return { items: merged, mergeReport: { imported, skippedIdentical, conflictCopies } };
+  return { items: merged, mergeReport: { imported, skippedIdentical, conflictCopies }, identitySkipped };
 }
 
 // ---------------------------------------------------------------------------
@@ -2151,7 +2264,7 @@ class VaultStore {
    * Leg 2: adopt no longer mints an admin keypair at all); the EXISTING-profile return
    * omits `recoveryKeyDisplay` too (M17 F4 Leg 2 / DD2).
    * @param {{ destinationTarget?: string, secret: Buffer, secretKind?: 'master'|'recovery', overwrite?: boolean }} opts
-   * @returns {Promise<{ imported: true, fresh: boolean, vaultId: string, recoveryKeyDisplay?: string }>}
+   * @returns {Promise<{ imported: true, fresh: boolean, vaultId: string, recoveryKeyDisplay?: string, skippedTypes?: string[] }>}
    */
   async importVault(bundle, opts = /** @type {any} */ ({})) {
     // GATED (M18 F2 Leg 2 / DD3): import awaits scrypt mid-op, so it holds the
@@ -2169,7 +2282,7 @@ class VaultStore {
   /**
    * @param {any} bundle
    * @param {{ destinationTarget?: string, secret: Buffer, secretKind?: 'master'|'recovery', overwrite?: boolean }} opts
-   * @returns {Promise<{ imported: true, fresh: boolean, vaultId: string, recoveryKeyDisplay?: string }>}
+   * @returns {Promise<{ imported: true, fresh: boolean, vaultId: string, recoveryKeyDisplay?: string, skippedTypes?: string[] }>}
    */
   async _importVault(bundle, opts) {
     const { destinationTarget, secret, secretKind, overwrite } = opts;
@@ -2231,9 +2344,21 @@ class VaultStore {
     try {
       vaultKey = vc.unwrapVaultKey(mrkEnv, mrk, mrkEnvelopeAad(vaultDoc.version));
       // The ciphertext is GCM-authentic but its PLAINTEXT shape is attacker-chosen:
-      // validate the decrypted array (type / string id / uniqueness / bound) BEFORE
-      // any write or `items.map` (finding 4) — a non-array previously crashed later.
-      const items = validateImportedItems(vc.decryptItems(vaultDoc.items, vaultKey));
+      // validate the decrypted array (non-object / missing-or-duplicate id / bound)
+      // BEFORE any write or `items.map` (finding 4) — a non-array previously crashed
+      // later. DD3 (Mission 21 F2 L3): an item of a type this build does not
+      // recognize is TOLERATED — dropped + reported via `skippedTypes` — rather
+      // than aborting the whole import (the `.gfvault` PARSE path above stays
+      // loud; only item-type recognition is softened, and only here). This call
+      // site has NO caller anywhere in `src/main` (verified — a store-only
+      // return-shape change, not new IPC/page plumbing).
+      const { items: knownItems, skippedTypes } = partitionImportedItems(vc.decryptItems(vaultDoc.items, vaultKey));
+      // LD2: a bundle vault carrying more than one `identity` item is itself the
+      // violation (no destination to compare against on either branch below — the
+      // existing-profile branch below is a whole-vault REPLACE, never a merge) —
+      // keep the first, drop the rest, fold into the same skippedTypes report.
+      const { items, droppedIdentity } = capSingleIdentity(knownItems);
+      if (droppedIdentity && !skippedTypes.includes('identity')) skippedTypes.push('identity');
 
       if (!this.isSetUp()) {
         // FRESH profile: adopt the bundle's manager. Vault FIRST (to GLOBAL_ID — the sole
@@ -2266,7 +2391,8 @@ class VaultStore {
           imported: true,
           fresh: true,
           vaultId: GLOBAL_ID,
-          recoveryKeyDisplay: adopted.recoveryKeyDisplay
+          recoveryKeyDisplay: adopted.recoveryKeyDisplay,
+          ...(skippedTypes.length > 0 ? { skippedTypes } : {})
         };
       }
 
@@ -2286,7 +2412,7 @@ class VaultStore {
       // Evict the destination's cached key — else a stale key GCM-fails on the new ciphertext.
       this.vaultKeys.get(dest)?.fill(0);
       this.vaultKeys.delete(dest);
-      return { imported: true, fresh: false, vaultId: dest };
+      return { imported: true, fresh: false, vaultId: dest, ...(skippedTypes.length > 0 ? { skippedTypes } : {}) };
     } finally {
       if (mrk) mrk.fill(0); // transient bundle MRK (existing path / any pre-install throw).
       if (vaultKey) vaultKey.fill(0); // transient vault key (both paths).
@@ -2448,7 +2574,8 @@ class VaultStore {
     }
 
     /** @type {Array<{ entryHandle: string, outcome: 'landed'|'skipped'|'collision-refused'|'failed',
-     *   destination?: string, mergeReport?: { imported: number, skippedIdentical: number, conflictCopies: number } }>} */
+     *   destination?: string, mergeReport?: { imported: number, skippedIdentical: number, conflictCopies: number },
+     *   skippedTypes?: string[] }>} */
     const results = [];
     let anyFailed = false;
     try {
@@ -2493,7 +2620,19 @@ class VaultStore {
           // collect-array, which that op needs for its batch-then-one-txn shape; this
           // loop writes each vault immediately, so there is nothing to batch).
           vaultKey = vc.unwrapVaultKey(mrkEnv, mrk, mrkEnvelopeAad(doc.version));
-          const items = validateImportedItems(vc.decryptItems(doc.items, vaultKey));
+          // DD3 (Mission 21 F2 L3): tolerant of an unrecognized item TYPE — dropped +
+          // reported via `skippedTypes`, never a whole-vault abort. Genuine corruption
+          // (non-array / non-object item / missing-or-duplicate id) still throws, and
+          // the try/catch below is what stops THAT from destroying results for vaults
+          // that already landed (the fix this leg's AC names: "tolerance means adding
+          // per-entry exception handling, not relaxing a validator").
+          const { items: knownItems, skippedTypes } = partitionImportedItems(vc.decryptItems(doc.items, vaultKey));
+          // LD2: a bundle vault carrying more than one `identity` item is itself the
+          // violation, independent of any destination — cap it here so BOTH branches
+          // below (merge and whole-vault write) only ever see at most one.
+          const capped = capSingleIdentity(knownItems);
+          const items = capped.items;
+          if (capped.droppedIdentity && !skippedTypes.includes('identity')) skippedTypes.push('identity');
 
           /** @type {{ imported: number, skippedIdentical: number, conflictCopies: number } | undefined} */
           let mergeReport;
@@ -2511,6 +2650,10 @@ class VaultStore {
               items: vc.encryptItems(merge.items, destKey)
             });
             mergeReport = merge.mergeReport;
+            // LD2's merge-collision ruling: the destination's existing identity
+            // profile is KEPT, the incoming one REPORTED AS SKIPPED — reusing this
+            // SAME `skippedTypes` reporting shape rather than a second mechanism.
+            if (merge.identitySkipped && !skippedTypes.includes('identity')) skippedTypes.push('identity');
           } else {
             // Fresh write (no destination vault) OR an explicit whole-vault replace —
             // this bundle vault's OWN key, wrapped under the profile's LIVE mrk (fresh:
@@ -2529,8 +2672,21 @@ class VaultStore {
             entryHandle,
             outcome: 'landed',
             destination: destId,
-            ...(mergeReport ? { mergeReport } : {})
+            ...(mergeReport ? { mergeReport } : {}),
+            ...(skippedTypes.length > 0 ? { skippedTypes } : {})
           });
+        } catch {
+          // Per-entry exception handling (DD3): a genuinely malformed vault entry —
+          // never an unrecognized item TYPE, which is tolerated above without
+          // throwing — fails ONLY this entry (the `_importLogins` per-row DD11
+          // precedent: catch broadly, mark this one outcome, keep going). Earlier-
+          // landed results survive, and (unlike the jar-creation-verify failure
+          // above, which stops for its own residue-recovery reason) later entries
+          // still get a chance — the exact thing the old whole-loop throw
+          // destroyed. `anyFailed` still gates the fresh-profile adopt step below,
+          // same as the create-verify path.
+          results.push({ entryHandle, outcome: 'failed' });
+          anyFailed = true;
         } finally {
           if (vaultKey) vaultKey.fill(0);
         }
@@ -2579,12 +2735,17 @@ class VaultStore {
    *
    * Item counts cannot come from ciphertext shape (`doc.items` is one AES-GCM blob) —
    * this is decrypt-then-discard, the `listItemsMeta` precedent (fully decrypt +
-   * project a non-secret whitelist). Runs `validateImportedItems` on EVERY bundle
-   * vault's decrypted plaintext (cycle-2 HIGH): a malformed-plaintext vault must fail
-   * HERE, at the secret step where nothing is written — never mid-commit after
-   * earlier vaults already landed. `identity` (present on EVERY entry, including
-   * global — M18 F3 L5) is resolved via `resolveIdentity` for display; a tamper
-   * there fails loudly (that helper's own contract), never a silent unnamed jar.
+   * project a non-secret whitelist). Runs `partitionImportedItems` on EVERY bundle
+   * vault's decrypted plaintext (cycle-2 HIGH): a malformed-plaintext vault (non-array /
+   * non-object item / missing-or-duplicate id) must still fail HERE, at the secret step
+   * where nothing is written — never mid-commit after earlier vaults already landed.
+   * DD3 (Mission 21 F2 L3) softens ONLY the item-type check — an unrecognized type is
+   * dropped from `itemCount` and named in `skippedTypes` instead of throwing, so preview
+   * never silently under-counts what a bundle actually carries (per-vault, not
+   * per-commit — LD2's identity cap applies here too, destination-independent).
+   * `identity` (present on EVERY entry, including global — M18 F3 L5) is resolved via
+   * `resolveIdentity` for display; a tamper there fails loudly (that helper's own
+   * contract), never a silent unnamed jar.
    *
    * Gated via `_enterGatedOp` — NOT for `exportVault`'s local-read rationale (preview
    * touches no local vault state) but so an operator cannot START a multi-step import
@@ -2592,7 +2753,7 @@ class VaultStore {
    * (that guard belongs to `restoreProfile`, which writes) — a preview never mutates.
    * @param {any} bundle
    * @param {{ secret: Buffer, secretKind?: 'master'|'recovery' }} opts
-   * @returns {Promise<{ labels: Array<{ entryHandle: string, identity: { kind: 'global' } | { kind: 'jar', name: string, color?: string }, itemCount: number }> }>}
+   * @returns {Promise<{ labels: Array<{ entryHandle: string, identity: { kind: 'global' } | { kind: 'jar', name: string, color?: string }, itemCount: number, skippedTypes?: string[] }> }>}
    */
   async previewRestoreBundle(bundle, opts = /** @type {any} */ ({})) {
     const releaseOp = this._enterGatedOp();
@@ -2657,11 +2818,19 @@ class VaultStore {
         try {
           // Ruling 11's per-iteration discipline: at most one bundle vault key live at a time.
           vaultKey = vc.unwrapVaultKey(mrkEnv, mrk, mrkEnvelopeAad(doc.version));
-          const items = validateImportedItems(vc.decryptItems(doc.items, vaultKey));
+          // DD3: tolerant of an unrecognized item type (reported, not thrown) — see the
+          // docstring above. Genuine corruption still throws and fails the WHOLE preview,
+          // unchanged from before this leg.
+          const { items: knownItems, skippedTypes } = partitionImportedItems(vc.decryptItems(doc.items, vaultKey));
+          // LD2: destination-independent at preview — a bundle vault carrying more than
+          // one identity item is itself the violation, knowable before any target is chosen.
+          const { items, droppedIdentity } = capSingleIdentity(knownItems);
+          if (droppedIdentity && !skippedTypes.includes('identity')) skippedTypes.push('identity');
           labels.push({
             entryHandle,
             identity: resolveIdentity(mrk, entryHandle, identity, identityPlaintext),
-            itemCount: items.length
+            itemCount: items.length,
+            ...(skippedTypes.length > 0 ? { skippedTypes } : {})
           });
           // The decrypted item objects themselves are dropped by scope here (JS strings, not
           // zeroizable — the accepted listItemsMeta posture; ruling 2's "decrypt-then-discard").
@@ -2832,7 +3001,7 @@ class VaultStore {
       throw new VaultStateError('vault-store: item must be an object');
     }
     if (!ITEM_TYPES.has(item.type)) {
-      throw new VaultStateError(`vault-store: item.type must be one of login|card|note (got "${item.type}")`);
+      throw new VaultStateError(`vault-store: item.type must be one of login|card|note|identity (got "${item.type}")`);
     }
     const id = typeof item.id === 'string' && item.id.length > 0 ? item.id : crypto.randomBytes(8).toString('hex');
     const now = this._now();
@@ -2901,6 +3070,24 @@ class VaultStore {
     const normalized = this._normalizeItem(item, existingCreatedAt);
     if (idx >= 0) items[idx] = normalized;
     else items.push(normalized);
+
+    // LD2 (Mission 21 F2 L3): one identity profile per vault — the cheap choke point.
+    // Refuse the WHOLE save (no write at all) rather than silently dropping or
+    // replacing anything: a second identity item (a different id) is a genuine
+    // caller error here, distinct from the tolerant bundle-import paths below
+    // (which cannot interactively ask "which one did you mean" and instead
+    // keep-the-destination / report-the-incoming-as-skipped — see mergeVaultItems
+    // and capSingleIdentity). Uses the SAME canonical accessor as any future read,
+    // rather than a bespoke `.find()` — `identityProfileOf`'s `profile` is the
+    // item that would survive; a conflict is any OTHER identity item still present.
+    if (normalized.type === 'identity') {
+      const { profile } = identityProfileOf(items);
+      if (profile && profile.id !== normalized.id) {
+        throw new VaultStateError(
+          'vault-store: only one identity item is allowed per vault — edit the existing profile instead of creating a second one'
+        );
+      }
+    }
 
     this._writeVault(vaultId, {
       kdf: doc.kdf,
@@ -3201,7 +3388,7 @@ class VaultStore {
       throw new VaultStateError('vault-store: item must be an object');
     }
     if (!ITEM_TYPES.has(item.type)) {
-      throw new VaultStateError(`vault-store: item.type must be one of login|card|note (got "${item.type}")`);
+      throw new VaultStateError(`vault-store: item.type must be one of login|card|note|identity (got "${item.type}")`);
     }
     const unchanged = Array.isArray(unchangedFields) ? unchangedFields : [];
     const secret = new Set(secretFieldsFor(item.type));
@@ -3671,6 +3858,13 @@ module.exports = {
   // schema and the decrypted-item-array guard are unit-tested directly.
   validateImportedKdf,
   validateImportedItems,
+  // DD3's tolerant counterpart to validateImportedItems (Mission 21 F2 L3) — the
+  // three bundle-import call sites' shared item-type filter, + LD2's identity cap
+  // and mergeVaultItems' own collision handling. Exported so all three are
+  // unit-tested directly, not only through the three call sites that use them.
+  partitionImportedItems,
+  capSingleIdentity,
+  mergeVaultItems,
   // M18 F3 Leg 2 (DD1 ruling 2); renamed + re-scoped M18 F3 Leg 5 (every entry,
   // not jar-only, keyed on entryHandle not sourceId): the bundle v2 identity
   // decrypt helper — leg 3's pre-mapping label step consumes this directly;

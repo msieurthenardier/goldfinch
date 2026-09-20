@@ -1,0 +1,23 @@
+<!--
+  Fixture: flight-search-destination
+  Corpus tier: negative-detection (identity family) — asserted by
+  assertNoDetectableEntry once it is extended to the identity family.
+  Models a flight-search widget: origin/destination pickers plus an optional
+  passenger name. Neither `origin` nor `destination` matches any alternative
+  in the identity vocabulary at all — they are not a synonym this table
+  recognizes for anything postal — so there is no postal-anchor candidate
+  whatsoever and the scope never anchors, regardless of `passengerName`
+  resolving a perfectly good non-postal role in isolation. A heuristic that
+  inferred "location-shaped fields near a form" would fire here; this
+  detector, keyed purely on a declared vocabulary, does not.
+  Added: 2026-09-20 (Mission 21, Flight 2, Leg 2 — identity-boundary).
+-->
+<form id="flight-search">
+  <label for="fs-origin">From</label>
+  <input type="text" id="fs-origin" name="origin" placeholder="Origin airport" />
+  <label for="fs-destination">To</label>
+  <input type="text" id="fs-destination" name="destination" placeholder="Destination airport" />
+  <label for="fs-passenger">Lead passenger</label>
+  <input type="text" id="fs-passenger" name="passengerName" />
+  <button type="submit">Search flights</button>
+</form>

@@ -21,22 +21,36 @@
 // security-critical module.
 
 /**
- * @typedef {'login' | 'card' | 'note'} ItemType
+ * @typedef {'login' | 'card' | 'note' | 'identity'} ItemType
  * @typedef {{ nonSecret: string[], secret: string[] }} TypeSchema
  */
 
 // Per the flight Context taxonomy (Architect-flagged linchpin):
-//   login — non-secret: title/username/origin; secret: password/totp/notes
-//   card  — non-secret: title/cardholder/brand/last4; secret: number/cvv/expiry/notes
-//   note  — non-secret: title; secret: body
+//   login    — non-secret: title/username/origin; secret: password/totp/notes
+//   card     — non-secret: title/cardholder/brand/last4; secret: number/cvv/expiry/notes
+//   note     — non-secret: title; secret: body
+//   identity — non-secret: title/fullName; secret: firstName/lastName/email/phone/street/
+//              street2/city/region/country/postalCode (Mission 21 Flight 2 Leg 3 / LD1)
 // `notes` is a secret free-text ANNOTATIONS field on login + card (the F2 capture test proves it
 // holds secrets and must survive edits). A NOTE carries NO `notes` field — its content IS its
 // `body`, so a second generic "Notes" field on a note was redundant (it showed both Note + Notes).
+//
+// LD1 (Mission 21 F2 L3): the identity split is CONSERVATIVE — only `title` and `fullName` are
+// non-secret. DD2 gives ONE profile per vault (no multi-profile disambiguation need), so the
+// non-secret set stays minimal: a street address, postcode, phone and email are all PII that
+// should not ride an unmasked metadata read just to render a picker row that says "your
+// details". The field NAMES below (everything but `title`) are Leg 2's identity detector role
+// names verbatim — `src/preload/vault-identity-fields.js`'s ROLE_ALTERNATIVES/AUTOCOMPLETE_ROLES
+// keys — with NO translation layer, so the two halves cannot drift on naming.
 /** @type {Record<ItemType, TypeSchema>} */
 const SCHEMA = {
   login: { nonSecret: ['title', 'username', 'origin'], secret: ['password', 'totp', 'notes'] },
   card: { nonSecret: ['title', 'cardholder', 'brand', 'last4'], secret: ['number', 'cvv', 'expiry', 'notes'] },
-  note: { nonSecret: ['title'], secret: ['body'] }
+  note: { nonSecret: ['title'], secret: ['body'] },
+  identity: {
+    nonSecret: ['title', 'fullName'],
+    secret: ['firstName', 'lastName', 'email', 'phone', 'street', 'street2', 'city', 'region', 'country', 'postalCode']
+  }
 };
 
 /** @type {ItemType[]} */
