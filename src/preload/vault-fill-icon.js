@@ -38,19 +38,19 @@ const COLOR_UNLOCKED = '#137333';
  * shackle is OPEN (the right leg lifts free of the body) and the label offers the
  * fill. Color is applied by the controller (createIcon) via the chip's `color`.
  *
- * `kind` names the ANCHOR's field family ('login' | 'card', issue #152) and drives
- * the accessible name only — the glyph is identical, and the icon stays decorative
- * and secret-free either way.
+ * `kind` names the ANCHOR's field family ('login' | 'card' | 'identity', issue
+ * #152 / M21 F3 Leg 3) and drives the accessible name only — the glyph is
+ * identical, and the icon stays decorative and secret-free either way.
  * @param {any} doc  a `document`-like object exposing createElementNS.
  * @param {boolean} [locked]  vault lock state (default true — the safe/closed default).
- * @param {'login'|'card'} [kind]  the anchor's field family (default 'login').
+ * @param {'login'|'card'|'identity'} [kind]  the anchor's field family (default 'login').
  * @returns {any} the `<svg>` icon element.
  */
 function buildVaultLockIcon(doc, locked = true, kind = 'login') {
   const svg = doc.createElementNS(SVG_NS, 'svg');
   svg.setAttribute(ICON_ATTR, '');
   svg.setAttribute('role', 'img');
-  const noun = kind === 'card' ? 'card' : 'login';
+  const noun = kind === 'card' ? 'card' : kind === 'identity' ? 'identity' : 'login';
   // State in the accessible name + a marker attribute (also lets tests/CSS see the state).
   svg.setAttribute('aria-label', locked ? `Unlock vault to fill ${noun}` : `Fill ${noun} from vault`);
   // NOTE: the kind rides the accessible name ONLY — no `data-kind` attribute. The
@@ -109,6 +109,22 @@ function cardAnchorsOf(entry) {
 }
 
 /**
+ * The fields of an identity entry that carry the icon (M21 F3 Leg 3, DD8): the
+ * scope's postal ANCHOR field and the FIRST non-postal role field in document
+ * order — never any other role field. Both are already computed and threaded
+ * onto the entry by `vault-identity-fields.js`'s `identityEntryForScope`
+ * (`entry.anchor` / `entry.nonPostalAnchor`) — this function never re-derives
+ * "first non-postal field" independently, which is exactly the second,
+ * driftable derivation DD2/DD8 forbid.
+ * @param {{ anchor?: any, nonPostalAnchor?: any }} entry
+ * @returns {any[]}
+ */
+function identityAnchorsOf(entry) {
+  if (!entry) return [];
+  return [entry.anchor, entry.nonPostalAnchor].filter(Boolean);
+}
+
+/**
  * A field is a valid anchor only if it's actually rendered — zero-size /
  * display:none honeypots (0×0 rect, or offsetParent null) get NO icon (else a
  * 0×0 icon lands at the page's top-left corner).
@@ -137,10 +153,13 @@ function isFieldVisible(field) {
  * @param {(doc: any) => Array<{number: any, cardholder: any, expiry: any, csc: any, form: any}>} [deps.findAllCardFields]
  *   payment-card entries (issue #152). OPTIONAL: an omitted injection yields no card
  *   anchors, so every pre-card caller keeps its exact prior behavior.
+ * @param {(doc: any) => any[]} [deps.findAllIdentityFields]  identity entries
+ *   (M21 F3 Leg 3, DD8). OPTIONAL: an omitted injection yields no identity
+ *   anchors, so every pre-identity caller keeps its exact prior behavior.
  * @param {() => boolean} deps.getEnabled  true iff top-frame AND vault-eligible
  * @param {() => boolean} [deps.getVaultLocked]  initial vault lock state (default true — locked).
  * @param {() => number} [deps.now]  clock for the gesture-target TTL (default Date.now).
- * @param {(anchor: any) => ({ kind: 'login'|'card', field: any } | null)} [deps.resolveTarget]
+ * @param {(anchor: any) => ({ kind: 'login'|'card'|'identity', field: any } | null)} [deps.resolveTarget]
  *   the shared entry-resolution walk (vault-entry-tracker.js's
  *   resolveTargetForAnchor, M21 F1 Leg 3, DD3g "same pure module, two execution
  *   contexts"). OPTIONAL, with an internal fallback below that is the byte-for-byte
@@ -155,12 +174,14 @@ function createVaultIconController({
   isTrustedGet,
   findAllLoginFields,
   findAllCardFields,
+  findAllIdentityFields,
   getEnabled,
   getVaultLocked,
   now,
   resolveTarget
 }) {
   const cardEntries = typeof findAllCardFields === 'function' ? findAllCardFields : () => [];
+  const identityEntries = typeof findAllIdentityFields === 'function' ? findAllIdentityFields : () => [];
   const clock = typeof now === 'function' ? now : Date.now;
   // Vault lock state driving the icon glyph + color (open/green when unlocked, closed/amber
   // when locked). Seeded from getVaultLocked() (the preload's init query) and updated live via
@@ -176,17 +197,20 @@ function createVaultIconController({
   // gesture): a main-side token would be no more trustworthy and adds no security —
   // this is fill-target INTEGRITY for the user's own page, not a cross-process secret.
   // `kind` distinguishes the login binding (a password field) from the card binding
-  // (a card-number field, issue #152) so a `vault-fill` can never consume a target
-  // bound by a card gesture, or vice versa — the two fill channels resolve against
-  // different DOM anchors and a cross-consumption would silently mis-target.
-  /** @type {{ kind: 'login'|'card', field: any, expiresAt: number } | null} */
+  // (a card-number field, issue #152) and the identity binding (the postal
+  // anchor field, M21 F3 Leg 3) so a `vault-fill`/`vault-fill-card`/
+  // `vault-fill-identity` can never consume a target bound by a DIFFERENT
+  // family's gesture — the three fill channels resolve against different DOM
+  // anchors and a cross-consumption would silently mis-target.
+  /** @type {{ kind: 'login'|'card'|'identity', field: any, expiresAt: number } | null} */
   let pendingFillTarget = null;
   const FILL_TARGET_TTL_MS = 60 * 1000;
 
   // Resolve the fill target for a focused anchor: the password field of the login
-  // entry the anchor belongs to, or the number field of its card entry. Null when
-  // the anchor is not part of any detected entry.
-  /** @returns {{ kind: 'login'|'card', field: any } | null} */
+  // entry the anchor belongs to, the number field of its card entry, or (DD8,
+  // M21 F3 Leg 3) the postal anchor field of its identity entry. Null when the
+  // anchor is not part of any detected entry.
+  /** @returns {{ kind: 'login'|'card'|'identity', field: any } | null} */
   function targetForAnchor(anchor) {
     if (typeof resolveTarget === 'function') return resolveTarget(anchor);
     if (!anchor) return null;
@@ -200,6 +224,11 @@ function createVaultIconController({
         return entry.number ? { kind: 'card', field: entry.number } : null;
       }
     }
+    for (const entry of identityEntries(doc)) {
+      if (identityAnchorsOf(entry).includes(anchor)) {
+        return entry.anchor ? { kind: 'identity', field: entry.anchor } : null;
+      }
+    }
     return null;
   }
 
@@ -208,7 +237,7 @@ function createVaultIconController({
    * bound field when still valid, else null (the fill falls back to the first-field
    * heuristic). Always clears the binding — single-use is the security property, so
    * a kind mismatch still burns the target rather than leaving it for a later fill.
-   * @param {'login'|'card'} [kind]  when given, the binding must match this family.
+   * @param {'login'|'card'|'identity'} [kind]  when given, the binding must match this family.
    * @returns {any}
    */
   function consumeFillTarget(kind) {
@@ -285,7 +314,7 @@ function createVaultIconController({
     e.preventDefault();
   }
 
-  /** @param {'login'|'card'} kind */
+  /** @param {'login'|'card'|'identity'} kind */
   function createIcon(kind) {
     const el = buildVaultLockIcon(doc, vaultLocked, kind);
     const s = el.style;
@@ -382,13 +411,17 @@ function createVaultIconController({
   }
 
   // Every anchorable field mapped to its family: the username + password of each
-  // detected login form (both carry the icon — problem 2), and the number /
-  // cardholder / expiry / csc of each detected card form (issue #152). Logins are
-  // walked FIRST so a field somehow claimed by both families resolves as a login —
-  // the narrower, origin-gated path.
-  /** @returns {Map<any, 'login'|'card'>} */
+  // detected login form (both carry the icon — problem 2), the number /
+  // cardholder / expiry / csc of each detected card form (issue #152), and
+  // (M21 F3 Leg 3, DD8) the postal anchor + first non-postal field of each
+  // detected identity entry. Walked login → card → identity so a field somehow
+  // claimed by an earlier family resolves there — the same login > card >
+  // identity precedence DD5 fixes at detection. This is the site that decides
+  // whether an identity icon renders AT ALL (flight DD8 records that the flight
+  // spec itself missed this site once).
+  /** @returns {Map<any, 'login'|'card'|'identity'>} */
   function anchorKinds() {
-    /** @type {Map<any, 'login'|'card'>} */
+    /** @type {Map<any, 'login'|'card'|'identity'>} */
     const kinds = new Map();
     for (const entry of findAllLoginFields(doc)) {
       if (entry.username) kinds.set(entry.username, 'login');
@@ -397,6 +430,11 @@ function createVaultIconController({
     for (const entry of cardEntries(doc)) {
       for (const field of cardAnchorsOf(entry)) {
         if (!kinds.has(field)) kinds.set(field, 'card');
+      }
+    }
+    for (const entry of identityEntries(doc)) {
+      for (const field of identityAnchorsOf(entry)) {
+        if (!kinds.has(field)) kinds.set(field, 'identity');
       }
     }
     return kinds;

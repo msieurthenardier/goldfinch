@@ -43,11 +43,18 @@
 //   tier             'gated' | 'known-unsolved' | 'negative-detection' |
 //                     'negative-gesture'
 //   assert           'detects' | 'no-detect' | 'captures' | 'offers' |
-//                     'no-offer' — which assertion function in
+//                     'offers-multi' | 'no-offer' — which assertion function in
 //                     test/helpers/save-moment-assertions.js runs. 'captures'
 //                     proves only capture-worthiness; 'offers' proves that PLUS
 //                     a real, headlessly-provable settle signal (Leg 6 —
 //                     hat-and-alignment — see that helper's own module header).
+//                     'offers-multi' (Mission 21, Flight 3, Leg 6 —
+//                     gesture-holds-every-family) is the MULTI-FAMILY sibling
+//                     of 'offers': the designated gesture PLANS a capture for
+//                     every family in `families`, in order (via the real
+//                     resolveGestureTargets + planCaptures, never a
+//                     reimplementation), AND settles via the same real native
+//                     form submission check.
 //   family           'login' | 'card' | 'identity' | null — required when
 //                     assert is 'detects', 'captures', or 'offers'. Three-way
 //                     as of Mission 21, Flight 2, Leg 2 (identity-boundary) —
@@ -56,6 +63,10 @@
 //                     so every identity-family entry currently carries
 //                     assert: 'detects' or lives in the negative-detection
 //                     tier with family: null.
+//   families         Array<'login'|'card'|'identity'>, required (and ONLY
+//                     meaningful) when assert is 'offers-multi' — the full,
+//                     ORDERED list of families the gesture is expected to
+//                     plan (Leg 6 — gesture-holds-every-family).
 //   file             path to the fixture HTML, relative to this manifest's own
 //                     directory. Omitted only for a fixture that is built
 //                     entirely by `simulate` (none currently need this).
@@ -270,10 +281,14 @@ module.exports = [
     // THE MOTIVATING PAGE. See the fixture's own header for the full
     // accounting: every field carries autocomplete="on" (a useless hint), so
     // detection runs entirely off the LD1 alternatives-model fallback
-    // vocabulary.
+    // vocabulary. PROMOTED to 'offers' at Mission 21, Flight 3, Leg 4
+    // (identity-capture, AC19) — tier and assert together, per this leg's own
+    // discipline: the submit button sits INSIDE `<form id="billing-address">`,
+    // so a real, headlessly-provable native form submission earns `offers`
+    // rather than only `captures` (decided by reading the fixture, per DD4).
     id: 'billing-jostens',
     tier: 'gated',
-    assert: 'detects',
+    assert: 'offers',
     family: 'identity',
     file: 'identity/billing-jostens.html'
   },
@@ -286,5 +301,48 @@ module.exports = [
     assert: 'detects',
     family: 'identity',
     file: 'identity/incident-report-third-party.html'
+  },
+
+  // --- multi-family (Leg 6 — gesture-holds-every-family): ONE gesture, TWO
+  // families held and offered. These are the corpus's own regression net for
+  // the fix — the HAT's Step 4a finding, reproduced headlessly and confirmed
+  // to FAIL against pre-fix code before the resolver/planner landed (see
+  // flight-log.md's Leg 6 entry for the recorded fail output). --------------
+  {
+    // Card + billing identity fields sharing ONE <form>, ONE native submit
+    // button inside it. See the fixture's own header for the full accounting.
+    id: 'checkout-combined-card-billing',
+    tier: 'gated',
+    assert: 'offers-multi',
+    families: ['card', 'identity'],
+    file: 'multi-family/checkout-combined-card-billing.html',
+    gestureSelector: '#pay-now'
+  },
+  {
+    // A sign-up form carrying a password AND an address in ONE <form> — the
+    // operator's own ruling: capture BOTH login and identity. See the
+    // fixture's own header for the LD3 ordering note (why only #su-username
+    // is claimed by login, not the earlier identity fields).
+    id: 'signup-with-address',
+    tier: 'gated',
+    assert: 'offers-multi',
+    families: ['login', 'identity'],
+    file: 'multi-family/signup-with-address.html',
+    gestureSelector: '#create-account'
+  },
+  {
+    // AC6b (live-HAT-found gap): the EMAIL field is the one immediately
+    // before Password — no dedicated username field. Proves the generic
+    // families-planned outcome via the shared corpus runner; the PAYLOAD
+    // content this shape exists to pin (login username === email,
+    // identity carries NO email) is asserted directly by the dedicated
+    // unit test in test/unit/vault-capture-plan.test.js, which loads this
+    // same file. See the fixture's own header for the full accounting.
+    id: 'signup-email-as-username',
+    tier: 'gated',
+    assert: 'offers-multi',
+    families: ['login', 'identity'],
+    file: 'multi-family/signup-email-as-username.html',
+    gestureSelector: '#join-now'
   }
 ];

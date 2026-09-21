@@ -536,3 +536,108 @@ test('honeypot / zero-rect focused field gets NO icon', () => {
   ctl.handleFocusIn({ target: pass });
   assert.equal(bodyIcon(doc), null, 'a zero-rect field is never anchored');
 });
+
+// --- identity (M21 F3 Leg 3, DD8): the third icon kind ----------------------
+
+function makeControllerWithFinders(doc, sends, extra = {}) {
+  return createVaultIconController({
+    document: doc,
+    window: { scrollX: 0, scrollY: 0 },
+    ipcRenderer: { send: (channel, payload) => sends.push({ channel, payload }) },
+    isTrustedGet: { call: (e) => !!e.isTrusted },
+    findAllLoginFields,
+    getEnabled: () => true,
+    ...extra
+  });
+}
+
+test('AC13: the identity postal anchor field gets its own icon, aria-labeled "identity"', () => {
+  const street = new FakeInput('text', 'street');
+  const email = new FakeInput('text', 'email');
+  const doc = makeDoc([new FakeForm([street, email])]);
+  const identityEntry = { anchor: street, nonPostalAnchor: email };
+  const ctl = makeControllerWithFinders(doc, [], { findAllIdentityFields: () => [identityEntry] });
+
+  ctl.handleFocusIn({ target: street });
+  const icon = bodyIcon(doc);
+  assert.ok(icon, 'the postal anchor gets an icon');
+  assert.equal(icon.getAttribute('aria-label'), 'Unlock vault to fill identity');
+});
+
+test('AC13: the non-postal anchor field ALSO gets an identity icon (two icons per entry, DD8)', () => {
+  const street = new FakeInput('text', 'street');
+  const email = new FakeInput('text', 'email');
+  const doc = makeDoc([new FakeForm([street, email])]);
+  const identityEntry = { anchor: street, nonPostalAnchor: email };
+  const ctl = makeControllerWithFinders(doc, [], { findAllIdentityFields: () => [identityEntry] });
+
+  ctl.handleFocusIn({ target: email });
+  const icon = bodyIcon(doc);
+  assert.ok(icon, 'the non-postal anchor also gets an icon');
+  assert.equal(icon.getAttribute('aria-label'), 'Unlock vault to fill identity');
+});
+
+test('AC13/AC14: the identity icon carries no extra attribute — the attribute-set pin is unaffected', () => {
+  const street = new FakeInput('text', 'street');
+  const email = new FakeInput('text', 'email');
+  const doc = makeDoc([new FakeForm([street, email])]);
+  const identityEntry = { anchor: street, nonPostalAnchor: email };
+  const ctl = makeControllerWithFinders(doc, [], { findAllIdentityFields: () => [identityEntry] });
+
+  ctl.handleFocusIn({ target: street });
+  const icon = bodyIcon(doc);
+  const attrKeys = Object.keys(icon.attributes).sort();
+  assert.deepEqual(
+    attrKeys,
+    ['aria-label', 'data-locked', 'focusable', 'height', 'role', 'viewBox', 'width', ICON_ATTR].sort(),
+    'no data-kind — the kind rides the accessible name only'
+  );
+});
+
+test('DD5 precedence: login wins a field an injected (pathological) identity entry also claims', () => {
+  const user = new FakeInput('text', 'username');
+  const pass = new FakeInput('password', 'password');
+  const doc = makeDoc([new FakeForm([user, pass])]);
+  const ctl = makeControllerWithFinders(doc, [], {
+    findAllIdentityFields: () => [{ anchor: user, nonPostalAnchor: null }]
+  });
+
+  ctl.handleFocusIn({ target: user });
+  const icon = bodyIcon(doc);
+  assert.equal(icon.getAttribute('aria-label'), 'Unlock vault to fill login', 'login wins the contested field');
+});
+
+test("AC13: clicking either identity icon binds the entry's POSTAL anchor as the fill target", () => {
+  const street = new FakeInput('text', 'street');
+  const email = new FakeInput('text', 'email');
+  const doc = makeDoc([new FakeForm([street, email])]);
+  const sends = [];
+  const identityEntry = { anchor: street, nonPostalAnchor: email };
+  const ctl = makeControllerWithFinders(doc, sends, { findAllIdentityFields: () => [identityEntry] });
+
+  // Focus the NON-postal anchor and click its icon — the fill target must
+  // still resolve to the entry's postal anchor (DD8).
+  ctl.handleFocusIn({ target: email });
+  bodyIcon(doc).dispatch('click', { isTrusted: true });
+
+  assert.equal(sends.length, 1);
+  assert.equal(sends[0].channel, 'guest-vault-gesture');
+  assert.equal(
+    ctl.consumeFillTarget('identity'),
+    street,
+    'the fill target is the postal anchor, not the clicked field'
+  );
+});
+
+test('consumeFillTarget("identity") is null for a login-bound gesture, and vice versa (kind isolation)', () => {
+  const user = new FakeInput('text', 'username');
+  const pass = new FakeInput('password', 'password');
+  const doc = makeDoc([new FakeForm([user, pass])]);
+  const sends = [];
+  const ctl = makeControllerWithFinders(doc, sends, {});
+
+  ctl.handleFocusIn({ target: pass });
+  bodyIcon(doc).dispatch('click', { isTrusted: true });
+
+  assert.equal(ctl.consumeFillTarget('identity'), null, 'a login-bound target does not satisfy an identity consume');
+});

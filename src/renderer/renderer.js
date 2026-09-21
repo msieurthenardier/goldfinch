@@ -33,6 +33,7 @@ import { createDownloadsController } from './chrome/downloads-controller.js';
 import { createAuditHooks } from './chrome/audit-hooks.js';
 import { createSiteSecurityController } from './chrome/site-security-controller.js';
 import { createVaultController } from './chrome/vault-controller.js';
+import { createAuthChallengeController } from './chrome/auth-challenge-controller.js'; // Mission 21 F3 Leg 1
 import { createJarsClient } from './chrome/jars-client.js';
 import { createBookmarksClient, bookmarkEntryToEditModel } from './chrome/bookmarks-client.js';
 import { createBookmarksBar } from './chrome/bookmarks-bar.js';
@@ -445,6 +446,15 @@ const {
   openVaultCompromiseOverlayForAudit,
   openVaultCompromiseRecoverOverlayForAudit
 } = vaultController;
+// HTTP basic-auth + TLS client-cert challenge controller (M14 F1 L2/L3, extracted
+// M21 F3 Leg 1 "sheet-type-dispatch"): the vaultController construction-order
+// precedent above — openOverlayMenu is a late-bound closure (overlayMenuClient
+// does not exist yet at this point in the module, exactly the TDZ hazard
+// vaultController's own construction avoids the same way).
+const authChallengeController = createAuthChallengeController({
+  goldfinch: window.goldfinch,
+  openOverlayMenu: (...args) => overlayMenuClient.open(...args)
+});
 
 /* ---- menu-overlay sheet state (shared monotonic open-token discipline) ---- */
 const overlayMenus = {
@@ -495,28 +505,13 @@ const overlayMenus = {
     ariaTarget: () => null, // DD11: textbox disallows aria-expanded; listbox is cross-document
     refocus() {}
   },
-  // HTTP basic-auth credential prompt (M14 F1 L2, flight DD2). Raised from main's
-  // pending-challenge store (auth-challenge-present) — no chrome trigger element,
-  // so no aria-expanded target and no trigger refocus. The close reason's DD2
-  // lifecycle bucket (resolve vs re-present) is mapped MAIN-SIDE by the store's
-  // manager close-observer; the chrome only opens.
-  'auth-basic': {
-    open: false,
-    token: 0,
-    blurClosedAt: -Infinity,
-    ariaTarget: () => null,
-    refocus() {}
-  },
-  // TLS client-cert chooser (M14 F1 L3, flight DD4) — same shape as auth-basic:
-  // raised from main's pending-challenge store (cert-challenge-present), no
-  // chrome trigger element, close buckets mapped MAIN-SIDE by the store.
-  'cert-picker': {
-    open: false,
-    token: 0,
-    blurClosedAt: -Infinity,
-    ariaTarget: () => null,
-    refocus() {}
-  },
+  // HTTP basic-auth ('auth-basic') + TLS client-cert ('cert-picker') challenge
+  // prompts (M14 F1 L2/L3) — owned by auth-challenge-controller.js (extracted
+  // M21 F3 Leg 1). Neither has a chrome trigger element (both raised from main's
+  // pending-challenge store), so neither has an aria-expanded target or trigger
+  // refocus; the close reason's DD2 lifecycle bucket (resolve vs re-present) is
+  // mapped MAIN-SIDE by the store's manager close-observer.
+  ...authChallengeController.overlayStates,
   // The 11 vault sheet states (vault-unlock, vault-picker, vault-capture, vault-set,
   // vault-recovery-show, vault-stepup, vault-accesskey-show, vault-import-unlock,
   // vault-change-master, vault-recover, vault-adminkey-show) — owned by
@@ -1354,31 +1349,9 @@ window.goldfinch.onTabMediaList(({ wcId, mediaList }) => {
   if (tab.id === ctx.activeTabId) renderMedia();
 });
 
-// HTTP auth challenge presentation (M14 F1 L2, flight DD2). Main's pending-
-// challenge store decides WHEN a challenge presents (eligibility + queue); the
-// chrome opens the auth-basic sheet through the standard open path with the
-// NON-SECRET {host, realm} model + the store-stamped `popup` marker flag (M14
-// F2 L2 DD5). The credential leaves only via the authSubmit Buffer channel.
-window.goldfinch.onAuthChallengePresent(({ host, realm, popup }) => {
-  openOverlayMenu('auth-basic', { host, realm, ...(popup === true ? { popup: true } : {}) }, null, 0);
-});
-
-// Client-cert challenge presentation (M14 F1 L3, flight DD4): same store-
-// decides / chrome-opens contract as above. Display strings only — {subject,
-// issuer} rows + the requesting host (the sheet's site-attribution subtitle,
-// M14 F3 HAT fix); selection resolves MAIN-SIDE from the channel-4 index.
-window.goldfinch.onCertChallengePresent(({ certs, host, popup }) => {
-  openOverlayMenu(
-    'cert-picker',
-    {
-      certs: Array.isArray(certs) ? certs : [],
-      ...(typeof host === 'string' && host ? { host } : {}),
-      ...(popup === true ? { popup: true } : {})
-    },
-    null,
-    0
-  );
-});
+// HTTP auth challenge + TLS client-cert challenge presentation (M14 F1 L2/L3) —
+// both subscriptions now live in auth-challenge-controller.js (extracted M21 F3
+// Leg 1, constructed above alongside vaultController).
 
 // Find-overlay per-tab state sync (DD9 + the two Leg-3 channels). Text arrives on
 // EVERY overlay query — empty included (deletion sync: switch-back must restore a

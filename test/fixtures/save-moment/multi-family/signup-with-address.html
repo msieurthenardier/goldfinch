@@ -1,0 +1,43 @@
+<!--
+  Fixture: signup-with-address
+  Corpus tier: gated (multi-family). Families: login AND identity, from ONE
+  gesture. Added at Mission 21 Flight 3 Leg 6 (gesture-holds-every-family) —
+  the operator's own ruling on the combined-form gap: "on a sign-up form
+  carrying a password AND an address, capture BOTH login and identity" (one
+  consistent rule, no special case for the card+billing shape alone).
+
+  A single sign-up <form> with first name, email, a street address (the
+  identity family's postal anchor via the {address1} alternative — the same
+  proven spelling as billing-jostens.html, reused deliberately) and a
+  username/password pair (the login family's structural anchor,
+  autocomplete="username"/"new-password"). Field names/ids are deliberately
+  DISJOINT from login's vocabulary — nothing here is contested at detection.
+
+  LD3 ordering matters for what's ADMITTED, not what's present: `su-username`
+  is the LAST text/email/tel input immediately preceding the password field,
+  so `isClaimedByLogin` claims ONLY that field — firstName/email/address1/
+  city stay available to identity detection (the earlier fields are not the
+  "last one before password", so login's claim never reaches them).
+
+  `value` attributes are the corpus's own stand-in for "the operator typed
+  this". The submit button sits INSIDE this single form (a bare
+  `<button type="submit">`), so a real, headlessly-provable native form
+  submission (DD4's navigation-commit settle signal) fires on click.
+  Added: 2026-09-21 (Mission 21, Flight 3, Leg 6 — gesture-holds-every-family).
+-->
+<form id="signup" action="/signup" method="post">
+  <h2>Create your account</h2>
+  <label for="su-first">First name</label>
+  <input type="text" id="su-first" name="firstName" value="Ada" />
+  <label for="su-email">Email</label>
+  <input type="email" id="su-email" name="email" value="ada@example.com" />
+  <label for="su-addr1">Address line 1</label>
+  <input type="text" id="su-addr1" name="address1" value="12 Analytical Engine Way" />
+  <label for="su-city">City</label>
+  <input type="text" id="su-city" name="city" value="London" />
+  <label for="su-username">Username</label>
+  <input type="text" id="su-username" name="username" autocomplete="username" value="ada" />
+  <label for="su-password">Password</label>
+  <input type="password" id="su-password" name="password" autocomplete="new-password" value="hunter2" />
+  <button type="submit" id="create-account">Create account</button>
+</form>

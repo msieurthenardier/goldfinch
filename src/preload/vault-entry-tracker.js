@@ -42,14 +42,21 @@ const { VAULT_ENTRY_OBSERVER_HANDLE } = require('./vault-entry-observer-handle')
  * business logic threaded through here only because the walk itself is shared,
  * not because this module owns icon policy.
  *
+ * DD5 precedence (M21 F3 Leg 3): login checked first, then card, then
+ * identity — an identity anchor (either of the entry's TWO icon fields, the
+ * postal anchor or the first non-postal field, AC13) resolves to the entry's
+ * postal `anchor` field as its fill target, never re-derived independently of
+ * `vault-identity-fields.js`'s own `entry.anchor`/`entry.nonPostalAnchor`.
+ *
  * @param {any} doc
  * @param {any} anchor
  * @param {object} finders
  * @param {(doc: any) => Array<{username: any, password: any, form: any}>} finders.findAllLoginFields
  * @param {(doc: any) => Array<{number: any, cardholder: any, expiry: any, csc: any, form: any}>} [finders.findAllCardFields]
- * @returns {{ kind: 'login'|'card', field: any } | null}
+ * @param {(doc: any) => any[]} [finders.findAllIdentityFields]
+ * @returns {{ kind: 'login'|'card'|'identity', field: any } | null}
  */
-function resolveTargetForAnchor(doc, anchor, { findAllLoginFields, findAllCardFields }) {
+function resolveTargetForAnchor(doc, anchor, { findAllLoginFields, findAllCardFields, findAllIdentityFields }) {
   if (!anchor) return null;
   const logins = typeof findAllLoginFields === 'function' ? findAllLoginFields(doc) : [];
   for (const entry of logins) {
@@ -63,6 +70,12 @@ function resolveTargetForAnchor(doc, anchor, { findAllLoginFields, findAllCardFi
       if (entry[role] && entry[role] === anchor) {
         return entry.number ? { kind: 'card', field: entry.number } : null;
       }
+    }
+  }
+  const identities = typeof findAllIdentityFields === 'function' ? findAllIdentityFields(doc) : [];
+  for (const entry of identities) {
+    if ((entry.anchor && entry.anchor === anchor) || (entry.nonPostalAnchor && entry.nonPostalAnchor === anchor)) {
+      return entry.anchor ? { kind: 'identity', field: entry.anchor } : null;
     }
   }
   return null;
@@ -163,7 +176,7 @@ function createEntryTracker({ execInWorld, installScript, warn }) {
     return result && typeof result === 'object' && result.filled === true ? { filled: true } : { filled: false };
   }
 
-  const EMPTY_SNAPSHOT = Object.freeze({ logins: [], cards: [] });
+  const EMPTY_SNAPSHOT = Object.freeze({ logins: [], cards: [], identities: [] });
 
   /**
    * The GESTURE-TIME read (Leg 5, DD3f corrected at design review): called by
@@ -178,7 +191,7 @@ function createEntryTracker({ execInWorld, installScript, warn }) {
    * throw, and never treated as "nothing detected" being conflated with "the
    * read failed" at the call site's own layer (both simply produce no
    * provenanced secret to hold).
-   * @returns {Promise<{ logins: any[], cards: any[] }>}
+   * @returns {Promise<{ logins: any[], cards: any[], identities: any[] }>}
    */
   async function readSnapshot() {
     const ok = await ensureInstalled();
@@ -189,7 +202,13 @@ function createEntryTracker({ execInWorld, installScript, warn }) {
     } catch {
       result = undefined;
     }
-    if (!result || typeof result !== 'object' || !Array.isArray(result.logins) || !Array.isArray(result.cards)) {
+    if (
+      !result ||
+      typeof result !== 'object' ||
+      !Array.isArray(result.logins) ||
+      !Array.isArray(result.cards) ||
+      !Array.isArray(result.identities)
+    ) {
       return EMPTY_SNAPSHOT;
     }
     return result;
@@ -197,14 +216,17 @@ function createEntryTracker({ execInWorld, installScript, warn }) {
 
   return {
     ensureInstalled,
-    // Fills execute IN THE ISOLATED WORLD (DD3h) — fillLogin/fillCard here are
-    // thin routers, never main-world callers of fillLoginForm/fillCardForm
-    // themselves. The credential/card value crosses INTO the isolated world (as
-    // a JSON literal embedded in the script text, same trust level as the
-    // existing 'vault-fill'/'vault-fill-card' IPC payload); nothing about the
+    // Fills execute IN THE ISOLATED WORLD (DD3h) — fillLogin/fillCard/fillIdentity
+    // here are thin routers, never main-world callers of
+    // fillLoginForm/fillCardForm/fillIdentityForm themselves. `payload`
+    // (`{ cred, ordinal }` / `{ card, ordinal }` / `{ identity, ordinal }`, M21
+    // F3 Leg 3 DD9) crosses INTO the isolated world as ONE JSON literal
+    // embedded in the script text (`callScript` takes exactly one argument —
+    // there is no second positional slot for the ordinal); nothing about the
     // FILL — no field identity — ever crosses back OUT.
-    fillLogin: (cred) => runFill('fillLogin', cred),
-    fillCard: (card) => runFill('fillCard', card),
+    fillLogin: (payload) => runFill('fillLogin', payload),
+    fillCard: (payload) => runFill('fillCard', payload),
+    fillIdentity: (payload) => runFill('fillIdentity', payload),
     // The gesture-time snapshot read (Leg 5).
     readSnapshot
   };

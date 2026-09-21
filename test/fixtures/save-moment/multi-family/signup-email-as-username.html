@@ -1,0 +1,47 @@
+<!--
+  Fixture: signup-email-as-username
+  Corpus tier: gated (multi-family). Families: login AND identity, from ONE
+  gesture. Added at Mission 21 Flight 3 Leg 6 (gesture-holds-every-family),
+  AC6b — a live-HAT-found gap in this leg's OWN `signup-with-address.html`
+  fixture: that fixture gives login a DEDICATED `username` field, so it never
+  exercises the common real-world sign-up shape where the EMAIL is the field
+  immediately before the password and there is no separate username field at
+  all. `resolveLoginEntry` (vault-fill-fields.js) picks a login's username
+  POSITIONALLY — the LAST text/email/tel input preceding the password field,
+  document order, never by name/id/autocomplete — so here the EMAIL field IS
+  the username. `isClaimedByLogin` (vault-identity-fields.js) must then remove
+  that same field from identity's candidate list BEFORE role resolution runs,
+  or the email would be captured TWICE: once as the login username, once as
+  identity's own `email` secret. The dedicated unit test
+  (test/unit/vault-capture-plan.test.js) loads this exact file and asserts the
+  payload contents directly — the generic `offers-multi` corpus assertion only
+  checks WHICH families plan, not what rides in their payloads.
+
+  A single sign-up <form>: Full name, Email (immediately before Password — no
+  dedicated username field), Password, Address line 1, Postal code. The
+  address fields anchor an identity scope (`{address1}` / `{postal}{code}`,
+  the same proven spellings as billing-jostens.html / signup-with-address.html
+  — reused deliberately rather than inventing a new vocabulary this leg does
+  not own); Full name supplies identity's required non-postal candidate once
+  Email is removed from consideration by login's claim.
+
+  `value` attributes are the corpus's own stand-in for "the operator typed
+  this". The submit button sits INSIDE this single form (a bare
+  `<button type="submit">`), so a real, headlessly-provable native form
+  submission (DD4's navigation-commit settle signal) fires on click.
+  Added: 2026-09-21 (Mission 21, Flight 3, Leg 6 — gesture-holds-every-family, AC6b).
+-->
+<form id="signup2" action="/join" method="post">
+  <h2>Join now</h2>
+  <label for="su2-name">Full name</label>
+  <input type="text" id="su2-name" name="fullName" value="Grace Hopper" />
+  <label for="su2-email">Email</label>
+  <input type="email" id="su2-email" name="email" value="grace@example.com" />
+  <label for="su2-password">Password</label>
+  <input type="password" id="su2-password" name="password" autocomplete="new-password" value="compiler1" />
+  <label for="su2-addr1">Address line 1</label>
+  <input type="text" id="su2-addr1" name="address1" value="1 Mark I Way" />
+  <label for="su2-zip">Postal code</label>
+  <input type="text" id="su2-zip" name="postalCode" value="02139" />
+  <button type="submit" id="join-now">Join now</button>
+</form>

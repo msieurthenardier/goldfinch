@@ -217,20 +217,48 @@ function registerBrowserIpc({
     vaultTrace('gesture-hold', { wcId, held: !!held, kind: 'card' });
   });
 
+  // Vault IDENTITY capture (M21 F3 Leg 4, AC10) — the identity twin of the
+  // gesture-time hold above. LD2: { identitySecrets, fullName } — identitySecrets
+  // a Uint8Array (the UTF-8 JSON of the ten secret identity fields), fullName a
+  // plain string (the one non-secret field). Same trust shape: wcId from
+  // event.sender.id, origin derived + frozen main-side (never guest-supplied),
+  // held (never disposed/offered) here — the offer is raised only at SETTLE.
+  ipcMain.on('guest-vault-capture-identity', (event, payload) => {
+    if (!getVaultHuman) return;
+    const wcId = event.sender.id;
+    const { identitySecrets, fullName } = /** @type {any} */ (payload || {});
+    const held = getVaultHuman().holdGestureIdentity({
+      wcId,
+      identitySecretsBytes: identitySecrets,
+      fullName
+    });
+    vaultTrace('gesture-hold', { wcId, held: !!held, kind: 'identity' });
+  });
+
   // Settle — the DETACHMENT signal (DD4's SPA case). A bare, payload-free
   // trigger — main derives the trusted wcId from event.sender.id, the
   // guest-vault-gesture idiom — reported by the guest-side gesture-detachment
-  // watch (webview-preload.js) when the fields a held gesture read came from
-  // are removed from the DOM without any navigation ever committing. The
+  // watch (webview-preload.js) when a held gesture read's field set is fully
+  // removed from the DOM without any navigation ever committing. The
   // navigation-commit settle signal lives in guest-wiring.js's did-navigate
   // handler instead — this is the SECOND of DD4's two settle paths, never the
-  // only one.
+  // only one. M21 F3 L2 (LD1): the IPC stays payload-free and TAB-scoped even
+  // though the watch that fires it is now per-family (webview-preload.js) —
+  // main keeps releasing EVERY pending record for the tab, never just the
+  // family whose fields detached (a `kind` on the payload would let a
+  // guest-supplied value steer which held record releases, against this
+  // channel's own documented no-payload trust shape).
   ipcMain.on('guest-vault-gesture-settle', (event) => {
     if (!getVaultHuman) return;
     const wcId = event.sender.id;
-    const offer = getVaultHuman().captureRelease(wcId);
-    vaultTrace('settle', { wcId, via: 'detachment', offered: !!offer, mode: offer && offer.model && offer.model.mode });
-    if (offer) {
+    const offers = getVaultHuman().captureRelease(wcId);
+    vaultTrace('settle', {
+      wcId,
+      via: 'detachment',
+      count: offers.length,
+      modes: offers.map((o) => o.model && o.model.mode)
+    });
+    for (const offer of offers) {
       chromeForTab(wcId)?.send('vault-capture-offer', { captureId: offer.captureId, model: offer.model });
     }
   });

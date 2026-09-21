@@ -35,6 +35,12 @@ export const MANAGE_ID = 'manage-passwords';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
+// The empty-picker note (AC4, Mission 21 Flight 3 Leg 1; text updated Flight 3
+// Leg 3, AC20, to name all three families — Leg 1's own design review
+// established that a comment misattributing a boundary is worse than a stale
+// one, so this corrects the prior "Leg 4 changes the text" comment).
+const EMPTY_PICKER_NOTE = 'No saved logins, cards, or identities to fill here';
+
 /**
  * Build the generic, per-row credential glyph (a padlock) as inline SVG — same icon
  * for every row. Built via createElementNS/setAttribute (NO innerHTML): this is a
@@ -109,20 +115,104 @@ function buildCardIcon(document) {
 }
 
 /**
+ * Build the per-row IDENTITY glyph (M21 F3 Leg 3) — a simple person silhouette,
+ * drawn in the same createElementNS/setAttribute discipline as the credential
+ * padlock and card icons (NO innerHTML, never a remote asset). Decorative
+ * (aria-hidden); the row's textContent carries the accessible name.
+ * @param {Document} document
+ * @returns {SVGElement}
+ */
+function buildIdentityIcon(document) {
+  const svg = /** @type {any} */ (document.createElementNS(SVG_NS, 'svg'));
+  svg.setAttribute('class', 'vault-picker-icon');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('width', '22');
+  svg.setAttribute('height', '22');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '2');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  svg.setAttribute('aria-hidden', 'true');
+
+  const head = document.createElementNS(SVG_NS, 'circle');
+  head.setAttribute('cx', '12');
+  head.setAttribute('cy', '8');
+  head.setAttribute('r', '4');
+  svg.appendChild(head);
+
+  const shoulders = document.createElementNS(SVG_NS, 'path');
+  shoulders.setAttribute('d', 'M4 20c0-4.4 3.6-8 8-8s8 3.6 8 8');
+  svg.appendChild(shoulders);
+
+  return svg;
+}
+
+// Type-keyed dispatch table (Mission 21 Flight 3 Leg 1, replacing the 8 binary
+// `=== 'card'` / `!== 'card'` branch sites this module used to carry): each entry
+// supplies the section heading label, the generic fallback title, the row icon
+// builder, and the secondary (dimmed) line builder for that kind. Data only, no
+// branching logic. Membership is checked via hasOwnProperty (never a bare truthy
+// lookup) so a `type` of 'constructor' or similar can't resolve through
+// Object.prototype. `identity` (M21 F3 Leg 3, AC20) is the third family — its
+// secondary line is `fullName` (a declared non-secret field in
+// vault-item-schema.js; every other identity field is secret and never
+// reaches the sheet).
+const KIND_TABLE = {
+  login: {
+    sectionHeading: 'Logins',
+    fallbackTitle: 'Login',
+    buildIcon: buildCredentialIcon,
+    secondaryLine: (item) => String(item && item.username != null ? item.username : '')
+  },
+  card: {
+    sectionHeading: 'Cards',
+    fallbackTitle: 'Card',
+    buildIcon: buildCardIcon,
+    // last4 is the ONLY card digits that ever reach the sheet (a declared
+    // non-secret field in vault-item-schema.js; the PAN, CVV and expiry never
+    // leave main).
+    secondaryLine: (item) => {
+      const brand = item && item.brand != null && item.brand !== '' ? String(item.brand) : '';
+      const last4 = item && item.last4 != null && item.last4 !== '' ? `•••• ${item.last4}` : '';
+      return [brand, last4].filter(Boolean).join('  ');
+    }
+  },
+  identity: {
+    sectionHeading: 'Identity',
+    fallbackTitle: 'Identity',
+    buildIcon: buildIdentityIcon,
+    secondaryLine: (item) => String(item && item.fullName != null ? item.fullName : '')
+  }
+};
+
+/**
+ * Resolve a picker row's family. An item whose `type` is absent, `'login'`,
+ * `'note'`, or anything unrecognised resolves to `login` — the exact fallback the
+ * prior `item.type !== 'card'` check implied. `null`/`undefined` items resolve to
+ * `login` too (the render loop's own `item || {}` renders a null entry as a
+ * login row).
+ * @param {{ type?: string }|null|undefined} item
+ * @returns {'card'|'login'|'identity'}
+ */
+function kindOf(item) {
+  const type = item && item.type;
+  const known = typeof type === 'string' && Object.prototype.hasOwnProperty.call(KIND_TABLE, type);
+  const knownType = /** @type {'card'|'login'|'identity'} */ (type);
+  return known ? knownType : 'login';
+}
+
+/**
  * The secondary (dimmed) line for a row. A login shows its username; a card shows
  * its brand and masked last four — the ONLY card digits that ever reach the sheet
  * (`last4` is a declared non-secret field in vault-item-schema.js; the PAN, CVV and
- * expiry never leave main). Text only, always a string.
- * @param {{ type?: string, username?: string|null, brand?: string|null, last4?: string|null }} item
+ * expiry never leave main); an identity shows its `fullName` — the ONLY identity
+ * field besides `title` that is not secret. Text only, always a string.
+ * @param {{ type?: string, username?: string|null, brand?: string|null, last4?: string|null, fullName?: string|null }} item
  * @returns {string}
  */
 export function secondaryLineFor(item) {
-  if (item && item.type === 'card') {
-    const brand = item.brand != null && item.brand !== '' ? String(item.brand) : '';
-    const last4 = item.last4 != null && item.last4 !== '' ? `•••• ${item.last4}` : '';
-    return [brand, last4].filter(Boolean).join('  ');
-  }
-  return String(item && item.username != null ? item.username : '');
+  return KIND_TABLE[kindOf(item)].secondaryLine(item);
 }
 
 /**
@@ -300,28 +390,35 @@ export function renderVaultPickerRows(document, card, model) {
     const note = document.createElement('div');
     note.className = 'cm-item vault-picker-note';
     note.setAttribute('aria-disabled', 'true');
-    note.textContent = 'No saved logins or cards to fill here';
+    note.textContent = EMPTY_PICKER_NOTE;
     card.appendChild(note);
   }
 
-  // Section headers (issue #152) appear ONLY when both families are present — a
-  // logins-only picker renders exactly as it did before cards existed. Headers are
+  // Section headers (issue #152) appear ONLY when ≥2 distinct kinds are present — a
+  // single-kind picker renders exactly as it did before cards existed. Headers are
   // `aria-hidden` presentational text, NOT menuitems: they never enter `buttons`, so
   // the roving contract and the `data-pick-index` → model index mapping are both
   // untouched by them (the index is the position in the FULL model, not in a section).
-  const hasLogins = rows.some((r) => r && r.type !== 'card');
-  const hasCards = rows.some((r) => r && r.type === 'card');
-  const sectioned = hasLogins && hasCards;
+  //
+  // Derived from `rows.filter(Boolean)` — deliberately NOT the same array the render
+  // loop below walks. A null entry contributes no kind here (matching the pre-table
+  // `rows.some(r => r && …)` precomputation) even though the render loop, reached via
+  // `item || {}`, renders that same null entry as a login row. Two derivations over
+  // one array, on purpose: `filter(Boolean)` for sectioning, `item || {}` for
+  // rendering — collapsing them would flip `[null, {type:'card'}]` from unsectioned to
+  // sectioned, a real output change.
+  const presentKinds = new Set(rows.filter(Boolean).map(kindOf));
+  const sectioned = presentKinds.size >= 2;
   let lastKind = null;
 
   rows.forEach((item, i) => {
-    const isCard = !!(item && item.type === 'card');
-    const kind = isCard ? 'card' : 'login';
+    const kind = kindOf(item);
+    const entry = KIND_TABLE[kind];
     if (sectioned && kind !== lastKind) {
       const heading = document.createElement('div');
       heading.className = 'vault-picker-section';
       heading.setAttribute('aria-hidden', 'true');
-      heading.textContent = isCard ? 'Cards' : 'Logins';
+      heading.textContent = entry.sectionHeading;
       card.appendChild(heading);
     }
     lastKind = kind;
@@ -333,7 +430,7 @@ export function renderVaultPickerRows(document, card, model) {
     btn.tabIndex = -1;
     btn.dataset.pickIndex = String(i);
 
-    btn.appendChild(isCard ? buildCardIcon(document) : buildCredentialIcon(document));
+    btn.appendChild(entry.buildIcon(document));
 
     const text = document.createElement('span');
     text.className = 'vault-picker-text';
@@ -345,13 +442,7 @@ export function renderVaultPickerRows(document, card, model) {
     // Fall back through: explicit title → the secondary line → a type-appropriate
     // generic, so a row is never blank.
     const titleText =
-      item && item.title != null && item.title !== ''
-        ? item.title
-        : secondary !== ''
-          ? secondary
-          : isCard
-            ? 'Card'
-            : 'Login';
+      item && item.title != null && item.title !== '' ? item.title : secondary !== '' ? secondary : entry.fallbackTitle;
     title.textContent = String(titleText);
     text.appendChild(title);
 

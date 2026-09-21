@@ -28,6 +28,7 @@
 const { createEntryObserver } = require('./vault-entry-observer');
 const { findAllLoginFields, fillLoginForm } = require('./vault-fill-fields');
 const { findAllCardFields, fillCardForm } = require('./vault-card-fields');
+const { findAllIdentityFields, fillIdentityForm } = require('./vault-identity-fields');
 const { VAULT_ENTRY_OBSERVER_HANDLE } = require('./vault-entry-observer-handle');
 
 if (!window[VAULT_ENTRY_OBSERVER_HANDLE]) {
@@ -37,6 +38,7 @@ if (!window[VAULT_ENTRY_OBSERVER_HANDLE]) {
     document,
     findAllLoginFields,
     findAllCardFields,
+    findAllIdentityFields,
     report: (snap) => {
       lastReportedSnapshot = snap;
     }
@@ -44,13 +46,27 @@ if (!window[VAULT_ENTRY_OBSERVER_HANDLE]) {
   observer.install();
 
   window[VAULT_ENTRY_OBSERVER_HANDLE] = {
-    fillLogin(cred) {
-      const result = fillLoginForm(document, cred);
+    // `{ cred, ordinal }` / `{ card, ordinal }` / `{ identity, ordinal }` (M21
+    // F3 Leg 3, DD9): `ordinal` is an INTEGER index into this family's own
+    // `findAll<Family>Fields(document)`, computed main-world-side by the
+    // gesture-bound anchor's ordinal — never a node reference (DD3g). A
+    // null/out-of-range ordinal falls back to today's first-detected-entry
+    // behaviour, exactly as before this leg.
+    /** @param {{ cred?: any, ordinal?: number|null }} [arg] */
+    fillLogin(arg = {}) {
+      const result = fillLoginForm(document, arg.cred, arg.ordinal);
       observer.grantForFill(result);
       return { filled: !!result.filled };
     },
-    fillCard(card) {
-      const result = fillCardForm(document, card);
+    /** @param {{ card?: any, ordinal?: number|null }} [arg] */
+    fillCard(arg = {}) {
+      const result = fillCardForm(document, arg.card, arg.ordinal);
+      observer.grantForFill(result);
+      return { filled: !!result.filled };
+    },
+    /** @param {{ identity?: any, ordinal?: number|null }} [arg] */
+    fillIdentity(arg = {}) {
+      const result = fillIdentityForm(document, arg.identity, arg.ordinal);
       observer.grantForFill(result);
       return { filled: !!result.filled };
     },

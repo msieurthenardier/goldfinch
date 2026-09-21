@@ -21,14 +21,24 @@
 //                          edit to manifest.js's `tier` AND `assert` fields
 //                          together, never a rewrite of this harness.
 //   'gated'                ordinary test — assertDetectsEntry, assertCapturesEntry,
-//                          or assertOffersEntry, per the entry's own `assert`.
+//                          assertOffersEntry, or assertOffersFamilies, per the
+//                          entry's own `assert`.
 //
-// 'captures' vs 'offers' (Leg 6 — hat-and-alignment, a live HAT finding — see
-// flight-log.md and save-moment-assertions.js's own module header): 'captures'
-// proves a gesture WOULD create a held, settle-pending capture; 'offers' proves
-// that PLUS a real settle signal. A shape only earns `assert: 'offers'` once a
-// settle signal is honestly provable for it headlessly — never assigned merely
-// because the gesture/detection layer looks correct.
+// 'captures' vs 'offers' (Leg 6 — hat-and-alignment, Flight 1, a live HAT
+// finding — see flight-log.md and save-moment-assertions.js's own module
+// header): 'captures' proves a gesture WOULD create a held, settle-pending
+// capture; 'offers' proves that PLUS a real settle signal. A shape only earns
+// `assert: 'offers'` once a settle signal is honestly provable for it
+// headlessly — never assigned merely because the gesture/detection layer
+// looks correct.
+//
+// 'offers-multi' (Mission 21, Flight 3, Leg 6 — gesture-holds-every-family):
+// the multi-family sibling of 'offers' — one gesture PLANS a capture for
+// every family in the entry's own `families` list, in order, via the REAL
+// `resolveGestureTargets` + `planCaptures` (see assertOffersFamilies). This is
+// the corpus's regression net for the combined-form gap the HAT's Step 4a
+// found in THIS flight (single-family precedence made identity capture
+// impossible on a form shared with card or login).
 //
 // No snapshot / golden-file baselines anywhere in this file (house rule) —
 // every assertion is DOM-shape / detection-outcome based.
@@ -44,6 +54,7 @@ const {
   assertNoDetectableEntry,
   assertCapturesEntry,
   assertOffersEntry,
+  assertOffersFamilies,
   assertNoOffer
 } = require('../helpers/save-moment-assertions');
 
@@ -51,11 +62,14 @@ const FIXTURES_DIR = path.join(__dirname, '..', 'fixtures', 'save-moment');
 const MANIFEST = require(path.join(FIXTURES_DIR, 'manifest.js'));
 
 const KNOWN_TIERS = new Set(['gated', 'known-unsolved', 'negative-detection', 'negative-gesture']);
-// 'offers' split from 'captures' at Leg 6 (hat-and-alignment) — see
+// 'offers' split from 'captures' at Leg 6 (hat-and-alignment, Flight 1) — see
 // save-moment-assertions.js's module header for why: 'captures' proves only
 // that a gesture WOULD create a held, settle-pending capture; 'offers' proves
 // that PLUS a real settle signal (native navigation) fires for it too.
-const KNOWN_ASSERTS = new Set(['detects', 'no-detect', 'captures', 'offers', 'no-offer']);
+// 'offers-multi' (Mission 21, Flight 3, Leg 6 — gesture-holds-every-family) is
+// the multi-family sibling — see manifest.js's own entry-shape doc and
+// save-moment-assertions.js's assertOffersFamilies.
+const KNOWN_ASSERTS = new Set(['detects', 'no-detect', 'captures', 'offers', 'offers-multi', 'no-offer']);
 // Tiers whose real-world outcome cannot be computed yet — the mechanism the
 // flight settled on for clean promotion (Node 22.22.0-verified in the flight
 // log: a todo that starts passing does not fail the run). Leg 5
@@ -100,6 +114,14 @@ function runAssertion(entry) {
       expectedOrdinal: entry.expectedOrdinal ?? 0,
       gestureSelector: entry.gestureSelector
     });
+    return;
+  }
+  if (entry.assert === 'offers-multi') {
+    assert.ok(
+      Array.isArray(entry.families) && entry.families.length > 0,
+      `manifest entry "${entry.id}" has assert:'offers-multi' but no (or empty) families`
+    );
+    assertOffersFamilies(doc, entry.families, { gestureSelector: entry.gestureSelector });
     return;
   }
   if (entry.assert === 'no-offer') {

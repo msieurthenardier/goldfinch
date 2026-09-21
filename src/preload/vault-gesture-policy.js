@@ -1,15 +1,16 @@
 'use strict';
 
 // Main-world GESTURE CLASSIFICATION (Mission 21, Flight 1, Leg 5 — broadened-
-// capture). NEW logic — nothing in src/preload or src/shared had a button-like /
-// type=submit / role helper before this leg, and the entry observer's own
-// keydown listener (vault-entry-observer.js) grants PROVENANCE on every
-// keystroke (correct — DD3 wants that), which is a DIFFERENT concept from a
-// CAPTURE GESTURE (DD1/DD3): a trusted click on any button-like element, or a
-// trusted Enter while focus is in a field. This module owns only that second,
-// narrower classification, plus the entry-ORDINAL resolution a gesture needs
-// to disambiguate a multi-form page (ordinal recovers the PR#112 finding-9
-// precision Leg 3 accepted losing for fill — see the flight log).
+// capture; identity's third arm added at Flight 3 Leg 4, AC5/AC6). NEW logic —
+// nothing in src/preload or src/shared had a button-like / type=submit / role
+// helper before this leg, and the entry observer's own keydown listener
+// (vault-entry-observer.js) grants PROVENANCE on every keystroke (correct — DD3
+// wants that), which is a DIFFERENT concept from a CAPTURE GESTURE (DD1/DD3): a
+// trusted click on any button-like element, or a trusted Enter while focus is in
+// a field. This module owns only that second, narrower classification, plus the
+// entry-ORDINAL resolution a gesture needs to disambiguate a multi-form page
+// (ordinal recovers the PR#112 finding-9 precision Leg 3 accepted losing for
+// fill — see the flight log).
 //
 // Pure, Electron-free, DOM-shape-only (no `require('electron')`, no `window`/
 // `document` globals referenced at module scope) — `require()`-able under
@@ -29,6 +30,11 @@
 /** Roles `resolveOrdinalInFamily` matches against, mirroring the observer's own sets. */
 const LOGIN_ROLES = ['username', 'password'];
 const CARD_ROLES = ['number', 'cardholder', 'expiry', 'expMonth', 'expYear', 'csc'];
+// Identity's eleven roles (M21 F3 Leg 4, AC5) — imported, never hand-typed a third
+// time (the AC3b precedent Leg 3 set for the observer): the single source is
+// vault-identity-fields.js's own derived union. `POSTAL_ROLES`/`NON_POSTAL_ROLES`
+// back AC6's value-layer gate below.
+const { IDENTITY_ROLES, POSTAL_ROLES, NON_POSTAL_ROLES } = require('./vault-identity-fields');
 
 /** Input `.type` values that never count as a text-entry-ish "tracked field" for the Enter gesture. */
 const NON_FIELD_INPUT_TYPES = new Set(['button', 'submit', 'reset', 'checkbox', 'radio', 'image', 'file', 'hidden']);
@@ -136,23 +142,68 @@ function resolveOrdinalInFamily(target, entries, roles) {
 }
 
 /**
- * The full gesture-target resolution across both families: login checked
- * first, then card. Returns `{ kind, ordinal }` or `null`.
+ * The full gesture-target resolution across all three families (Leg 6 —
+ * gesture-holds-every-family, LD1/LD3). Returns a LIST — one `{ kind,
+ * ordinal }` per family that resolves, in the fixed order login, card,
+ * identity, each resolved INDEPENDENTLY via the existing
+ * `resolveOrdinalInFamily`. The fixed order is kept purely for determinism
+ * (offer order) — it is no longer a winner-take-all precedence: DD5's
+ * login > card > identity contest is resolved at DETECTION (`isClaimedByLogin`
+ * / `isClaimedByCard` remove a contested field from identity's candidates
+ * before this function ever runs), not by this function stopping early. A
+ * gesture with nothing detected in any family returns `[]`, never `null`.
+ *
+ * RENAMED (deliberately, not changed in place — Leg 6 LD1) from the old
+ * SINGULAR resolver, which returned `{ kind, ordinal } | null`, exactly one
+ * match: an array is truthy and has no `.kind`, so a stale caller still
+ * written against the old return shape would silently read `undefined` for
+ * `.kind` and — through a guest dispatch's old `: logins[…]` else-branch
+ * shape — fall into the LOGIN path. A rename turns every stale caller into a
+ * loud break instead. There is no parallel singular helper left anywhere.
  * @param {any} target
- * @param {{ logins?: any[], cards?: any[] }} entries
- * @returns {{ kind: 'login' | 'card', ordinal: number } | null}
+ * @param {{ logins?: any[], cards?: any[], identities?: any[] }} entries
+ * @returns {Array<{ kind: 'login' | 'card' | 'identity', ordinal: number }>}
  */
-function resolveGestureTarget(target, { logins = [], cards = [] } = {}) {
+function resolveGestureTargets(target, { logins = [], cards = [], identities = [] } = {}) {
+  /** @type {Array<{ kind: 'login' | 'card' | 'identity', ordinal: number }>} */
+  const resolved = [];
   const loginOrdinal = resolveOrdinalInFamily(target, logins, LOGIN_ROLES);
-  if (loginOrdinal !== null) return { kind: 'login', ordinal: loginOrdinal };
+  if (loginOrdinal !== null) resolved.push({ kind: 'login', ordinal: loginOrdinal });
   const cardOrdinal = resolveOrdinalInFamily(target, cards, CARD_ROLES);
-  if (cardOrdinal !== null) return { kind: 'card', ordinal: cardOrdinal };
-  return null;
+  if (cardOrdinal !== null) resolved.push({ kind: 'card', ordinal: cardOrdinal });
+  const identityOrdinal = resolveOrdinalInFamily(target, identities, IDENTITY_ROLES);
+  if (identityOrdinal !== null) resolved.push({ kind: 'identity', ordinal: identityOrdinal });
+  return resolved;
 }
 
-/** The isolated-world three-state snapshot's secret-bearing role, per kind. */
+/** The isolated-world three-state snapshot's secret-bearing role, per kind (login/card only —
+ * AC6: identity has no single secret-bearing role, so `snapshotHasProvenancedSecret`'s identity
+ * arm never calls this). */
 function secretRoleForKind(kind) {
   return kind === 'card' ? 'number' : 'password';
+}
+
+/**
+ * AC6 / flight DD2: identity's value-layer admission gate, mirroring Flight 2's
+ * LD2 scope-anchor gate one layer up (detection -> value). True iff the
+ * snapshot's `anchorRole` (LD3 — a plain role-name string the observer threads
+ * onto the identity snapshot entry, never re-derived here) names a REAL postal
+ * role whose field is provenanced (`value != null`) AND at least one
+ * `NON_POSTAL_ROLES` field is also provenanced. A missing or unrecognised
+ * `anchorRole` (not a member of `POSTAL_ROLES`) fails closed — false.
+ * @param {any} entrySnapshot
+ * @returns {boolean}
+ */
+function identitySnapshotHasProvenancedSecret(entrySnapshot) {
+  const anchorRole = entrySnapshot.anchorRole;
+  if (typeof anchorRole !== 'string' || !POSTAL_ROLES.has(anchorRole)) return false;
+  const anchorField = entrySnapshot[anchorRole];
+  if (!anchorField || anchorField.value == null) return false;
+  for (const role of NON_POSTAL_ROLES) {
+    const field = entrySnapshot[role];
+    if (field && field.value != null) return true;
+  }
+  return false;
 }
 
 /**
@@ -163,13 +214,16 @@ function secretRoleForKind(kind) {
  * module never reads `.value` itself; it only inspects the already-gated
  * snapshot). A gesture whose resolved entry has no provenanced secret (nothing
  * was ever typed/filled) is a gesture worth recognizing but NOT worth holding
- * — never even worth creating a pending-settle record for.
+ * — never even worth creating a pending-settle record for. Identity (AC6) is
+ * dispatched to `identitySnapshotHasProvenancedSecret` instead of
+ * `secretRoleForKind` — identity has no single secret-bearing role.
  * @param {any} entrySnapshot
- * @param {'login' | 'card'} kind
+ * @param {'login' | 'card' | 'identity'} kind
  * @returns {boolean}
  */
 function snapshotHasProvenancedSecret(entrySnapshot, kind) {
   if (!entrySnapshot) return false;
+  if (kind === 'identity') return identitySnapshotHasProvenancedSecret(entrySnapshot);
   const field = entrySnapshot[secretRoleForKind(kind)];
   return !!field && field.value != null;
 }
@@ -179,9 +233,10 @@ module.exports = {
   isFieldElement,
   isCaptureGesture,
   resolveOrdinalInFamily,
-  resolveGestureTarget,
+  resolveGestureTargets,
   snapshotHasProvenancedSecret,
   secretRoleForKind,
   LOGIN_ROLES,
-  CARD_ROLES
+  CARD_ROLES,
+  IDENTITY_ROLES
 };

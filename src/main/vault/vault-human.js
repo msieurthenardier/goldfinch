@@ -31,6 +31,41 @@ const { resolvePersistJar } = require('../persist-jar-gate');
 // Card capture (issue #152): the non-secret descriptors derived from a PAN, plus the
 // plausibility gate that keeps an arbitrary submitted form value out of the vault.
 const { isPlausibleCardNumber, brandForNumber, last4Of, titleForNumber, digitsOf } = require('./card-identity');
+// Identity fill (M21 F3 Leg 3, DD7) + capture (M21 F3 Leg 4, DD10): the eleven
+// role-field names, single-sourced via `identity-profile.js`'s own derived union
+// (never re-typed here); `identityProfileOf`/`classifyCapture` are LD6/DD10's own
+// wiring — reused here, never reimplemented (both had no caller before this leg).
+const { IDENTITY_FIELDS, identityProfileOf, classifyCapture } = require('./identity-profile');
+
+// DD6: the field LABELS an identity offer names — never a value (ten of eleven
+// identity fields are declared secret in vault-item-schema.js). Mirrors, and must
+// be kept in sync with, src/shared/vault-editor-model.js's EDITOR_LAYOUT.identity
+// labels — the only other place the operator sees these field names spelled out.
+// vault-human.js stays main-only CJS and that file is a real ES module served to
+// the vault page, so the pairing is manual here rather than a shared import.
+const IDENTITY_FIELD_LABELS = {
+  fullName: 'Full name',
+  firstName: 'First name',
+  lastName: 'Last name',
+  email: 'Email',
+  phone: 'Phone',
+  street: 'Street address',
+  street2: 'Street address 2',
+  city: 'City',
+  region: 'State / Region',
+  country: 'Country',
+  postalCode: 'Postal code'
+};
+
+/**
+ * Field names -> human-readable LABELS (DD6) — never a value. An unrecognised
+ * field name (should never happen; defensive) falls back to itself.
+ * @param {string[]} fields
+ * @returns {string[]}
+ */
+function labelsFor(fields) {
+  return fields.map((f) => IDENTITY_FIELD_LABELS[f] || f);
+}
 
 // The held captured-credential record's safety-drop timeout (Leg 4): if neither a
 // save nor a dismiss resolves the offer, the record is zeroized+dropped after this
@@ -65,6 +100,67 @@ function originOf(url) {
 }
 
 /**
+ * The supersession FAMILY of a capture record (M21 F3 Leg 2's DD1 amendment,
+ * made THREE-WAY and FAIL-CLOSED at Leg 4 / LD1): 'card' when `rec.kind ===
+ * 'card'`, 'identity' when `rec.kind === 'identity'` (the shapes `holdGestureCard`/
+ * `captureCard` and `holdGestureIdentity`/`captureIdentity` stamp on every record
+ * they create), 'login' when `kind` is ABSENT (every login-creating site —
+ * `capture`, `holdGestureLogin` — omits it), and `null` for anything else —
+ * including a stray `'constructor'`/`''`/unrecognised string. This is the ONE
+ * predicate every supersession loop below uses instead of a bare `rec.wcId ===
+ * wcId` (a family-blind loop is what made a card release zeroize a sibling
+ * pending login record, or vice versa, in the SAME synchronous pass, defeating
+ * multi-hold — DD1's own citation: `capture`/`captureCard`/`captureIdentity` have
+ * no callers anywhere in `src/` outside `captureRelease`, so `captureRelease`'s
+ * own re-entry into any of them was the live path this broke) — and it is what
+ * `dispatchByFamily` below uses to refuse an unrecognised kind rather than
+ * silently defaulting it to login (LD1's central finding: every capture-side
+ * dispatch was binary with login as the else-branch).
+ * @param {any} rec
+ * @returns {'login' | 'card' | 'identity' | null}
+ */
+function familyOf(rec) {
+  // ABSENT (the key genuinely does not exist — `undefined`) is 'login'; a
+  // rec-less call also falls here (best-effort, matching the pre-Leg-4
+  // fallback). An EXPLICIT `null` (or any other non-string) is NOT "absent" —
+  // it falls through to the fail-closed `null` below (AC1's own distinction).
+  const kind = rec ? rec.kind : undefined;
+  if (kind === undefined) return 'login';
+  if (kind === 'card') return 'card';
+  if (kind === 'identity') return 'identity';
+  return null;
+}
+
+/**
+ * The sentinel `dispatchByFamily` returns when `familyOf(rec)` is `null` — an
+ * unrecognised `kind`. Frozen, exported alongside `dispatchByFamily`/`familyOf`
+ * so a test can identify it by reference rather than shape. Unreachable in
+ * production today (no public constructor produces an unrecognised `kind`),
+ * which is exactly why LD1 pins the refusal here rather than assuming it.
+ */
+const FAMILY_REFUSED = Object.freeze({ familyRefused: true });
+
+/**
+ * LD1's ONE exported family dispatch helper — the sole main-side dispatch point
+ * for `captureRelease`/`captureFinalize`/`captureSave`. Resolves `rec`'s family
+ * via `familyOf` and invokes exactly the matching handler; an unrecognised family
+ * invokes NO handler and returns `FAMILY_REFUSED` — never a login fallback. A
+ * pure function: it neither drops nor mutates `rec` itself — each call site maps
+ * `FAMILY_REFUSED` to its OWN existing "record is gone" behaviour, dropping and
+ * zeroizing the record itself (LD1's per-site mapping).
+ * @param {any} rec
+ * @param {{ login: (rec: any) => any, card: (rec: any) => any, identity: (rec: any) => any }} handlers
+ * @returns {any}
+ */
+function dispatchByFamily(rec, { login, card, identity }) {
+  const family = familyOf(rec);
+  if (family === 'login') return login(rec);
+  if (family === 'card') return card(rec);
+  if (family === 'identity') return identity(rec);
+  return FAMILY_REFUSED;
+}
+
+/**
  * @typedef {Object} VaultHumanDeps
  * @property {() => any} getVaultStore  the memoized vault-store singleton accessor.
  * @property {(wcId: number) => any} fromId  webContents.fromId — resolve a tab's live wc.
@@ -78,6 +174,10 @@ function originOf(url) {
  *   SEPARATE channel from `fillDelegate` because the two land on different DOM anchors
  *   guest-side. Optional: an omitted injection refuses card fills outright (`ineligible`)
  *   rather than silently dropping them, so offline fixtures stay honest.
+ * @property {(arg: { wcId: number, identity: any }) => void} [fillIdentityDelegate]
+ *   the IDENTITY main→preload fill effect (M21 F3 Leg 3, DD7/AC19 —
+ *   `send('vault-fill-identity', identity)`). Same optional-refuses-rather-than-
+ *   drops shape as `fillCardDelegate`.
  * @property {(fn: () => void, ms: number) => any} [setTimeout]  capture drop-timer arm (default global) — injected so the timeout is unit-testable.
  * @property {(handle: any) => void} [clearTimeout]  capture drop-timer clear (default global).
  * @property {() => number} [now]  clock (default Date.now) — the record's capturedAt stamp.
@@ -87,6 +187,12 @@ function originOf(url) {
  *   has no registry access, so the chromeId→wcIds lookup is injected rather than reached for
  *   (main.js: `webContents.fromId(chromeId)` → `registry.getWindowForChrome(wc)` →
  *   `[...rec.tabViews.keys()]`, null-safe at every hop). An omitted dep resolves no tabs.
+ * @property {(event: string, detail: any) => void} [trace]  M21 F3 Leg 4, LD9 — an OPTIONAL
+ *   diagnostic trace (no-op default; this module is Electron-free and cannot reach console/env
+ *   itself). `main.js` wires the real one behind the same `GOLDFINCH_VAULT_TRACE` gate
+ *   `register-browser-ipc.js`'s own `vaultTrace` uses, with the same `[vault-capture]` prefix.
+ *   `detail` must carry vault ids/counts only — NEVER a field value (LD9's duplicate-profile
+ *   refusal trace is the sole caller today).
  */
 
 /**
@@ -97,8 +203,8 @@ function originOf(url) {
  * @typedef {Object} CaptureRecord
  * @property {string} captureId
  * @property {number} wcId  the owning tab (for last-wins-per-tab supersession).
- * @property {'login' | 'card'} [kind]  the item family (issue #152; absent = 'login',
- *   so every pre-card record shape is unchanged).
+ * @property {'login' | 'card' | 'identity'} [kind]  the item family (issue #152; identity
+ *   M21 F3 Leg 4); absent = 'login', so every pre-card record shape is unchanged.
  * @property {string} origin  derived in main from the sender URL (never guest-supplied),
  *   FROZEN at capture/hold time — never re-derived at settle (Leg 5 Edge Case).
  * @property {string | null} username
@@ -114,6 +220,14 @@ function originOf(url) {
  * @property {string | null} [expiry]  card only.
  * @property {string | null} [brand]  card only — derived from the PAN (non-secret).
  * @property {string | null} [last4]  card only — derived from the PAN (non-secret).
+ * @property {Buffer} [identitySecrets]  identity only (M21 F3 Leg 4, LD2) — the ten secret
+ *   identity fields, as ONE Buffer holding the UTF-8 JSON `capture()` decodes transiently at
+ *   dispose/save time. Zeroized by `dropCapture` (LD7 — every own Buffer, not a named list).
+ * @property {string | null} [fullName]  identity only — the one non-secret identity field.
+ * @property {string[]} [identityGapFilled]  identity only, stamped by `disposeIdentityCapture` —
+ *   exactly the field names `classifyCapture` found as gaps, consumed by LD8's write set.
+ * @property {string[]} [identityConflicting]  identity only — exactly the field names
+ *   `classifyCapture` found as conflicts, consumed by LD8's write set.
  * @property {string} jarId  the tab's persistent jar id (fixed at capture; disposition uses it).
  * @property {'save' | 'update' | 'locked' | 'pending-settle'} mode  'locked' = held pending an
  *   unlock; the save/update disposition is deferred to `captureFinalize` (it needs the vault
@@ -135,6 +249,12 @@ function createVaultHuman(deps) {
   const _setTimeout = deps.setTimeout ?? setTimeout;
   const _clearTimeout = deps.clearTimeout ?? clearTimeout;
   const _now = deps.now ?? Date.now;
+  // LD9: an optional diagnostic trace — no-op by default (this module is
+  // Electron-free and cannot reach console/env itself). `main.js` wires the real
+  // one behind the same GOLDFINCH_VAULT_TRACE gate register-browser-ipc.js's own
+  // vaultTrace uses. `detail` must carry vault ids/counts only — never a field
+  // value (LD9's own refusal-tracing rule).
+  const _trace = typeof deps.trace === 'function' ? deps.trace : () => {};
 
   // The held captured-credential records (Leg 4). Keyed by captureId; each holds the
   // password as a zeroizable Buffer that is dropped on save / dismiss / supersession
@@ -153,12 +273,35 @@ function createVaultHuman(deps) {
     if (!rec) return;
     captures.delete(captureId);
     if (rec.timer != null) _clearTimeout(rec.timer);
-    // Every zeroizable secret the record can hold, login and card alike (issue #152).
-    // A new secret field MUST be added here or it outlives the record.
-    for (const field of ['password', 'number', 'cvv']) {
-      const buf = /** @type {any} */ (rec)[field];
-      if (buf && typeof buf.fill === 'function') buf.fill(0);
+    // LD7 (M21 F3 Leg 4, design review HIGH/SECURITY): zeroize EVERY own
+    // Buffer-valued field on the record — never a named list. The prior
+    // ['password', 'number', 'cvv'] list, under a comment reading "a new secret
+    // field MUST be added here or it outlives the record", is EXACTLY the defect
+    // class this retires: a new `rec.identitySecrets` Buffer would silently have
+    // outlived every lock/tab-close/window-close/TTL. Every Buffer a capture
+    // record ever holds is secret by construction (a non-secret field is always
+    // a string) and `rec.timer` is a Node Timeout, which `Buffer.isBuffer`
+    // rejects — so this is a strict superset of the three names it replaces,
+    // plus `identitySecrets`, plus any future secret field, with NO edit
+    // required here ever again.
+    for (const value of Object.values(rec)) {
+      if (Buffer.isBuffer(value)) value.fill(0);
     }
+  }
+
+  /**
+   * TEST-ONLY seam (LD1/AC2b): insert `rec` directly into the private `captures`
+   * Map, keyed by its own `captureId`. No production caller can construct a
+   * record whose `kind` is not one of the three known families — that is exactly
+   * why AC1/AC2's fail-closed pins need this seam to exercise a real
+   * `captureRelease`/`captureFinalize`/`captureSave` call end to end against a
+   * `{ kind: 'bogus' }` record. Never called by production code; mirrors the
+   * underscore-prefixed test-only introspection already precedented in
+   * vault-entry-observer.js. Returns nothing — never hands back the live Map.
+   * @param {any} rec
+   */
+  function _seedCaptureForTest(rec) {
+    captures.set(rec.captureId, rec);
   }
 
   /**
@@ -187,16 +330,18 @@ function createVaultHuman(deps) {
 
   /**
    * The picker model for the tab: the badged, metadata-only reachable items, LOGINS
-   * FIRST then CARDS (issue #152). `[]` for a burner (no persistent jar), a bad/empty
-   * URL, or a locked/uncreated vault — both reachable reads are themselves `[]`-safe.
+   * FIRST, then CARDS (issue #152), then IDENTITY (M21 F3 Leg 3, DD7). `[]` for a
+   * burner (no persistent jar), a bad/empty URL, or a locked/uncreated vault — all
+   * three reachable reads are themselves `[]`-safe.
    *
-   * The two families are gathered by DIFFERENT rules and that asymmetry is deliberate:
-   * logins are ORIGIN-FILTERED (a credential belongs to its site), cards are not (a
-   * card belongs to the operator and is used at any merchant — see
-   * `reachableCardItems`). Each row is stamped with its `type` HERE, at the merge
-   * point, rather than inside the store: the login row's key set is pinned as a
-   * metadata-only guard by vault-store-reachable.test.js, and this is presentation
-   * routing for the unified picker, not vault metadata.
+   * The families are gathered by DIFFERENT rules and that asymmetry is deliberate:
+   * logins are ORIGIN-FILTERED (a credential belongs to its site), cards and
+   * identity are not (a card belongs to the operator and is used at any merchant —
+   * see `reachableCardItems`; a person's own name/address belongs to the operator
+   * too — see `reachableIdentityItems`). Each row is stamped with its `type` HERE,
+   * at the merge point, rather than inside the store: the login row's key set is
+   * pinned as a metadata-only guard by vault-store-reachable.test.js, and this is
+   * presentation routing for the unified picker, not vault metadata.
    * @param {number} wcId
    * @returns {Array<any>}
    */
@@ -215,7 +360,11 @@ function createVaultHuman(deps) {
       typeof store.reachableCardItems === 'function'
         ? store.reachableCardItems(jar.id).map((/** @type {any} */ row) => ({ ...row, type: 'card' }))
         : [];
-    return logins.concat(cards);
+    const identities =
+      typeof store.reachableIdentityItems === 'function'
+        ? store.reachableIdentityItems(jar.id).map((/** @type {any} */ row) => ({ ...row, type: 'identity' }))
+        : [];
+    return logins.concat(cards, identities);
   }
 
   /**
@@ -223,10 +372,12 @@ function createVaultHuman(deps) {
    * ORDER (DD6/DD9): (1) locked; (2) burner → ineligible BEFORE the scope assert
    * (so a `vaultId:'global'` can never fill a burner tab); (3) cross-vault scope
    * (`vaultId ∈ { 'global', tabJar.id }`); (4) resolve the item; (5) TYPE-DISPATCH on
-   * the STORED item's own `type` (issue #152) — a `card` skips the origin check by
-   * design and rides `fillCardDelegate`; a `login` takes the exact/widened origin
-   * check and rides `fillDelegate`; any other type is refused. Any refusal returns
-   * `{ filled: false, reason }` and does NOT call either fill delegate. On success the
+   * the STORED item's own `type` (issue #152; identity M21 F3 Leg 3, DD7) — a
+   * `card` or an `identity` skips the origin check by design and rides
+   * `fillCardDelegate` / `fillIdentityDelegate` respectively; a `login` takes the
+   * exact/widened origin check and rides `fillDelegate`; any other type is
+   * refused. Any refusal returns `{ filled: false, reason }` and does NOT call
+   * any fill delegate. On success the
    * credential is built + consumed HERE and `{ filled: true }` (no secret) is
    * returned.
    * @param {{ wcId: number, vaultId: string, itemId: string }} sel
@@ -263,11 +414,11 @@ function createVaultHuman(deps) {
     }
     if (!item) return { filled: false, reason: 'origin-mismatch' };
 
-    // (5) TYPE-DISPATCH (issue #152). The branch is chosen by the STORED ITEM's own
-    // `type` — never by anything the guest, the page, or the chrome supplied — so a
-    // hostile page cannot steer a login request onto the un-origin-gated card path.
-    // Fill payloads go out over DIFFERENT channels because they land on different DOM
-    // anchors guest-side.
+    // (5) TYPE-DISPATCH (issue #152; identity M21 F3 Leg 3, DD7). The branch is
+    // chosen by the STORED ITEM's own `type` — never by anything the guest, the
+    // page, or the chrome supplied — so a hostile page cannot steer a login
+    // request onto either un-origin-gated path. Fill payloads go out over
+    // DIFFERENT channels because they land on different DOM anchors guest-side.
     if (item.type === 'card') {
       // Cards are NOT origin-gated (see reachableCardItems for the full reasoning): a
       // payment card belongs to the operator, not to a site. Every other gate above —
@@ -283,6 +434,19 @@ function createVaultHuman(deps) {
           cvv: item.cvv
         }
       });
+      return { filled: true };
+    }
+
+    if (item.type === 'identity') {
+      // Identity is NOT origin-gated either (DD7 — the card precedent): a
+      // person's own name and address belong to the operator, not to a site.
+      // Every other gate above — unlocked, persistent jar, jar scope — has
+      // already run.
+      if (!deps.fillIdentityDelegate) return { filled: false, reason: 'ineligible' };
+      /** @type {any} */
+      const identity = {};
+      for (const field of IDENTITY_FIELDS) identity[field] = item[field];
+      deps.fillIdentityDelegate({ wcId, identity });
       return { filled: true };
     }
 
@@ -425,10 +589,12 @@ function createVaultHuman(deps) {
       return null;
     }
 
-    // Supersession: evict+zeroize any prior record for this SAME tab first, so a rapid
-    // re-submit is true last-wins and never leaves an orphan record holding a password.
+    // Supersession: evict+zeroize any prior LOGIN record for this SAME tab first, so a
+    // rapid re-submit is true last-wins and never leaves an orphan record holding a
+    // password. Family-scoped (M21 F3 L2, DD1's amendment) — a card hold for the same
+    // tab is a DIFFERENT family and survives untouched (`familyOf`).
     for (const [id, rec] of captures) {
-      if (rec.wcId === wcId) dropCapture(id);
+      if (rec.wcId === wcId && familyOf(rec) === 'login') dropCapture(id);
     }
 
     const normUser = normUsername(username);
@@ -506,8 +672,10 @@ function createVaultHuman(deps) {
       return null;
     }
 
+    // Family-scoped supersession (M21 F3 L2, DD1's amendment): only a PRIOR LOGIN hold
+    // for this tab is evicted — a pending CARD hold survives untouched.
     for (const [id, rec] of captures) {
-      if (rec.wcId === wcId) dropCapture(id);
+      if (rec.wcId === wcId && familyOf(rec) === 'login') dropCapture(id);
     }
 
     const captureId = crypto.randomBytes(12).toString('hex');
@@ -559,8 +727,10 @@ function createVaultHuman(deps) {
       return null;
     }
 
+    // Family-scoped supersession (M21 F3 L2, DD1's amendment): only a PRIOR CARD hold
+    // for this tab is evicted — a pending LOGIN hold survives untouched.
     for (const [id, rec] of captures) {
-      if (rec.wcId === wcId) dropCapture(id);
+      if (rec.wcId === wcId && familyOf(rec) === 'card') dropCapture(id);
     }
 
     const captureId = crypto.randomBytes(12).toString('hex');
@@ -588,61 +758,143 @@ function createVaultHuman(deps) {
   }
 
   /**
-   * SETTLE: release a tab's held gesture-time read (if any) into an actual gate+dispose
-   * pass, via the SAME `capture`/`captureCard` those functions already run for a direct
-   * call — never a reimplementation. Called from BOTH settle signals (DD4): a per-tab
-   * `did-navigate` commit, and a preload-reported field detachment (the SPA case). Returns
-   * `null` when nothing is pending for this tab (the ordinary case — most gestures/settles
-   * have no held record at all — or a resistant fixture whose values never carried a
-   * provenanced secret, so no hold was ever created), or the same `{ captureId, model }`
-   * shape `capture`/`captureCard` return.
+   * Hold a GESTURE-TIME identity read, pending SETTLE (M21 F3 Leg 4, AC9) — the
+   * identity twin of `holdGestureLogin`/`holdGestureCard`. LD2: the ten secret
+   * identity fields cross as ONE `Uint8Array` (`identitySecretsBytes` — the
+   * UTF-8 JSON of the ten secret role values), copied into a zeroizable Buffer
+   * HERE (`rec.identitySecrets`) and the incoming array wiped; `fullName`, the
+   * one non-secret identity field, crosses as a plain string. Same gate + family-
+   * scoped supersession shape as the other two holds, same `captures` map +
+   * `dropCapture` choke point — no new drop-rule wiring needed.
+   * @param {{ wcId: number, identitySecretsBytes: any, fullName: any }} arg
+   * @returns {{ captureId: string } | null}
+   */
+  function holdGestureIdentity({ wcId, identitySecretsBytes, fullName }) {
+    const store = deps.getVaultStore();
+    const bytes = identitySecretsBytes instanceof Uint8Array ? identitySecretsBytes : null;
+
+    const origin = tabOriginFor(wcId);
+    const jar = tabJarFor(wcId);
+    if (!store.isSetUp() || !jar || !origin || !bytes) {
+      if (bytes) bytes.fill(0);
+      return null;
+    }
+
+    // Family-scoped supersession (LD1): only a PRIOR IDENTITY hold for this tab
+    // is evicted — a pending LOGIN or CARD hold survives untouched.
+    for (const [id, rec] of captures) {
+      if (rec.wcId === wcId && familyOf(rec) === 'identity') dropCapture(id);
+    }
+
+    const captureId = crypto.randomBytes(12).toString('hex');
+    const identitySecrets = Buffer.from(bytes);
+    bytes.fill(0);
+
+    /** @type {any} */
+    const rec = {
+      captureId,
+      wcId,
+      kind: 'identity',
+      origin,
+      identitySecrets,
+      fullName: fullName == null || fullName === '' ? null : String(fullName),
+      jarId: jar.id,
+      mode: 'pending-settle',
+      choices: [],
+      timer: null,
+      capturedAt: _now()
+    };
+    rec.timer = _setTimeout(() => dropCapture(captureId), CAPTURE_DROP_MS);
+    if (rec.timer && typeof rec.timer.unref === 'function') rec.timer.unref();
+    captures.set(captureId, rec);
+    return { captureId };
+  }
+
+  /**
+   * SETTLE: release a tab's held gesture-time reads (M21 F3 L2, DD1 — one per FAMILY,
+   * not one per tab) into actual gate+dispose passes, via the SAME `capture`/`captureCard`
+   * those functions already run for a direct call — never a reimplementation. Called from
+   * BOTH settle signals (DD4): a per-tab `did-navigate` commit, and a preload-reported
+   * field detachment (the SPA case). Returns `[]` when nothing is pending for this tab (the
+   * ordinary case — most gestures/settles have no held record at all — or a resistant
+   * fixture whose values never carried a provenanced secret, so no hold was ever created),
+   * otherwise one `{ captureId, model }` entry per released record that produced an offer,
+   * in `captures` Map insertion order (gesture order) — a record whose disposition yields
+   * no offer (an unchanged login/card) is simply absent, exactly as it returned null today.
+   *
+   * AC1/AC3: `capture`/`captureCard`/`captureIdentity` re-run their OWN family-scoped
+   * supersession loop on every call — with `familyOf` in place, a release below can no
+   * longer evict a still-pending SIBLING record of a different family mid-loop, which
+   * is what makes releasing multiple families in one call safe.
+   *
+   * AC12b: this loop is iterated over a SNAPSHOT taken up front and stays fully
+   * SYNCHRONOUS end to end (no `await` between records) — no external bulk-drop (lock /
+   * tab close / window close) can interleave mid-loop and invalidate AC3's argument.
    *
    * The pending record's secret Buffer(s) are COPIED before the pending record is dropped —
-   * never the SAME Buffer object handed to `capture`/`captureCard`, which would otherwise be
-   * zeroized by THIS function's own `dropCapture` before those functions ever read it (an
-   * aliasing hazard caught at implementation time, not assumed safe).
+   * never the SAME Buffer object handed to `capture`/`captureCard`/`captureIdentity`, which
+   * would otherwise be zeroized by THIS function's own `dropCapture` before those functions
+   * ever read it (an aliasing hazard caught at implementation time, not assumed safe) — done
+   * PER RECORD, inside the loop, so no reference to a dropped record's Buffer is ever held.
+   *
+   * LD1: dispatch is via `dispatchByFamily`, never a binary kind check — an
+   * unrecognised family (`FAMILY_REFUSED`) drops+zeroizes the record and is OMITTED from the
+   * returned array, exactly as a record whose disposition yields no offer already is.
    * @param {number} wcId
-   * @returns {{ captureId: string, model: any } | null}
+   * @returns {Array<{ captureId: string, model: any }>}
    */
   function captureRelease(wcId) {
-    let pendingId = null;
-    let rec = null;
+    // Snapshot BEFORE releasing anything (AC12b) — never the live `captures` Map, which
+    // this loop's own calls into `capture`/`captureCard`/`captureIdentity` mutate (drop the
+    // released record, then re-add a NEW one for its disposition).
+    /** @type {Array<[string, CaptureRecord]>} */
+    const pending = [];
     for (const [id, r] of captures) {
-      if (r.wcId === wcId && r.mode === 'pending-settle') {
-        pendingId = id;
-        rec = r;
-        break;
-      }
+      if (r.wcId === wcId && r.mode === 'pending-settle') pending.push([id, r]);
     }
-    if (!rec) return null;
+    if (pending.length === 0) return [];
 
-    if (rec.kind === 'card') {
-      const numberCopy = Buffer.from(rec.number);
-      const cvvCopy = Buffer.from(rec.cvv);
-      const { cardholder, expiry, jarId, origin } = rec;
-      dropCapture(pendingId);
-      return captureCard({
-        wcId,
-        numberBytes: numberCopy,
-        cvvBytes: cvvCopy,
-        cardholder,
-        expiry,
-        origin,
-        jar: { id: jarId }
+    const released = [];
+    for (const [pendingId, rec] of pending) {
+      const outcome = dispatchByFamily(rec, {
+        login: () => {
+          const passwordCopy = Buffer.from(rec.password);
+          const { username, usernameDetected, jarId, origin } = rec;
+          dropCapture(pendingId);
+          return capture({ wcId, username, passwordBytes: passwordCopy, usernameDetected, origin, jar: { id: jarId } });
+        },
+        card: () => {
+          const numberCopy = Buffer.from(rec.number);
+          const cvvCopy = Buffer.from(rec.cvv);
+          const { cardholder, expiry, jarId, origin } = rec;
+          dropCapture(pendingId);
+          return captureCard({
+            wcId,
+            numberBytes: numberCopy,
+            cvvBytes: cvvCopy,
+            cardholder,
+            expiry,
+            origin,
+            jar: { id: jarId }
+          });
+        },
+        identity: () => {
+          const secretsCopy = Buffer.from(rec.identitySecrets);
+          const { fullName, jarId, origin } = rec;
+          dropCapture(pendingId);
+          return captureIdentity({ wcId, identitySecretsBytes: secretsCopy, fullName, origin, jar: { id: jarId } });
+        }
       });
+      if (outcome === FAMILY_REFUSED) {
+        // LD1's per-site mapping: drop+zeroize the refused record (dispatchByFamily
+        // invoked no handler, so it is still held), then behave exactly as a record
+        // whose disposition yields no offer already does — omitted from the array.
+        dropCapture(pendingId);
+        continue;
+      }
+      if (outcome) released.push(outcome);
     }
-
-    const passwordCopy = Buffer.from(rec.password);
-    const { username, usernameDetected, jarId, origin } = rec;
-    dropCapture(pendingId);
-    return capture({
-      wcId,
-      username,
-      passwordBytes: passwordCopy,
-      usernameDetected,
-      origin,
-      jar: { id: jarId }
-    });
+    return released;
   }
 
   /**
@@ -761,9 +1013,16 @@ function createVaultHuman(deps) {
       return null; // not a card — never offer to save an arbitrary form value
     }
 
-    // Supersession: evict+zeroize any prior record for this SAME tab first.
+    // Supersession: evict+zeroize any prior CARD record for this SAME tab first.
+    // Family-scoped (M21 F3 L2, DD1's amendment, AC1b) — THIS is the loop that would
+    // have defeated the whole leg left family-blind: `captureCard` has no callers in
+    // `src/` outside `captureRelease`, so every card release re-enters this loop, where
+    // (family-blind) it would find and zeroize a sibling PENDING LOGIN record `capture()`
+    // just created moments earlier in the same synchronous `captureRelease` pass — or,
+    // with the gesture order reversed, a still-pending login record even earlier. This
+    // loop binds its variable as `prior`, not `rec` — a `rec.wcId`-shaped grep misses it.
     for (const [id, prior] of captures) {
-      if (prior.wcId === wcId) dropCapture(id);
+      if (prior.wcId === wcId && familyOf(prior) === 'card') dropCapture(id);
     }
 
     const captureId = crypto.randomBytes(12).toString('hex');
@@ -807,6 +1066,198 @@ function createVaultHuman(deps) {
   }
 
   /**
+   * Decode a held identity record's transient plaintext (LD2): the ten secret
+   * fields from `rec.identitySecrets`' JSON, plus `fullName` from the record's
+   * own plain-string field. A parse failure (should never happen — this module
+   * is the sole writer of `identitySecrets`) degrades every secret field to ''
+   * rather than throwing — an empty field is simply never judged by
+   * `classifyCapture` (its own `isPresent` guard).
+   * @param {any} rec
+   * @returns {any}  a plain object keyed by every one of `IDENTITY_FIELDS`.
+   */
+  function decodeIdentitySecrets(rec) {
+    /** @type {any} */
+    let parsed;
+    try {
+      parsed = JSON.parse(rec.identitySecrets.toString('utf8'));
+    } catch {
+      parsed = {};
+    }
+    /** @type {any} */
+    const out = { fullName: rec.fullName ?? '' };
+    for (const field of IDENTITY_FIELDS) {
+      if (field === 'fullName') continue;
+      out[field] = typeof parsed[field] === 'string' ? parsed[field] : '';
+    }
+    return out;
+  }
+
+  /**
+   * LD6: which stored identity profile (if any) a capture for `jarId` classifies
+   * against — the tab's own jar vault PREFERRED over the global vault, mirroring
+   * the login/card precedent (jar match preferred over global). Reads through
+   * `identityProfileOf` (LD2/DD10's canonical accessor) at EACH vault visited, so
+   * a per-vault write-path-invariant violation (`extra` non-empty) is surfaced
+   * for whichever vault is actually chosen — never silently picked around.
+   * Returns `null` when neither vault holds a profile (a fresh save).
+   * @param {string} jarId
+   * @returns {{ vaultId: string, profile: any, extra: any[] } | null}
+   */
+  function identityProfileFor(jarId) {
+    const store = deps.getVaultStore();
+    const targets = jarId !== 'global' ? [jarId, 'global'] : ['global'];
+    for (const vaultId of targets) {
+      let items;
+      try {
+        items = store.listItems(vaultId);
+      } catch {
+        continue; // non-persistent/unknown jar (VaultStateError) or a lock race — skip.
+      }
+      const { profile, extra } = identityProfileOf(/** @type {any[]} */ (items));
+      if (profile) return { vaultId, profile, extra };
+    }
+    return null;
+  }
+
+  /**
+   * Compute the save/update disposition for a held IDENTITY record against the
+   * NOW-UNLOCKED vault (M21 F3 Leg 4, DD10/LD6/LD9) — the identity twin of
+   * `disposeCapture`/`disposeCardCapture`. Reads the transient captured record via
+   * `decodeIdentitySecrets`, resolves the profile to classify against via LD6's
+   * `identityProfileFor`, and runs the flight's hard-zero criterion —
+   * `classifyCapture` — for real:
+   *   - a violated one-profile-per-vault invariant (`extra` non-empty) REFUSES the
+   *     offer entirely (LD9) rather than silently picking a profile — traced (when
+   *     `deps.trace` is injected) with vault ids/counts only, never a field value;
+   *   - `match` against an existing profile → no offer (record dropped);
+   *   - `gap-fill` / `conflict` against an existing profile → an `update` offer,
+   *     with the record stamped with EXACTLY the fields the offer names
+   *     (`rec.identityGapFilled` / `rec.identityConflicting`) for LD8's write-set
+   *     to consume later at `captureSave` — never a spread of the full capture;
+   *   - no profile anywhere (a fresh vault) → a `save` offer naming every captured
+   *     field as `addedFields` (DD10's stated residual: nothing to conflict with).
+   * The model carries field LABELS only (DD6) — `classifyCapture`'s own `to`/`from`
+   * VALUES are consumed here and never placed on the returned model.
+   * @param {any} rec
+   * @returns {any | null}
+   */
+  function disposeIdentityCapture(rec) {
+    const captured = decodeIdentitySecrets(rec);
+    const found = identityProfileFor(rec.jarId);
+
+    if (found && found.extra.length > 0) {
+      _trace('duplicate-profile', { jarId: rec.jarId, vaultId: found.vaultId, count: found.extra.length + 1 });
+      return null; // LD9: refuse the offer entirely — never silently pick one.
+    }
+
+    const classification = classifyCapture(found ? found.profile : null, captured);
+
+    if (found) {
+      if (classification.kind === 'match') return null; // nothing to update → no offer
+      rec.mode = 'update';
+      rec.vaultId = found.vaultId;
+      rec.itemId = found.profile.id;
+      rec.choices = [];
+      rec.identityGapFilled = classification.gapFilled.map((g) => g.field);
+      rec.identityConflicting = classification.conflicting.map((c) => c.field);
+      return {
+        kind: 'identity',
+        origin: rec.origin,
+        mode: 'update',
+        addedFields: labelsFor(rec.identityGapFilled),
+        changedFields: labelsFor(rec.identityConflicting),
+        defaultVaultId: found.vaultId,
+        choices: []
+      };
+    }
+
+    rec.mode = 'save';
+    rec.choices = [rec.jarId, 'global'];
+    return {
+      kind: 'identity',
+      origin: rec.origin,
+      mode: 'save',
+      addedFields: labelsFor(classification.gapFilled.map((g) => g.field)),
+      changedFields: [],
+      defaultVaultId: rec.jarId,
+      choices: [rec.jarId, 'global']
+    };
+  }
+
+  /**
+   * Capture a freshly-submitted identity profile (M21 F3 Leg 4, AC8b) — the
+   * identity twin of `capture`/`captureCard`. LD2: the ten secret fields arrive
+   * as ONE `Uint8Array` (the UTF-8 JSON of the ten secret role values), copied
+   * into a zeroizable Buffer HERE (`rec.identitySecrets`) and the incoming array
+   * wiped; `fullName` crosses as a plain string. Neither ever reaches chrome —
+   * the offer model carries only field LABELS (DD6), never a value.
+   *
+   * GATE: the manager is set up, the tab resolves a PERSISTENT jar, an origin
+   * resolves. No plausibility gate — DD2's own value-layer admission gate
+   * (the scope anchor AND a non-postal role both provenanced) already ran at the
+   * gesture layer before this was ever called, so a gate-passed capture is
+   * always worth holding.
+   *
+   * Like the login/card path, a LOCKED vault HOLDS the capture (mode 'locked')
+   * and defers the disposition to `captureFinalize`. `origin`/`jar` follow
+   * `capture`'s own override shape (Leg 5): normally DERIVED HERE from the tab's
+   * current state; `captureRelease` is the one caller that supplies them
+   * explicitly, frozen at gesture time. `captureRelease`'s identity branch and
+   * nothing else calls this (AC8b — the login/card twins' own call graph).
+   * @param {{ wcId: number, identitySecretsBytes: any, fullName: any, origin?: string|null, jar?: {id: string}|null }} arg
+   * @returns {{ captureId: string, model: any } | null}
+   */
+  function captureIdentity({ wcId, identitySecretsBytes, fullName, origin: originOverride, jar: jarOverride }) {
+    const store = deps.getVaultStore();
+    const bytes = identitySecretsBytes instanceof Uint8Array ? identitySecretsBytes : null;
+
+    const origin = originOverride !== undefined ? originOverride : tabOriginFor(wcId);
+    const jar = jarOverride !== undefined ? jarOverride : tabJarFor(wcId);
+    if (!store.isSetUp() || !jar || !origin || !bytes) {
+      if (bytes) bytes.fill(0);
+      return null;
+    }
+
+    // Family-scoped supersession (LD1): only a PRIOR IDENTITY record for this
+    // SAME tab is evicted — a pending LOGIN or CARD hold survives untouched.
+    for (const [id, prior] of captures) {
+      if (prior.wcId === wcId && familyOf(prior) === 'identity') dropCapture(id);
+    }
+
+    const captureId = crypto.randomBytes(12).toString('hex');
+    /** @type {any} */
+    const rec = {
+      captureId,
+      wcId,
+      kind: 'identity',
+      origin,
+      identitySecrets: Buffer.from(bytes),
+      fullName: fullName == null || fullName === '' ? null : String(fullName),
+      jarId: jar.id,
+      mode: 'save',
+      choices: [],
+      timer: null,
+      capturedAt: _now()
+    };
+    bytes.fill(0); // the incoming deserialized array is a separate allocation
+    rec.timer = _setTimeout(() => dropCapture(captureId), CAPTURE_DROP_MS);
+    if (rec.timer && typeof rec.timer.unref === 'function') rec.timer.unref();
+    captures.set(captureId, rec);
+
+    if (!store.isUnlocked()) {
+      rec.mode = 'locked';
+      return { captureId, model: { kind: 'identity', origin, mode: 'locked' } };
+    }
+
+    const model = disposeIdentityCapture(rec);
+    if (!model) {
+      dropCapture(captureId);
+      return null;
+    }
+    return { captureId, model };
+  }
+
+  /**
    * Finalize a held 'locked' capture AFTER a successful unlock (the chrome's unlock-to-save
    * continuation): compute the deferred save/update disposition and return `{ captureId, model }`
    * so the chrome opens the vault-capture sheet.
@@ -817,7 +1268,8 @@ function createVaultHuman(deps) {
    * into its own message (operator-reported: a real save that produced total silence, with no
    * way to tell a correct no-op from a defect). The reasons:
    *   'expired'     — the record is gone: the 2-minute safety timeout fired, or it was dropped
-   *                   (dismissed / superseded by a newer capture on the same tab).
+   *                   (dismissed / superseded by a newer capture on the same tab), OR (LD1) the
+   *                   record carried an unrecognised family — refused, dropped, mapped here.
    *   'locked'      — the vault is not unlocked after all (unlock didn't take / raced a re-lock).
    *   'tab-changed' — the tab's jar no longer resolves the SAME jar (tab closed / re-jarred);
    *                   the record is dropped so the captured password never lingers.
@@ -836,11 +1288,22 @@ function createVaultHuman(deps) {
       dropCapture(captureId);
       return { reason: /** @type {'tab-changed'} */ ('tab-changed') };
     }
-    // Unchanged item after unlock (dispose → null) → drop, no offer. The card twin
-    // disposes by PAN identity; the login twin by origin+username, with DD3c's
-    // post-dispose downgrade applied (unlock-to-save must not skip it — a locked-at-
-    // gesture capture reaches disposition ONLY through this path).
-    const model = rec.kind === 'card' ? disposeCardCapture(rec) : applyUsernameDowngrade(rec, disposeCapture(rec));
+    // Unchanged item after unlock (dispose → null) → drop, no offer. LD1: dispatched via
+    // dispatchByFamily, never a binary kind check — the card twin disposes by
+    // PAN identity, the identity twin by LD6/DD10's classifyCapture wiring, and the login
+    // twin by origin+username with DD3c's post-dispose downgrade applied (unlock-to-save
+    // must not skip it — a locked-at-gesture capture reaches disposition ONLY through this
+    // path). An unrecognised family (FAMILY_REFUSED) drops+zeroizes and maps to 'expired' —
+    // its existing "no such record" reason, true once the record is gone.
+    const model = dispatchByFamily(rec, {
+      login: () => applyUsernameDowngrade(rec, disposeCapture(rec)),
+      card: () => disposeCardCapture(rec),
+      identity: () => disposeIdentityCapture(rec)
+    });
+    if (model === FAMILY_REFUSED) {
+      dropCapture(captureId);
+      return { reason: /** @type {'expired'} */ ('expired') };
+    }
     if (!model) {
       dropCapture(captureId);
       return { reason: /** @type {'unchanged'} */ ('unchanged') };
@@ -868,6 +1331,22 @@ function createVaultHuman(deps) {
    * On success — and on a `saveItem` throw (N1) — the record is zeroized+dropped and the
    * timer cleared through the `dropCapture` choke point, so a captured password never
    * lingers on a persist error.
+   *
+   * IDENTITY (M21 F3 Leg 4, LD4/LD8): a `save` writes a brand-new item titled the fixed
+   * non-secret default `"My details"` (LD4 — never composed from firstName+lastName) with
+   * every captured field. An `update` writes EXACTLY the fields `disposeIdentityCapture`
+   * named on the record (`rec.identityGapFilled` ∪ `rec.identityConflicting`) over the
+   * EXISTING item — LD8's hard rule, never a spread of the full capture: a checkout
+   * captures only the fields it happens to ask for, and a bare `{ ...existing, ...captured }`
+   * would silently blank every field the form never asked about. The store's
+   * one-profile-per-vault refusal (`_saveItem`) is respected either way — an `update`
+   * targets the existing profile's own id (passes it); a racing concurrent `save` would
+   * throw `VaultStateError`, which this function does not catch, surfacing through the
+   * same generic "Couldn't save" chain as any other `saveItem` throw (N1).
+   *
+   * LD1: dispatched via `dispatchByFamily`, never a binary kind check — an
+   * unrecognised family (`FAMILY_REFUSED`) drops+zeroizes the record and maps to `{ saved:
+   * false }`, its existing "record gone" shape (true once the record is dropped).
    * @param {{ captureId: string, vaultId: any }} arg
    * @returns {{ saved: boolean, reason?: string }}
    */
@@ -885,105 +1364,153 @@ function createVaultHuman(deps) {
     const rec = captures.get(captureId);
     if (!rec) return { saved: false };
 
-    // CARD (issue #152) — the same save/update shape as a login, with the card's own
-    // field set. An update MERGES over the existing item for exactly the login path's
-    // reason: `saveItem` wholesale-replaces, so a bare rewrite would drop the
-    // operator's custom title and notes.
-    if (rec.kind === 'card') {
-      const number = rec.number.toString('utf8');
-      let cardTarget;
-      let cardItem;
-      if (rec.mode === 'update') {
-        cardTarget = /** @type {string} */ (rec.vaultId);
-        const existing = store.listItems(cardTarget).find((/** @type {any} */ i) => i.id === rec.itemId);
-        if (!existing) {
-          dropCapture(captureId);
-          return { saved: false };
+    const outcome = dispatchByFamily(rec, {
+      // CARD (issue #152) — the same save/update shape as a login, with the card's own
+      // field set. An update MERGES over the existing item for exactly the login path's
+      // reason: `saveItem` wholesale-replaces, so a bare rewrite would drop the
+      // operator's custom title and notes.
+      card: () => {
+        const number = rec.number.toString('utf8');
+        let cardTarget;
+        let cardItem;
+        if (rec.mode === 'update') {
+          cardTarget = /** @type {string} */ (rec.vaultId);
+          const existing = store.listItems(cardTarget).find((/** @type {any} */ i) => i.id === rec.itemId);
+          if (!existing) {
+            dropCapture(captureId);
+            return { saved: false };
+          }
+          cardItem = {
+            ...existing,
+            number,
+            cvv: rec.cvv.toString('utf8'),
+            expiry: rec.expiry,
+            cardholder: rec.cardholder ?? existing.cardholder,
+            brand: rec.brand ?? existing.brand,
+            last4: rec.last4 ?? existing.last4
+          };
+        } else {
+          if (typeof vaultId !== 'string' || !rec.choices.includes(vaultId)) {
+            return { saved: false, reason: 'invalid-vault' };
+          }
+          cardTarget = vaultId;
+          // SAVE only: synthesize a self-describing title ("Visa •••• 4242"), the card
+          // analogue of the login path's hostname title.
+          cardItem = {
+            type: 'card',
+            title: titleForNumber(number),
+            cardholder: rec.cardholder,
+            brand: rec.brand,
+            last4: rec.last4,
+            number,
+            cvv: rec.cvv.toString('utf8'),
+            expiry: rec.expiry
+          };
         }
-        cardItem = {
-          ...existing,
-          number,
-          cvv: rec.cvv.toString('utf8'),
-          expiry: rec.expiry,
-          cardholder: rec.cardholder ?? existing.cardholder,
-          brand: rec.brand ?? existing.brand,
-          last4: rec.last4 ?? existing.last4
-        };
-      } else {
+        try {
+          store.saveItem(cardTarget, cardItem);
+        } finally {
+          dropCapture(captureId);
+        }
+        return { saved: true };
+      },
+
+      // IDENTITY (M21 F3 Leg 4, LD4/LD8). See this function's own header.
+      identity: () => {
+        const captured = decodeIdentitySecrets(rec);
+        if (rec.mode === 'update') {
+          const target = /** @type {string} */ (rec.vaultId);
+          const existing = store.listItems(target).find((/** @type {any} */ i) => i.id === rec.itemId);
+          if (!existing) {
+            dropCapture(captureId);
+            return { saved: false };
+          }
+          // LD8: write EXACTLY the fields the offer named — never a spread of the full
+          // captured object, which would silently blank every field this form never asked
+          // about.
+          const fields = new Set([...(rec.identityGapFilled || []), ...(rec.identityConflicting || [])]);
+          /** @type {any} */
+          const item = { ...existing };
+          for (const field of fields) item[field] = captured[field];
+          try {
+            store.saveItem(target, item);
+          } finally {
+            dropCapture(captureId);
+          }
+          return { saved: true };
+        }
         if (typeof vaultId !== 'string' || !rec.choices.includes(vaultId)) {
           return { saved: false, reason: 'invalid-vault' };
         }
-        cardTarget = vaultId;
-        // SAVE only: synthesize a self-describing title ("Visa •••• 4242"), the card
-        // analogue of the login path's hostname title.
-        cardItem = {
-          type: 'card',
-          title: titleForNumber(number),
-          cardholder: rec.cardholder,
-          brand: rec.brand,
-          last4: rec.last4,
-          number,
-          cvv: rec.cvv.toString('utf8'),
-          expiry: rec.expiry
-        };
-      }
-      try {
-        store.saveItem(cardTarget, cardItem);
-      } finally {
-        dropCapture(captureId);
-      }
-      return { saved: true };
-    }
+        // SAVE (new item) only: the fixed non-secret default title (LD4 — one profile
+        // per vault needs no disambiguation), every captured field.
+        const item = { type: 'identity', title: 'My details', ...captured };
+        try {
+          store.saveItem(vaultId, item);
+        } finally {
+          dropCapture(captureId);
+        }
+        return { saved: true };
+      },
 
-    let target;
-    let item;
-    if (rec.mode === 'update') {
-      target = /** @type {string} */ (rec.vaultId);
-      // Read the existing item and MERGE — a bare rewrite would drop totp / custom title
-      // / notes (saveItem wholesale-replaces on update, keeping only createdAt).
-      const existing = store.listItems(target).find((/** @type {any} */ i) => i.id === rec.itemId);
-      // The item vanished between the offer and the save (deleted elsewhere) — nothing to
-      // update. Drop the held record so the captured password never lingers.
-      if (!existing) {
-        dropCapture(captureId);
-        return { saved: false };
-      }
-      item = {
-        ...existing,
-        origin: rec.origin,
-        username: rec.username,
-        password: rec.password.toString('utf8')
-      };
-    } else {
-      if (typeof vaultId !== 'string' || !rec.choices.includes(vaultId)) {
-        return { saved: false, reason: 'invalid-vault' };
-      }
-      target = vaultId;
-      // SAVE (new item) only: synthesize a self-describing title from the origin host.
-      let title;
-      try {
-        title = new URL(rec.origin).hostname;
-      } catch {
-        title = rec.origin;
-      }
-      item = {
-        type: 'login',
-        title,
-        origin: rec.origin,
-        username: rec.username,
-        password: rec.password.toString('utf8')
-      };
-    }
+      login: () => {
+        let target;
+        let item;
+        if (rec.mode === 'update') {
+          target = /** @type {string} */ (rec.vaultId);
+          // Read the existing item and MERGE — a bare rewrite would drop totp / custom title
+          // / notes (saveItem wholesale-replaces on update, keeping only createdAt).
+          const existing = store.listItems(target).find((/** @type {any} */ i) => i.id === rec.itemId);
+          // The item vanished between the offer and the save (deleted elsewhere) — nothing to
+          // update. Drop the held record so the captured password never lingers.
+          if (!existing) {
+            dropCapture(captureId);
+            return { saved: false };
+          }
+          item = {
+            ...existing,
+            origin: rec.origin,
+            username: rec.username,
+            password: rec.password.toString('utf8')
+          };
+        } else {
+          if (typeof vaultId !== 'string' || !rec.choices.includes(vaultId)) {
+            return { saved: false, reason: 'invalid-vault' };
+          }
+          target = vaultId;
+          // SAVE (new item) only: synthesize a self-describing title from the origin host.
+          let title;
+          try {
+            title = new URL(rec.origin).hostname;
+          } catch {
+            title = rec.origin;
+          }
+          item = {
+            type: 'login',
+            title,
+            origin: rec.origin,
+            username: rec.username,
+            password: rec.password.toString('utf8')
+          };
+        }
 
-    // N1: once we commit to the persist, drop+zeroize the held record in a `finally` so a
-    // `saveItem` throw (e.g. a disk error) can never leave the captured password lingering
-    // until the 2-min safety timeout. On success this is the same drop choke point as before.
-    try {
-      store.saveItem(target, item);
-    } finally {
+        // N1: once we commit to the persist, drop+zeroize the held record in a `finally` so a
+        // `saveItem` throw (e.g. a disk error) can never leave the captured password lingering
+        // until the 2-min safety timeout. On success this is the same drop choke point as before.
+        try {
+          store.saveItem(target, item);
+        } finally {
+          dropCapture(captureId);
+        }
+        return { saved: true };
+      }
+    });
+
+    if (outcome === FAMILY_REFUSED) {
       dropCapture(captureId);
+      return { saved: false };
     }
-    return { saved: true };
+    return outcome;
   }
 
   /**
@@ -1076,16 +1603,19 @@ function createVaultHuman(deps) {
     fillHuman,
     capture,
     captureCard,
+    captureIdentity,
     holdGestureLogin,
     holdGestureCard,
+    holdGestureIdentity,
     captureRelease,
     captureFinalize,
     captureSave,
     captureDismiss,
     dropCapturesForTab,
     dropCapturesForWindow,
-    dropAllCaptures
+    dropAllCaptures,
+    _seedCaptureForTest
   };
 }
 
-module.exports = { createVaultHuman, originOf };
+module.exports = { createVaultHuman, originOf, familyOf, dispatchByFamily, FAMILY_REFUSED };

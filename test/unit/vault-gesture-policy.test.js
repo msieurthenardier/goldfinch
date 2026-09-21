@@ -11,7 +11,7 @@ const {
   isFieldElement,
   isCaptureGesture,
   resolveOrdinalInFamily,
-  resolveGestureTarget,
+  resolveGestureTargets,
   snapshotHasProvenancedSecret,
   secretRoleForKind
 } = require('../../src/preload/vault-gesture-policy');
@@ -114,7 +114,7 @@ test('isCaptureGesture: an unrecognized event type never qualifies; a null/missi
   assert.equal(isCaptureGesture(undefined), false);
 });
 
-// --- resolveOrdinalInFamily / resolveGestureTarget (multi-form disambiguation) --
+// --- resolveOrdinalInFamily / resolveGestureTargets (multi-form disambiguation) --
 
 test('resolveOrdinalInFamily: target IS one of the tracked fields itself (the Enter case) — matched by identity, any role', () => {
   const password = { tag: 'pw' };
@@ -172,24 +172,27 @@ test('resolveOrdinalInFamily: empty entries / null target resolve null, never th
   assert.equal(resolveOrdinalInFamily({ tag: 'x' }, null, ['password']), null);
 });
 
-test('resolveGestureTarget: resolves a LOGIN entry before ever checking cards', () => {
+test('resolveGestureTargets: LOGIN and CARD both resolve (list [login, card], in that order — Leg 6 rewrite of "login wins over card"; the card entry has no form of its own, so it resolves via step 3\'s sole-entry fallback rather than being suppressed by login resolving first)', () => {
   const password = { tag: 'pw' };
   const logins = [{ username: null, password, form: null }];
   const cards = [{ number: { tag: 'n' }, form: null }];
-  assert.deepEqual(resolveGestureTarget(password, { logins, cards }), { kind: 'login', ordinal: 0 });
+  assert.deepEqual(resolveGestureTargets(password, { logins, cards }), [
+    { kind: 'login', ordinal: 0 },
+    { kind: 'card', ordinal: 0 }
+  ]);
 });
 
-test('resolveGestureTarget: resolves a CARD entry when no login entry matches', () => {
+test('resolveGestureTargets: resolves a CARD entry when no login entry matches (empty logins array short-circuits to no match)', () => {
   const number = { tag: 'n' };
   const logins = [];
   const cards = [{ number, form: null }];
-  assert.deepEqual(resolveGestureTarget(number, { logins, cards }), { kind: 'card', ordinal: 0 });
+  assert.deepEqual(resolveGestureTargets(number, { logins, cards }), [{ kind: 'card', ordinal: 0 }]);
 });
 
-test('resolveGestureTarget: neither family resolves anything -> null; missing entries default to empty arrays', () => {
-  assert.equal(resolveGestureTarget({ tag: 'x' }, { logins: [], cards: [] }), null);
-  assert.equal(resolveGestureTarget({ tag: 'x' }, {}), null);
-  assert.equal(resolveGestureTarget({ tag: 'x' }), null);
+test('resolveGestureTargets: neither family resolves anything -> [] (never null); missing entries default to empty arrays', () => {
+  assert.deepEqual(resolveGestureTargets({ tag: 'x' }, { logins: [], cards: [] }), []);
+  assert.deepEqual(resolveGestureTargets({ tag: 'x' }, {}), []);
+  assert.deepEqual(resolveGestureTargets({ tag: 'x' }), []);
 });
 
 // --- snapshotHasProvenancedSecret / secretRoleForKind ---------------------------
@@ -219,4 +222,153 @@ test('snapshotHasProvenancedSecret: a card entry checks the "number" role, not "
 test('snapshotHasProvenancedSecret: a null/undefined entrySnapshot is false, never throws', () => {
   assert.equal(snapshotHasProvenancedSecret(null, 'login'), false);
   assert.equal(snapshotHasProvenancedSecret(undefined, 'card'), false);
+});
+
+// --- AC5/AC6 (M21 F3 Leg 4): identity's third arm ---------------------------
+
+test('AC5: resolveGestureTargets resolves an IDENTITY entry when neither login nor card has anything to match (list order is login, card, identity — Leg 6 rewrite)', () => {
+  const street = { tag: 'street' };
+  const identities = [{ street, form: null }];
+  assert.deepEqual(resolveGestureTargets(street, { logins: [], cards: [], identities }), [
+    { kind: 'identity', ordinal: 0 }
+  ]);
+});
+
+test("Leg 6 rewrite of \"AC5: DD5 precedence — login beats card beats identity\" — the fixed order survives purely for DETERMINISM now, not as a winner-take-all rule: all three resolve and are returned as list [login, card, identity], in that order. NOTE (per the leg's own Edge Cases): this synthetic shape — one fake node shared by all three families' entries — cannot occur on a real page, because LD3's detection-time claims (isClaimedByLogin / isClaimedByCard) remove a field contested with login or card from identity's candidates before detection ever hands this function three entries pointing at the same node. This is a resolver-in-isolation worst case, not a reachable page.", () => {
+  const password = { tag: 'pw' };
+  const logins = [{ username: null, password, form: null }];
+  const cards = [{ number: password, form: null }]; // a contrived shared-node stand-in
+  const identities = [{ street: password, form: null }];
+  assert.deepEqual(resolveGestureTargets(password, { logins, cards, identities }), [
+    { kind: 'login', ordinal: 0 },
+    { kind: 'card', ordinal: 0 },
+    { kind: 'identity', ordinal: 0 }
+  ]);
+});
+
+test('AC5: missing `identities` defaults to an empty array (Leg 6 rewrite: [] not null)', () => {
+  assert.deepEqual(resolveGestureTargets({ tag: 'x' }, { logins: [], cards: [] }), []);
+});
+
+// --- Leg 6 (gesture-holds-every-family) AC1: the 7-row pinned table -----------
+// Every row exercises `resolveGestureTargets` alone (no planner, no snapshot) —
+// plain fake entries in the same style as the tests above, never real DOM.
+
+test("AC1 row 1: card + billing in ONE form, the form's submit button -> [card, identity]", () => {
+  const form1 = { tag: 'form1' };
+  const cards = [{ number: { tag: 'n' }, form: form1 }];
+  const identities = [{ street: { tag: 'street' }, form: form1 }];
+  const target = { form: form1 }; // the submit button, inside the same form
+  assert.deepEqual(resolveGestureTargets(target, { logins: [], cards, identities }), [
+    { kind: 'card', ordinal: 0 },
+    { kind: 'identity', ordinal: 0 }
+  ]);
+});
+
+test('AC1 row 2: card + billing in ONE form, Enter in the billing Email field -> [card, identity]', () => {
+  const form1 = { tag: 'form1' };
+  const cards = [{ number: { tag: 'n' }, form: form1 }];
+  const emailField = { tag: 'email', form: form1 }; // Enter's target carries its own .form too
+  const identities = [{ street: { tag: 'street' }, email: emailField, form: form1 }];
+  assert.deepEqual(resolveGestureTargets(emailField, { logins: [], cards, identities }), [
+    { kind: 'card', ordinal: 0 },
+    { kind: 'identity', ordinal: 0 }
+  ]);
+});
+
+test("AC1 row 3: card form + billing form, submit OUTSIDE both (the real Jostens shape) -> [card, identity], each via its family's own sole-entry fallback", () => {
+  const cardForm = { tag: 'card-form' };
+  const billingForm = { tag: 'billing-form' };
+  const cards = [{ number: { tag: 'n' }, form: cardForm }];
+  const identities = [{ street: { tag: 'street' }, form: billingForm }];
+  const target = { form: null }; // no .closest either — no form association at all
+  assert.deepEqual(resolveGestureTargets(target, { logins: [], cards, identities }), [
+    { kind: 'card', ordinal: 0 },
+    { kind: 'identity', ordinal: 0 }
+  ]);
+});
+
+test('AC1 row 4: card form + billing form, SEPARATE, "Save card" inside the card form -> [card] only', () => {
+  const cardForm = { tag: 'card-form' };
+  const billingForm = { tag: 'billing-form' };
+  const cards = [{ number: { tag: 'n' }, form: cardForm }];
+  const identities = [{ street: { tag: 'street' }, form: billingForm }];
+  const target = { form: cardForm }; // "Save card", inside the card form only
+  assert.deepEqual(resolveGestureTargets(target, { logins: [], cards, identities }), [{ kind: 'card', ordinal: 0 }]);
+});
+
+test('AC1 row 5: sign-up (name, email, address, password) in ONE form, submit -> [login, identity]', () => {
+  const form1 = { tag: 'signup-form' };
+  const logins = [{ username: null, password: { tag: 'pw' }, form: form1 }];
+  const identities = [{ street: { tag: 'street' }, form: form1 }];
+  const target = { form: form1 };
+  assert.deepEqual(resolveGestureTargets(target, { logins, cards: [], identities }), [
+    { kind: 'login', ordinal: 0 },
+    { kind: 'identity', ordinal: 0 }
+  ]);
+});
+
+test('AC1 row 6: plain login form, submit -> [login]', () => {
+  const form1 = { tag: 'login-form' };
+  const logins = [{ username: null, password: { tag: 'pw' }, form: form1 }];
+  const target = { form: form1 };
+  assert.deepEqual(resolveGestureTargets(target, { logins, cards: [], identities: [] }), [
+    { kind: 'login', ordinal: 0 }
+  ]);
+});
+
+test('AC1 row 7: nothing detected, any button -> []', () => {
+  assert.deepEqual(resolveGestureTargets({ form: null }, { logins: [], cards: [], identities: [] }), []);
+});
+
+test('AC6: identity gate — anchor-only (no non-postal field provenanced) is false', () => {
+  const snap = {
+    anchorRole: 'street',
+    street: { detected: true, value: '1 Main St' },
+    email: { detected: true, value: null }
+  };
+  assert.equal(snapshotHasProvenancedSecret(snap, 'identity'), false);
+});
+
+test('AC6: identity gate — non-postal-only (no anchor provenanced) is false', () => {
+  const snap = {
+    anchorRole: 'street',
+    street: { detected: true, value: null },
+    email: { detected: true, value: 'a@b.com' }
+  };
+  assert.equal(snapshotHasProvenancedSecret(snap, 'identity'), false);
+});
+
+test('AC6: identity gate — BOTH anchor and a non-postal field provenanced is true', () => {
+  const snap = {
+    anchorRole: 'street',
+    street: { detected: true, value: '1 Main St' },
+    email: { detected: true, value: 'a@b.com' }
+  };
+  assert.equal(snapshotHasProvenancedSecret(snap, 'identity'), true);
+});
+
+test('AC6: identity gate — a MISSING anchorRole fails closed', () => {
+  const snap = {
+    street: { detected: true, value: '1 Main St' },
+    email: { detected: true, value: 'a@b.com' }
+  };
+  assert.equal(snapshotHasProvenancedSecret(snap, 'identity'), false);
+});
+
+test('AC6: identity gate — an UNRECOGNISED anchorRole (not a real postal role) fails closed', () => {
+  const snap = {
+    anchorRole: 'email', // a real role, but NOT postal — must not be treated as an anchor
+    street: { detected: true, value: '1 Main St' },
+    email: { detected: true, value: 'a@b.com' }
+  };
+  assert.equal(snapshotHasProvenancedSecret(snap, 'identity'), false);
+  const snap2 = { anchorRole: 'bogus', street: { detected: true, value: '1 Main St' } };
+  assert.equal(snapshotHasProvenancedSecret(snap2, 'identity'), false);
+});
+
+test('AC6: secretRoleForKind is never consulted for identity — it stays login/card only', () => {
+  // secretRoleForKind has no identity branch at all; snapshotHasProvenancedSecret's
+  // identity arm must not fall through to it.
+  assert.notEqual(secretRoleForKind('identity'), 'street');
 });

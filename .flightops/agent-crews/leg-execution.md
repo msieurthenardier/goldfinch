@@ -96,6 +96,11 @@ Evaluate:
 4. Codebase state — account for working tree, existing tooling, uncommitted changes?
 5. File/line references — accurate against current codebase?
 6. Dependencies — prerequisite legs completed? Outputs available?
+7. Scenario acceptance criteria — does every acceptance criterion that claims to
+   prove a flight design decision's named scenario drive that scenario from the
+   decision's OWN stated trigger (the real entry point a user reaches), rather than
+   a substitute call straight into the downstream mechanism? A criterion that calls
+   the mechanism directly can pass while the scenario itself is broken — flag it.
 
 Provide structured output:
 

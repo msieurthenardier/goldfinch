@@ -3,12 +3,17 @@
 
 const { normalizeFieldHaystack, resolveAutocompleteToken, fieldHaystack } = require('./field-tokenizer');
 const { findAllLoginFields } = require('./vault-fill-fields');
+const { findAllCardFields } = require('./vault-card-fields');
+// LD1 (M21 F3 Leg 3): the two field setters, shared with card rather than a
+// third private copy — see field-setters.js's own header.
+const { setFieldValue, setChoiceValue } = require('./field-setters');
 
-// Pure identity-field detection for the guest main-world preload (Mission 21,
-// Flight 2, Leg 2 — identity-boundary). The IDENTITY twin of vault-card-fields.js
-// — same shape (`findAllIdentityFields(doc)` -> entries), same "pure, `require`-
-// able, no page/store coupling" discipline. DETECTION ONLY: no fill, no capture,
-// no store, no schema. Those are Flight 3 / Leg 3.
+// Pure identity-field detection + fill for the guest main-world preload
+// (Mission 21, Flight 2 Leg 2 — identity-boundary; fill added Flight 3 Leg 3 —
+// identity-fill). The IDENTITY twin of vault-card-fields.js — same shape
+// (`findAllIdentityFields(doc)` -> entries, `fillIdentityForm(doc, identity,
+// ordinal)` -> `{ filled, fields }`), same "pure, `require`-able, no page/store
+// coupling" discipline. Capture is Flight 3 Leg 4, still out of scope here.
 //
 // WHY THIS IS THE HARDEST OF THE THREE FAMILIES: login has a structural anchor
 // (`input[type=password]`, a real HTML semantic). Card has no structural anchor
@@ -124,6 +129,25 @@ const { findAllLoginFields } = require('./vault-fill-fields');
 // entirely, not just that one field's role).
 //
 // ---------------------------------------------------------------------------
+// DD5 (M21 F3 Leg 3) — CARD WINS A FIELD CONTESTED WITH IDENTITY.
+// ---------------------------------------------------------------------------
+// identity's `fullName` alternative is bare `{name}`, and a "Name on Card"
+// field (`card_nameOnCard`, squawk 0091's own motivating spelling) normalizes
+// to a token set containing `name` — so it matches identity's `fullName` AND
+// card's `cardholder`. Card wins: its claim is anchored on a detected
+// `cc-number` field (a resolved anchor), identity's is a vocabulary judgement.
+// Precedence is login > card > identity, consistent at detection (this
+// module), icon placement (vault-fill-icon.js), and gesture resolution
+// (vault-entry-tracker.js). `isClaimedByCard` checks ALL SIX card roles
+// (`number`, `cardholder`, `expiry`, `expMonth`, `expYear`, `csc`) — not just
+// `cardholder` — because a field claimed by the card detector is a card field
+// whatever identity's vocabulary thinks, and enumerating only the one known
+// contest would leave the rule to be re-derived the next time a spelling
+// collides. Built from the already-exported `findAllCardFields` exactly as
+// `isClaimedByLogin` is built from `findAllLoginFields` — `vault-card-fields.js`
+// is not touched.
+//
+// ---------------------------------------------------------------------------
 // PREFIX VOCABULARY — named, not left to the implementer.
 // ---------------------------------------------------------------------------
 // `billing`, `shipping`, `delivery`, `mailing`, `contact`, `home`, `work`.
@@ -236,6 +260,17 @@ const ROLE_ALTERNATIVES = {
 
 const POSTAL_ROLES = new Set(['street', 'street2', 'postalCode', 'city', 'region', 'country']);
 const NON_POSTAL_ROLES = new Set(['fullName', 'firstName', 'lastName', 'email', 'phone']);
+
+// AC3b (M21 F3 Leg 3): the ONE definition of the eleven identity roles,
+// DERIVED from the two sets above — never hand-typed again. `CARD_ROLES`
+// already exists as two independent hand-typed copies
+// (`vault-gesture-policy.js` and `vault-entry-observer.js`); identity must not
+// start a third instance of that drift-prone pattern. Both the isolated-world
+// observer (which snapshots identity fields) and the main-world ordinal
+// resolution (`resolveOrdinalInFamily`, `vault-gesture-policy.js`) import THIS
+// array — `identity-profile.js`'s existing drift guard already asserts its own
+// `IDENTITY_FIELDS` equals this same union.
+const IDENTITY_ROLES = [...POSTAL_ROLES, ...NON_POSTAL_ROLES];
 
 // WHATWG autofill-detail tokens -> our internal role names. Written
 // SEPARATELY from ROLE_ALTERNATIVES per the module header's "written twice"
@@ -375,11 +410,30 @@ function isClaimedByLogin(field, doc) {
   return findAllLoginFields(doc).some((entry) => entry.username === field);
 }
 
+/** Every role a card entry can claim (DD5) — checked in full, not just `cardholder`. */
+const CARD_CLAIM_ROLES = ['number', 'cardholder', 'expiry', 'expMonth', 'expYear', 'csc'];
+
+/**
+ * Is `field` claimed by the CARD detector (DD5's callable artifact). Built from
+ * the already-exported `findAllCardFields` exactly as `isClaimedByLogin` is
+ * built from `findAllLoginFields` — `vault-card-fields.js` is NOT touched.
+ * Checks ALL SIX card roles, not just `cardholder`: a field the card detector
+ * resolved to ANY of its roles is a card field regardless of what identity's
+ * vocabulary would otherwise call it.
+ * @param {any} field
+ * @param {any} doc
+ * @returns {boolean}
+ */
+function isClaimedByCard(field, doc) {
+  if (!field || !doc) return false;
+  return findAllCardFields(doc).some((entry) => CARD_CLAIM_ROLES.some((role) => entry[role] === field));
+}
+
 /**
  * Every identity-capable field in `scope`, in document order, EXCLUDING any
- * field login has claimed (LD3) — applied before any role resolution, so a
- * login-claimed field cannot serve as this scope's postal anchor either (the
- * "anchor itself can be contested" edge case).
+ * field login OR card has claimed (LD3, DD5) — applied before any role
+ * resolution, so a login- or card-claimed field cannot serve as this scope's
+ * postal anchor either (the "anchor itself can be contested" edge case).
  * @param {any} scope
  * @param {any} doc
  * @returns {any[]}
@@ -388,7 +442,8 @@ function candidateFields(scope, doc) {
   if (!scope || typeof scope.querySelectorAll !== 'function') return [];
   return Array.from(scope.querySelectorAll('input, select'))
     .filter(isIdentityCapableField)
-    .filter((field) => !isClaimedByLogin(field, doc));
+    .filter((field) => !isClaimedByLogin(field, doc))
+    .filter((field) => !isClaimedByCard(field, doc));
 }
 
 /**
@@ -473,7 +528,19 @@ function identityEntryForScope(scope, doc) {
   const nonPostalCandidate = resolved.find((r) => NON_POSTAL_ROLES.has(r.role));
   if (!nonPostalCandidate) return null;
 
-  return entryFromResolved(resolved, anchorCandidate.field, scope);
+  const entry = entryFromResolved(resolved, anchorCandidate.field, scope);
+  // DD2/DD8 (Flight 3): thread the postal anchor's OWN role name and the
+  // scope's non-postal anchor field onto the entry HERE, where both are
+  // already in scope — never re-derived downstream (a second, independent
+  // derivation of "first non-postal field" is exactly what DD8 forbids). The
+  // icon controller (vault-fill-icon.js) reads `entry.anchor` /
+  // `entry.nonPostalAnchor` for its two-icon placement; Leg 4's value-layer
+  // gate reads `entry.anchorRole` to know which snapshot role IS the anchor
+  // (a duplicate reference into one of the eleven roles, never a twelfth
+  // pseudo-role).
+  entry.anchorRole = anchorCandidate.role;
+  entry.nonPostalAnchor = nonPostalCandidate.field;
+  return entry;
 }
 
 /**
@@ -519,14 +586,66 @@ function findIdentityFields(doc) {
   return all.length ? all[0] : null;
 }
 
+/**
+ * Fill the TOP-FRAME identity form on `doc` with `identity`. Top-frame only
+ * (the `window.top !== window` guard, matching the login/card twins). Resolves
+ * the entry by `ordinal` (M21 F3 Leg 3, DD9's fill-precision fix) — an integer
+ * index into `findAllIdentityFields(doc)`, computed by the caller via
+ * `resolveOrdinalInFamily` — with a fall-back to entry 0 when `ordinal` is
+ * null/out of range. Writes each stored field into the matching detected role
+ * via `field-setters.js` (`setChoiceValue` for a `<select>` — country and
+ * region are routinely selects); a role with no stored value, or no detected
+ * field, is skipped, NEVER written empty. Returns the same `{ filled, fields }`
+ * contract as `fillLoginForm`/`fillCardForm`, so the isolated-world observer's
+ * `grantForFill` grants provenance for exactly what was written.
+ * @param {any} doc
+ * @param {any} identity  a plain object keyed by IDENTITY_ROLES' role names.
+ * @param {number | null} [ordinal]
+ * @returns {{ filled: boolean, fields: Array<{ field: any, value: string }> }}
+ */
+function fillIdentityForm(doc, identity, ordinal) {
+  // `typeof window` is 'undefined' under the headless unit test (which drives
+  // this pure helper directly); in the guest main world it is the page window.
+  if (typeof window !== 'undefined' && window.top !== window) return { filled: false, fields: [] };
+  if (!identity) return { filled: false, fields: [] };
+
+  const all = findAllIdentityFields(doc);
+  const entry =
+    typeof ordinal === 'number' && Number.isInteger(ordinal) && ordinal >= 0 && ordinal < all.length
+      ? all[ordinal]
+      : all[0];
+  if (!entry) return { filled: false, fields: [] };
+
+  const written = [];
+  for (const role of IDENTITY_ROLES) {
+    const field = entry[role];
+    if (!field) continue;
+    const value = identity[role];
+    if (value == null || value === '') continue;
+    const strValue = String(value);
+    const tag = String(field.tagName == null ? '' : field.tagName).toLowerCase();
+    if (tag === 'select') {
+      const writtenValue = setChoiceValue(field, [strValue]);
+      if (writtenValue != null) written.push({ field, value: writtenValue });
+    } else {
+      setFieldValue(field, strValue);
+      written.push({ field, value: strValue });
+    }
+  }
+  return { filled: true, fields: written };
+}
+
 module.exports = {
   PREFIXES,
   AUTOCOMPLETE_ROLES,
   POSTAL_ROLES,
   NON_POSTAL_ROLES,
+  IDENTITY_ROLES,
   autocompleteRoleOf,
   fallbackRoleOf,
   isClaimedByLogin,
+  isClaimedByCard,
   findIdentityFields,
-  findAllIdentityFields
+  findAllIdentityFields,
+  fillIdentityForm
 };

@@ -117,16 +117,22 @@ function isLivePasswordField(doc, field) {
  * main-frame-only `webContents.send`). No password field → no-op. Returns a
  * small status object — NEVER the credential.
  *
- * `targetPassword` (PR#112 finding 9): when the fill was initiated by a lock-icon
- * gesture, the guest binds the CLICKED field to the round-trip and passes it here.
- * If it is still a live password field in `doc`, that specific form's fields are
- * filled — NOT the document's first password field (the pre-fix behavior that
- * mis-filled the wrong form on a multi-login page). A null / stale / foreign target
- * falls back to the first-password-field heuristic, which is exactly the MCP
- * automation path's behavior (origin-matched top-frame login, no gesture).
+ * `ordinal` (M21 F3 Leg 3, DD9 — PR#112 finding 9's precision, restored via an
+ * INTEGER rather than a node): when the fill was initiated by a lock-icon
+ * gesture, the caller resolves the clicked field's ordinal position among
+ * `findAllLoginFields(doc)` (via `resolveOrdinalInFamily`) and passes that
+ * INTEGER here — never a node reference (an integer crosses the isolated-world
+ * boundary freely; DD3g forbids only node identity). A valid in-range ordinal
+ * fills THAT specific entry — NOT the document's first password field (the
+ * pre-fix behavior that mis-filled the wrong form on a multi-login page). A
+ * `null` / non-integer / out-of-range ordinal falls back to the
+ * first-password-field heuristic, which is exactly the MCP automation path's
+ * behavior (origin-matched top-frame login, no gesture). **No overloading**:
+ * this parameter is an integer or `null`, never a node — the isolated-world
+ * fill is the only production caller, and it has no node to pass regardless.
  * @param {any} doc
  * @param {{ username?: string|null, password?: string|null } | null | undefined} cred
- * @param {any} [targetPassword]  the gesture-bound password field, validated live here.
+ * @param {number | null} [ordinal]  an index into `findAllLoginFields(doc)`.
  * @returns {{ filled: boolean, fields: Array<{ field: any, value: string }> }}
  *   `fields` carries the exact string WRITTEN to each field that was actually
  *   filled, keyed by the field's own node reference (M21 F1 Leg 3, DD3h) — this is
@@ -134,13 +140,15 @@ function isLivePasswordField(doc, field) {
  *   provenance for exactly what a Goldfinch fill wrote, with no read-back and no
  *   cross-world correlation. Empty when nothing was filled.
  */
-function fillLoginForm(doc, cred, targetPassword) {
+function fillLoginForm(doc, cred, ordinal) {
   // `typeof window` is 'undefined' under the headless unit test (which drives
   // this pure helper directly); in the guest main world it is the page window.
   if (typeof window !== 'undefined' && window.top !== window) return { filled: false, fields: [] };
-  const fields = isLivePasswordField(doc, targetPassword)
-    ? resolveLoginEntry(targetPassword) // the clicked form's { username, password, form }
-    : findLoginFields(doc); // first-password-field fallback (MCP / no-gesture)
+  const all = findAllLoginFields(doc);
+  const fields =
+    typeof ordinal === 'number' && Number.isInteger(ordinal) && ordinal >= 0 && ordinal < all.length
+      ? all[ordinal] // the gesture-bound entry, by ordinal
+      : findLoginFields(doc); // first-password-field fallback (MCP / no-gesture / stale ordinal)
   if (!fields || !fields.password) return { filled: false, fields: [] };
   const written = [];
   if (fields.username && cred && cred.username != null) {

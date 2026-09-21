@@ -137,14 +137,22 @@ test('REGRESSION (M14 F3 HAT): the LIVE cert-picker model shape ({certs, popup?}
   // the a11y hook still sends the pre-popup bare-array shape, which masked it.
   // Source-contract pin (downloads-popup-contract idiom): BOTH ends of the
   // shape contract, so neither side can drift without failing here.
-  const rendererSource = fs.readFileSync(path.join(__dirname, '../../src/renderer/renderer.js'), 'utf8');
+  // NOTE (Mission 21 Flight 3 Leg 1, "sheet-type-dispatch", AC11.1): the
+  // onCertChallengePresent handler this pin reads moved out of renderer.js and
+  // into src/renderer/chrome/auth-challenge-controller.js (AC6's extraction).
+  // Retargeted to the file the code now lives in; the regexes below are
+  // unchanged — they still match the moved code verbatim.
+  const challengeControllerSource = fs.readFileSync(
+    path.join(__dirname, '../../src/renderer/chrome/auth-challenge-controller.js'),
+    'utf8'
+  );
   const sheetSource = fs.readFileSync(path.join(__dirname, '../../src/renderer/menu-overlay.js'), 'utf8');
   // 1. The live chrome sender uses the object form (never the bare array —
   //    the popup marker must be able to ride every presentation).
   assert.match(
-    rendererSource,
+    challengeControllerSource,
     /openOverlayMenu\(\s*'cert-picker',\s*\{\s*certs:\s*Array\.isArray\(certs\)\s*\?\s*certs\s*:\s*\[\]/,
-    "renderer.js's cert-challenge-present handler must send the { certs, popup? } object model"
+    "auth-challenge-controller.js's cert-challenge-present handler must send the { certs, popup? } object model"
   );
   // 2. The sheet's init gate accepts an OBJECT for cert-picker (array-or-object
   //    — renderCertPicker's documented domain; an array-only gate re-blanks
@@ -158,14 +166,14 @@ test('REGRESSION (M14 F3 HAT): the LIVE cert-picker model shape ({certs, popup?}
   //    host on the object model — dropping it re-opens the no-attribution gap:
   //    the sheet renders but can't say WHO is asking for a certificate…
   assert.match(
-    rendererSource,
+    challengeControllerSource,
     /onCertChallengePresent\(\(\{ certs, host, popup \}\)/,
-    "renderer.js's cert-challenge-present handler must destructure the payload's host"
+    "auth-challenge-controller.js's cert-challenge-present handler must destructure the payload's host"
   );
   assert.match(
-    rendererSource,
+    challengeControllerSource,
     /\.\.\.\(typeof host === 'string' && host \? \{ host \} : \{\}\)/,
-    "renderer.js's cert-challenge-present handler must put host on the model for the attribution subtitle"
+    "auth-challenge-controller.js's cert-challenge-present handler must put host on the model for the attribution subtitle"
   );
   // …and the sheet side renders it (the model field is inert without the
   //    renderCertPickerSubtitle call — both ends pinned, fix-#4 idiom).

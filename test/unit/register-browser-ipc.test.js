@@ -45,12 +45,19 @@ function makeHarness(options = {}) {
   const human = {
     captures: [],
     dismissed: [],
-    nextOffer: null,
+    // M21 F3 L2 (DD1's amendment, AC2 contract update): captureRelease now returns an
+    // ARRAY — [] for the common nothing-pending case, one entry per released family.
+    nextOffer: [],
     holdGestureLogin(arg) {
       human.captures.push(arg);
       return { captureId: 'held' };
     },
     holdGestureCard(arg) {
+      human.captures.push(arg);
+      return { captureId: 'held' };
+    },
+    // M21 F3 L4 (AC10): the identity twin — same shape as the login/card fakes.
+    holdGestureIdentity(arg) {
       human.captures.push(arg);
       return { captureId: 'held' };
     },
@@ -303,6 +310,19 @@ test('vault capture (Leg 5, broadened-capture): guest-vault-capture HOLDS only �
   assert.deepEqual(h.events, [], 'a gesture hold never itself forwards a vault-capture-offer');
 });
 
+test('vault capture identity (M21 F3 Leg 4, AC10): guest-vault-capture-identity HOLDS only', () => {
+  const h = makeHarness();
+  const identitySecrets = new TextEncoder().encode(JSON.stringify({ email: 'a@b.com' }));
+
+  h.listeners.get('guest-vault-capture-identity')({ sender: { id: 5 } }, { identitySecrets, fullName: 'Ada Lovelace' });
+  assert.deepEqual(h.human.captures[0], {
+    wcId: 5,
+    identitySecretsBytes: identitySecrets,
+    fullName: 'Ada Lovelace'
+  });
+  assert.deepEqual(h.events, [], 'a gesture hold never itself forwards a vault-capture-offer');
+});
+
 test('vault capture card (Leg 5): guest-vault-capture-card HOLDS only', () => {
   const h = makeHarness();
   const numberBytes = new TextEncoder().encode('4111111111111111');
@@ -325,28 +345,41 @@ test('vault capture card (Leg 5): guest-vault-capture-card HOLDS only', () => {
 test('vault capture settle (Leg 5, DD4 detachment path): guest-vault-gesture-settle releases via captureRelease and forwards the resulting offer (no password on the wire); nothing pending forwards nothing', () => {
   const h = makeHarness();
 
-  // NOTHING PENDING: captureRelease() returns null → no vault-capture-offer is sent.
-  h.human.nextOffer = null;
+  // NOTHING PENDING: captureRelease() returns [] (M21 F3 L2 AC2 contract update) →
+  // no vault-capture-offer is sent.
+  h.human.nextOffer = [];
   h.listeners.get('guest-vault-gesture-settle')({ sender: { id: 5 } });
   assert.deepEqual(h.events, [], 'no forward when captureRelease finds nothing pending / drops');
 
-  // RELEASED: captureRelease() returns { captureId, model } → forwarded to the owning chrome.
-  h.human.nextOffer = {
-    captureId: 'cap123',
-    model: {
-      origin: 'https://a.example',
-      username: 'me@a',
-      mode: 'save',
-      defaultVaultId: 'personal',
-      choices: ['personal', 'global']
-    }
+  // RELEASED: captureRelease() returns [{ captureId, model }] → forwarded to the owning chrome.
+  const offerModel = {
+    origin: 'https://a.example',
+    username: 'me@a',
+    mode: 'save',
+    defaultVaultId: 'personal',
+    choices: ['personal', 'global']
   };
+  h.human.nextOffer = [{ captureId: 'cap123', model: offerModel }];
   h.listeners.get('guest-vault-gesture-settle')({ sender: { id: 5 } });
-  assert.deepEqual(h.events, [
-    ['chrome-send', 'vault-capture-offer', { captureId: 'cap123', model: h.human.nextOffer.model }]
-  ]);
+  assert.deepEqual(h.events, [['chrome-send', 'vault-capture-offer', { captureId: 'cap123', model: offerModel }]]);
   // The forwarded payload never carries a password (grep the whole event stream).
   assert.ok(!JSON.stringify(h.events).includes('typed-secret'), 'no captured password crosses to chrome');
+});
+
+// M21 F3 L2 (DD1's amendment, AC4): captureRelease can release MULTIPLE families in
+// one settle — the detachment settle path must send one vault-capture-offer per
+// entry, in order, exactly like guest-wiring.js's navigation-commit settle half.
+test('AC4: guest-vault-gesture-settle sends ONE vault-capture-offer per entry captureRelease returns, preserving release order', () => {
+  const h = makeHarness();
+  h.human.nextOffer = [
+    { captureId: 'cap-login', model: { origin: 'https://a.example', username: 'me@a', mode: 'save' } },
+    { captureId: 'cap-card', model: { kind: 'card', origin: 'https://a.example', mode: 'save' } }
+  ];
+  h.listeners.get('guest-vault-gesture-settle')({ sender: { id: 5 } });
+  assert.deepEqual(h.events, [
+    ['chrome-send', 'vault-capture-offer', { captureId: 'cap-login', model: h.human.nextOffer[0].model }],
+    ['chrome-send', 'vault-capture-offer', { captureId: 'cap-card', model: h.human.nextOffer[1].model }]
+  ]);
 });
 
 test('vault fill-icon context menu: a BARE guest signal pops a NATIVE menu over the owning window — no secret, no guest DOM', () => {

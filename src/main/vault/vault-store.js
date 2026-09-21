@@ -3542,6 +3542,56 @@ class VaultStore {
     return out;
   }
 
+  /**
+   * The reachable IDENTITY item for a tab's jar (M21 F3 Leg 3, DD7) — the
+   * identity twin of `reachableCardItems`, with the SAME no-origin argument: a
+   * person's own name and address belong to the operator, not to a site.
+   * Every OTHER gate is identical to the card twin (unlocked, persistent jar
+   * only, global + the tab's own jar visited).
+   *
+   * METADATA ONLY — the row carries identity's two non-secret fields per
+   * `vault-item-schema.js` (`title` / `fullName`). The other nine fields are
+   * secret and NEVER leave main; they are resolved only inside `fillHuman`.
+   *
+   * Reads through `identityProfileOf` (LD2's canonical "the identity profile"
+   * accessor) — NEVER `items.find(it => it.type === 'identity')`, which would
+   * silently pick whichever item sorts first instead of surfacing a duplicate
+   * (a write-path invariant violation this method has no business hiding).
+   * Per-vault: a vault whose write-path invariant WAS violated surfaces at
+   * most its own first profile here — the invariant itself is enforced at
+   * every write site (see `identity-profile.js`'s own header).
+   *
+   * `[]`-SAFE, never throws — same guards as the login/card twins.
+   * @param {string | null} jarId  the tab's persistent jar id, or null (burner/none).
+   * @returns {Array<{ vaultId: string, id: string, title: string|null, fullName: string|null }>}
+   */
+  reachableIdentityItems(jarId) {
+    if (!this.isUnlocked()) return []; // locked → no MRK → nothing reachable.
+    // A burner / non-persistent tab reaches NOTHING, global included — the
+    // same refusal the login/card twins make, for the same reason.
+    if (!jarId) return [];
+    const targets = jarId !== GLOBAL_ID ? [GLOBAL_ID, jarId] : [GLOBAL_ID];
+    const out = [];
+    for (const id of targets) {
+      let items;
+      try {
+        items = this.listItems(id);
+      } catch {
+        continue; // non-persistent/unknown jar (VaultStateError) or a lock race — skip.
+      }
+      const { profile } = identityProfileOf(/** @type {any[]} */ (items));
+      if (profile) {
+        out.push({
+          vaultId: id,
+          id: profile.id,
+          title: profile.title ?? null,
+          fullName: profile.fullName ?? null
+        });
+      }
+    }
+    return out;
+  }
+
   // -------------------------------------------------------------------------
   // Access keys (per-jar automation grants — DD6 step-up)
   // -------------------------------------------------------------------------

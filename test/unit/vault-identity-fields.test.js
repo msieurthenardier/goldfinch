@@ -11,11 +11,14 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const {
   PREFIXES,
+  IDENTITY_ROLES,
   autocompleteRoleOf,
   fallbackRoleOf,
   isClaimedByLogin,
+  isClaimedByCard,
   findIdentityFields,
-  findAllIdentityFields
+  findAllIdentityFields,
+  fillIdentityForm
 } = require('../../src/preload/vault-identity-fields');
 const { findAllLoginFields } = require('../../src/preload/vault-fill-fields');
 
@@ -444,4 +447,233 @@ test('a <select> country field is identity-capable', () => {
   const entries = findAllIdentityFields(doc);
   assert.equal(entries.length, 1);
   assert.equal(entries[0].country, fields.country);
+});
+
+// --- DD5 (M21 F3 Leg 3): card wins a field contested with identity ----------
+
+test('AC1/AC2: a field claimed by the card detector (card_nameOnCard) does not resolve as identity fullName', () => {
+  // card_number resolves via card's own fallback vocabulary to its `number`
+  // anchor; card_nameOnCard is squawk 0091's own motivating spelling — it
+  // resolves as card's `cardholder` AND, by identity's bare {name} alternative,
+  // would otherwise resolve as identity's `fullName`.
+  const number = new FakeInput({ name: 'card_number' });
+  const nameOnCard = new FakeInput({ name: 'card_nameOnCard' });
+  const anchor = new FakeInput({ name: 'billingAddress1' });
+  const email = new FakeInput({ name: 'email', type: 'email' });
+  const doc = docOf({ number, nameOnCard, anchor, email });
+
+  // The card detector really does claim it (sanity — proves the contest is real).
+  assert.equal(isClaimedByCard(nameOnCard, doc), true);
+
+  const entries = findAllIdentityFields(doc);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].fullName, null, 'card-claimed field must not resolve as identity fullName');
+});
+
+test('AC2 control: the SAME spelling with NO card number in scope resolves as identity fullName', () => {
+  const nameOnCard = new FakeInput({ name: 'card_nameOnCard' });
+  const anchor = new FakeInput({ name: 'billingAddress1' });
+  const email = new FakeInput({ name: 'email', type: 'email' });
+  const doc = docOf({ nameOnCard, anchor, email });
+
+  assert.equal(isClaimedByCard(nameOnCard, doc), false, 'no card number anywhere in scope → not card-claimed');
+  const entries = findAllIdentityFields(doc);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].fullName, nameOnCard);
+});
+
+test('isClaimedByCard checks all six card roles, not just cardholder', () => {
+  const number = new FakeInput({ autocomplete: 'cc-number' });
+  const csc = new FakeInput({ autocomplete: 'cc-csc' });
+  const doc = docOf({ number, csc });
+  assert.equal(isClaimedByCard(csc, doc), true, 'csc is one of the six checked roles');
+  assert.equal(isClaimedByCard(number, doc), true);
+});
+
+test('isClaimedByCard is false for a field in a document with no card number at all', () => {
+  const csc = new FakeInput({ name: 'securityCode' }); // no cc-number anywhere → findAllCardFields is []
+  const doc = docOf({ csc });
+  assert.equal(isClaimedByCard(csc, doc), false);
+});
+
+// --- AC3 (DD2/DD8): the entry carries anchorRole and the non-postal anchor --
+
+test("AC3: the entry carries anchorRole (the postal anchor's own role name) and nonPostalAnchor (the first non-postal field)", () => {
+  const street = new FakeInput({ name: 'billingAddress1' });
+  const firstName = new FakeInput({ name: 'billingFirstName' });
+  const email = new FakeInput({ name: 'billingEmail', type: 'email' });
+  const doc = docOf({ street, firstName, email });
+
+  const entries = findAllIdentityFields(doc);
+  assert.equal(entries.length, 1);
+  const entry = entries[0];
+  assert.equal(entry.anchor, street);
+  assert.equal(entry.anchorRole, 'street', "the anchor's OWN role name, never re-derived");
+  assert.equal(entry.nonPostalAnchor, firstName, 'the FIRST non-postal role field in document order');
+});
+
+// --- AC5: fillIdentityForm --------------------------------------------------
+
+class FakeSelectField {
+  constructor(name, options) {
+    this.tagName = 'SELECT';
+    this.name = name;
+    this.id = '';
+    this.placeholder = '';
+    this.form = null;
+    this.options = options.map(([value, text]) => ({ value, textContent: text }));
+    this.value = '';
+    this.events = [];
+  }
+  getAttribute() {
+    return null;
+  }
+  dispatchEvent(evt) {
+    this.events.push({ type: evt.type, bubbles: !!evt.bubbles });
+    return true;
+  }
+}
+
+test('fillIdentityForm writes each stored field into its matching detected role, skipping absent/empty values', () => {
+  const street = new FakeInput({ name: 'billingAddress1' });
+  const fullName = new FakeInput({ name: 'name' });
+  const email = new FakeInput({ name: 'email', type: 'email' });
+  const doc = docOf({ street, fullName, email });
+
+  const result = fillIdentityForm(doc, {
+    street: '123 Main St',
+    fullName: 'Ada Lovelace',
+    email: '', // empty → skipped, never written
+    phone: null // absent → skipped
+  });
+
+  assert.equal(result.filled, true);
+  assert.equal(street.value, '123 Main St');
+  assert.equal(fullName.value, 'Ada Lovelace');
+  assert.equal(email.value, '', 'an empty stored value is never written');
+  assert.deepEqual(result.fields.map((f) => f.value).sort(), ['123 Main St', 'Ada Lovelace'].sort());
+});
+
+test('fillIdentityForm skips a role with no detected field on the page', () => {
+  const street = new FakeInput({ name: 'billingAddress1' });
+  const email = new FakeInput({ name: 'email', type: 'email' });
+  const doc = docOf({ street, email });
+
+  const result = fillIdentityForm(doc, { street: '1 Main St', fullName: 'Ada Lovelace' });
+  assert.equal(result.filled, true);
+  assert.equal(result.fields.length, 1);
+  assert.equal(result.fields[0].field, street);
+});
+
+test('fillIdentityForm uses setChoiceValue for a <select> country field', () => {
+  const street = new FakeInput({ name: 'billingAddress1' });
+  const email = new FakeInput({ name: 'email', type: 'email' });
+  const country = new FakeSelectField('billingCountry', [
+    ['US', 'United States'],
+    ['CA', 'Canada']
+  ]);
+  const doc = docOf({ street, email, country });
+
+  const result = fillIdentityForm(doc, { street: '1 Main St', country: 'CA' });
+  assert.equal(country.value, 'CA');
+  assert.ok(result.fields.some((f) => f.field === country && f.value === 'CA'));
+});
+
+test('fillIdentityForm: a <select> with no matching option contributes no entry and is left untouched', () => {
+  const street = new FakeInput({ name: 'billingAddress1' });
+  const email = new FakeInput({ name: 'email', type: 'email' });
+  const country = new FakeSelectField('billingCountry', [['US', 'United States']]);
+  const doc = docOf({ street, email, country });
+
+  const result = fillIdentityForm(doc, { street: '1 Main St', country: 'Elbonia' });
+  assert.equal(country.value, '', 'no matching option → left untouched');
+  assert.ok(!result.fields.some((f) => f.field === country));
+});
+
+test('fillIdentityForm: no identity entry on the page → not filled', () => {
+  const doc = docOf({ q: new FakeInput({ name: 'q', type: 'search' }) });
+  assert.deepEqual(fillIdentityForm(doc, { fullName: 'Ada' }), { filled: false, fields: [] });
+});
+
+test('fillIdentityForm: a null identity is a no-op', () => {
+  const street = new FakeInput({ name: 'billingAddress1' });
+  const email = new FakeInput({ name: 'email', type: 'email' });
+  const doc = docOf({ street, email });
+  assert.deepEqual(fillIdentityForm(doc, null), { filled: false, fields: [] });
+  assert.equal(street.value, '');
+});
+
+test('fillIdentityForm: top-frame guard — never fills inside an iframe', () => {
+  const street = new FakeInput({ name: 'billingAddress1' });
+  const email = new FakeInput({ name: 'email', type: 'email' });
+  const doc = docOf({ street, email });
+
+  const saved = global.window;
+  try {
+    global.window = { top: {} };
+    const result = fillIdentityForm(doc, { street: '1 Main St' });
+    assert.deepEqual(result, { filled: false, fields: [] });
+    assert.equal(street.value, '');
+  } finally {
+    if (saved === undefined) delete global.window;
+    else global.window = saved;
+  }
+});
+
+// --- AC9/AC12 (DD9): the ordinal fix, identity's twin -----------------------
+
+test('AC12 identity twin: ordinal 1 fills the SECOND identity-anchored form, not the document-first', () => {
+  const streetA = new FakeInput({ name: 'billingAddress1' });
+  const emailA = new FakeInput({ name: 'email', type: 'email' });
+  const formA = new FakeForm([streetA, emailA]);
+  const streetB = new FakeInput({ name: 'shippingAddress1' });
+  const emailB = new FakeInput({ name: 'shippingEmail', type: 'email' });
+  const formB = new FakeForm([streetB, emailB]);
+  const doc = makeDoc([formA, formB]);
+
+  const result = fillIdentityForm(doc, { street: '2 Second Ave', email: 'b@example.com' }, 1);
+  assert.equal(result.filled, true);
+  assert.equal(streetB.value, '2 Second Ave', 'the second (ordinal 1) form is filled');
+  assert.equal(emailB.value, 'b@example.com');
+  assert.equal(streetA.value, '', 'the document-first form must NOT be filled');
+  assert.equal(emailA.value, '');
+});
+
+test('fillIdentityForm: a null/out-of-range ordinal falls back to entry 0', () => {
+  const streetA = new FakeInput({ name: 'billingAddress1' });
+  const emailA = new FakeInput({ name: 'email', type: 'email' });
+  const formA = new FakeForm([streetA, emailA]);
+  const streetB = new FakeInput({ name: 'shippingAddress1' });
+  const emailB = new FakeInput({ name: 'shippingEmail', type: 'email' });
+  const formB = new FakeForm([streetB, emailB]);
+  const doc = makeDoc([formA, formB]);
+
+  fillIdentityForm(doc, { street: '1 First St' }, null);
+  assert.equal(streetA.value, '1 First St', 'null ordinal → entry 0');
+
+  streetA.value = '';
+  fillIdentityForm(doc, { street: '1 First St again' }, 99);
+  assert.equal(streetA.value, '1 First St again', 'out-of-range ordinal → entry 0');
+  assert.equal(streetB.value, '', 'the non-fallback entry is never filled');
+});
+
+// --- AC3b sanity: the exported IDENTITY_ROLES union -------------------------
+
+test('IDENTITY_ROLES is the eleven roles, derived from POSTAL_ROLES + NON_POSTAL_ROLES', () => {
+  assert.deepEqual(
+    IDENTITY_ROLES.slice().sort(),
+    [
+      'city',
+      'country',
+      'email',
+      'firstName',
+      'fullName',
+      'lastName',
+      'phone',
+      'postalCode',
+      'region',
+      'street',
+      'street2'
+    ].sort()
+  );
 });

@@ -1,9 +1,10 @@
 <!--
   Fixture: billing-jostens
-  Corpus tier: gated (identity family) — asserted by assertDetectsEntry.
-  Models the motivating real-world shape from mission planning (a Jostens-
-  style checkout billing step): every field carries autocomplete="on" — a
-  near-useless generic hint (resolveAutocompleteToken finds no role for the
+  Corpus tier: gated (identity family) — asserted by assertOffersEntry (promoted
+  from assertDetectsEntry at Mission 21, Flight 3, Leg 4 — identity-capture,
+  AC19). Models the motivating real-world shape from mission planning (a
+  Jostens-style checkout billing step): every field carries autocomplete="on" —
+  a near-useless generic hint (resolveAutocompleteToken finds no role for the
   bare token "on") that real checkouts ship all the time — so DETECTION MUST
   work off name/id alone, exactly the fallback vocabulary this leg exists to
   prove (LD1's alternatives model). The scope anchors on billingAddress1
@@ -11,24 +12,31 @@
   via {postal,code}); billingFirstName/billingLastName/billingEmail/
   billingPhone supply the required non-postal role (LD4 amendment 2) several
   times over.
+  `value` attributes (added at the Leg 4 promotion): the corpus's own stand-in
+  for "the operator typed this" — assertCapturesEntry/assertOffersEntry grant
+  provenance for every non-empty value they find. The submit button sits
+  INSIDE this form (a bare `<button type="submit">`, no `type` override) — a
+  real, headlessly-provable native form submission (DD4's navigation-commit
+  settle signal), which is what earns `offers` rather than only `captures`
+  (per DD4, decided by reading the fixture).
   Added: 2026-09-20 (Mission 21, Flight 2, Leg 2 — identity-boundary).
 -->
 <form id="billing-address">
   <label for="bf-first">First name</label>
-  <input type="text" id="bf-first" name="billingFirstName" autocomplete="on" />
+  <input type="text" id="bf-first" name="billingFirstName" autocomplete="on" value="Ada" />
   <label for="bf-last">Last name</label>
-  <input type="text" id="bf-last" name="billingLastName" autocomplete="on" />
+  <input type="text" id="bf-last" name="billingLastName" autocomplete="on" value="Lovelace" />
   <label for="bf-email">Email</label>
-  <input type="email" id="bf-email" name="billingEmail" autocomplete="on" />
+  <input type="email" id="bf-email" name="billingEmail" autocomplete="on" value="ada@example.com" />
   <label for="bf-phone">Phone</label>
-  <input type="tel" id="bf-phone" name="billingPhone" autocomplete="on" />
+  <input type="tel" id="bf-phone" name="billingPhone" autocomplete="on" value="555-0100" />
   <label for="bf-addr1">Address line 1</label>
-  <input type="text" id="bf-addr1" name="billingAddress1" autocomplete="on" />
+  <input type="text" id="bf-addr1" name="billingAddress1" autocomplete="on" value="12 Analytical Engine Way" />
   <label for="bf-city">City</label>
-  <input type="text" id="bf-city" name="billingCity" autocomplete="on" />
+  <input type="text" id="bf-city" name="billingCity" autocomplete="on" value="London" />
   <label for="bf-zip">Postal code</label>
-  <input type="text" id="bf-zip" name="billingPostalCode" autocomplete="on" />
+  <input type="text" id="bf-zip" name="billingPostalCode" autocomplete="on" value="SW1A 1AA" />
   <label for="bf-country">Country</label>
-  <input type="text" id="bf-country" name="billingCountry" autocomplete="on" />
+  <input type="text" id="bf-country" name="billingCountry" autocomplete="on" value="UK" />
   <button type="submit">Continue</button>
 </form>

@@ -1,12 +1,18 @@
 'use strict';
 
 // Unit tests for src/main/vault/identity-profile.js (Mission 21, Flight 2, Leg 3 /
-// DD2, LD2, LD3). Pure module, no store, no DOM — classifyCapture has NO caller
-// until Flight 3 (leg LD3: "not trusted until proven" applies here too — a rule
-// asserted and never attacked is exactly what shipped squawks 0090 and 0091).
+// DD2, LD2, LD3). Pure module, no store, no DOM. `classifyCapture` gained its
+// first live caller at Flight 3 Leg 4 (identity-capture, DD10) —
+// `disposeIdentityCapture` in vault-human.js; this file still tests it directly
+// with plain objects (the pre-Leg-4 "not trusted until proven" discipline), and
+// AC20 below additionally proves the DD10 backstop against the REAL
+// `incident-report-third-party` fixture rather than a hand-typed stand-in.
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const path = require('node:path');
+const { extractFixtureFile } = require('../helpers/fixture-extractor');
+const { findAllIdentityFields } = require('../../src/preload/vault-identity-fields');
 
 const ip = require('../../src/main/vault/identity-profile');
 const identityFields = require('../../src/preload/vault-identity-fields');
@@ -150,4 +156,84 @@ test('classifyCapture: only fields PRESENT in captured are ever judged', () => {
   const result = ip.classifyCapture(stored, captured);
   assert.equal(result.kind, 'gap-fill');
   assert.deepEqual(result.gapFilled, [{ field: 'email', to: 'jane@example.com' }]);
+});
+
+/* ------------------------------------------------------------ AC20 (Leg 4): the
+ * DD10 backstop, proven against the REAL incident-report-third-party fixture —
+ * Flight 2's named ACCEPTED false positive. Its fields (a third party's
+ * incident location, a reporter's own name/email) clear every detection gate
+ * (see the fixture's own header), so promoting it to `captures`/`offers` would
+ * gate a known false positive as desired behaviour (AC20 forbids this). Instead
+ * this pins the BACKSTOP it relies on: a captured value that conflicts with an
+ * existing profile never silently overwrites; on a FRESH vault it is merely a
+ * gap-fill (DD10's own named residual — the conflict rule cannot protect its
+ * own headline scenario on a first-ever capture). */
+
+const INCIDENT_REPORT_FIXTURE = path.join(
+  __dirname,
+  '..',
+  'fixtures',
+  'save-moment',
+  'identity',
+  'incident-report-third-party.html'
+);
+
+/**
+ * Build the captured-record shape `disposeIdentityCapture` would compute from
+ * the incident-report-third-party fixture, by setting plausible operator-typed
+ * values on its detected fields and reading them back through the SAME
+ * detector this leg's gesture/observer path uses — never a hand-typed stand-in.
+ * @returns {any}
+ */
+function capturedFromIncidentReportFixture() {
+  const doc = extractFixtureFile(INCIDENT_REPORT_FIXTURE);
+  const entry = findAllIdentityFields(doc)[0];
+  assert.ok(entry, 'the fixture must still detect an identity entry');
+  const values = {
+    fullName: 'Alex Reporter',
+    email: 'alex@example.com',
+    street: '123 Elsewhere St',
+    city: 'Springfield',
+    postalCode: '90001'
+  };
+  for (const [role, value] of Object.entries(values)) {
+    if (entry[role]) entry[role].value = value;
+  }
+  /** @type {any} */
+  const captured = {};
+  for (const field of ip.IDENTITY_FIELDS) {
+    const el = entry[field];
+    if (el && el.value) captured[field] = el.value;
+  }
+  return captured;
+}
+
+test('AC20: incident-report-third-party — an EXISTING profile classifies the captured stranger-address as a CONFLICT', () => {
+  const captured = capturedFromIncidentReportFixture();
+  assert.ok(Object.keys(captured).length >= 3, 'sanity: the fixture actually captured several fields');
+
+  const stored = {
+    type: 'identity',
+    title: 'My details',
+    fullName: 'Jane Q. Operator',
+    email: 'jane@example.com',
+    street: '1 Real Home St',
+    city: 'Hometown',
+    postalCode: '00000'
+  };
+  const result = ip.classifyCapture(stored, captured);
+  assert.equal(result.kind, 'conflict', "the backstop: a stranger's address never silently overwrites");
+  assert.ok(result.conflicting.length > 0);
+  // Every conflicting field really did differ.
+  for (const c of result.conflicting) {
+    assert.notEqual(c.from, c.to);
+  }
+});
+
+test('AC20 (DD10 residual): on a FRESH vault (no stored profile) the same capture is only a gap-fill, never a conflict', () => {
+  const captured = capturedFromIncidentReportFixture();
+  const result = ip.classifyCapture(null, captured);
+  assert.equal(result.kind, 'gap-fill', "DD10's own named residual — the conflict rule has nothing to fire against");
+  assert.deepEqual(result.conflicting, []);
+  assert.ok(result.gapFilled.length > 0);
 });
