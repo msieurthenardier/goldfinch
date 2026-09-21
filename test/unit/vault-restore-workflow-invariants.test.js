@@ -8,6 +8,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { RENDERER_LINE_BUDGET } = require('../helpers/renderer-line-budget');
 
 const REPO_ROOT = path.join(__dirname, '../..');
 const MAIN_JS = fs.readFileSync(path.join(REPO_ROOT, 'src/main/main.js'), 'utf8');
@@ -131,7 +132,20 @@ test('renderer.js is untouched by this leg (DD11: no renderer.js change, or a na
   // into src/renderer/chrome/auth-challenge-controller.js — see
   // seam-contract.test.js's RENDERER_LINE_BUDGET comment for the full
   // accounting.
-  assert.equal(lines, 1550, 'renderer.js line count matches the current landed source');
+  //
+  // Squawk 0096: this pin now reads test/helpers/renderer-line-budget.js's
+  // RENDERER_LINE_BUDGET (imported above) instead of carrying its own literal — the
+  // SAME constant seam-contract.test.js's `<=` ceiling test reads. This is sound
+  // because renderer.js's own line-budget ruling is zero-headroom ("no slack banked
+  // beyond the landed value" — see that file's comment), so the ceiling and the exact
+  // landed count are the same number by policy. A future leg that legitimately
+  // changes renderer.js retargets the ONE constant in the helper; both this test and
+  // the seam-contract ceiling move together.
+  assert.equal(
+    lines,
+    RENDERER_LINE_BUDGET,
+    'renderer.js line count matches the current landed source (test/helpers/renderer-line-budget.js)'
+  );
 });
 
 test('no inline VaultStore error-class check outside the vault-sheet-errors.js mapper (zero inline ladders)', () => {

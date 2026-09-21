@@ -349,7 +349,19 @@ pinning behaviour with the existing menu specs' unit twins, and unifies the
 chip refresh: one `refreshTabIndicators(tab)` in
 `site-security-controller.js` called by every per-tab push handler
 (failure, security, crash, hung) and by activation — the F2 debrief's two
-recommendations. `RENDERER_LINE_BUDGET` is lowered to the measured count
+recommendations.
+
+> **Correction (squawk 0085, verified against shipped code).** "hung" does
+> not belong in that per-tab-push list: `hang-notice-controller.js`'s
+> `onTabHung` (the `tab-hung` push handler) calls `refreshStrip(tab)` and
+> `project(tab)`, never `refreshTabIndicators` — the address-chip model
+> never reads `tab.hung`, so it never needed to. The as-shipped callers of
+> `refreshTabIndicators` are the failure, security, and crash pushes, plus
+> activation (`grep -rn refreshTabIndicators src/`, current as of this
+> squawk). This text is left as originally written rather than silently
+> rewritten; the shipped behaviour is correct and unaffected.
+
+`RENDERER_LINE_BUDGET` is lowered to the measured count
 (expected ≤ 1550) and this flight's glue (panel deps, the bar controller,
 census, two seam hooks) must fit with ≥ 40 lines to spare. Seam hooks:
 `showCrashPanelForAudit()` and `showHangNoticeForAudit()` (synthetic

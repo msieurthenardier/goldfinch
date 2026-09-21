@@ -15,7 +15,6 @@ const {
   fallbackRoleOf,
   findCardFields,
   findAllCardFields,
-  isLiveCardNumberField,
   parseExpiry,
   fillCardForm
 } = require('../../src/preload/vault-card-fields');
@@ -475,16 +474,6 @@ test('an out-of-range ordinal falls back to the first detected entry', () => {
 
   fillCardForm(doc, CARD, 99);
   assert.equal(f.number.value, '4242424242424242');
-});
-
-test('isLiveCardNumberField only accepts a live detected number field', () => {
-  const f = cardForm();
-  const doc = makeDoc([new FakeForm([f.number, f.csc])]);
-
-  assert.equal(isLiveCardNumberField(doc, f.number), true);
-  assert.equal(isLiveCardNumberField(doc, f.csc), false, 'the csc is not a fill anchor');
-  assert.equal(isLiveCardNumberField(doc, new FakeInput({ autocomplete: 'cc-number' })), false);
-  assert.equal(isLiveCardNumberField(doc, null), false);
 });
 
 // --- squawk 0091: underscore-joined prefixes, WITHOUT the placeholder crutch --

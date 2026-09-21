@@ -194,7 +194,9 @@ uploaded anywhere.
   and its `.meta` sibling removed together) across `pending`/`completed`/
   `new` at every `app.ready` (`crash-log.js`'s `pruneDumps`); there is no
   in-app viewer or "clear dumps" control — delete the `crashDumps`
-  directory (or the whole profile) to remove them.
+  directory (or the whole profile) to remove them. Pruning is not
+  synchronised with Crashpad's own dump writer — a prune racing a live
+  write is a theoretical, accepted race, never observed causing corruption.
 - **Triggering a crash for testing**: read the target renderer's OS pid from
   the admin census (`enumerateTabs`' `pid` field for a guest, or
   `enumerateWindows`' `chromePid` for a window's chrome), then signal it from

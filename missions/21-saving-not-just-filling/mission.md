@@ -328,13 +328,14 @@ that follows it fires.
       large flight, and design review flagged it as the mission's one oversized
       piece.
 - [x] Flight 2: **Identity foundations** *(landed 2026-09-20)* — what an identity IS and how it is
-      stored: the admissibility boundary (a specific token stands alone, a generic
-      one needs a qualifying prefix), proven against adversarial fixtures; the card
-      fallback-pattern fixes escalated from squawks 0090/0091; and the identity
-      item type in the vault substrate including a bundle importer that survives an
-      unknown type. Nothing page-facing ships. *(Split at design review from a
-      single larger "Identity items" flight — review judged that a repeat of
-      Flight 1's sizing mistake.)*
+      stored: the admissibility boundary (a scope admits identity fields only with
+      an admissible postal role AND a non-postal role both present; bare `address`
+      never qualifies; matching is by alternatives, longest match wins), proven
+      against adversarial fixtures; the card fallback-pattern fixes escalated from
+      squawks 0090/0091; and the identity item type in the vault substrate
+      including a bundle importer that survives an unknown type. Nothing
+      page-facing ships. *(Split at design review from a single larger "Identity
+      items" flight — review judged that a repeat of Flight 1's sizing mistake.)*
 - [x] Flight 3: **Identity fill and capture** *(landed 2026-09-21, PR #228 — HAT
       passed; the combined-form gap the HAT found was fixed in-flight as Leg 6)* — in-world detection wiring, fill,
       capture, the three-way sheet templates, and the fill-precision regression

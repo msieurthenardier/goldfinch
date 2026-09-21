@@ -723,6 +723,35 @@ test('recoverTabs: the gap queue is deduped last-wins per (wcId, channel), survi
   ]);
 });
 
+test('recoverTabs: two no-wcId gap messages both survive the dedupe, in order, interleaved with a deduped wcId pair at its last-occurrence position', async () => {
+  const sent = [];
+  const h = makeHarness({ chromeRecoveryAdopts: [['adopt-tab', { wcId: 1, active: true }]] });
+  await h.lifecycle.ready;
+  const rec = {
+    bootConfigServed: false,
+    noBootTab: false,
+    recoverTabs: true,
+    restoreTabs: null,
+    tabViews: new Map([[1, { view: {} }]]),
+    activeTabWcId: 1,
+    pendingChromeSends: [
+      () => ['tab-loading', { wcId: 1, loading: true }],
+      () => ['toast-show', { message: 'first toast' }], // no wcId — must never collapse with the other
+      () => ['tab-loading', { wcId: 1, loading: false }], // survivor for (1, tab-loading) — last occurrence
+      () => ['toast-show', { message: 'second toast' }] // no wcId — must never collapse with the first
+    ],
+    chromeView: { webContents: { isDestroyed: () => false, send: (...args) => sent.push(args) } }
+  };
+  h.setBootRecord(rec);
+  h.handlers.get('window-boot-config')({ sender: {} });
+  assert.deepEqual(sent, [
+    ['adopt-tab', { wcId: 1, active: true }],
+    ['toast-show', { message: 'first toast' }],
+    ['tab-loading', { wcId: 1, loading: false }],
+    ['toast-show', { message: 'second toast' }]
+  ]);
+});
+
 test('pruneCrashDumps is called at ready with app.getPath("crashDumps")', async () => {
   const h = makeHarness();
   await h.lifecycle.ready;

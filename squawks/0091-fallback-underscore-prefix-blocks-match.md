@@ -128,11 +128,8 @@ normalisation creates new word boundaries): `pan`, `acctNum`, `tenderNumber`,
 
 ## Sign-Off
 
-**Reviewer**: pending — this flight batches implementation across its legs and
-runs one code review at the end (see `flight.md`'s Technical Approach). This
-corrective action and its verification are the Developer's own; the
-end-of-flight review is the formal sign-off of record and will amend this
-section if it finds otherwise.
-**Commit**: uncommitted at leg-implementation time — branch
-`flight/02-identity-items` (Mission 21, Flight 2, Leg 1); committed at
-end-of-flight per this project's convention.
+**Reviewer**: independent Reviewer, flight-end review batched across Flight 2's
+legs (see `flight.md`'s Technical Approach) — reviewed as part of PR #226's
+flight-end review, which reported no blocking issues.
+**Verdict**: confirmed
+**Commit**: `016e540` — `flight/02: Identity Foundations (Mission 21) (#226)`

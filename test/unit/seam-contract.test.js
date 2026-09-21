@@ -29,11 +29,13 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
+const { RENDERER_LINE_BUDGET } = require('../helpers/renderer-line-budget');
 
 const REPO_ROOT = path.join(__dirname, '../..');
 const RENDERER_JS = path.join(REPO_ROOT, 'src/renderer/renderer.js');
 const BOOKMARKS_BAR_JS = path.join(REPO_ROOT, 'src/renderer/chrome/bookmarks-bar.js');
 const VAULT_JS = path.join(REPO_ROOT, 'src/renderer/pages/vault.js');
+const VAULT_RESTORE_CONTROLLER_JS = path.join(REPO_ROOT, 'src/renderer/pages/vault-restore-controller.js');
 const A11Y_AUDIT_MJS = path.join(REPO_ROOT, 'scripts/a11y-audit.mjs');
 
 // The FD-approved closed-set size (CLAUDE.md "Renderer evaluate-seam
@@ -303,7 +305,13 @@ const SEAM_COUNT = 41;
 // extraction precedent), buying the headroom the flight's later identity legs
 // need. Measured AFTER `npm run format` (this test's own split-array metric):
 // 1550. No slack banked beyond the landed value, per the leg's own AC8.
-const RENDERER_LINE_BUDGET = 1550;
+//
+// Squawk 0096: this number is now single-sourced in test/helpers/renderer-line-
+// budget.js (imported above as RENDERER_LINE_BUDGET) — vault-restore-workflow-
+// invariants.test.js's exact-equality pin reads the SAME constant, so a future
+// retarget touches one place instead of two. A future leg that changes this
+// number still records its own history entry here (the historical accounting
+// above stays put) but edits the value in the helper module, not a local const.
 
 // Bookmarks-bar line budget (squawk 0025, M15 debrief finding F25): bar/
 // overflow rendering, measurement, and dispatch business logic lives in
@@ -338,6 +346,18 @@ const BOOKMARKS_BAR_LINE_BUDGET = 1100;
 // vault-restore-controller.js gets NO budget of its own (the vault-browser-import-
 // controller.js sibling precedent — it has none either).
 const VAULT_PAGE_LINE_BUDGET = 2150;
+
+// vault-restore-controller.js line budget (squawk 0069): the file (M19 F2 Leg 1
+// extraction target, the restore/export modal cluster pulled out of vault.js —
+// see the VAULT_PAGE_LINE_BUDGET note above) carried no budget of its own,
+// unlike vault.js/renderer.js/bookmarks-bar.js — a gap the M19 F2 debrief
+// flagged as a re-accretion risk (five nontrivial modals: export, restore
+// pick, color-swatch, mapping, completion) worth closing while the file is
+// fresh. Measures 855 lines (this test's own split-array metric); budget =
+// landed + a small buffer (~50 lines), rounded to a clean number, same "lock
+// in headroom, don't leave slack" discipline as the BOOKMARKS_BAR_LINE_BUDGET
+// and VAULT_PAGE_LINE_BUDGET pins above.
+const VAULT_RESTORE_CONTROLLER_LINE_BUDGET = 900;
 
 const SEAM_ANCHOR = 'Object.assign(/** @type {any} */ (globalThis), {';
 const IDENTIFIER_RE = /^[A-Za-z_$][\w$]*$/;
@@ -392,6 +412,15 @@ test('vault.js stays within its VAULT_PAGE_LINE_BUDGET line budget (M18 F3 L3 / 
   const source = fs.readFileSync(VAULT_JS, 'utf8');
   const lines = source.split(/\r?\n/).length;
   assert.ok(lines <= VAULT_PAGE_LINE_BUDGET, `vault.js has ${lines} lines; budget is ${VAULT_PAGE_LINE_BUDGET}`);
+});
+
+test('vault-restore-controller.js stays within its VAULT_RESTORE_CONTROLLER_LINE_BUDGET line budget (squawk 0069)', () => {
+  const source = fs.readFileSync(VAULT_RESTORE_CONTROLLER_JS, 'utf8');
+  const lines = source.split(/\r?\n/).length;
+  assert.ok(
+    lines <= VAULT_RESTORE_CONTROLLER_LINE_BUDGET,
+    `vault-restore-controller.js has ${lines} lines; budget is ${VAULT_RESTORE_CONTROLLER_LINE_BUDGET}`
+  );
 });
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,14 @@
 // @ts-check
 'use strict';
 
+// LD1 (M21 F3 Leg 3) moved this module's private `setFieldValue` out to
+// field-setters.js for the card and identity families but deliberately left
+// this copy alone (see squawk 0097). Squawk 0097 finishes the consolidation:
+// the two bodies were confirmed byte-identical (value assignment + the same
+// bubbling `input`/`change` events, same init options), so this is a pure
+// import swap — no behavior change.
+const { setFieldValue } = require('./field-setters');
+
 // Pure login-form field-selection + fill helpers for the guest main-world
 // preload (Mission 12, Flight 1, Leg 4). Factored OUT of webview-preload.js so
 // they unit-test headlessly against a hand-rolled fake `document`: the preload
@@ -84,34 +92,6 @@ function findAllLoginFields(doc) {
 }
 
 /**
- * Set a field's value and dispatch the bubbling input + change events a live
- * page's framework listeners expect.
- * @param {any} field
- * @param {string} value
- */
-function setFieldValue(field, value) {
-  field.value = value;
-  field.dispatchEvent(new Event('input', { bubbles: true }));
-  field.dispatchEvent(new Event('change', { bubbles: true }));
-}
-
-/**
- * Is `field` one of the password inputs CURRENTLY present in `doc`? A gesture
- * target is validated against the live document immediately before filling
- * (PR#112 finding 9) so a stale / detached / spoofed node can never be filled —
- * only a real, still-present password field the icon was anchored to.
- * @param {any} doc
- * @param {any} field
- * @returns {boolean}
- */
-function isLivePasswordField(doc, field) {
-  if (!field || !doc || typeof doc.querySelectorAll !== 'function') return false;
-  const pwList = doc.querySelectorAll('input[type=password]');
-  if (!pwList || !pwList.length) return false;
-  return Array.from(pwList).includes(field);
-}
-
-/**
  * Fill the TOP-FRAME login form on `doc` with `cred` ({ username, password }).
  * Top-frame only: never fills inside an iframe (defense in depth atop the
  * main-frame-only `webContents.send`). No password field → no-op. Returns a
@@ -164,4 +144,4 @@ function fillLoginForm(doc, cred, ordinal) {
   return { filled: true, fields: written };
 }
 
-module.exports = { findLoginFields, findAllLoginFields, fillLoginForm, isLivePasswordField };
+module.exports = { findLoginFields, findAllLoginFields, fillLoginForm };

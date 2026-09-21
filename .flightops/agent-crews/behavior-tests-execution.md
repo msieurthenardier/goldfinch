@@ -783,3 +783,67 @@ Signal `[READY]` now.
   claims. The vault store's Electron-free `load()` runs `recover()`
   (write-capable in principle): bracket any live-profile harness run with
   before/after hash verification.
+- **Guest-crash signal choice**: with `crashReporter` active, `kill -SEGV`
+  / `kill -ABRT` do not crash a SANDBOXED guest renderer on this build —
+  the guest stays `ok` at the same pid; only `kill -KILL` crashes it. Go
+  straight to KILL when a guest crash is the goal — see
+  `tests/behavior/crash-and-hang-surfaces/runs/2026-09-17-00-22-28.md`
+  (Checkpoint 1 raw state; Checkpoint 11 Actions taken; Orchestrator Notes
+  "SEGV/ABRT do not crash a sandboxed guest on this build").
+- **`captureWindow`/`captureScreenshot` against a `SIGSTOP`ped renderer**:
+  both refuse with `capture-timeout` (no fresh compositor frame within the
+  capture window) — a stopped guest's continued visibility is a `[by-eye]`
+  observable, not one this apparatus can render a verdict on — see same
+  run (Checkpoint 6 Actions taken/Verdict; Orchestrator Notes "Apparatus
+  ceiling found (step 6)").
+- **Chrome SEGV latency**: a SEGV on the unsandboxed chrome renderer takes
+  ~15 s to register (Crashpad's in-process handler runs first) — the
+  window census can hold `booted: true` with the OLD `chromePid` for the
+  whole gap before the crash+reload completes inside a single sampling
+  tick. Corroborate a chrome crash by the `chromePid` CHANGE
+  (`src/main/window-census.js`'s `chromePidOf`/`WindowCensusRow.chromePid`),
+  never by catching a transient `booted: false` between samples — see same
+  run (Checkpoint 10 raw state/Verdict; Orchestrator Notes "SEGV latency on
+  the chrome view (step 10)").
+- **`openTab` return shape**: returns a bare number (the wcId), not an
+  object — confirmed against `src/main/automation/mcp-tools.js`'s own doc
+  comment ("the new wcId (number) OR null") — see same run (Checkpoint 1
+  Actions taken; Closing Summaries, Executor item 4).
+- **`navigate` right after `openTab`**: can race the still-loading page —
+  poll until url/loadState/pid stabilise before treating a `navigate`
+  result as settled; Checkpoint 1's first take (wcId 18) raced the initial
+  load and was discarded, redone on a fresh tab (wcId 19) with a settle
+  poll — see same run (Checkpoint 1 Actions taken).
+- **Renderer sharing**: same-origin, same-jar tabs are not guaranteed to
+  share a renderer process, but when they do, killing one crashes both —
+  check pids before deciding how many kill signals a multi-tab scenario
+  needs — see same run (Checkpoint 1 Validator notes: "the discarded wcId
+  18 shared a renderer with wcId 19 and crashed with it").
+- **`enumerateTabs` vs `enumerateWindows` as the liveness probe**: a
+  wedged `enumerateTabs` (the SDK's full 60 s timeout) against a window
+  whose chrome had died was a PRODUCT defect, since fixed
+  (`chrome-recovery.js`'s pause branch now clears `bootConfigServed`, so a
+  paused window contributes zero census rows instead of hanging);
+  `enumerateWindows` stayed fast throughout and is the liveness proof —
+  set an explicit short client timeout on `enumerateTabs` in any doubtful
+  (recovery-paused / dead-chrome) state rather than trusting its default
+  timeout — see same run (Checkpoint 12 Actions taken/Validator notes;
+  Checkpoint 12b; Orchestrator Notes "Fix pass F1").
+- **Post-loop reads are their own evidence, distinct from the
+  transient-poll-evidence rule above**: a value read only AFTER a polling
+  loop ends — e.g. confirming a `chromePid` change once the loop's own 30
+  saved samples never caught it, requiring the Validator's own fresh read
+  — must be saved as its own evidence file, not left as an unrecorded live
+  read. The existing transient-read rule (tls-trust-surface run, above)
+  covers reads taken DURING a poll; this is the companion case for the
+  read taken AFTER the poll concludes — see same run (Checkpoint 10 raw
+  state: "the Executor had not saved that post-loop read as a file";
+  Validator notes: "process gap — post-loop reads must be saved as
+  evidence files; enforced by the Orchestrator from step 11 on").
+- **Window topology after a relaunch**: renumbers totally — `windowId`s
+  are not stable across a relaunch, which upgrades the existing
+  out-of-band-relaunch guidance above (wcId renumbering as a relaunch
+  signal) with the window-level case — re-resolve THE window under test by
+  its `lastFocused` flag, not by a remembered `windowId` — see same run
+  (Checkpoint 15 Actions taken; Orchestrator Notes "Relaunch (row 15,
+  after checkpoint 14)").
