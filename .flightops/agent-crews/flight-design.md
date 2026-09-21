@@ -70,6 +70,16 @@ Evaluate:
    user actions should invalidate it. Vague answers ("eventually", "on next cycle")
    without a concrete trigger are a flag. Conflating "cached object works" with
    "cached object reflects current source" is a common category error worth catching.
+9. Scenario trace — for every design decision whose own prose names a concrete
+   motivating scenario ("on this page, the user does X and gets Y"), trace that exact
+   scenario through the code AS IT WILL EXIST after the flight's planned changes,
+   from its real entry point to its observable outcome, with probes (grep, node -e),
+   not reasoning. Report any step where the trace cannot complete. A decision can
+   correctly fix every mechanism it lists and still leave its own scenario broken if
+   the cause sits in a layer none of its changes touch.
+10. Decision consistency — does any design decision constrain behaviour that another
+   decision's motivating scenario depends on? Check the decisions against EACH OTHER,
+   not only against the code, and cite any conflicting pair verbatim.
 
 Provide structured output:
 

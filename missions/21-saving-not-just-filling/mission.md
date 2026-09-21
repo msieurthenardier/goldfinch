@@ -355,6 +355,15 @@ that follows it fires.
       flight carries little of its security risk — generation is triggered by a
       trusted click on Goldfinch's own injected element, which is already gated
       today — and is instead the mission's highest UI-craft risk.
+- [ ] Flight 5 *(optional)* — **carried from Flight 3's debrief, DECIDED by the
+      operator**: a pending save offer should SURVIVE window blur (today the
+      `vault-capture` sheet is deliberately excluded from blur survival, so
+      alt-tabbing to check a detail discards the offer). A decided behaviour change,
+      but it needs a scoped design, not a squawk: it is security-sensitive (a held
+      secret stays in memory while the window is unfocused), and it interacts with
+      Flight 3 Leg 2's LD2 (blur is an occlusion close that drops the whole queue)
+      and with the lock-close safety valve (`closesOnVaultLock` would then also close
+      it, so the dismiss-drop must fire on that reason).
 - [ ] Flight 5 *(optional)* — **carried from Flight 3's HAT**: the operator asked
       for before/after VALUES on the identity update sheet. Not a squawk — it reverses
       Flight 3's DD6 (labels only, never values) and is security-sensitive (secret PII
