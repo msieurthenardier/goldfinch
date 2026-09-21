@@ -122,7 +122,7 @@
 const assert = require('node:assert/strict');
 const { findAllLoginFields } = require('../../src/preload/vault-fill-fields');
 const { findAllCardFields } = require('../../src/preload/vault-card-fields');
-const { findAllIdentityFields } = require('../../src/preload/vault-identity-fields');
+const { findAllIdentityFields, IDENTITY_ROLES } = require('../../src/preload/vault-identity-fields');
 const { createEntryObserver, LOGIN_ROLES, CARD_ROLES } = require('../../src/preload/vault-entry-observer');
 const {
   isCaptureGesture,
@@ -185,15 +185,22 @@ function assertNoDetectableEntry(doc) {
  * detected field that carries a non-empty `.value` — the corpus's stand-in for
  * "the operator typed this" (a static HTML fixture has no live keystroke to
  * simulate; `_grant` is the same test-only entry point
- * `vault-entry-observer.test.js` itself uses). Returns
- * `{ observer, logins, cards, snapshot }`.
+ * `vault-entry-observer.test.js` itself uses). THREE-WAY (M21 F3 Leg 4) —
+ * identity joins login/card, never a binary observer. Returns
+ * `{ observer, logins, cards, identities, snapshot }`.
  * @param {any} doc
- * @returns {{ observer: any, logins: any[], cards: any[], snapshot: { logins: any[], cards: any[] } }}
+ * @returns {{ observer: any, logins: any[], cards: any[], identities: any[], snapshot: { logins: any[], cards: any[], identities: any[] } }}
  */
 function buildProvenancedObserver(doc) {
-  const observer = createEntryObserver({ document: doc, findAllLoginFields, findAllCardFields });
+  const observer = createEntryObserver({
+    document: doc,
+    findAllLoginFields,
+    findAllCardFields,
+    findAllIdentityFields
+  });
   const logins = findAllLoginFields(doc);
   const cards = findAllCardFields(doc);
+  const identities = findAllIdentityFields(doc);
   for (const entry of logins) {
     for (const role of LOGIN_ROLES) {
       const field = entry[role];
@@ -206,7 +213,28 @@ function buildProvenancedObserver(doc) {
       if (field && field.value) observer._grant(field);
     }
   }
-  return { observer, logins, cards, snapshot: observer.snapshot() };
+  for (const entry of identities) {
+    for (const role of IDENTITY_ROLES) {
+      const field = entry[role];
+      if (field && field.value) observer._grant(field);
+    }
+  }
+  return { observer, logins, cards, identities, snapshot: observer.snapshot() };
+}
+
+/**
+ * The snapshot array for `kind` — THREE-WAY (M21 F3 Leg 4), replacing the
+ * binary `resolved.kind === 'card' ? snapshot.cards : snapshot.logins` dispatch
+ * (the Central Danger table's own class of defect: a missed identity site here
+ * would silently read the LOGIN snapshot for an identity-resolved gesture).
+ * @param {{ logins: any[], cards: any[], identities: any[] }} snapshot
+ * @param {'login'|'card'|'identity'} kind
+ * @returns {any[]}
+ */
+function snapshotEntriesFor(snapshot, kind) {
+  if (kind === 'card') return snapshot.cards;
+  if (kind === 'identity') return snapshot.identities;
+  return snapshot.logins;
 }
 
 /**
@@ -237,13 +265,13 @@ function resolveGestureElement(doc, selector) {
  * provenanced secret worth holding. Proves CAPTURE-WORTHINESS only — see the
  * module header for why that is a deliberately narrower claim than "offers".
  * @param {any} doc
- * @param {'login'|'card'} family
+ * @param {'login'|'card'|'identity'} family
  * @param {{ expectedOrdinal?: number, gestureSelector?: string }} [opts]
- * @returns {{ target: any, resolved: { kind: 'login'|'card', ordinal: number }, entrySnapshot: any }}
+ * @returns {{ target: any, resolved: { kind: 'login'|'card'|'identity', ordinal: number }, entrySnapshot: any }}
  */
 function resolveCaptureWorthyGesture(doc, family, opts = {}) {
   const expectedOrdinal = opts.expectedOrdinal ?? 0;
-  const { logins, cards, snapshot } = buildProvenancedObserver(doc);
+  const { logins, cards, identities, snapshot } = buildProvenancedObserver(doc);
 
   const target = resolveGestureElement(doc, opts.gestureSelector);
   assert.ok(
@@ -254,7 +282,7 @@ function resolveCaptureWorthyGesture(doc, family, opts = {}) {
   const event = { type: 'click', isTrusted: true, target };
   assert.ok(isCaptureGesture(event), "expected the designated element's click to qualify as a capture gesture");
 
-  const resolved = resolveGestureTarget(target, { logins, cards });
+  const resolved = resolveGestureTarget(target, { logins, cards, identities });
   assert.ok(resolved, 'expected the gesture to resolve to a detected entry');
   assert.equal(resolved.kind, family, `expected the gesture to resolve a ${family} entry, resolved ${resolved.kind}`);
   assert.equal(
@@ -263,7 +291,7 @@ function resolveCaptureWorthyGesture(doc, family, opts = {}) {
     `expected the gesture to resolve ordinal ${expectedOrdinal}, resolved ${resolved.ordinal}`
   );
 
-  const entrySnapshot = (resolved.kind === 'card' ? snapshot.cards : snapshot.logins)[resolved.ordinal];
+  const entrySnapshot = snapshotEntriesFor(snapshot, resolved.kind)[resolved.ordinal];
   assert.ok(
     snapshotHasProvenancedSecret(entrySnapshot, resolved.kind),
     `expected the resolved ${family} entry at ordinal ${expectedOrdinal} to carry a provenanced secret worth capturing`
@@ -277,7 +305,7 @@ function resolveCaptureWorthyGesture(doc, family, opts = {}) {
  * Leg 6 — hat-and-alignment; body unchanged). See the module header:
  * CAPTURE-WORTHINESS only, never a claim that an offer is ever released.
  * @param {any} doc
- * @param {'login'|'card'} family
+ * @param {'login'|'card'|'identity'} family
  * @param {{ expectedOrdinal?: number, gestureSelector?: string }} [opts]
  */
 function assertCapturesEntry(doc, family, opts = {}) {
@@ -323,7 +351,7 @@ function wouldNativelySubmit(target) {
  * `wouldNativelySubmit(target)` — the resolved gesture element must actually
  * settle via native navigation for a fixture to earn `assert: 'offers'`.
  * @param {any} doc
- * @param {'login'|'card'} family
+ * @param {'login'|'card'|'identity'} family
  * @param {{ expectedOrdinal?: number, gestureSelector?: string }} [opts]
  */
 function assertOffersEntry(doc, family, opts = {}) {
@@ -349,7 +377,7 @@ function assertOffersEntry(doc, family, opts = {}) {
  * @param {{ gestureSelector?: string }} [opts]
  */
 function assertNoOffer(doc, opts = {}) {
-  const { logins, cards, snapshot } = buildProvenancedObserver(doc);
+  const { logins, cards, identities, snapshot } = buildProvenancedObserver(doc);
 
   const target = resolveGestureElement(doc, opts.gestureSelector);
   assert.ok(
@@ -360,10 +388,10 @@ function assertNoOffer(doc, opts = {}) {
   const event = { type: 'click', isTrusted: true, target };
   if (!isCaptureGesture(event)) return; // not even a qualifying gesture — definitely no offer
 
-  const resolved = resolveGestureTarget(target, { logins, cards });
+  const resolved = resolveGestureTarget(target, { logins, cards, identities });
   if (!resolved) return; // no entry resolves — nothing to capture
 
-  const entrySnapshot = (resolved.kind === 'card' ? snapshot.cards : snapshot.logins)[resolved.ordinal];
+  const entrySnapshot = snapshotEntriesFor(snapshot, resolved.kind)[resolved.ordinal];
   assert.ok(
     !snapshotHasProvenancedSecret(entrySnapshot, resolved.kind),
     `expected NO provenanced secret to be available for capture via this gesture (resolved ${resolved.kind} ordinal ${resolved.ordinal})`

@@ -54,6 +54,9 @@
 const LOGIN_ROLES = ['username', 'password'];
 /** Card entry roles this module ever reads/snapshots. */
 const CARD_ROLES = ['number', 'cardholder', 'expiry', 'expMonth', 'expYear', 'csc'];
+// Identity roles (M21 F3 Leg 3): imported, never hand-typed a third time
+// (AC3b) — the single source is vault-identity-fields.js's own derived union.
+const { IDENTITY_ROLES } = require('./vault-identity-fields');
 
 // DD3i (Leg 5 design review): provenance retention is BOUNDED, not indefinite.
 // Before this flight a plaintext password existed only transiently inside one
@@ -71,7 +74,8 @@ const PROVENANCE_TTL_MS = 15 * 60 * 1000;
  * @param {any} deps.document
  * @param {(doc: any) => Array<{username: any, password: any, form: any}>} deps.findAllLoginFields
  * @param {(doc: any) => Array<{number: any, cardholder: any, expiry: any, expMonth: any, expYear: any, csc: any, form: any}>} [deps.findAllCardFields]
- * @param {(snapshot: { logins: any[], cards: any[] }) => void} [deps.report]
+ * @param {(doc: any) => any[]} [deps.findAllIdentityFields]  identity entries (M21 F3 Leg 3).
+ * @param {(snapshot: { logins: any[], cards: any[], identities: any[] }) => void} [deps.report]
  *   called with the CURRENT full snapshot after every provenance-affecting event
  *   (a grant, a fill-grant, or a detachment eviction) — plain data only, per DD3g.
  * @param {() => number} [deps.now]  clock (default Date.now) — injected so the DD3i TTL is
@@ -85,6 +89,7 @@ function createEntryObserver({
   document: doc,
   findAllLoginFields,
   findAllCardFields,
+  findAllIdentityFields,
   report,
   now,
   setTimeout: injectedSetTimeout,
@@ -92,6 +97,7 @@ function createEntryObserver({
 }) {
   const loginEntries = typeof findAllLoginFields === 'function' ? findAllLoginFields : () => [];
   const cardEntries = typeof findAllCardFields === 'function' ? findAllCardFields : () => [];
+  const identityEntries = typeof findAllIdentityFields === 'function' ? findAllIdentityFields : () => [];
   const _now = typeof now === 'function' ? now : Date.now;
   // `setTimeout`/`clearTimeout` are HOST-provided, not a standard-JS built-in
   // (unlike `Date` above) — a bare reference to either, evaluated where no
@@ -126,7 +132,7 @@ function createEntryObserver({
   const provenance = new Map();
 
   function detect() {
-    return { logins: loginEntries(doc), cards: cardEntries(doc) };
+    return { logins: loginEntries(doc), cards: cardEntries(doc), identities: identityEntries(doc) };
   }
 
   function isDetectedField(field, entries) {
@@ -135,6 +141,11 @@ function createEntryObserver({
     }
     for (const entry of entries.cards) {
       for (const role of CARD_ROLES) {
+        if (entry[role] === field) return true;
+      }
+    }
+    for (const entry of entries.identities) {
+      for (const role of IDENTITY_ROLES) {
         if (entry[role] === field) return true;
       }
     }
@@ -214,12 +225,20 @@ function createEntryObserver({
   /**
    * The full plain-data snapshot: every currently-detected entry, three-state
    * per field. Never a node handle — every value here is a boolean or a string.
+   * Identity entries additionally carry `anchorRole` (LD3, M21 F3 Leg 4) — a
+   * plain role-name string the main-world detector already stamped on the
+   * entry (`entry.anchorRole`), read here rather than re-derived, so the
+   * value-layer gate can read anchor role AND values from ONE enumeration.
    */
   function snapshot() {
     const entries = detect();
     return {
       logins: entries.logins.map((entry) => snapshotEntry(entry, LOGIN_ROLES)),
-      cards: entries.cards.map((entry) => snapshotEntry(entry, CARD_ROLES))
+      cards: entries.cards.map((entry) => snapshotEntry(entry, CARD_ROLES)),
+      identities: entries.identities.map((entry) => ({
+        ...snapshotEntry(entry, IDENTITY_ROLES),
+        anchorRole: typeof entry.anchorRole === 'string' ? entry.anchorRole : null
+      }))
     };
   }
 

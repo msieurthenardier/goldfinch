@@ -10,10 +10,19 @@
 const { ipcRenderer, webFrame } = require('electron');
 const { findAllLoginFields } = require('./vault-fill-fields');
 const { findAllCardFields } = require('./vault-card-fields');
+const { findAllIdentityFields, IDENTITY_ROLES } = require('./vault-identity-fields');
 const { createVaultIconController } = require('./vault-fill-icon');
 const { createEntryTracker, resolveTargetForAnchor } = require('./vault-entry-tracker');
 const { VAULT_ENTRY_OBSERVER_INSTALL_SCRIPT } = require('./vault-entry-observer-bundle.generated');
-const { isCaptureGesture, resolveGestureTarget, snapshotHasProvenancedSecret } = require('./vault-gesture-policy');
+const {
+  isCaptureGesture,
+  resolveGestureTarget,
+  snapshotHasProvenancedSecret,
+  resolveOrdinalInFamily,
+  LOGIN_ROLES,
+  CARD_ROLES
+} = require('./vault-gesture-policy');
+const { createGestureDetachWatch } = require('./vault-gesture-detach-watch');
 const { createBookmarkDropListeners } = require('./guest-bookmark-drop');
 const { tabBoundary } = require('../shared/tab-boundary');
 
@@ -329,12 +338,14 @@ const vaultIcons = createVaultIconController({
   isTrustedGet,
   findAllLoginFields,
   findAllCardFields,
+  findAllIdentityFields,
   getEnabled: () => vaultEligible && IS_TOP_FRAME,
   getVaultLocked: () => vaultLocked,
   // Shared entry-resolution walk (M21 F1 Leg 3, DD3g "same pure module, two
   // execution contexts") — decorative icon placement stays main-world, using
   // the SAME resolution logic capture will use inside the isolated world.
-  resolveTarget: (anchor) => resolveTargetForAnchor(document, anchor, { findAllLoginFields, findAllCardFields })
+  resolveTarget: (anchor) =>
+    resolveTargetForAnchor(document, anchor, { findAllLoginFields, findAllCardFields, findAllIdentityFields })
 });
 
 // The entry tracker (Mission 21, Flight 1, Leg 3 — entry-tracker, DD3f/DD3g/
@@ -418,40 +429,56 @@ if (document.documentElement) {
 // Allow the UI to force a refresh.
 ipcRenderer.on('rescan-media', () => send());
 
-// Vault fill (M12 F1 Leg 4; routed in-world M21 F1 Leg 3, DD3h): the
-// main→preload credential-injection channel. The resolved credential arrives
-// ONLY here (never over the MCP wire) and is filled into the TOP-FRAME login
-// form; fillLoginForm (now running INSIDE the isolated world, not here) guards
-// `window.top === window`, and webContents.send targets the main frame, so a
-// cross-origin iframe is never filled. page JS cannot register a rogue
-// 'vault-fill' listener — the guest runs nodeIntegration:false, so it has no
-// ipcRenderer (DD7).
-// The fill itself now executes in the isolated world (DD3h: fill and grant
-// happen in ONE realm, so there is no main-world-node-identity-crosses-the-
-// boundary correlation problem to solve). `consumeFillTarget('login')` is still
-// called for its single-use + TTL + kind-match bookkeeping (PR#112 finding 9's
-// binding stays exactly as vault-fill-icon.js implements it — proven unmodified
-// by test/unit/vault-fill-icon.test.js), but its returned field is a MAIN-WORLD
-// node reference that per DD3g can never cross into the isolated world — the
-// isolated-world fill instead always resolves via fillLoginForm's own
-// first-detected-entry fallback (the same path MCP/no-gesture fills already
-// used). Documented, deliberate precision trade-off for this leg; see the
-// flight log.
+// Vault fill (M12 F1 Leg 4; routed in-world M21 F1 Leg 3, DD3h; ordinal
+// precision restored M21 F3 Leg 3, DD9): the main→preload credential-injection
+// channel. The resolved credential arrives ONLY here (never over the MCP wire)
+// and is filled into the TOP-FRAME login form; fillLoginForm (now running
+// INSIDE the isolated world, not here) guards `window.top === window`, and
+// webContents.send targets the main frame, so a cross-origin iframe is never
+// filled. page JS cannot register a rogue 'vault-fill' listener — the guest
+// runs nodeIntegration:false, so it has no ipcRenderer (DD7).
+// The fill itself executes in the isolated world (DD3h: fill and grant happen
+// in ONE realm, so there is no main-world-node-identity-crosses-the-boundary
+// correlation problem to solve). `consumeFillTarget('login')`'s bound field
+// (PR#112 finding 9) is now resolved to an INTEGER ordinal via the SAME
+// `resolveOrdinalInFamily` the capture gesture already uses (DD9 — no new
+// helper) — an integer crosses the isolated-world boundary freely, unlike the
+// node reference DD3g forbids — and passed alongside the credential. A
+// null/stale/out-of-range ordinal falls back to fillLoginForm's own
+// first-detected-entry behaviour (the same path MCP/no-gesture fills use).
 ipcRenderer.on('vault-fill', (_e, cred) => {
-  vaultIcons.consumeFillTarget('login');
-  entryTracker.fillLogin(cred);
+  const target = vaultIcons.consumeFillTarget('login');
+  const ordinal = resolveOrdinalInFamily(target, findAllLoginFields(document), LOGIN_ROLES);
+  entryTracker.fillLogin({ cred, ordinal });
 });
 
-// Vault CARD fill (issue #152; routed in-world M21 F1 Leg 3, DD3h): the card
-// twin of `vault-fill`. Same trust shape — the resolved card arrives ONLY here
-// (never over the MCP wire, which stays login-only) and is filled into the
-// TOP-FRAME card form inside the isolated world; `fillCardForm` there guards
-// `window.top === window` and `webContents.send` targets the main frame, so a
-// cross-origin iframe is never filled. Same consume-for-bookkeeping-only
-// trade-off as the login path above.
+// Vault CARD fill (issue #152; routed in-world M21 F1 Leg 3, DD3h; ordinal
+// precision M21 F3 Leg 3, DD9): the card twin of `vault-fill`. Same trust
+// shape — the resolved card arrives ONLY here (never over the MCP wire, which
+// stays login-only) and is filled into the TOP-FRAME card form inside the
+// isolated world; `fillCardForm` there guards `window.top === window` and
+// `webContents.send` targets the main frame, so a cross-origin iframe is
+// never filled. Same ordinal-resolution shape as the login path above.
 ipcRenderer.on('vault-fill-card', (_e, card) => {
-  vaultIcons.consumeFillTarget('card');
-  entryTracker.fillCard(card);
+  const target = vaultIcons.consumeFillTarget('card');
+  const ordinal = resolveOrdinalInFamily(target, findAllCardFields(document), CARD_ROLES);
+  entryTracker.fillCard({ card, ordinal });
+});
+
+// Vault IDENTITY fill (M21 F3 Leg 3, DD7/DD8/DD9): the identity twin of
+// `vault-fill`/`vault-fill-card`. The resolved identity arrives ONLY here
+// (never over the MCP wire, which stays login-only per DD7) and is filled
+// into the TOP-FRAME identity form inside the isolated world; `fillIdentityForm`
+// there guards `window.top === window`. Same ordinal-resolution shape as the
+// other two families — `consumeFillTarget('identity')`'s bound field is always
+// the entry's postal anchor (DD8: `targetForAnchor` resolves either of the
+// entry's two icon fields to the postal anchor), which is itself one of the
+// eleven `IDENTITY_ROLES` fields, so `resolveOrdinalInFamily`'s step 1 always
+// resolves for a real gesture.
+ipcRenderer.on('vault-fill-identity', (_e, identity) => {
+  const target = vaultIcons.consumeFillTarget('identity');
+  const ordinal = resolveOrdinalInFamily(target, findAllIdentityFields(document), IDENTITY_ROLES);
+  entryTracker.fillIdentity({ identity, ordinal });
 });
 
 // ---------------------------------------------------------------------------
@@ -490,15 +517,17 @@ ipcRenderer.on('vault-fill-card', (_e, card) => {
 // ---------------------------------------------------------------------------
 if (IS_TOP_FRAME && vaultEligible) {
   // Main-world node references for the CURRENT pending gesture's resolved
-  // entry, watched for detachment (DD4's SPA settle signal — a flow that
+  // entry(ies), watched for detachment (DD4's SPA settle signal — a flow that
   // removes its fields without ever navigating). Spoofable (main-world), which
   // DD4 itself accepts: a forged/early detachment can only release data main
-  // ALREADY HOLDS, sooner — never fabricate a value. One observer, lazily
-  // created and re-armed per gesture rather than one-per-gesture teardown/
-  // rebuild churn.
-  let watchedGestureFields = [];
-  let gestureDetachObserver = null;
-
+  // ALREADY HOLDS, sooner — never fabricate a value. M21 F3 L2 (DD1's amendment /
+  // LD1): PER-FAMILY now — a login hold and a card hold on the SAME tab each
+  // watch their OWN field set, so a second family's gesture no longer silently
+  // drops the first family's detach signal. The kind-keyed arm/clear/fire state
+  // machine itself lives in the extracted, unit-tested `vault-gesture-detach-
+  // watch.js` (AC10) — this file supplies only the thin real-DOM +
+  // `ipcRenderer` wiring (the injected `MutationObserver`, the live document
+  // root, and the settle IPC send).
   function reportGestureSettle() {
     try {
       ipcRenderer.send('guest-vault-gesture-settle');
@@ -507,19 +536,18 @@ if (IS_TOP_FRAME && vaultEligible) {
     }
   }
 
-  function armGestureDetachWatch(fields) {
-    watchedGestureFields = fields.filter(Boolean);
-    if (!watchedGestureFields.length) return;
-    if (gestureDetachObserver) return; // already watching — the fresh field set above is enough
-    if (typeof MutationObserver !== 'function' || !document.documentElement) return; // fails closed: no detach signal, never a forged one
-    gestureDetachObserver = new MutationObserver(() => {
-      if (!watchedGestureFields.length) return;
-      const stillAttached = watchedGestureFields.every((f) => f.isConnected);
-      if (stillAttached) return;
-      watchedGestureFields = [];
-      reportGestureSettle();
-    });
-    gestureDetachObserver.observe(document.documentElement, { childList: true, subtree: true });
+  const gestureDetachWatch = createGestureDetachWatch({
+    MutationObserver: typeof MutationObserver === 'function' ? MutationObserver : undefined,
+    root: () => document.documentElement,
+    onSettle: reportGestureSettle
+  });
+
+  /**
+   * @param {'login' | 'card' | 'identity'} kind
+   * @param {any[]} fields
+   */
+  function armGestureDetachWatch(kind, fields) {
+    gestureDetachWatch.arm(kind, fields);
   }
 
   // The submitted expiry as a single `MM/YY`-ish string, from the isolated
@@ -540,16 +568,24 @@ if (IS_TOP_FRAME && vaultEligible) {
     // Guidance 1b) — the resolveTargetForAnchor split-context precedent:
     // decorative icon resolution stays main-world, capture resolution moves
     // into the isolated world; THIS pass exists only to compute an integer
-    // ordinal, never to read a value.
+    // ordinal, never to read a value. Identity's third arm (M21 F3 Leg 4, AC8)
+    // is checked LAST, matching DD5's login > card > identity precedence.
     const logins = findAllLoginFields(document);
     const cards = findAllCardFields(document);
-    const resolved = resolveGestureTarget(target, { logins, cards });
+    const identities = findAllIdentityFields(document);
+    const resolved = resolveGestureTarget(target, { logins, cards, identities });
     if (!resolved) return;
-    // Cast-to-local (house discipline, CLAUDE.md): `entry`'s two possible
-    // shapes (login vs. card) are chosen by the SAME `resolved.kind` this
+    // Cast-to-local (house discipline, CLAUDE.md): `entry`'s three possible
+    // shapes (login/card/identity) are chosen by the SAME `resolved.kind` this
     // function keeps re-checking below, but tsc cannot correlate a union
     // picked by one ternary against a later independent property read.
-    const entry = /** @type {any} */ (resolved.kind === 'card' ? cards[resolved.ordinal] : logins[resolved.ordinal]);
+    const entry = /** @type {any} */ (
+      resolved.kind === 'card'
+        ? cards[resolved.ordinal]
+        : resolved.kind === 'identity'
+          ? identities[resolved.ordinal]
+          : logins[resolved.ordinal]
+    );
     if (!entry) return;
 
     let snapshot;
@@ -559,7 +595,11 @@ if (IS_TOP_FRAME && vaultEligible) {
       return; // fail closed — no hold, no offer
     }
     const entrySnapshot = /** @type {any} */ (
-      (resolved.kind === 'card' ? snapshot.cards : snapshot.logins)[resolved.ordinal]
+      resolved.kind === 'card'
+        ? snapshot.cards[resolved.ordinal]
+        : resolved.kind === 'identity'
+          ? snapshot.identities[resolved.ordinal]
+          : snapshot.logins[resolved.ordinal]
     );
     if (!snapshotHasProvenancedSecret(entrySnapshot, resolved.kind)) return; // nothing worth holding
 
@@ -575,7 +615,38 @@ if (IS_TOP_FRAME && vaultEligible) {
           cardholder,
           expiry: expiryFromSnapshot(entrySnapshot)
         });
-        armGestureDetachWatch([entry.number, entry.cardholder, entry.expiry, entry.expMonth, entry.expYear, entry.csc]);
+        armGestureDetachWatch('card', [
+          entry.number,
+          entry.cardholder,
+          entry.expiry,
+          entry.expMonth,
+          entry.expYear,
+          entry.csc
+        ]);
+        return;
+      }
+      if (resolved.kind === 'identity') {
+        // LD2 (flight): the ten secret identity fields cross as ONE Uint8Array —
+        // the UTF-8 JSON of the ten secret role values (every role but
+        // fullName, the one non-secret field, which crosses as a plain string
+        // alongside it). Missing/unprovenanced fields encode as '' — the SAME
+        // bucket `classifyCapture`'s own `isPresent` guard already treats as
+        // absent, so an unset field is simply never judged.
+        const encoder = new TextEncoder();
+        /** @type {any} */
+        const secrets = {};
+        for (const role of IDENTITY_ROLES) {
+          if (role === 'fullName') continue;
+          secrets[role] =
+            entrySnapshot[role] && entrySnapshot[role].value != null ? String(entrySnapshot[role].value) : '';
+        }
+        const fullNameValue =
+          entrySnapshot.fullName && entrySnapshot.fullName.value != null ? String(entrySnapshot.fullName.value) : '';
+        ipcRenderer.send('guest-vault-capture-identity', {
+          identitySecrets: encoder.encode(JSON.stringify(secrets)),
+          fullName: fullNameValue
+        });
+        armGestureDetachWatch('identity', IDENTITY_ROLES.map((role) => entry[role]).filter(Boolean));
         return;
       }
       // Login. DD3c's wire field: `usernameDetected` is whether a username FIELD
@@ -589,7 +660,7 @@ if (IS_TOP_FRAME && vaultEligible) {
         entrySnapshot.username && entrySnapshot.username.value != null ? entrySnapshot.username.value : null;
       const passwordBytes = new TextEncoder().encode(String(entrySnapshot.password.value));
       ipcRenderer.send('guest-vault-capture', { username: usernameValue, usernameDetected, password: passwordBytes });
-      armGestureDetachWatch([entry.username, entry.password]);
+      armGestureDetachWatch('login', [entry.username, entry.password]);
     } catch {
       /* page navigated away mid-send — nothing was held, nothing to release */
     }

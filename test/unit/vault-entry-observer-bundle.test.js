@@ -61,14 +61,17 @@ test('the wrapped script contains no ESM export syntax', () => {
   assert.equal(/^export\s+(?:default\b|async\b|const\b|let\b|var\b|function\b|class\b|\{|\*)/m.test(src), false);
 });
 
-test('inlines the observer core and the two pure field modules (their function names are present)', () => {
+test('inlines the observer core and the pure field modules (their function names are present)', () => {
   const { VAULT_ENTRY_OBSERVER_INSTALL_SCRIPT: src } = require(generatedPath);
   for (const name of [
     'createEntryObserver',
     'fillLoginForm',
     'findAllLoginFields',
     'fillCardForm',
-    'findAllCardFields'
+    'findAllCardFields',
+    // M21 F3 Leg 3 (identity-fill, AC8) — ADD, never remove.
+    'fillIdentityForm',
+    'findAllIdentityFields'
   ]) {
     assert.ok(src.includes(name), `expected inlined name "${name}" in the observer bundle`);
   }
@@ -191,7 +194,10 @@ test('end-to-end: typing grants provenance with the REAL value, and a Goldfinch 
   assert.equal(afterTyping.logins[0].username.value, 'alice');
   assert.equal(afterTyping.logins[0].password.value, null, 'password detected but never typed into → unprovenanced');
 
-  const fillResult = handle.fillLogin({ username: 'bob', password: 'hunter2' });
+  // M21 F3 Leg 3 (DD9): the handle method's payload is `{ cred, ordinal }`, not
+  // the cred directly — `ordinal` omitted here falls back to the
+  // first-detected-entry heuristic, exactly the MCP/no-gesture path.
+  const fillResult = handle.fillLogin({ cred: { username: 'bob', password: 'hunter2' } });
   assert.equal(fillResult.filled, true); // cross-realm object — see the property-check note above
   assert.equal(username.value, 'bob');
   assert.equal(password.value, 'hunter2');

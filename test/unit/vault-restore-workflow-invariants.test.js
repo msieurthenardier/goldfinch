@@ -123,7 +123,15 @@ test('renderer.js is untouched by this leg (DD11: no renderer.js change, or a na
   // `showCrashPanelForAudit`/`showHangNoticeForAudit` seam hooks) — this
   // leg's OWN scope, not a foreign touch; see seam-contract.test.js's
   // RENDERER_LINE_BUDGET comment for the full accounting.
-  assert.equal(lines, 1577, 'renderer.js line count matches the current landed source');
+  // Retargeted again (Mission 21 Flight 3 Leg 1, sheet-type-dispatch, AC11.2 —
+  // a second, independent copy of the fact RENDERER_LINE_BUDGET already tracks,
+  // logged as squawk 0096 and deferred rather than fixed here): 1577 → 1550 —
+  // LOWERED, a behaviour-preserving move, not a growth: the two M14 F1 auth/cert
+  // challenge subscriptions + their two overlay-menu states extracted verbatim
+  // into src/renderer/chrome/auth-challenge-controller.js — see
+  // seam-contract.test.js's RENDERER_LINE_BUDGET comment for the full
+  // accounting.
+  assert.equal(lines, 1550, 'renderer.js line count matches the current landed source');
 });
 
 test('no inline VaultStore error-class check outside the vault-sheet-errors.js mapper (zero inline ladders)', () => {

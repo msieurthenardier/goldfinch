@@ -227,9 +227,11 @@ test('findAllLoginFields: null/garbage doc → empty array (pure, no throw)', ()
   assert.deepEqual(findAllLoginFields({}), []);
 });
 
-// --- targetPassword binding (PR#112 finding 9): the clicked form's field wins ---
+// --- ordinal targeting (PR#112 finding 9's precision, restored via an integer
+// per M21 F3 Leg 3, DD9 — these are the REWRITTEN regression tests: the third
+// parameter is now an ordinal, never a node) ----------------------------------
 
-test('targetPassword fills the SECOND login form, not the document-first (finding 9)', () => {
+test('ordinal 1 fills the SECOND login form, not the document-first (finding 9)', () => {
   const userA = new FakeInput('text', 'user-a');
   const passA = new FakeInput('password', 'pass-a');
   const formA = new FakeForm([userA, passA]);
@@ -238,8 +240,9 @@ test('targetPassword fills the SECOND login form, not the document-first (findin
   const formB = new FakeForm([userB, passB]);
   const doc = makeDoc([formA, formB]);
 
-  // The gesture targeted form B's password field — fill THAT form, not the first.
-  const result = fillLoginForm(doc, { username: 'bob@example.com', password: 'hunter2' }, passB);
+  // The gesture targeted form B's password field, resolved to ordinal 1 — fill
+  // THAT form, not the first.
+  const result = fillLoginForm(doc, { username: 'bob@example.com', password: 'hunter2' }, 1);
 
   assert.deepEqual(result, {
     filled: true,
@@ -254,22 +257,21 @@ test('targetPassword fills the SECOND login form, not the document-first (findin
   assert.equal(userA.value, '');
 });
 
-test('a null / stale targetPassword falls back to the first-field heuristic (MCP path)', () => {
+test('a null / out-of-range ordinal falls back to the first-field heuristic (MCP path)', () => {
   const userA = new FakeInput('text', 'user-a');
   const passA = new FakeInput('password', 'pass-a');
   const passB = new FakeInput('password', 'pass-b');
   const doc = makeDoc([new FakeForm([userA, passA]), new FakeForm([passB])]);
 
-  // Null target → first field (unchanged MCP behavior).
+  // Null ordinal → first field (unchanged MCP behavior).
   fillLoginForm(doc, { username: 'alice', password: 'pw' }, null);
-  assert.equal(passA.value, 'pw', 'null target → first password field');
+  assert.equal(passA.value, 'pw', 'null ordinal → first password field');
 
-  // A detached/foreign field not in the doc → treated as stale → first field.
+  // An out-of-range ordinal (no such entry) → treated as stale → first field.
   passA.value = '';
-  const foreign = new FakeInput('password', 'foreign');
-  fillLoginForm(doc, { username: 'alice', password: 'pw2' }, foreign);
-  assert.equal(passA.value, 'pw2', 'foreign target is not present in doc → falls back to first');
-  assert.equal(foreign.value, '', 'the foreign field is never filled');
+  fillLoginForm(doc, { username: 'alice', password: 'pw2' }, 99);
+  assert.equal(passA.value, 'pw2', 'out-of-range ordinal falls back to first');
+  assert.equal(passB.value, '', 'the non-fallback entry is never filled');
 });
 
 test('isLivePasswordField: true only for a password input present in the doc', () => {

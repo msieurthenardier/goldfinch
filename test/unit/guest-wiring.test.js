@@ -615,7 +615,7 @@ test('did-navigate releases a held gesture capture via vaultHuman().captureRelea
     vaultHuman: () => ({
       captureRelease: (wcId) => {
         releaseCalls.push(wcId);
-        return { captureId: 'cap1', model: { origin: 'https://a.example', username: 'me', mode: 'save' } };
+        return [{ captureId: 'cap1', model: { origin: 'https://a.example', username: 'me', mode: 'save' } }];
       }
     })
   });
@@ -632,13 +632,41 @@ test('did-navigate releases a held gesture capture via vaultHuman().captureRelea
   assert.deepEqual(h.sends[1], ['tab-did-navigate', { wcId: 60, url: wc.url }]);
 });
 
-test('did-navigate calls captureRelease every time, but forwards NOTHING when it returns null (the ordinary, no-held-capture case)', () => {
+// M21 F3 L2 (DD1's amendment, AC4): captureRelease can now return MULTIPLE
+// entries in one call (one per family) — did-navigate must send one
+// vault-capture-offer per entry, IN ORDER, all still before tab-did-navigate.
+test('AC4: did-navigate sends ONE vault-capture-offer per entry captureRelease returns, preserving release order, all before tab-did-navigate', () => {
+  const h = setup({
+    vaultHuman: () => ({
+      captureRelease: () => [
+        { captureId: 'cap-login', model: { origin: 'https://a.example', username: 'me', mode: 'save' } },
+        { captureId: 'cap-card', model: { kind: 'card', origin: 'https://a.example', mode: 'save' } }
+      ]
+    })
+  });
+  const wc = new FakeContents(63);
+  h.wiring.wireTabViewEvents({ webContents: wc }, 63, 'persist:jar-a');
+
+  wc.emit('did-navigate');
+
+  const offerSends = h.sends.filter(([channel]) => channel === 'vault-capture-offer');
+  assert.equal(offerSends.length, 2, 'one vault-capture-offer per released entry');
+  assert.equal(offerSends[0][1].captureId, 'cap-login', 'release order preserved — login first');
+  assert.equal(offerSends[1][1].captureId, 'cap-card', 'release order preserved — card second');
+  const navigateIndex = h.sends.findIndex(([channel]) => channel === 'tab-did-navigate');
+  assert.ok(
+    h.sends.findIndex(([channel]) => channel === 'vault-capture-offer') < navigateIndex,
+    'every vault-capture-offer send precedes tab-did-navigate'
+  );
+});
+
+test('did-navigate calls captureRelease every time, but forwards NOTHING when it returns [] (the ordinary, no-held-capture case — M21 F3 L2 AC2 contract update)', () => {
   const releaseCalls = [];
   const h = setup({
     vaultHuman: () => ({
       captureRelease: (wcId) => {
         releaseCalls.push(wcId);
-        return null;
+        return [];
       }
     })
   });

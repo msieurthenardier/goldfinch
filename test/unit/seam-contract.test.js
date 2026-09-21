@@ -297,7 +297,13 @@ const SEAM_COUNT = 41;
 // no architectural extraction is at fault, every added line is either an
 // import, a late-bound wrapper function, one named dep entry, or a seam hook
 // the leg's own Outputs specify.
-const RENDERER_LINE_BUDGET = 1577;
+// Mission 21 Flight 3 Leg 1 (sheet-type-dispatch): LOWERED, 1577 → 1550 — the
+// two M14 F1 auth/cert challenge subscriptions + their two overlay-menu states
+// extracted verbatim into auth-challenge-controller.js (the vault-controller.js
+// extraction precedent), buying the headroom the flight's later identity legs
+// need. Measured AFTER `npm run format` (this test's own split-array metric):
+// 1550. No slack banked beyond the landed value, per the leg's own AC8.
+const RENDERER_LINE_BUDGET = 1550;
 
 // Bookmarks-bar line budget (squawk 0025, M15 debrief finding F25): bar/
 // overflow rendering, measurement, and dispatch business logic lives in

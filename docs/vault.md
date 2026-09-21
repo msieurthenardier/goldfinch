@@ -376,14 +376,17 @@ the picker row, the capture offer and the sheet carry only `title` / `cardholder
 refuse non-login items, and the documented "never card data" guarantee in
 `docs/mcp-automation.md` is unchanged by this work.
 
-### Identity items (Mission 21, Flight 2 — foundations only)
+### Identity items (Mission 21, Flights 2-3)
 
 A fourth item type, `identity` — one name/email/phone/address profile, at most one per vault.
-**This flight shipped the detector and the item type only; no fill, capture or sheet wiring
-exists yet** — `classifyCapture`/`identityProfileOf` (below) have no live caller until the
-follow-on flight. The scope split mirrors Flight 1's own lesson: a single leg that tried to
-design detection, fill, capture *and* the sheets at once would have repeated a mistake that cost
-Flight 1 six review rounds.
+**Flight 2 shipped the detector and the item type; Flight 3 wired fill, capture, and the
+capture sheet into the live page** — `classifyCapture`/`identityProfileOf` (below) are called
+live from `disposeIdentityCapture` (`src/main/vault/vault-human.js`). The Flight 2/3 split
+mirrors Flight 1's own lesson: a single leg that tried to design detection, fill, capture *and*
+the sheets at once would have repeated a mistake that cost Flight 1 six review rounds. Flight
+3's own fill/capture mechanics (the two-icon placement, `isClaimedByCard`, the value-layer
+admission gate, the `identitySecrets` buffer, the multi-hold presentation queue shared with
+login/card) are documented in CLAUDE.md's Password vault pattern rather than duplicated here.
 
 **Schema** (`src/shared/vault-item-schema.js`'s `SCHEMA.identity`) is conservative: only `title`
 and `fullName` are non-secret (metadata a picker row can show without unmasking); everything
@@ -486,9 +489,9 @@ unchanged, and the `.gfvault` PARSE path (which never called it in the first pla
 loudly on any malformed vault. A merge collision on an identity profile (previous bullet) folds
 into this SAME `skippedTypes` array rather than a second reporting mechanism.
 
-**`classifyCapture(stored, captured)`** (`src/main/vault/identity-profile.js`, pure, no live
-caller until the follow-on flight) is the conflict rule made real and unit-tested rather than left
-as a paper decision: `{ kind: 'match' | 'gap-fill' | 'conflict', gapFilled: [{field, to}],
+**`classifyCapture(stored, captured)`** (`src/main/vault/identity-profile.js`, pure; its live
+caller is `disposeIdentityCapture`, Mission 21 Flight 3 Leg 4) is the conflict rule made real and
+unit-tested rather than left as a paper decision: `{ kind: 'match' | 'gap-fill' | 'conflict', gapFilled: [{field, to}],
 conflicting: [{field, from, to}] }`. Only fields PRESENT in the capture are judged. Equality is
 BYTE-EXACT — no trimming, no case-folding, no normalisation — so `"555-1234"` vs `"5551234"` IS a
 conflict; softening that would be a judgement call this module has no business making silently.

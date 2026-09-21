@@ -19,6 +19,76 @@
 // sheet — it lives only in the main-side held record; the Save invoke reports just
 // the chosen vaultId (+ captureId + token).
 
+// Kind-keyed dispatch table (Mission 21 Flight 3 Leg 1, replacing the binary
+// `model.kind === 'card'` branching; `identity` added at Leg 4, AC17/AC18):
+// each entry supplies the heading noun, the subject row's label, and its
+// value-text builder (including the family's "nothing captured" fallback —
+// '(card)' / '(no username)'). Data only, no branching logic, so a future kind
+// adds an entry rather than editing a function body. Membership is checked via
+// hasOwnProperty (never a bare truthy lookup) so a `kind` of 'constructor' or
+// similar can't resolve through Object.prototype.
+//
+// `identity` is MODE-DISPATCH WITHIN the family, layered on top of the family
+// dispatch above it (AC17): its own `heading(model)` overrides the generic
+// `${Save|Update} ${noun}?` construction — the model's `mode` is only two
+// values ('save'/'update'), but identity has THREE headings, so 'update' is
+// further split on whether `changedFields` is non-empty (a conflict) or empty
+// (a gap-fill). DD6: the subject row lists field LABELS from
+// `addedFields`/`changedFields` — never a value; `classifyCapture`'s `to`/`from`
+// values never reach this module at all (consumed main-side, per the flight's
+// own field-names-not-values rule).
+const KIND_TABLE = {
+  card: {
+    noun: 'card',
+    subjectLabel: 'Card',
+    // last4 is a declared NON-SECRET field; the PAN never reaches the sheet at all.
+    subjectValueText(model) {
+      const brand = model && model.brand != null && model.brand !== '' ? String(model.brand) : '';
+      const last4 = model && model.last4 != null && model.last4 !== '' ? `•••• ${model.last4}` : '';
+      return [brand, last4].filter(Boolean).join('  ') || '(card)';
+    }
+  },
+  login: {
+    noun: 'password',
+    subjectLabel: 'Username',
+    subjectValueText(model) {
+      return model && model.username != null && model.username !== '' ? String(model.username) : '(no username)';
+    }
+  },
+  identity: {
+    subjectLabel: 'Fields',
+    heading(model) {
+      const mode = model && model.mode === 'update' ? 'update' : 'save';
+      if (mode === 'save') return 'Save your details?';
+      const changed = Array.isArray(model && model.changedFields) ? model.changedFields : [];
+      return changed.length > 0 ? 'Update your saved details?' : 'Add to your saved details?';
+    },
+    // Field LABELS only (DD6) — a conflict names BOTH groups.
+    subjectValueText(model) {
+      const added = Array.isArray(model && model.addedFields) ? model.addedFields : [];
+      const changed = Array.isArray(model && model.changedFields) ? model.changedFields : [];
+      const parts = [];
+      if (added.length) parts.push(added.join(', '));
+      if (changed.length) parts.push(changed.join(', '));
+      return parts.join(' · ') || '(no fields)';
+    }
+  }
+};
+
+/**
+ * Resolve a capture model's family. An absent or unrecognised `kind` (including
+ * `undefined`, `null`, or any string not in KIND_TABLE) resolves to `login` —
+ * the exact fallback the prior `model.kind === 'card'` check implied.
+ * @param {{ kind?: string }} model
+ * @returns {'card'|'login'|'identity'}
+ */
+function kindOf(model) {
+  const kind = model && model.kind;
+  const known = typeof kind === 'string' && Object.prototype.hasOwnProperty.call(KIND_TABLE, kind);
+  const knownKind = /** @type {'card'|'login'|'identity'} */ (kind);
+  return known ? knownKind : 'login';
+}
+
 /**
  * Build the vault-capture card shell (built once by menu-overlay.js; the per-offer
  * content is filled by renderVaultCaptureCard).
@@ -116,29 +186,26 @@ function makeField(document, card, labelText) {
  * (empty for `update`) so the caller can read the selection.
  * @param {Document} document
  * @param {ReturnType<typeof buildVaultCaptureCard>} refs
- * @param {{ origin?: string, username?: string|null, mode?: string, defaultVaultId?: string, choices?: Array<string | { vaultId: string, label?: string }>, kind?: string, brand?: string|null, last4?: string|null }} model
+ * @param {{ origin?: string, username?: string|null, mode?: string, defaultVaultId?: string, choices?: Array<string | { vaultId: string, label?: string }>, kind?: string, brand?: string|null, last4?: string|null, addedFields?: string[], changedFields?: string[] }} model
  * @returns {{ mode: 'save'|'update', choiceInputs: HTMLInputElement[] }}
  */
 export function renderVaultCaptureCard(document, refs, model) {
   const mode = model && model.mode === 'update' ? 'update' : 'save';
-  const isCard = !!(model && model.kind === 'card');
   // Copy is per-KIND (issue #152): "Save card?" over a payment capture, and the
-  // subject row becomes Card ("Visa •••• 4242") instead of Username.
-  const noun = isCard ? 'card' : 'password';
-  const heading = `${mode === 'update' ? 'Update' : 'Save'} ${noun}?`;
+  // subject row becomes Card ("Visa •••• 4242") instead of Username — resolved
+  // through KIND_TABLE rather than a binary branch. A kind may supply its OWN
+  // `heading(model)` (identity, AC17 — mode-dispatch WITHIN the family) instead
+  // of the generic `${Save|Update} ${noun}?` construction card/login still use.
+  const entry = KIND_TABLE[kindOf(model)];
+  const heading =
+    typeof entry.heading === 'function'
+      ? entry.heading(model)
+      : `${mode === 'update' ? 'Update' : 'Save'} ${entry.noun}?`;
   refs.heading.textContent = heading;
   refs.card.setAttribute('aria-label', heading.slice(0, -1));
   refs.originValue.textContent = String(model && model.origin != null ? model.origin : '');
-  if (refs.subjectLabel) refs.subjectLabel.textContent = isCard ? 'Card' : 'Username';
-  if (isCard) {
-    // last4 is a declared NON-SECRET field; the PAN never reaches the sheet at all.
-    const brand = model && model.brand != null && model.brand !== '' ? String(model.brand) : '';
-    const last4 = model && model.last4 != null && model.last4 !== '' ? `•••• ${model.last4}` : '';
-    refs.usernameValue.textContent = [brand, last4].filter(Boolean).join('  ') || '(card)';
-  } else {
-    refs.usernameValue.textContent =
-      model && model.username != null && model.username !== '' ? String(model.username) : '(no username)';
-  }
+  if (refs.subjectLabel) refs.subjectLabel.textContent = entry.subjectLabel;
+  refs.usernameValue.textContent = entry.subjectValueText(model);
   refs.error.textContent = '';
 
   refs.choices.textContent = '';

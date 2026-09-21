@@ -152,11 +152,17 @@ export default [
     // twin of vault-card-fields.js — same main-world context, same
     // CJS-required-by-the-preload shape; it additionally requires
     // vault-fill-fields.js (for LD3's isClaimedByLogin), already in this group.
+    // field-setters.js (M21 F3 Leg 3 — identity-fill, LD1) holds the two field
+    // setters extracted out of vault-card-fields.js, shared by card and identity
+    // — same CJS-required-by-the-preload shape; there is no `src/preload/**`
+    // wildcard, so an unlisted CJS module here fails lint with
+    // "'module' is not defined" (Leg 2's AC13b lesson).
     files: [
       'src/preload/webview-preload.js',
       'src/preload/vault-fill-fields.js',
       'src/preload/vault-card-fields.js',
       'src/preload/field-tokenizer.js',
+      'src/preload/field-setters.js',
       'src/preload/vault-identity-fields.js',
       'src/preload/vault-fill-icon.js',
       'src/preload/vault-entry-observer.js',
@@ -164,6 +170,7 @@ export default [
       'src/preload/vault-entry-observer-handle.js',
       'src/preload/vault-entry-observer-bootstrap.js',
       'src/preload/vault-gesture-policy.js',
+      'src/preload/vault-gesture-detach-watch.js',
       'src/preload/guest-bookmark-drop.js'
     ],
     languageOptions: { sourceType: 'commonjs', globals: { ...globals.node, ...globals.browser } },

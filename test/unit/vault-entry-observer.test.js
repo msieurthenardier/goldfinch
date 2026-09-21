@@ -137,7 +137,11 @@ test('an untrusted (synthetic) input/keydown never grants provenance, and never 
 
   assert.equal(detectCalls, 0, 'an untrusted event must short-circuit BEFORE the detection walk runs at all');
   assert.equal(observer._provenanceSize(), 0);
-  assert.deepEqual(observer.snapshot(), { logins: [{ password: { detected: true, value: null } }], cards: [] });
+  assert.deepEqual(observer.snapshot(), {
+    logins: [{ password: { detected: true, value: null } }],
+    cards: [],
+    identities: []
+  });
 });
 
 test('a trusted input on a detected field grants provenance (isTrusted pass-through)', () => {
@@ -155,7 +159,8 @@ test('a trusted input on a detected field grants provenance (isTrusted pass-thro
   assert.equal(observer._provenanceSize(), 1);
   assert.deepEqual(observer.snapshot(), {
     logins: [{ password: { detected: true, value: 'real-typed-value' } }],
-    cards: []
+    cards: [],
+    identities: []
   });
 });
 
@@ -668,7 +673,8 @@ test('snapshot shape: detected+provenanced, detected+unprovenanced, and never-de
         password: { detected: true, value: null } // detected + unprovenanced
       }
     ],
-    cards: []
+    cards: [],
+    identities: []
   });
   // The third state — never detected — is a KEY ABSENT, not a third value. A
   // password-only entry (no username field at all) proves it directly:
@@ -756,9 +762,13 @@ const SOURCE_TEXT = fs.readFileSync(SOURCE_PATH, 'utf8');
 // lines. RAISED AGAIN from 300 to 390 at Leg 5 (broadened-capture, DD3i):
 // bounded provenance lifetime — the expiry timer/clock injection, the
 // grant/grantForFill unification into grantValue, active eviction on expiry,
-// and the pagehide belt-and-suspenders clear — earns its ~70 lines. A future
-// leg that needs more room bumps this explicitly.
-const OBSERVER_LINE_BUDGET = 410;
+// and the pagehide belt-and-suspenders clear — earns its ~70 lines. RAISED
+// AGAIN from 410 to 425 at Mission 21 Flight 3 Leg 3 (identity-fill, AC4): a
+// third injected finder (`findAllIdentityFields`), the imported (never
+// hand-typed — AC3b) `IDENTITY_ROLES`, and identity's third arm in `detect()`
+// / `isDetectedField()` / `snapshot()` earns its ~12 lines. A future leg that
+// needs more room bumps this explicitly.
+const OBSERVER_LINE_BUDGET = 425;
 
 test('the observer carries no save/update/dispose/IPC policy vocabulary (source scan)', () => {
   const forbidden = [
@@ -793,4 +803,130 @@ test('vault-entry-observer.js stays within its line-ceiling', () => {
 test('LOGIN_ROLES / CARD_ROLES match the roles the pure field modules actually resolve', () => {
   assert.deepEqual(LOGIN_ROLES, ['username', 'password']);
   assert.deepEqual(CARD_ROLES, ['number', 'cardholder', 'expiry', 'expMonth', 'expYear', 'csc']);
+});
+
+// --- identity (M21 F3 Leg 3, AC4) --------------------------------------------
+
+test('snapshot() returns an identities array alongside logins/cards, three-state per role', () => {
+  const street = new FakeField('text', 'street');
+  const fullName = new FakeField('text', 'fullName');
+  const doc = makeFakeDocument();
+  const observer = createEntryObserver({
+    document: doc,
+    findAllLoginFields: () => [],
+    findAllIdentityFields: () => [
+      {
+        anchor: street,
+        anchorRole: 'street',
+        fullName,
+        firstName: null,
+        lastName: null,
+        email: null,
+        phone: null,
+        street,
+        street2: null,
+        city: null,
+        region: null,
+        country: null,
+        postalCode: null
+      }
+    ]
+  });
+  observer.install();
+
+  const before = observer.snapshot();
+  assert.deepEqual(before.identities, [
+    { fullName: { detected: true, value: null }, street: { detected: true, value: null }, anchorRole: 'street' }
+  ]);
+
+  street.value = '123 Main St';
+  doc._fire('input', trustedEvent('input', street));
+  const after = observer.snapshot();
+  assert.equal(after.identities[0].street.value, '123 Main St');
+});
+
+test('a trusted keystroke into an identity field grants provenance the same as login/card', () => {
+  const email = new FakeField('email', 'email');
+  const street = new FakeField('text', 'street');
+  const doc = makeFakeDocument();
+  const observer = createEntryObserver({
+    document: doc,
+    findAllLoginFields: () => [],
+    findAllIdentityFields: () => [
+      {
+        anchor: street,
+        fullName: null,
+        firstName: null,
+        lastName: null,
+        email,
+        phone: null,
+        street,
+        street2: null,
+        city: null,
+        region: null,
+        country: null,
+        postalCode: null
+      }
+    ]
+  });
+  observer.install();
+
+  email.value = 'a@b.com';
+  doc._fire('input', trustedEvent('input', email));
+  assert.equal(observer.snapshot().identities[0].email.value, 'a@b.com');
+
+  // A synthetic (untrusted) input never grants.
+  street.value = 'forged';
+  doc._fire('input', untrustedEvent('input', street));
+  assert.equal(observer.snapshot().identities[0].street.value, null);
+});
+
+test('grantForFill grants provenance for an identity fill result exactly like login/card', () => {
+  const street = new FakeField('text', 'street');
+  const doc = makeFakeDocument();
+  const observer = createEntryObserver({
+    document: doc,
+    findAllLoginFields: () => [],
+    findAllIdentityFields: () => [
+      {
+        anchor: street,
+        fullName: null,
+        firstName: null,
+        lastName: null,
+        email: null,
+        phone: null,
+        street,
+        street2: null,
+        city: null,
+        region: null,
+        country: null,
+        postalCode: null
+      }
+    ]
+  });
+  observer.install();
+
+  street.value = '123 Main St';
+  observer.grantForFill({ filled: true, fields: [{ field: street, value: '123 Main St' }] });
+  assert.equal(observer.snapshot().identities[0].street.value, '123 Main St');
+});
+
+test("IDENTITY_ROLES (imported, AC3b) matches identity's own detector role names", () => {
+  const { IDENTITY_ROLES } = require('../../src/preload/vault-identity-fields');
+  assert.deepEqual(
+    IDENTITY_ROLES.slice().sort(),
+    [
+      'city',
+      'country',
+      'email',
+      'firstName',
+      'fullName',
+      'lastName',
+      'phone',
+      'postalCode',
+      'region',
+      'street',
+      'street2'
+    ].sort()
+  );
 });

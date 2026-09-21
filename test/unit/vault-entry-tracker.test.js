@@ -221,6 +221,22 @@ test('fillCard calls h.fillCard(...) with the card payload', async () => {
   assert.ok(fillScript.includes('4242424242424242'));
 });
 
+test('AC7: fillIdentity calls h.fillIdentity(...) with the { identity, ordinal } payload', async () => {
+  let fillScript = null;
+  const tracker = createEntryTracker({
+    execInWorld: (script) => {
+      if (fillScript === null && script !== 'INSTALL_SCRIPT') fillScript = script;
+      return Promise.resolve(script === 'INSTALL_SCRIPT' ? { installed: true } : { filled: true });
+    },
+    installScript: 'INSTALL_SCRIPT'
+  });
+  const result = await tracker.fillIdentity({ identity: { fullName: 'Ada Lovelace' }, ordinal: 1 });
+  assert.deepEqual(result, { filled: true });
+  assert.ok(fillScript.includes('h.fillIdentity('));
+  assert.ok(fillScript.includes('Ada Lovelace'));
+  assert.ok(fillScript.includes('"ordinal":1'));
+});
+
 test('fillLogin/fillCard return { filled: false } when install failed — never throw, never hang', async () => {
   const tracker = createEntryTracker({
     execInWorld: fakeExecInWorldAlways(undefined),
@@ -286,6 +302,46 @@ test("resolveTargetForAnchor: the split expMonth/expYear selects are never ancho
   assert.equal(result, null);
 });
 
+test('resolveTargetForAnchor (AC15): an identity anchor — either the postal anchor OR the non-postal anchor — resolves { kind: "identity", field: <postal anchor> }', () => {
+  const street = { tag: 'street-field' };
+  const email = { tag: 'email-field' };
+  const doc = {};
+  const identityEntry = { anchor: street, nonPostalAnchor: email };
+
+  // Clicking the postal anchor itself.
+  assert.deepEqual(
+    resolveTargetForAnchor(doc, street, {
+      findAllLoginFields: () => [],
+      findAllCardFields: () => [],
+      findAllIdentityFields: () => [identityEntry]
+    }),
+    { kind: 'identity', field: street }
+  );
+
+  // Clicking the non-postal anchor — the fill target is STILL the postal anchor.
+  assert.deepEqual(
+    resolveTargetForAnchor(doc, email, {
+      findAllLoginFields: () => [],
+      findAllCardFields: () => [],
+      findAllIdentityFields: () => [identityEntry]
+    }),
+    { kind: 'identity', field: street }
+  );
+});
+
+test('resolveTargetForAnchor (DD5): login, then card, then identity — precedence order', () => {
+  const contested = { tag: 'contested-field' };
+  const doc = {};
+  // A pathological identity entry claims the SAME field a login entry claims —
+  // login must win (checked first).
+  const result = resolveTargetForAnchor(doc, contested, {
+    findAllLoginFields: () => [{ username: null, password: contested, form: null }],
+    findAllCardFields: () => [],
+    findAllIdentityFields: () => [{ anchor: contested, nonPostalAnchor: null }]
+  });
+  assert.deepEqual(result, { kind: 'login', field: contested });
+});
+
 test('resolveTargetForAnchor: null / unrecognized anchor resolves null', () => {
   const doc = {};
   assert.equal(resolveTargetForAnchor(doc, null, { findAllLoginFields: () => [] }), null);
@@ -332,7 +388,11 @@ test('readSnapshot installs first (once), then calls execInWorld for the snapsho
             installed = true;
             resolve({ installed: true });
           } else {
-            resolve({ logins: [{ password: { detected: true, value: 'hunter2' } }], cards: [] });
+            resolve({
+              logins: [{ password: { detected: true, value: 'hunter2' } }],
+              cards: [],
+              identities: []
+            });
           }
         })
       );
@@ -340,17 +400,21 @@ test('readSnapshot installs first (once), then calls execInWorld for the snapsho
     installScript: 'INSTALL_SCRIPT'
   });
   const snapshot = await tracker.readSnapshot();
-  assert.deepEqual(snapshot, { logins: [{ password: { detected: true, value: 'hunter2' } }], cards: [] });
+  assert.deepEqual(snapshot, {
+    logins: [{ password: { detected: true, value: 'hunter2' } }],
+    cards: [],
+    identities: []
+  });
   assert.equal(scripts.length, 2, 'install script, then the snapshot call script');
 });
 
-test('readSnapshot fails closed to an empty { logins: [], cards: [] } shape when the observer never installed', async () => {
+test('readSnapshot fails closed to an empty { logins: [], cards: [], identities: [] } shape when the observer never installed', async () => {
   const tracker = createEntryTracker({
     execInWorld: fakeExecInWorldAlways(undefined), // never installs
     installScript: 'INSTALL_SCRIPT',
     warn: () => {}
   });
-  assert.deepEqual(await tracker.readSnapshot(), { logins: [], cards: [] });
+  assert.deepEqual(await tracker.readSnapshot(), { logins: [], cards: [], identities: [] });
 });
 
 test('readSnapshot fails closed to the empty shape on a rejecting execInWorld (install succeeds, snapshot call rejects)', async () => {
@@ -365,7 +429,7 @@ test('readSnapshot fails closed to the empty shape on a rejecting execInWorld (i
     },
     installScript: 'INSTALL_SCRIPT'
   });
-  assert.deepEqual(await tracker.readSnapshot(), { logins: [], cards: [] });
+  assert.deepEqual(await tracker.readSnapshot(), { logins: [], cards: [], identities: [] });
 });
 
 test('readSnapshot fails closed to the empty shape on a malformed resolved value (missing logins/cards arrays)', async () => {
@@ -380,7 +444,7 @@ test('readSnapshot fails closed to the empty shape on a malformed resolved value
     },
     installScript: 'INSTALL_SCRIPT'
   });
-  assert.deepEqual(await tracker.readSnapshot(), { logins: [], cards: [] });
+  assert.deepEqual(await tracker.readSnapshot(), { logins: [], cards: [], identities: [] });
 });
 
 test('readSnapshot does not depend on execInWorld resolving synchronously (DD3f)', async () => {
@@ -404,8 +468,12 @@ test('readSnapshot does not depend on execInWorld resolving synchronously (DD3f)
   await Promise.resolve();
   await Promise.resolve();
   assert.equal(settled, false, 'must not have settled before the underlying promise resolves');
-  d.resolve({ logins: [], cards: [{ number: { detected: true, value: '4111111111111111' } }] });
-  assert.deepEqual(await pending, { logins: [], cards: [{ number: { detected: true, value: '4111111111111111' } }] });
+  d.resolve({ logins: [], cards: [{ number: { detected: true, value: '4111111111111111' } }], identities: [] });
+  assert.deepEqual(await pending, {
+    logins: [],
+    cards: [{ number: { detected: true, value: '4111111111111111' } }],
+    identities: []
+  });
 });
 
 // --- DD3f (Leg 5 correction): no direct cross-process isolated-world read ---

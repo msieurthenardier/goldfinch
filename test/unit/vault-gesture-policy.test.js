@@ -220,3 +220,78 @@ test('snapshotHasProvenancedSecret: a null/undefined entrySnapshot is false, nev
   assert.equal(snapshotHasProvenancedSecret(null, 'login'), false);
   assert.equal(snapshotHasProvenancedSecret(undefined, 'card'), false);
 });
+
+// --- AC5/AC6 (M21 F3 Leg 4): identity's third arm ---------------------------
+
+test('AC5: resolveGestureTarget resolves an IDENTITY entry when neither login nor card matches, checked LAST (DD5)', () => {
+  const street = { tag: 'street' };
+  const identities = [{ street, form: null }];
+  assert.deepEqual(resolveGestureTarget(street, { logins: [], cards: [], identities }), {
+    kind: 'identity',
+    ordinal: 0
+  });
+});
+
+test('AC5: DD5 precedence — login beats card beats identity when all three could resolve', () => {
+  const password = { tag: 'pw' };
+  const logins = [{ username: null, password, form: null }];
+  const cards = [{ number: password, form: null }]; // a contrived shared-node stand-in
+  const identities = [{ street: password, form: null }];
+  assert.deepEqual(resolveGestureTarget(password, { logins, cards, identities }), { kind: 'login', ordinal: 0 });
+});
+
+test('AC5: missing `identities` defaults to an empty array', () => {
+  assert.equal(resolveGestureTarget({ tag: 'x' }, { logins: [], cards: [] }), null);
+});
+
+test('AC6: identity gate — anchor-only (no non-postal field provenanced) is false', () => {
+  const snap = {
+    anchorRole: 'street',
+    street: { detected: true, value: '1 Main St' },
+    email: { detected: true, value: null }
+  };
+  assert.equal(snapshotHasProvenancedSecret(snap, 'identity'), false);
+});
+
+test('AC6: identity gate — non-postal-only (no anchor provenanced) is false', () => {
+  const snap = {
+    anchorRole: 'street',
+    street: { detected: true, value: null },
+    email: { detected: true, value: 'a@b.com' }
+  };
+  assert.equal(snapshotHasProvenancedSecret(snap, 'identity'), false);
+});
+
+test('AC6: identity gate — BOTH anchor and a non-postal field provenanced is true', () => {
+  const snap = {
+    anchorRole: 'street',
+    street: { detected: true, value: '1 Main St' },
+    email: { detected: true, value: 'a@b.com' }
+  };
+  assert.equal(snapshotHasProvenancedSecret(snap, 'identity'), true);
+});
+
+test('AC6: identity gate — a MISSING anchorRole fails closed', () => {
+  const snap = {
+    street: { detected: true, value: '1 Main St' },
+    email: { detected: true, value: 'a@b.com' }
+  };
+  assert.equal(snapshotHasProvenancedSecret(snap, 'identity'), false);
+});
+
+test('AC6: identity gate — an UNRECOGNISED anchorRole (not a real postal role) fails closed', () => {
+  const snap = {
+    anchorRole: 'email', // a real role, but NOT postal — must not be treated as an anchor
+    street: { detected: true, value: '1 Main St' },
+    email: { detected: true, value: 'a@b.com' }
+  };
+  assert.equal(snapshotHasProvenancedSecret(snap, 'identity'), false);
+  const snap2 = { anchorRole: 'bogus', street: { detected: true, value: '1 Main St' } };
+  assert.equal(snapshotHasProvenancedSecret(snap2, 'identity'), false);
+});
+
+test('AC6: secretRoleForKind is never consulted for identity — it stays login/card only', () => {
+  // secretRoleForKind has no identity branch at all; snapshotHasProvenancedSecret's
+  // identity arm must not fall through to it.
+  assert.notEqual(secretRoleForKind('identity'), 'street');
+});

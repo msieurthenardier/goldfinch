@@ -133,7 +133,8 @@ test('holdGestureLogin: last-wins-per-tab supersession — a second gesture on t
     );
 
     const released = human.captureRelease(10);
-    assert.equal(released.model.username, 'b', 'the SECOND (superseding) gesture is what survives to settle');
+    assert.equal(released.length, 1, 'exactly one login offer released — the array-of-one contract (M21 F3 L2, AC2)');
+    assert.equal(released[0].model.username, 'b', 'the SECOND (superseding) gesture is what survives to settle');
   } finally {
     rm(dir);
   }
@@ -141,11 +142,11 @@ test('holdGestureLogin: last-wins-per-tab supersession — a second gesture on t
 
 /* ----------------------------------------------------------- captureRelease */
 
-test('captureRelease: nothing pending for the tab returns null (the ordinary case — most gestures/settles have no held record)', async () => {
+test('captureRelease: nothing pending for the tab returns an EMPTY ARRAY (the ordinary case — most gestures/settles have no held record) — M21 F3 L2 AC2 contract update', async () => {
   const dir = tmpDir();
   try {
     const { human } = await makeHarness(dir);
-    assert.equal(human.captureRelease(10), null);
+    assert.deepEqual(human.captureRelease(10), []);
   } finally {
     rm(dir);
   }
@@ -162,16 +163,16 @@ test('captureRelease: releases a held gesture into a real SAVE offer, with the a
       passwordBytes: bytesOf('hunter2')
     });
     const released = human.captureRelease(10);
-    assert.ok(released);
-    assert.equal(released.model.mode, 'save');
-    assert.equal(released.model.username, 'me@a');
+    assert.equal(released.length, 1, 'M21 F3 L2 AC2: an array of one');
+    assert.equal(released[0].model.mode, 'save');
+    assert.equal(released[0].model.username, 'me@a');
 
     // Prove the password itself survived the hold→release hop correctly
     // (the pending record's Buffer is COPIED before it is dropped, never
     // handed straight to `capture()` — the aliasing hazard the leg's own
     // implementation note calls out) by actually saving it and reading it
     // back from the store.
-    const saved = human.captureSave({ captureId: released.captureId, vaultId: 'work' });
+    const saved = human.captureSave({ captureId: released[0].captureId, vaultId: 'work' });
     assert.deepEqual(saved, { saved: true });
     const [item] = store.listItems('work');
     assert.equal(item.username, 'me@a');
@@ -200,14 +201,14 @@ test('captureRelease: origin is FROZEN at gesture (hold) time — a tab navigate
     urls.set(10, B + '/somewhere');
 
     const released = human.captureRelease(10);
-    assert.ok(released);
+    assert.equal(released.length, 1, 'M21 F3 L2 AC2: an array of one');
     assert.equal(
-      released.model.origin,
+      released[0].model.origin,
       A,
       'disposition used the ORIGIN CAPTURED AT GESTURE TIME, never re-derived at settle'
     );
     assert.equal(
-      released.model.mode,
+      released[0].model.mode,
       'update',
       'matched the stored item at the frozen origin A, not a fresh lookup at B'
     );
@@ -229,11 +230,11 @@ test('captureRelease: a LOCKED vault at settle holds mode "locked" — captureFi
     store.lockNow();
 
     const released = human.captureRelease(10);
-    assert.ok(released);
-    assert.equal(released.model.mode, 'locked');
+    assert.equal(released.length, 1, 'M21 F3 L2 AC2: an array of one');
+    assert.equal(released[0].model.mode, 'locked');
 
     await store.unlock(MASTER);
-    const finalized = human.captureFinalize(released.captureId);
+    const finalized = human.captureFinalize(released[0].captureId);
     assert.ok(finalized.captureId, 'captureFinalize completed the deferred disposition');
     assert.equal(finalized.model.mode, 'save');
   } finally {
@@ -257,13 +258,13 @@ test('DD3c: username DETECTED but UNPROVENANCED (usernameDetected:true, username
       passwordBytes: bytesOf('attacker-or-real-new-password')
     });
     const released = human.captureRelease(10);
-    assert.ok(released);
+    assert.equal(released.length, 1, 'M21 F3 L2 AC2: an array of one');
     assert.equal(
-      released.model.mode,
+      released[0].model.mode,
       'save',
       'DD3c: detected-but-unprovenanced username must NEVER reach the update branch, even though null matches the stored null-username item'
     );
-    assert.equal(released.model.defaultVaultId, 'work');
+    assert.equal(released[0].model.defaultVaultId, 'work');
   } finally {
     rm(dir);
   }
@@ -282,9 +283,9 @@ test('DD3c: NO username field detected at all (usernameDetected:false, username:
       passwordBytes: bytesOf('a-real-new-password')
     });
     const released = human.captureRelease(10);
-    assert.ok(released);
+    assert.equal(released.length, 1, 'M21 F3 L2 AC2: an array of one');
     assert.equal(
-      released.model.mode,
+      released[0].model.mode,
       'update',
       'a genuine password-only submit still matches the stored null-username item'
     );
@@ -307,10 +308,11 @@ test("DD3c downgrade also applies through captureFinalize's unlock-to-save conti
       passwordBytes: bytesOf('new-password')
     });
     const released = human.captureRelease(10);
-    assert.equal(released.model.mode, 'locked');
+    assert.equal(released.length, 1, 'M21 F3 L2 AC2: an array of one');
+    assert.equal(released[0].model.mode, 'locked');
 
     await store.unlock(MASTER);
-    const finalized = human.captureFinalize(released.captureId);
+    const finalized = human.captureFinalize(released[0].captureId);
     assert.equal(
       finalized.model.mode,
       'save',
@@ -336,9 +338,9 @@ test('holdGestureCard + captureRelease: a held card gesture releases into a real
     });
     assert.ok(held);
     const released = human.captureRelease(10);
-    assert.ok(released);
-    assert.equal(released.model.kind, 'card');
-    assert.equal(released.model.mode, 'save');
+    assert.equal(released.length, 1, 'M21 F3 L2 AC2: an array of one');
+    assert.equal(released[0].model.kind, 'card');
+    assert.equal(released[0].model.mode, 'save');
   } finally {
     rm(dir);
   }
@@ -357,7 +359,7 @@ test('holdGestureCard: an implausible number (fails Luhn) still HOLDS at gesture
     });
     assert.ok(held, 'held regardless — the plausibility gate lives in captureCard(), run at release');
     const released = human.captureRelease(10);
-    assert.equal(released, null, 'release drops an implausible number — never offered');
+    assert.deepEqual(released, [], 'release drops an implausible number — never offered (M21 F3 L2 AC2: empty array)');
   } finally {
     rm(dir);
   }
@@ -375,7 +377,7 @@ test('the new "pending-settle" held state is covered by dropCapturesForTab, exac
     assert.equal(dropped[0].mode, 'pending-settle');
     assert.ok(allZero(dropped[0].password));
     assert.equal(timer.pending.size, 0);
-    assert.equal(human.captureRelease(10), null, 'nothing left to release after the drop');
+    assert.deepEqual(human.captureRelease(10), [], 'nothing left to release after the drop');
   } finally {
     rm(dir);
   }
@@ -428,7 +430,222 @@ test('the new "pending-settle" held state is STILL a DROP (never an offer) on TT
     assert.equal(timer.pending.size, 1);
     timer.fireAll();
     assert.equal(timer.pending.size, 0);
-    assert.equal(human.captureRelease(10), null, 'the TTL drop leaves nothing to release — never an offer');
+    assert.deepEqual(human.captureRelease(10), [], 'the TTL drop leaves nothing to release — never an offer');
+  } finally {
+    rm(dir);
+  }
+});
+
+/* --------------------------------- multi-hold (M21 F3 L2, DD1's amendment) --- */
+
+test('AC1: supersession is family-scoped — a login hold and a card hold coexist on one tab; a SECOND login gesture evicts only the login record and leaves the card record intact', async () => {
+  const dir = tmpDir();
+  try {
+    const { human, timer } = await makeHarness(dir);
+    human.holdGestureLogin({ wcId: 10, username: 'a', usernameDetected: true, passwordBytes: bytesOf('p1') });
+    human.holdGestureCard({
+      wcId: 10,
+      numberBytes: bytesOf('4111111111111111'),
+      cvvBytes: bytesOf('123'),
+      cardholder: 'Ada Lovelace',
+      expiry: '12/28'
+    });
+    assert.equal(timer.pending.size, 2, 'both families hold independently — two live drop timers');
+
+    // A SECOND login gesture must evict only the FIRST login hold, never the card.
+    human.holdGestureLogin({ wcId: 10, username: 'b', usernameDetected: true, passwordBytes: bytesOf('p2') });
+    assert.equal(
+      timer.pending.size,
+      2,
+      "the superseded login's timer was cleared and a new one armed — the card's is untouched"
+    );
+
+    const released = human.captureRelease(10);
+    assert.equal(released.length, 2, 'AC1: BOTH the surviving login offer and the untouched card offer release');
+    const cardOffer = released.find((o) => o.model.kind === 'card');
+    const loginOffer = released.find((o) => o.model.kind !== 'card');
+    assert.ok(cardOffer, 'the card offer survived the second login gesture');
+    assert.ok(loginOffer, 'the login offer released too');
+    assert.equal(
+      loginOffer.model.username,
+      'b',
+      'the SECOND (superseding) login gesture is what survives — same-family last-wins is unchanged'
+    );
+  } finally {
+    rm(dir);
+  }
+});
+
+// AC1b's two tests below deliberately go further than merely reading the RETURNED
+// offer models (which are plain data captured synchronously — they would look intact
+// even if the underlying held record had ALREADY been zeroized+dropped by a
+// family-blind sibling loop moments later). Each test SAVES both offers and reads
+// the persisted items back, so it actually bites the specific `captureCard` bug
+// (`:765-767`'s loop variable is `prior`, not `rec`) that a bare `released.length`
+// check does not: proven live — reverting captureCard's family scope back to
+// `if (prior.wcId === wcId) dropCapture(id)` leaves `released.length` at 2 in BOTH
+// orders (the returned models are unaffected), but the LOGIN-then-CARD order's
+// login save then fails (`{ saved: false }`, the record was zeroized by the card's
+// own re-entrant supersession loop moments after being created) — exactly the class
+// of defect a shallow assertion would miss.
+
+test("AC1b: releasing a LOGIN-then-CARD pair — both offers actually SAVE (captureCard's own family-scoped loop must not zeroize the login record capture() just created in the same synchronous captureRelease pass)", async () => {
+  const dir = tmpDir();
+  try {
+    const { store, human } = await makeHarness(dir);
+    human.holdGestureLogin({
+      wcId: 10,
+      username: 'me@a',
+      usernameDetected: true,
+      passwordBytes: bytesOf('hunter2')
+    });
+    human.holdGestureCard({
+      wcId: 10,
+      numberBytes: bytesOf('4111111111111111'),
+      cvvBytes: bytesOf('123'),
+      cardholder: 'Ada Lovelace',
+      expiry: '12/28'
+    });
+
+    const released = human.captureRelease(10);
+    assert.equal(released.length, 2, "AC1b: login-then-card order — both offers survive captureRelease's own re-entry");
+    const cardOffer = released.find((o) => o.model.kind === 'card');
+    const loginOffer = released.find((o) => o.model.kind !== 'card');
+
+    // The bite: SAVE both, not just read the returned model — a zeroized-and-dropped
+    // held record fails to save even though the earlier-returned model still "looks" fine.
+    assert.deepEqual(
+      human.captureSave({ captureId: loginOffer.captureId, vaultId: 'work' }),
+      { saved: true },
+      'the login record must still exist to save — NOT zeroized by the card release that followed it'
+    );
+    assert.deepEqual(human.captureSave({ captureId: cardOffer.captureId, vaultId: 'work' }), { saved: true });
+    const items = store.listItems('work');
+    assert.equal(items.find((it) => it.type === 'login')?.password, 'hunter2');
+    assert.equal(items.find((it) => it.type === 'card')?.number, '4111111111111111');
+  } finally {
+    rm(dir);
+  }
+});
+
+test('AC1b: releasing a CARD-then-LOGIN pair — both offers actually SAVE (the reverse gesture order)', async () => {
+  const dir = tmpDir();
+  try {
+    const { store, human } = await makeHarness(dir);
+    human.holdGestureCard({
+      wcId: 10,
+      numberBytes: bytesOf('4111111111111111'),
+      cvvBytes: bytesOf('123'),
+      cardholder: 'Ada Lovelace',
+      expiry: '12/28'
+    });
+    human.holdGestureLogin({
+      wcId: 10,
+      username: 'me@a',
+      usernameDetected: true,
+      passwordBytes: bytesOf('hunter2')
+    });
+
+    const released = human.captureRelease(10);
+    assert.equal(released.length, 2, 'AC1b: card-then-login order — both offers survive');
+    const cardOffer = released.find((o) => o.model.kind === 'card');
+    const loginOffer = released.find((o) => o.model.kind !== 'card');
+
+    assert.deepEqual(human.captureSave({ captureId: cardOffer.captureId, vaultId: 'work' }), { saved: true });
+    assert.deepEqual(
+      human.captureSave({ captureId: loginOffer.captureId, vaultId: 'work' }),
+      { saved: true },
+      'the login record must still exist to save — never evicted even earlier by the card path'
+    );
+    const items = store.listItems('work');
+    assert.equal(items.find((it) => it.type === 'login')?.password, 'hunter2');
+    assert.equal(items.find((it) => it.type === 'card')?.number, '4111111111111111');
+  } finally {
+    rm(dir);
+  }
+});
+
+test("AC3: captureRelease's own re-entry cannot evict its sibling — releasing two families in one call returns BOTH offers with the actual typed secrets intact", async () => {
+  const dir = tmpDir();
+  try {
+    const { store, human } = await makeHarness(dir);
+    human.holdGestureLogin({
+      wcId: 10,
+      username: 'me@a',
+      usernameDetected: true,
+      passwordBytes: bytesOf('hunter2')
+    });
+    human.holdGestureCard({
+      wcId: 10,
+      numberBytes: bytesOf('4111111111111111'),
+      cvvBytes: bytesOf('123'),
+      cardholder: 'Ada Lovelace',
+      expiry: '12/28'
+    });
+
+    const released = human.captureRelease(10);
+    assert.equal(released.length, 2, 'AC3: one call, two families, two offers');
+    const cardOffer = released.find((o) => o.model.kind === 'card');
+    const loginOffer = released.find((o) => o.model.kind !== 'card');
+
+    const savedLogin = human.captureSave({ captureId: loginOffer.captureId, vaultId: 'work' });
+    assert.deepEqual(savedLogin, { saved: true });
+    const savedCard = human.captureSave({ captureId: cardOffer.captureId, vaultId: 'work' });
+    assert.deepEqual(savedCard, { saved: true });
+
+    const items = store.listItems('work');
+    const login = items.find((it) => it.type === 'login');
+    const card = items.find((it) => it.type === 'card');
+    assert.equal(login.username, 'me@a');
+    assert.equal(login.password, 'hunter2', 'the login password was never zeroized by the sibling card release');
+    assert.equal(card.number, '4111111111111111', 'the card number was never zeroized by the sibling login release');
+  } finally {
+    rm(dir);
+  }
+});
+
+test("AC11: the three bulk drops (tab close / window close / vault lock) already cover BOTH families for one tab, and each record's own CAPTURE_DROP_MS timer still fires independently", async () => {
+  const dir = tmpDir();
+  try {
+    const { human, timer } = await makeHarness(dir);
+    human.holdGestureLogin({ wcId: 10, username: 'a', usernameDetected: true, passwordBytes: bytesOf('pw') });
+    human.holdGestureCard({
+      wcId: 10,
+      numberBytes: bytesOf('4111111111111111'),
+      cvvBytes: bytesOf('123'),
+      cardholder: 'Ada',
+      expiry: '12/28'
+    });
+    assert.equal(timer.pending.size, 2, 'two independent per-record drop timers');
+
+    const dropped = human.dropCapturesForTab(10);
+    assert.equal(dropped.length, 2, 'AC11: dropCapturesForTab drops BOTH families for the tab, family-blind by design');
+    assert.ok(dropped.every((r) => r.mode === 'pending-settle'));
+    assert.ok(
+      dropped.every((r) => allZero(r.kind === 'card' ? r.number : r.password)),
+      'every dropped record is zeroized'
+    );
+    assert.equal(timer.pending.size, 0, 'both timers cleared');
+    assert.deepEqual(human.captureRelease(10), [], 'nothing left to release for either family after the bulk drop');
+  } finally {
+    rm(dir);
+  }
+});
+
+test('AC11: dropAllCaptures (vault lock) also covers both families for one tab', async () => {
+  const dir = tmpDir();
+  try {
+    const { human } = await makeHarness(dir);
+    human.holdGestureLogin({ wcId: 10, username: 'a', usernameDetected: true, passwordBytes: bytesOf('pw') });
+    human.holdGestureCard({
+      wcId: 10,
+      numberBytes: bytesOf('4111111111111111'),
+      cvvBytes: bytesOf('123'),
+      cardholder: 'Ada',
+      expiry: '12/28'
+    });
+    const dropped = human.dropAllCaptures();
+    assert.equal(dropped.length, 2, 'AC11: dropAllCaptures drops BOTH families');
   } finally {
     rm(dir);
   }

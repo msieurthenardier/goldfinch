@@ -1114,3 +1114,69 @@ test('deriveAuditDetail(vaultAnswerAuth) records item id + resolved origin from 
     '2-arg call keeps args-only detail'
   );
 });
+
+// ---------------------------------------------------------------------------
+// AC21 (M21 F3 Leg 3, flight DD7): automation stays login-only. An identity
+// item is refused at every resolution site — `list()` (:357), `fill()` (:493),
+// `answerAuth()` (:549) — all three already filter `item.type === 'login'`.
+// No code change is expected; this pins that it stayed true now that a fourth
+// item type (`identity`) genuinely exists in the store.
+// ---------------------------------------------------------------------------
+
+// buildFixture() locks its own setup handle before returning, and saveItem
+// needs the MRK unlocked — so an identity item is added by briefly reopening
+// with the master password (mirroring buildFixture's own setup-then-lock
+// sequence) rather than via a locked store handle.
+async function buildFixtureWithIdentity() {
+  const fx = await buildFixture();
+  const reopened = makeStore(fx.dir);
+  await reopened.unlock(MASTER);
+  reopened.saveItem('work', { id: 'id1', type: 'identity', title: 'Home', fullName: 'Ada Lovelace' });
+  reopened.lockNow();
+  return fx;
+}
+
+test('AC21: list() never surfaces an identity item', async () => {
+  const fx = await buildFixtureWithIdentity();
+  try {
+    const store = makeStore(fx.dir);
+    const ctx = createVaultContext({ vaultStore: store, fillDelegate: makeFill().fn });
+    ctx.unlock('work', fx.workSecret);
+    const rows = ctx.list();
+    assert.deepEqual(rows.map((r) => r.id).sort(), ['w1'], 'the identity item never appears in list()');
+    assert.ok(!rows.some((r) => r.id === 'id1'));
+  } finally {
+    rm(fx.dir);
+  }
+});
+
+test('AC21: fill() refuses an identity item id as no-match — never dispatched to fillDelegate', async () => {
+  const fx = await buildFixtureWithIdentity();
+  try {
+    const store = makeStore(fx.dir);
+    const fill = makeFill();
+    const ctx = createVaultContext({ vaultStore: store, fillDelegate: fill.fn });
+    ctx.unlock('work', fx.workSecret);
+    const world = makeWorld();
+    const res = ctx.fill('work', { wcId: 10, itemId: 'id1' }, fillDeps(world));
+    assert.deepEqual(res, { filled: false, reason: 'no-match' });
+    assert.equal(fill.calls.length, 0, 'the identity is never handed to fillDelegate');
+  } finally {
+    rm(fx.dir);
+  }
+});
+
+test('AC21: answerAuth() refuses an identity item id as no-match — never dispatched to answerAuthDelegate', async () => {
+  const fx = await buildFixtureWithIdentity();
+  try {
+    const store = makeStore(fx.dir);
+    const aw = makeAnswerWorld();
+    const ctx = createVaultContext({ vaultStore: store, fillDelegate: makeFill().fn, ...aw.deps });
+    ctx.unlock('work', fx.workSecret);
+    const res = ctx.answerAuth('work', { wcId: 10, itemId: 'id1' }, fillDeps(aw.world));
+    assert.deepEqual(res, { answered: false, reason: 'no-match' });
+    assert.equal(aw.answers.length, 0, 'the identity is never handed to answerAuthDelegate');
+  } finally {
+    rm(fx.dir);
+  }
+});

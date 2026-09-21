@@ -175,7 +175,7 @@ test('renderVaultPickerRows: empty model → non-focusable note + the Manage foo
   // card = [note, separator, manage].
   assert.equal(list.children.length, 3);
   const note = list.children[0];
-  assert.equal(note.textContent, 'No saved logins or cards to fill here');
+  assert.equal(note.textContent, 'No saved logins, cards, or identities to fill here');
   assert.equal(note.attributes.get('aria-disabled'), 'true');
   // A note is not a menuitem → the roving items getter excludes it (no role).
   assert.equal(note.attributes.has('role'), false);
@@ -242,4 +242,46 @@ test('badgeLabelFor: Global for the global vault, jar name (or vaultId) otherwis
   assert.equal(badgeLabelFor({ vaultId: 'global' }), 'Global');
   assert.equal(badgeLabelFor({ vaultId: 'work', badgeLabel: 'Work' }), 'Work');
   assert.equal(badgeLabelFor({ vaultId: 'work' }), 'work'); // fallback to the raw id
+});
+
+// Mission 21 Flight 3 Leg 1 (sheet-type-dispatch) — pins added alongside the
+// dispatch-table refactor. AC9: every test above this line is UNMODIFIED.
+
+test('AC2: an unrecognised or absent type resolves as login, byte-identically', () => {
+  const document = createDocument();
+  const { list } = buildVaultPickerCard(document);
+  const rows = renderVaultPickerRows(document, list, [
+    { vaultId: 'global', id: 'i1', type: 'note', title: undefined, username: undefined },
+    { vaultId: 'global', id: 'i2', type: undefined, username: 'a@b' }
+  ]);
+  // Both rows render the login (credential) icon, not the card icon.
+  const icon0 = iconOf(rows[0]);
+  const icon1 = iconOf(rows[1]);
+  assert.equal(icon0.attributes.get('class'), 'vault-picker-icon');
+  assert.equal(icon1.attributes.get('class'), 'vault-picker-icon');
+  // No brand/last4 fields → secondary is '' → falls all the way to the login
+  // generic title, exactly like an unrecognised-type item always has.
+  assert.equal(titleOf(rows[0]).textContent, 'Login');
+  // Row 2 has a username → the secondary line (login shape, not the card shape).
+  assert.equal(usernameOf(rows[1]).textContent, 'a@b');
+});
+
+test('AC3b: a null model entry alongside a card renders with NO section headings', () => {
+  const document = createDocument();
+  const { list } = buildVaultPickerCard(document);
+  renderVaultPickerRows(document, list, [null, { vaultId: 'global', id: 'i1', type: 'card', last4: '4242' }]);
+  // No `.vault-picker-section` heading node anywhere in the list.
+  const headings = list.children.filter((c) => c.className === 'vault-picker-section');
+  assert.equal(headings.length, 0, 'a null entry must not flip the picker into sectioned rendering');
+  // The null entry still renders as a login row (item || {} in the render loop).
+  const nullRowIcon = iconOf(list.children[0]);
+  assert.equal(nullRowIcon.attributes.get('class'), 'vault-picker-icon');
+});
+
+test('AC4: the empty-picker copy appears exactly once in the module source', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '../../src/shared/vault-picker-template.js'), 'utf8');
+  const matches = src.match(/No saved logins, cards, or identities to fill here/g) || [];
+  assert.equal(matches.length, 1);
 });

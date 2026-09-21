@@ -30,7 +30,17 @@ function fakeVaultIndicatorEl() {
   };
 }
 
-function harness({ unlocked = false, finalizeResult = null, vaultIndicatorEl = null, vaultLockRejects = false } = {}) {
+function harness({
+  unlocked = false,
+  finalizeResult = null,
+  // M21 F3 L2 (multi-hold): an optional PER-ID finalize resolver, for tests that need
+  // two different locked-mode offers to finalize into two DIFFERENT models (AC6/AC7).
+  // Falls back to the single shared `finalizeResult` when omitted — every pre-existing
+  // test keeps working unchanged.
+  finalizeFor = null,
+  vaultIndicatorEl = null,
+  vaultLockRejects = false
+} = {}) {
   const opens = [];
   const dismissed = [];
   const finalized = [];
@@ -48,7 +58,8 @@ function harness({ unlocked = false, finalizeResult = null, vaultIndicatorEl = n
       },
       vaultCaptureFinalize: (id) => {
         finalized.push(id);
-        return finalizeResult instanceof Error ? Promise.reject(finalizeResult) : Promise.resolve(finalizeResult);
+        const result = finalizeFor ? finalizeFor(id) : finalizeResult;
+        return result instanceof Error ? Promise.reject(result) : Promise.resolve(result);
       },
       vaultLock: () => {
         vaultLockCalls.push(true);
@@ -283,4 +294,198 @@ test("a rejected lockNow() invoke never throws (fire-and-forget, like the vault 
   assert.doesNotThrow(() => h.controller.lockNow());
   await settle();
   assert.deepEqual(h.vaultLockCalls, [true], 'the bridge call was still made');
+});
+
+// ---------------------------------------------------------------------------
+// Multi-hold (M21 F3 L2, DD1 + its amendment): the chrome-side presentation
+// queue (already-unlocked offers) and the locked-mode pending-unlock drain.
+// ---------------------------------------------------------------------------
+
+const SAVE_MODEL_A = {
+  origin: 'https://a.example',
+  username: 'a',
+  mode: 'save',
+  defaultVaultId: 'work',
+  choices: ['work']
+};
+const SAVE_MODEL_B = {
+  kind: 'card',
+  origin: 'https://b.example',
+  mode: 'save',
+  defaultVaultId: 'work',
+  choices: ['work']
+};
+
+test('AC5: two already-unlocked offers open exactly one sheet; the second opens only after the first closes', () => {
+  const h = harness({ unlocked: true });
+  h.on.onVaultCaptureOffer({ captureId: 'cap1', model: SAVE_MODEL_A });
+  h.on.onVaultCaptureOffer({ captureId: 'cap2', model: SAVE_MODEL_B });
+  assert.equal(h.opens.length, 1, 'AC5: never a model-replace — the second offer waits its turn');
+  assert.equal(h.opens[0].model.captureId, 'cap1');
+
+  h.controller.handleClosed({ menuType: 'vault-capture', reason: 'escape' });
+  assert.equal(h.opens.length, 2, 'AC9: closing the first presents the next queued offer');
+  assert.equal(h.opens[1].model.captureId, 'cap2');
+});
+
+test('AC5b: advance() is idempotent — an unrelated onVaultLockState broadcast while a sheet is open (nothing queued) is a harmless no-op', () => {
+  const h = harness({ unlocked: true });
+  h.on.onVaultCaptureOffer({ captureId: 'cap1', model: SAVE_MODEL_A });
+  assert.equal(h.opens.length, 1);
+  // A duplicate / unrelated lock-state re-broadcast (recovery/admin unlock, or another
+  // tab) with nothing queued in pendingCaptureUnlock must never double-open — safety
+  // comes from advance()'s internal sheetOpen guard, not from restricting callers.
+  h.on.onVaultLockState({ setUp: true, unlocked: true });
+  assert.equal(h.opens.length, 1, 'no extra open fired');
+});
+
+test('AC5c: every OCCLUSION-class close reason (blur / tab-hide / tab-switch) drops the WHOLE queue and never advances', () => {
+  for (const reason of ['blur', 'tab-hide', 'tab-switch']) {
+    const h = harness({ unlocked: true });
+    h.on.onVaultCaptureOffer({ captureId: 'cap1', model: SAVE_MODEL_A });
+    h.on.onVaultCaptureOffer({ captureId: 'cap2', model: SAVE_MODEL_B });
+    h.controller.handleClosed({ menuType: 'vault-capture', reason });
+    assert.deepEqual(h.dismissed, ['cap1', 'cap2'], `reason '${reason}': AC5d — both captureIds dismissed`);
+    assert.equal(h.opens.length, 1, `reason '${reason}': AC5c — an occlusion-class close never advances`);
+  }
+});
+
+test('AC5c: every RESOLUTION-class close reason (escape / outside-click / tab-close) dismisses only the shown offer and presents the next', () => {
+  for (const reason of ['escape', 'outside-click', 'tab-close']) {
+    const h = harness({ unlocked: true });
+    h.on.onVaultCaptureOffer({ captureId: 'cap1', model: SAVE_MODEL_A });
+    h.on.onVaultCaptureOffer({ captureId: 'cap2', model: SAVE_MODEL_B });
+    h.controller.handleClosed({ menuType: 'vault-capture', reason });
+    assert.deepEqual(h.dismissed, ['cap1'], `reason '${reason}': only the offer that WAS showing is dismissed`);
+    assert.equal(h.opens.length, 2, `reason '${reason}': the next queued offer presents`);
+    assert.equal(h.opens[1].model.captureId, 'cap2');
+  }
+});
+
+test('AC9: an "activated" close (a successful save) skips the dismiss (main already dropped the record) but still presents the next queued offer', () => {
+  const h = harness({ unlocked: true });
+  h.on.onVaultCaptureOffer({ captureId: 'cap1', model: SAVE_MODEL_A });
+  h.on.onVaultCaptureOffer({ captureId: 'cap2', model: SAVE_MODEL_B });
+  h.controller.handleClosed({ menuType: 'vault-capture', reason: 'activated' });
+  assert.deepEqual(h.dismissed, [], 'a save already dropped the record main-side — no dismiss invoke');
+  assert.equal(h.opens.length, 2, 'the next queued offer still presents');
+  assert.equal(h.opens[1].model.captureId, 'cap2');
+});
+
+test('AC5d: a blur with two offers queued dismisses both captureIds and leaves the queue empty — nothing re-opens later', () => {
+  const h = harness({ unlocked: true });
+  h.on.onVaultCaptureOffer({ captureId: 'cap1', model: SAVE_MODEL_A });
+  h.on.onVaultCaptureOffer({ captureId: 'cap2', model: SAVE_MODEL_B });
+  h.controller.handleClosed({ menuType: 'vault-capture', reason: 'blur' });
+  assert.deepEqual(h.dismissed, ['cap1', 'cap2']);
+  assert.equal(h.opens.length, 1, 'nothing re-opens after the drop');
+  // Prove the queue is genuinely EMPTY, not merely un-advanced: an unrelated later
+  // lock-state broadcast must not resurrect anything.
+  h.on.onVaultLockState({ setUp: true, unlocked: true });
+  assert.equal(h.opens.length, 1, 'still nothing re-opens later');
+});
+
+test('AC6: two LOCKED-mode offers, one unlock, both reach a sheet — serially, each finalizing/resolving before the next is finalized', async () => {
+  const h = harness({
+    unlocked: false,
+    finalizeFor: (id) =>
+      id === 'cap1' ? { captureId: 'cap1', model: SAVE_MODEL_A } : { captureId: 'cap2', model: SAVE_MODEL_B }
+  });
+  offerLocked(h, 'cap1');
+  offerLocked(h, 'cap2');
+  assert.equal(h.opens.length, 1, 'AC7: the unlock prompt opens ONCE per drain, not once per offer');
+
+  h.on.onVaultLockState({ setUp: true, unlocked: true });
+  await settle();
+  assert.equal(h.opens.length, 2, 'the FIRST locked offer reached a save sheet');
+  assert.equal(h.opens[1].menuType, 'vault-capture');
+  assert.equal(h.opens[1].model.captureId, 'cap1');
+  assert.deepEqual(h.finalized, ['cap1'], 'the SECOND locked offer is not finalized until the first sheet closes');
+
+  h.controller.handleClosed({ menuType: 'vault-capture', reason: 'activated' });
+  await settle();
+  assert.equal(h.opens.length, 3, 'the SECOND locked offer ALSO reached a sheet');
+  assert.equal(h.opens[2].menuType, 'vault-capture');
+  assert.equal(h.opens[2].model.captureId, 'cap2');
+  assert.deepEqual(h.finalized, ['cap1', 'cap2']);
+});
+
+test('AC7: the unlock prompt opens exactly once for two locked-mode offers (asserted via the open COUNT)', () => {
+  const h = harness({ unlocked: false });
+  offerLocked(h, 'cap1');
+  offerLocked(h, 'cap2');
+  const unlockOpens = h.opens.filter((o) => o.menuType === 'vault-unlock');
+  assert.equal(unlockOpens.length, 1);
+});
+
+test('AC8: an abandoned unlock drops EVERY queued locked-mode record, not just the one that opened the prompt', () => {
+  const h = harness({ unlocked: false });
+  offerLocked(h, 'cap1');
+  offerLocked(h, 'cap2');
+  assert.equal(h.opens.length, 1, 'still just the one unlock prompt (AC7)');
+  h.controller.handleClosed({ menuType: 'vault-unlock', reason: 'escape' });
+  assert.deepEqual(h.dismissed, ['cap1', 'cap2']);
+});
+
+// ---------------------------------------------------------------------------
+// Post-landing fix (Leg 2 defect, Flight Director-classified in-scope): a
+// 'superseded' close of vault-capture (an UNRELATED menu — kebab, suggestions,
+// address-bar — taking over while a save-password sheet is open) used to be
+// carved out of the whole close-handling block, leaving `sheetOpen` stuck
+// `true` forever and every future offer permanently queued with nothing to
+// advance it. Under this leg's OWN serial design (openCaptureSheet has exactly
+// one caller, advance(), which no-ops while sheetOpen is true) a vault-capture
+// sheet can never model-replace another vault-capture sheet — so 'superseded'
+// reaching this branch can ONLY mean an unrelated menu took over, i.e. it is
+// occlusion-class, exactly where OCCLUSION_CLOSE_REASONS already puts it.
+// ---------------------------------------------------------------------------
+
+test('regression: a "superseded" close of vault-capture (an unrelated menu taking over) drops the shown record, dismisses the queue, and does NOT wedge future presentation', () => {
+  const h = harness({ unlocked: true });
+  h.on.onVaultCaptureOffer({ captureId: 'cap1', model: SAVE_MODEL_A });
+  assert.equal(h.opens.length, 1, 'the first offer opened a sheet');
+
+  // An unrelated menu (kebab, suggestions, …) supersedes the open vault-capture sheet.
+  h.controller.handleClosed({ menuType: 'vault-capture', reason: 'superseded' });
+  assert.deepEqual(h.dismissed, ['cap1'], 'the shown record is dismissed, not left held');
+
+  // A brand-new offer arriving afterward MUST still be able to present — this is the
+  // bug: with sheetOpen stuck true, advance() would refuse forever.
+  h.on.onVaultCaptureOffer({ captureId: 'cap2', model: SAVE_MODEL_B });
+  assert.equal(h.opens.length, 2, 'a later offer must still be able to open a sheet');
+  assert.equal(h.opens[1].menuType, 'vault-capture');
+  assert.equal(h.opens[1].model.captureId, 'cap2');
+});
+
+test('a "superseded" close of vault-capture dismisses the displayed record AND every queued offer, opening nothing', () => {
+  const h = harness({ unlocked: true });
+  h.on.onVaultCaptureOffer({ captureId: 'cap1', model: SAVE_MODEL_A });
+  h.on.onVaultCaptureOffer({ captureId: 'cap2', model: SAVE_MODEL_B });
+  assert.equal(h.opens.length, 1, 'AC5: the second offer queues rather than opening');
+
+  h.controller.handleClosed({ menuType: 'vault-capture', reason: 'superseded' });
+  assert.deepEqual(h.dismissed, ['cap1', 'cap2'], 'the shown record AND the queued sibling are both dismissed');
+  assert.equal(h.opens.length, 1, 'nothing opens over the menu that just took over');
+
+  // Prove the queue is genuinely empty, not merely un-advanced: an unrelated later
+  // lock-state broadcast must not resurrect anything.
+  h.on.onVaultLockState({ setUp: true, unlocked: true });
+  assert.equal(h.opens.length, 1, 'still nothing re-opens later');
+});
+
+test('invariant: while a vault-capture sheet is open, a further offer is QUEUED, never opened — openOverlayMenu("vault-capture", …) fires at most once until a close', () => {
+  const h = harness({ unlocked: true });
+  h.on.onVaultCaptureOffer({ captureId: 'cap1', model: SAVE_MODEL_A });
+  h.on.onVaultCaptureOffer({ captureId: 'cap2', model: SAVE_MODEL_B });
+  const captureOpens = () => h.opens.filter((o) => o.menuType === 'vault-capture');
+  assert.equal(captureOpens().length, 1, 'the second offer must not open a second vault-capture sheet');
+
+  h.controller.handleClosed({ menuType: 'vault-capture', reason: 'superseded' });
+  assert.equal(captureOpens().length, 1, 'a superseded close still opens nothing new');
+
+  // Once the queue is genuinely empty (dismissed above) and sheetOpen is reset, a
+  // fresh offer is free to open its own sheet — proving the guard is a serialization
+  // invariant, not a permanent lock.
+  h.on.onVaultCaptureOffer({ captureId: 'cap3', model: SAVE_MODEL_A });
+  assert.equal(captureOpens().length, 2, 'a fresh offer after the close can open its own sheet');
 });

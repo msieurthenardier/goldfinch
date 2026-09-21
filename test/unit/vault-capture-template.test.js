@@ -148,3 +148,93 @@ test('selectedVaultId: honors the checked radio, else the first, else null', () 
     'a'
   );
 });
+
+// --- identity mode-dispatch (M21 F3 Leg 4, AC17/AC18) -----------------------
+
+test('renderVaultCaptureCard (identity, fresh save): "Save your details?" + the vault choice', () => {
+  const document = createDocument();
+  const refs = buildVaultCaptureCard(document);
+  const { mode } = renderVaultCaptureCard(document, refs, {
+    kind: 'identity',
+    origin: 'https://shop.example',
+    mode: 'save',
+    addedFields: ['First name', 'Email', 'Street address'],
+    changedFields: [],
+    defaultVaultId: 'work',
+    choices: ['work', 'global']
+  });
+  assert.equal(mode, 'save');
+  assert.equal(refs.heading.textContent, 'Save your details?');
+  assert.equal(refs.card.attributes.get('aria-label'), 'Save your details', 'AC18: heading.slice(0, -1)');
+  assert.equal(refs.subjectLabel.textContent, 'Fields');
+  assert.equal(refs.usernameValue.textContent, 'First name, Email, Street address');
+  assert.equal(refs.choices.classList.contains('hidden'), false, 'a save offers the vault choice');
+});
+
+test('renderVaultCaptureCard (identity, gap-fill): "Add to your saved details?" + no vault choice', () => {
+  const document = createDocument();
+  const refs = buildVaultCaptureCard(document);
+  const { mode, choiceInputs } = renderVaultCaptureCard(document, refs, {
+    kind: 'identity',
+    origin: 'https://shop.example',
+    mode: 'update',
+    addedFields: ['Phone'],
+    changedFields: [],
+    defaultVaultId: 'work',
+    choices: []
+  });
+  assert.equal(mode, 'update');
+  assert.equal(refs.heading.textContent, 'Add to your saved details?');
+  assert.equal(refs.card.attributes.get('aria-label'), 'Add to your saved details');
+  assert.equal(refs.usernameValue.textContent, 'Phone');
+  assert.deepEqual(choiceInputs, [], 'an update renders no vault choice');
+  assert.equal(refs.choices.classList.contains('hidden'), true);
+});
+
+test('renderVaultCaptureCard (identity, conflict): "Update your saved details?" names BOTH groups', () => {
+  const document = createDocument();
+  const refs = buildVaultCaptureCard(document);
+  renderVaultCaptureCard(document, refs, {
+    kind: 'identity',
+    origin: 'https://shop.example',
+    mode: 'update',
+    addedFields: ['Phone'],
+    changedFields: ['Street address', 'Postal code'],
+    defaultVaultId: 'work',
+    choices: []
+  });
+  assert.equal(refs.heading.textContent, 'Update your saved details?');
+  assert.equal(refs.card.attributes.get('aria-label'), 'Update your saved details');
+  assert.equal(refs.usernameValue.textContent, 'Phone · Street address, Postal code', 'both groups named');
+});
+
+test('renderVaultCaptureCard (identity): with no fields at all, the subject row falls back to "(no fields)"', () => {
+  const document = createDocument();
+  const refs = buildVaultCaptureCard(document);
+  renderVaultCaptureCard(document, refs, {
+    kind: 'identity',
+    origin: 'https://shop.example',
+    mode: 'save',
+    addedFields: [],
+    changedFields: [],
+    defaultVaultId: 'work',
+    choices: ['work', 'global']
+  });
+  assert.equal(refs.usernameValue.textContent, '(no fields)');
+});
+
+test('renderVaultCaptureCard (identity): every field label is rendered via textContent only — no markup', () => {
+  const document = createDocument();
+  const refs = buildVaultCaptureCard(document);
+  renderVaultCaptureCard(document, refs, {
+    kind: 'identity',
+    origin: 'https://shop.example',
+    mode: 'save',
+    addedFields: ['<script>alert(1)</script>'],
+    changedFields: [],
+    defaultVaultId: 'work',
+    choices: ['work']
+  });
+  assert.equal(refs.usernameValue.children.length, 0, 'no child elements — text only');
+  assert.equal(refs.usernameValue.textContent, '<script>alert(1)</script>');
+});

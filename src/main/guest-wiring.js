@@ -731,13 +731,16 @@ function createGuestWiring(deps) {
         if (entry) entry.chromeNavPending = false;
         const url = entry ? effectiveUrl(entry) : wc.getURL();
         // Mission 21 Flight 1 Leg 5 (DD3f/DD4): SETTLE, navigation-commit half.
-        // A held gesture-time read (if any) for this tab is released HERE —
-        // never re-deriving origin (the record already froze it at gesture
-        // time; by now the tab may already show a DIFFERENT origin, since
-        // did-navigate fires AFTER commit). Most navigations have nothing
-        // pending — captureRelease is a cheap no-op in that case.
-        const gestureOffer = vaultHuman?.()?.captureRelease(wcId);
-        if (gestureOffer) {
+        // Held gesture-time reads (if any) for this tab are released HERE — never
+        // re-deriving origin (each record already froze it at gesture time; by now
+        // the tab may already show a DIFFERENT origin, since did-navigate fires
+        // AFTER commit). Most navigations have nothing pending — captureRelease
+        // returns [] cheaply in that case. M21 F3 L2 (DD1's amendment): ONE per
+        // FAMILY, not one per tab — iterate the returned array and push one
+        // vault-capture-offer per entry, preserving release order; the chrome
+        // queues and presents them serially (never a model-replace).
+        const gestureOffers = vaultHuman?.()?.captureRelease(wcId) || [];
+        for (const gestureOffer of gestureOffers) {
           sendToChrome('vault-capture-offer', { captureId: gestureOffer.captureId, model: gestureOffer.model });
         }
         sendToChrome('tab-did-navigate', { wcId, url });

@@ -455,26 +455,26 @@ test('a null card is a no-op', () => {
   assert.equal(f.number.value, '');
 });
 
-// --- gesture-bound targeting (the finding-9 discipline, card twin) ---------
+// --- ordinal targeting (the finding-9 discipline restored via an integer,
+// M21 F3 Leg 3, DD9 — REWRITTEN regression tests: the third parameter is now
+// an ordinal, never a node) --------------------------------------------------
 
-test('the gesture target selects ITS form on a multi-card page', () => {
+test('ordinal 1 selects the SECOND card form on a multi-card page', () => {
   const a = cardForm();
   const b = cardForm();
   const doc = makeDoc([new FakeForm([a.number, a.csc]), new FakeForm([b.number, b.csc])]);
 
-  fillCardForm(doc, CARD, b.number);
+  fillCardForm(doc, CARD, 1);
   assert.equal(b.number.value, '4242424242424242');
-  assert.equal(a.number.value, '', 'the first form must not be filled when form B was clicked');
+  assert.equal(a.number.value, '', 'the first form must not be filled when ordinal 1 was targeted');
 });
 
-test('a stale/foreign gesture target falls back to the first detected entry', () => {
+test('an out-of-range ordinal falls back to the first detected entry', () => {
   const f = cardForm();
   const doc = makeDoc([new FakeForm([f.number, f.csc])]);
-  const detached = new FakeInput({ autocomplete: 'cc-number' });
 
-  fillCardForm(doc, CARD, detached);
+  fillCardForm(doc, CARD, 99);
   assert.equal(f.number.value, '4242424242424242');
-  assert.equal(detached.value, '', 'a detached node is never filled');
 });
 
 test('isLiveCardNumberField only accepts a live detected number field', () => {

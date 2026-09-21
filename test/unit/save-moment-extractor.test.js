@@ -228,7 +228,8 @@ test('integration: createEntryObserver genuinely grants provenance from a truste
 
   assert.deepEqual(observer.snapshot(), {
     logins: [{ username: { detected: true, value: null }, password: { detected: true, value: 'real-typed-value' } }],
-    cards: []
+    cards: [],
+    identities: []
   });
 });
 
@@ -241,7 +242,11 @@ test('integration: an UNTRUSTED (script-dispatched) event on an extracted field 
   password.value = 'attacker-value';
   password.dispatchEvent(new Event('input', { bubbles: true })); // real Event → isTrusted:false
 
-  assert.deepEqual(observer.snapshot(), { logins: [{ password: { detected: true, value: null } }], cards: [] });
+  assert.deepEqual(observer.snapshot(), {
+    logins: [{ password: { detected: true, value: null } }],
+    cards: [],
+    identities: []
+  });
 });
 
 test('integration: fillLoginForm (production fill path) writes into an extracted document and grantForFill records it, no read-back', () => {
@@ -255,7 +260,8 @@ test('integration: fillLoginForm (production fill path) writes into an extracted
 
   assert.deepEqual(observer.snapshot(), {
     logins: [{ username: { detected: true, value: 'alice' }, password: { detected: true, value: 'hunter2' } }],
-    cards: []
+    cards: [],
+    identities: []
   });
   // The extractor's setFieldValue-driven write really landed on the node.
   assert.equal(doc.getElementById('pw').value, 'hunter2');

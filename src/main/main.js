@@ -1375,6 +1375,14 @@ function getVaultHuman() {
       fillCardDelegate: ({ wcId, card }) => {
         webContents.fromId(wcId)?.send('vault-fill-card', card);
       },
+      // Identity fill (M21 F3 Leg 3, DD7/AC19): the same shape and the same
+      // trust boundary as fillDelegate/fillCardDelegate above — webContents.send
+      // targets the TOP frame only, so a cross-origin iframe is never reached,
+      // and the identity is never returned to chrome. A distinct channel
+      // because it lands on different DOM anchors.
+      fillIdentityDelegate: ({ wcId, identity }) => {
+        webContents.fromId(wcId)?.send('vault-fill-identity', identity);
+      },
       // Leg 4 (capture-save): the held-record safety-drop timer, injected so the
       // ~2-min timeout is unit-testable (mirrors the vault-store idle timer).
       setTimeout: (fn, ms) => setTimeout(fn, ms),
@@ -1388,7 +1396,16 @@ function getVaultHuman() {
         const wc = webContents.fromId(chromeId);
         const rec = wc ? registry.getWindowForChrome(wc) : null;
         return rec ? [...rec.tabViews.keys()] : [];
-      }
+      },
+      // M21 F3 Leg 4, LD9: an optional capture-lifecycle trace, gated behind the
+      // SAME GOLDFINCH_VAULT_TRACE env var and the SAME `[vault-capture]` prefix
+      // as register-browser-ipc.js's own vaultTrace, so one debugging session
+      // reads as one coherent stream. vault-human.js defaults this to a no-op
+      // when omitted (it is Electron-free and cannot reach console/env itself).
+      trace:
+        process.env.GOLDFINCH_VAULT_TRACE === '1'
+          ? (event, detail) => console.info('[vault-capture]', event, JSON.stringify(detail))
+          : undefined
     });
   }
   return _vaultHuman;

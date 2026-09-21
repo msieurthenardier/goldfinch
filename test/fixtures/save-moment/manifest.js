@@ -270,10 +270,14 @@ module.exports = [
     // THE MOTIVATING PAGE. See the fixture's own header for the full
     // accounting: every field carries autocomplete="on" (a useless hint), so
     // detection runs entirely off the LD1 alternatives-model fallback
-    // vocabulary.
+    // vocabulary. PROMOTED to 'offers' at Mission 21, Flight 3, Leg 4
+    // (identity-capture, AC19) — tier and assert together, per this leg's own
+    // discipline: the submit button sits INSIDE `<form id="billing-address">`,
+    // so a real, headlessly-provable native form submission earns `offers`
+    // rather than only `captures` (decided by reading the fixture, per DD4).
     id: 'billing-jostens',
     tier: 'gated',
-    assert: 'detects',
+    assert: 'offers',
     family: 'identity',
     file: 'identity/billing-jostens.html'
   },
