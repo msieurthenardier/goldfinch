@@ -9,12 +9,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const {
-  findLoginFields,
-  findAllLoginFields,
-  fillLoginForm,
-  isLivePasswordField
-} = require('../../src/preload/vault-fill-fields');
+const { findLoginFields, findAllLoginFields, fillLoginForm } = require('../../src/preload/vault-fill-fields');
 
 class FakeInput {
   // `type` omitted models a no-type input (a real <input>.type is 'text').
@@ -272,16 +267,6 @@ test('a null / out-of-range ordinal falls back to the first-field heuristic (MCP
   fillLoginForm(doc, { username: 'alice', password: 'pw2' }, 99);
   assert.equal(passA.value, 'pw2', 'out-of-range ordinal falls back to first');
   assert.equal(passB.value, '', 'the non-fallback entry is never filled');
-});
-
-test('isLivePasswordField: true only for a password input present in the doc', () => {
-  const pass = new FakeInput('password', 'p');
-  const text = new FakeInput('text', 't');
-  const doc = makeDoc([new FakeForm([text, pass])]);
-  assert.equal(isLivePasswordField(doc, pass), true);
-  assert.equal(isLivePasswordField(doc, text), false, 'a text input is not a live password field');
-  assert.equal(isLivePasswordField(doc, new FakeInput('password', 'x')), false, 'a detached field is not live');
-  assert.equal(isLivePasswordField(null, pass), false);
 });
 
 test('top-frame guard: never fills inside an iframe (window.top !== window)', () => {

@@ -7,13 +7,15 @@
 // field-tokenizer.js (also extracted out of vault-card-fields.js).
 //
 // WHY THIS MOVE, NOT A THIRD COPY: identity needs both setters too (country and
-// region are routinely `<select>`s, just like card's expiry month/year). Two
-// private copies of `setFieldValue` already exist (`vault-fill-fields.js:92`,
-// unrelated to this move and left alone — see squawk 0097 — and the one that
-// used to live here); creating a THIRD private copy for identity would be the
-// exact drift risk this leg's other extractions (LD1's own precedent, AC3b's
-// IDENTITY_ROLES) are written to avoid. Card and identity now both `require()`
-// this module; the login copy is deliberately untouched.
+// region are routinely `<select>`s, just like card's expiry month/year). A
+// second private `setFieldValue` copy already existed in `vault-fill-fields.js`
+// at this leg's time (the one that used to live here, plus that one); creating
+// a THIRD private copy for identity would be the exact drift risk this leg's
+// other extractions (LD1's own precedent, AC3b's IDENTITY_ROLES) are written to
+// avoid. The login copy was deliberately left alone at this leg (see squawk
+// 0097) and consolidated onto this module afterward, at squawk-completion time
+// (confirmed byte-identical first) — login, card, and identity all `require()`
+// this module now.
 
 /**
  * Set a field's value and dispatch the bubbling input + change events a live

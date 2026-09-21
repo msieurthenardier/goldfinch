@@ -1,10 +1,10 @@
 # Squawk 0070: Document the injected-deps page-controller extraction pattern in CLAUDE.md
 
-**Status**: open
+**Status**: completed
 **Type**: servicing
 **Severity**: routine
 **Reported**: 2026-09-14
-**Completed**: —
+**Completed**: 2026-09-21
 
 ## Report
 
@@ -36,19 +36,67 @@ Surfaced by the M19 F2 flight debrief (Architect + Developer, both).
 
 ## Corrective Action
 
-*(written at completion — expected: a concise "Vault page — controller
-decomposition" note in CLAUDE.md's Password vault section stating the
-`create*Controller(deps)` factory shape, the closure-owned-state + getter/loader
-idiom, the injected-getter live-read convention, and the single canonical
-getter shape (pick one — a single `getState()`/`getPresence()` is the simpler
-contract). Doc only; the code reconciliation of the two existing controllers is
-a separate follow-on touch, not part of this doc squawk.)*
+Added one bullet, "Vault page — controller decomposition," to CLAUDE.md's
+Password vault section, immediately after the existing "Vault page — pure
+display models" bullet (the precedent this squawk's report pointed at).
+
+Before writing it, re-verified the report's claims against the current code,
+since the squawk is a week old:
+
+- `create*Controller(deps)` factory + closure-owned state exposed via
+  getter/loader methods: confirmed in all three
+  (`vault-restore-controller.js`'s `heldRecord()`/`loadHeld()` is the cleanest
+  example, per its own extraction-rationale docstring).
+- **Correction to the report**: `vault-nav-controller.js` does NOT share the
+  "modal cluster + injected-getter live page-state read + `setNotice`"
+  sub-shape the report attributed to all three. It owns a sidebar/scroll-spy,
+  not a modal cluster; `vault.js` passes it rendered data as call-time
+  arguments to `render(entries)`/`observe(sectionEls)`, never an injected
+  getter; it has no `setNotice`-equivalent callback. It predates the other two
+  (M12 F5 vs. M19 F1/F2) and is the simpler, more basic instance of the
+  general factory+closure-state idiom — the note says so explicitly rather
+  than overclaiming a third identical instance.
+- The getter drift is real and confirmed exactly as reported:
+  `vault-browser-import-controller.js`'s `getPresence()` returns
+  `{ jarRows, jarVaultPresence }` in one call (used at its one call site,
+  line 180, destructured together); `vault-restore-controller.js` takes two
+  separate `getJarRows()`/`getJarVaultPresence()`, also always called
+  together at its one call site (lines 481–482). Since every existing
+  consumer of either shape reads both values together, every time, the
+  two-getter shape buys no independent-read flexibility over the combined
+  one — so the note names the single combined getter
+  (`getPresence()`/`getState()`-shaped) as the canonical shape a fourth
+  controller should copy, states the two existing shapes explicitly differ,
+  and does NOT touch either controller's actual code (doc-only, per scope).
+- The `setNotice` single-purpose-callback coupling (`pendingNotice`, written
+  in `vault-restore-controller.js`, read only by `vault.js`'s `render()`) is
+  confirmed and is unique to `vault-restore-controller.js` — noted as such,
+  not generalized to the other two.
+
+No source file was changed; CLAUDE.md is the only edit.
 
 ## Verification
 
-*(written at completion — expected: the note exists and names the three
-controllers + the canonical shape; format:check green.)*
+- The note reads at CLAUDE.md's Password vault section, directly below "Vault
+  page — pure display models," names all three controllers
+  (`vault-nav-controller.js`, `vault-browser-import-controller.js`,
+  `vault-restore-controller.js`), states the getter-shape drift plainly, and
+  names the single combined getter as the canonical shape for new code with a
+  one-line reason.
+- `npm run format` — no changes (CLAUDE.md is not a Prettier-formatted
+  target in this repo; verified via `format:check`, below).
+- `npm run format:check` — "All matched files use Prettier code style!"
+  (green).
+- `npm test` — 5455 pass, 0 fail, 3 todo (pre-existing todos, unrelated to
+  this change).
+- This squawk's own edit touches exactly one source file, `CLAUDE.md` (plus
+  this squawk record); other files showing as modified in `git status` belong
+  to the other squawks completed earlier in this same batch turnaround and
+  were left untouched, per instruction.
 
 ## Sign-Off
 
-*(written at completion)*
+**Reviewer**: independent Reviewer agent (leg-execution crew), batch review of the
+2026-09-21 turnaround
+**Verdict**: confirmed — corrective action correct, complete, and confined to the reported surface; gates green (`npm test` 5455 pass / 0 fail / 3 todo, lint, typecheck, format:check, build:preload), leak scan clean
+**Commit**: see `squawk: turnaround 2026-09-21`

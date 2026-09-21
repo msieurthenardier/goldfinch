@@ -350,20 +350,6 @@ function findCardFields(doc) {
 }
 
 /**
- * Is `field` one of the card-number inputs CURRENTLY present in `doc`? The card
- * twin of `isLivePasswordField` — a gesture target is validated against the live
- * document immediately before filling, so a stale / detached / spoofed node can
- * never be filled.
- * @param {any} doc
- * @param {any} field
- * @returns {boolean}
- */
-function isLiveCardNumberField(doc, field) {
-  if (!field || !doc) return false;
-  return findAllCardFields(doc).some((entry) => entry.number === field);
-}
-
-/**
  * Parse a stored expiry string into `{ month: 'MM', year: 'YYYY' }`, or null when
  * it does not parse. Accepts the shapes operators actually type: `MM/YY`,
  * `MM/YYYY`, `MM-YY`, `MM YY`, `MMYY`, `MMYYYY` — PLUS a single-digit month with
@@ -504,7 +490,6 @@ module.exports = {
   fallbackRoleOf,
   findCardFields,
   findAllCardFields,
-  isLiveCardNumberField,
   parseExpiry,
   fillCardForm
 };
