@@ -297,10 +297,20 @@ that follows it fires.
       before the flight a plaintext copy existed only transiently inside one
       synchronous submit handler. Exposure duration, not value forgery — budgeted
       deliberately, and the one thing the new architecture made worse.
-- [ ] **Gesture-initiated fill on a page with MULTIPLE detected forms** resolves
-      by entry ordinal rather than the clicked node, because no node reference may
-      cross the isolated-world boundary. Correct in the common case; a DOM
-      mutation between the two enumerations can still misassociate.
+- [x] ~~**Gesture-initiated fill on a page with MULTIPLE detected forms**~~ —
+      **CLOSED 2026-09-21 by Flight 3 (DD9), verified live at its HAT Step 3.**
+      Original text: "resolves by entry ordinal rather than the clicked node… Correct
+      in the common case." That text was imprecise when written — the ordinal fix had
+      reached CAPTURE but not FILL, which still always filled the first detected
+      entry. Flight 3 made every icon fill (login, card, identity) pass an integer
+      ordinal through the existing `resolveOrdinalInFamily`; on a live two-form page
+      the clicked form fills and the other stays empty. The residual is split out
+      below.
+- [ ] **Ordinal fill/capture can misassociate under a DOM mutation between the two
+      enumerations** (the main world and the isolated world each enumerate entries
+      independently; the integer means the same entry in both only while the DOM is
+      stable between them). Narrowed from the item above — this is what remains.
+      Affects fill and capture alike.
 
 ## Flights
 
@@ -325,7 +335,8 @@ that follows it fires.
       unknown type. Nothing page-facing ships. *(Split at design review from a
       single larger "Identity items" flight — review judged that a repeat of
       Flight 1's sizing mistake.)*
-- [ ] Flight 3: **Identity fill and capture** — in-world detection wiring, fill,
+- [x] Flight 3: **Identity fill and capture** *(landed 2026-09-21, PR #228 — HAT
+      passed; the combined-form gap the HAT found was fixed in-flight as Leg 6)* — in-world detection wiring, fill,
       capture, the three-way sheet templates, and the fill-precision regression
       Flight 1 accepted (still live: the gesture's ordinal fix reached capture, not
       fill). Starts in budget deficit — `renderer.js` is 1576 lines against a 1577
@@ -344,5 +355,11 @@ that follows it fires.
       flight carries little of its security risk — generation is triggered by a
       trusted click on Goldfinch's own injected element, which is already gated
       today — and is instead the mission's highest UI-craft risk.
+- [ ] Flight 5 *(optional)* — **carried from Flight 3's HAT**: the operator asked
+      for before/after VALUES on the identity update sheet. Not a squawk — it reverses
+      Flight 3's DD6 (labels only, never values) and is security-sensitive (secret PII
+      over a non-zeroized channel into the sheet DOM; stored secrets shown on a
+      page-raised sheet). A named design question for this flight: masked hints,
+      reveal-on-click via the secret channel, or new-values-only.
 - [ ] Flight 5 *(optional)*: Alignment — vibe coding session for the feel of the
       offers, the generator affordance, and the identity sheet.

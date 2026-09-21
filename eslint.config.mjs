@@ -157,6 +157,10 @@ export default [
     // — same CJS-required-by-the-preload shape; there is no `src/preload/**`
     // wildcard, so an unlisted CJS module here fails lint with
     // "'module' is not defined" (Leg 2's AC13b lesson).
+    // vault-capture-plan.js (M21 F3 Leg 6 — gesture-holds-every-family, AC2b) is
+    // the pure per-family capture planner `webview-preload.js` calls — same
+    // CJS-required-by-the-preload shape, same "no src/preload/** wildcard"
+    // lesson as field-setters.js above.
     files: [
       'src/preload/webview-preload.js',
       'src/preload/vault-fill-fields.js',
@@ -171,6 +175,7 @@ export default [
       'src/preload/vault-entry-observer-bootstrap.js',
       'src/preload/vault-gesture-policy.js',
       'src/preload/vault-gesture-detach-watch.js',
+      'src/preload/vault-capture-plan.js',
       'src/preload/guest-bookmark-drop.js'
     ],
     languageOptions: { sourceType: 'commonjs', globals: { ...globals.node, ...globals.browser } },

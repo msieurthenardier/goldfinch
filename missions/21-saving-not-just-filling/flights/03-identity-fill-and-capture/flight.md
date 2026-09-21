@@ -1,6 +1,6 @@
 # Flight: Identity Fill and Capture
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Saving, Not Just Filling](../../mission.md)
 
 > **Scope note — why this is not split, stated deliberately.** Flight 2's debrief
@@ -281,6 +281,25 @@ ruling.)*
   but a card field claimed by the card detector is a card field whatever
   identity's vocabulary thinks, and enumerating the one known case would leave
   the rule to be re-derived the next time a spelling collides.
+- **⚠ AMENDED (Leg 6 — gesture-holds-every-family, spawned from the HAT's Leg 5
+  pre-walk finding): "consistent... at gesture resolution" above is RETIRED as
+  a winner-take-all capture rule.** The HAT found the headline scenario itself
+  broken by that reading: on a checkout where card and billing fields share
+  ONE form, `resolveGestureTarget`'s login-then-card-then-identity precedence
+  meant every gesture resolved to card and identity was never even checked —
+  identity capture was impossible on any combined form. Operator ruling: fix
+  it in this flight, and a sign-up form carrying a password AND an address
+  captures BOTH login and identity (one consistent rule, no special case for
+  the card+billing shape alone). The FIELD-level contest this DD decides is
+  UNCHANGED — `isClaimedByCard`/`isClaimedByLogin` still remove a contested
+  field from identity's candidates at DETECTION, before anything downstream
+  runs. What changes is only the GESTURE layer: `resolveGestureTargets`
+  (renamed, plural) now returns every family that resolves, in this same
+  fixed order — kept purely for DETERMINISM (offer order), never again as a
+  stop-early precedence — and a new pure planner
+  (`src/preload/vault-capture-plan.js`) plans each resolving family
+  independently, so one family's own gate failing (or being processed first)
+  never suppresses a sibling. Full design: Leg 6 artifact and flight-log.md.
 
 **DD6 — The identity capture-sheet model carries field NAMES, never values.**
 - DD2 (Flight 2) requires an update offer "naming exactly which fields change".
@@ -470,7 +489,7 @@ identity capture-sheet audit hook, and no further.**
 - [x] Is identity fill origin-gated? Does automation see it? → DD7.
 - [x] How is an identity fill triggered at all? → DD8.
 - [x] Is the fill-precision regression in scope? → DD9.
-- [ ] **Does an identity capture need its own settle signal, or does the existing
+- [x] *(Resolved in Leg 2 as LD1: a per-family detach watch, settle stays payload-free and tab-scoped.)* **Does an identity capture need its own settle signal, or does the existing
       pair suffice?** DD4 (Flight 1) gives two settle paths: a navigation commit,
       and a preload-reported detachment of the *held gesture's own fields*
       (`armGestureDetachWatch`). With two concurrent holds (DD1), the detach
@@ -479,7 +498,7 @@ identity capture-sheet audit hook, and no further.**
       this as its own decision** — it is a mechanism question the multi-hold
       re-key raises, answerable against `webview-preload.js:499-524`, and it must
       not be discovered in Leg 3 or Leg 4.
-- [ ] **Does `fullName` get COMPOSED from `firstName` + `lastName` at capture?**
+- [x] *(Resolved in Leg 4 as LD4: never composed — it is inference, and it would manufacture spurious conflicts.)* **Does `fullName` get COMPOSED from `firstName` + `lastName` at capture?**
       Flight 2 stated this as a leg residual with no caller: a profile saved from
       a split-name form may show `title` alone with `fullName` unset, which is
       the one non-secret field the picker row can render. **Leg 4 must rule** —
@@ -525,7 +544,7 @@ run** flag — Flight 2 debrief recommendation 1.
 - [x] **Squawks 0093, 0094, 0095 are open and OUT of scope** — documentation and
       sign-off hygiene from Flight 2's debrief, for a squawk turnaround, not this
       flight. Probe: `grep Status squawks/009{3,4,5}-*.md` → all `open`.
-- [ ] GUI dev launch + automation surface available for the HAT leg
+- [x] *(Verified at the HAT, 2026-09-21: `npm run dev:automation` launched onto WSLg; `dev-launch.mjs:41` rebuilds the preload.)* GUI dev launch + automation surface available for the HAT leg
       (`npm run dev:automation`) — *reasoned, not run; verified by the operator at
       HAT time, as in Flight 1.*
 
@@ -635,7 +654,13 @@ existing promotion discipline, not paralleled.
       identity/merge/conflict rendering carrying field names only (DD6); the
       corpus promotion (DD4); the `fullName` composition ruling (open question
       above); and DD12's seam entry if a new audit hook proves necessary.
-- [ ] **Leg 5** `hat-and-alignment` *(optional)* — operator-driven HAT on the dev
+- [x] **Leg 6** `gesture-holds-every-family` — **spawned from the HAT (Leg 5).** One
+      capture gesture holds every family it maps to, not just the first, closing the
+      combined-form gap the HAT confirmed at Step 4a (card + billing in one form made
+      identity capture impossible). Operator ruling: fix in this flight; a sign-up form
+      with a password AND an address captures BOTH. Retires DD5 as a winner-take-all
+      capture rule (contested fields stay resolved at detection).
+- [x] **Leg 5** `hat-and-alignment` *(optional)* — operator-driven HAT on the dev
       build. Walk covers, at minimum: a real billing checkout raising an identity
       offer; a card + identity double offer queueing two sheets; a fill into a
       later form; a conflict offer's copy; an icon-triggered fill on a two-form
@@ -649,17 +674,17 @@ existing promotion discipline, not paralleled.
 
 ### Completion Checklist
 
-- [ ] All legs completed
-- [ ] Tests passing (`npm test`, `npm run lint`, `npm run typecheck`,
+- [x] All legs completed
+- [x] Tests passing (`npm test`, `npm run lint`, `npm run typecheck`,
       `npm run format:check`)
 - [x] Documentation updated (`docs/vault.md`, CLAUDE.md — the Password vault
       pattern's identity bullet moves from "foundations only: no live caller" to
       the shipped behaviour, and the automation-stays-login-only guarantee is
       restated)
-- [ ] Mission Known Issue 3 (fill precision) marked closed in its "no precision
+- [x] Mission Known Issue 3 (fill precision) marked closed in its "no precision
       at all" form, with the mutation-race residual restated as what remains
-- [ ] Mission flight list updated
-- [ ] Flight 2's carried-forward debts explicitly accounted for: fill precision
+- [x] Mission flight list updated
+- [x] Flight 2's carried-forward debts explicitly accounted for: fill precision
       (DD9), unwired `classifyCapture` (DD10), LD3 precedence exercised (DD5),
       renderer budget (DD3)
 

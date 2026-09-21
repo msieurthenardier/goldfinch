@@ -16,12 +16,12 @@ const { createEntryTracker, resolveTargetForAnchor } = require('./vault-entry-tr
 const { VAULT_ENTRY_OBSERVER_INSTALL_SCRIPT } = require('./vault-entry-observer-bundle.generated');
 const {
   isCaptureGesture,
-  resolveGestureTarget,
-  snapshotHasProvenancedSecret,
+  resolveGestureTargets,
   resolveOrdinalInFamily,
   LOGIN_ROLES,
   CARD_ROLES
 } = require('./vault-gesture-policy');
+const { planCaptures } = require('./vault-capture-plan');
 const { createGestureDetachWatch } = require('./vault-gesture-detach-watch');
 const { createBookmarkDropListeners } = require('./guest-bookmark-drop');
 const { tabBoundary } = require('../shared/tab-boundary');
@@ -550,43 +550,27 @@ if (IS_TOP_FRAME && vaultEligible) {
     gestureDetachWatch.arm(kind, fields);
   }
 
-  // The submitted expiry as a single `MM/YY`-ish string, from the isolated
-  // world's three-state snapshot fields (either the combined `cc-exp` field or
-  // the split month/year pair). Returns '' when neither is present/provenanced
-  // — main stores a null expiry rather than a fabricated one.
-  function expiryFromSnapshot(entrySnapshot) {
-    if (entrySnapshot.expiry && entrySnapshot.expiry.value) return String(entrySnapshot.expiry.value);
-    const month = entrySnapshot.expMonth && entrySnapshot.expMonth.value ? String(entrySnapshot.expMonth.value) : '';
-    const year = entrySnapshot.expYear && entrySnapshot.expYear.value ? String(entrySnapshot.expYear.value) : '';
-    if (!month || !year) return '';
-    return `${month.padStart(2, '0')}/${year}`;
-  }
-
+  // (Leg 6 — gesture-holds-every-family, LD2/AC4c) ALL per-family decision
+  // logic — the entry lookup, the value-layer gate, the payload encoding, the
+  // watch-field list — now lives in the pure, unit-tested
+  // `vault-capture-plan.js`. This function is reduced to exactly four steps:
+  // resolve the list of resolving families, read the isolated-world snapshot
+  // ONCE, build the plan, and loop over it sending + arming. There is no
+  // `return` inside the loop body — the property "one family's own outcome
+  // never affects another's" is proven by `planCaptures`' own unit tests
+  // (AC4) and its neuter-verification (AC4b), not by reading this function.
   async function onCaptureGesture(target) {
     if (!target) return;
     // The ordinal needs its OWN main-world detection pass (Leg 5 Implementation
     // Guidance 1b) — the resolveTargetForAnchor split-context precedent:
     // decorative icon resolution stays main-world, capture resolution moves
-    // into the isolated world; THIS pass exists only to compute an integer
-    // ordinal, never to read a value. Identity's third arm (M21 F3 Leg 4, AC8)
-    // is checked LAST, matching DD5's login > card > identity precedence.
+    // into the isolated world; THIS pass exists only to compute integer
+    // ordinals, never to read a value.
     const logins = findAllLoginFields(document);
     const cards = findAllCardFields(document);
     const identities = findAllIdentityFields(document);
-    const resolved = resolveGestureTarget(target, { logins, cards, identities });
-    if (!resolved) return;
-    // Cast-to-local (house discipline, CLAUDE.md): `entry`'s three possible
-    // shapes (login/card/identity) are chosen by the SAME `resolved.kind` this
-    // function keeps re-checking below, but tsc cannot correlate a union
-    // picked by one ternary against a later independent property read.
-    const entry = /** @type {any} */ (
-      resolved.kind === 'card'
-        ? cards[resolved.ordinal]
-        : resolved.kind === 'identity'
-          ? identities[resolved.ordinal]
-          : logins[resolved.ordinal]
-    );
-    if (!entry) return;
+    const resolved = resolveGestureTargets(target, { logins, cards, identities });
+    if (resolved.length === 0) return;
 
     let snapshot;
     try {
@@ -594,75 +578,21 @@ if (IS_TOP_FRAME && vaultEligible) {
     } catch {
       return; // fail closed — no hold, no offer
     }
-    const entrySnapshot = /** @type {any} */ (
-      resolved.kind === 'card'
-        ? snapshot.cards[resolved.ordinal]
-        : resolved.kind === 'identity'
-          ? snapshot.identities[resolved.ordinal]
-          : snapshot.logins[resolved.ordinal]
-    );
-    if (!snapshotHasProvenancedSecret(entrySnapshot, resolved.kind)) return; // nothing worth holding
 
-    try {
-      if (resolved.kind === 'card') {
-        const encoder = new TextEncoder();
-        const cvvValue = entrySnapshot.csc && entrySnapshot.csc.value != null ? entrySnapshot.csc.value : '';
-        const cardholder =
-          entrySnapshot.cardholder && entrySnapshot.cardholder.value != null ? entrySnapshot.cardholder.value : '';
-        ipcRenderer.send('guest-vault-capture-card', {
-          number: encoder.encode(String(entrySnapshot.number.value)),
-          cvv: encoder.encode(String(cvvValue)),
-          cardholder,
-          expiry: expiryFromSnapshot(entrySnapshot)
-        });
-        armGestureDetachWatch('card', [
-          entry.number,
-          entry.cardholder,
-          entry.expiry,
-          entry.expMonth,
-          entry.expYear,
-          entry.csc
-        ]);
-        return;
+    const plan = planCaptures({
+      resolved,
+      entriesByKind: { login: logins, card: cards, identity: identities },
+      snapshot
+    });
+
+    for (const c of plan) {
+      try {
+        ipcRenderer.send(c.channel, c.payload);
+        armGestureDetachWatch(c.kind, c.watchFields);
+      } catch {
+        /* page navigated away mid-send for THIS family — nothing was held for
+           it, nothing to release; every other family in the plan still sends */
       }
-      if (resolved.kind === 'identity') {
-        // LD2 (flight): the ten secret identity fields cross as ONE Uint8Array —
-        // the UTF-8 JSON of the ten secret role values (every role but
-        // fullName, the one non-secret field, which crosses as a plain string
-        // alongside it). Missing/unprovenanced fields encode as '' — the SAME
-        // bucket `classifyCapture`'s own `isPresent` guard already treats as
-        // absent, so an unset field is simply never judged.
-        const encoder = new TextEncoder();
-        /** @type {any} */
-        const secrets = {};
-        for (const role of IDENTITY_ROLES) {
-          if (role === 'fullName') continue;
-          secrets[role] =
-            entrySnapshot[role] && entrySnapshot[role].value != null ? String(entrySnapshot[role].value) : '';
-        }
-        const fullNameValue =
-          entrySnapshot.fullName && entrySnapshot.fullName.value != null ? String(entrySnapshot.fullName.value) : '';
-        ipcRenderer.send('guest-vault-capture-identity', {
-          identitySecrets: encoder.encode(JSON.stringify(secrets)),
-          fullName: fullNameValue
-        });
-        armGestureDetachWatch('identity', IDENTITY_ROLES.map((role) => entry[role]).filter(Boolean));
-        return;
-      }
-      // Login. DD3c's wire field: `usernameDetected` is whether a username FIELD
-      // was detected at all (the snapshot key's presence — DD3h's three-state
-      // shape), independent of whether it carried provenance — `normUsername`
-      // would otherwise collapse "detected but unprovenanced" into the SAME
-      // bucket as "never detected", which is exactly the bucket DD3c forbids
-      // reaching the `update` branch.
-      const usernameDetected = Object.prototype.hasOwnProperty.call(entrySnapshot, 'username');
-      const usernameValue =
-        entrySnapshot.username && entrySnapshot.username.value != null ? entrySnapshot.username.value : null;
-      const passwordBytes = new TextEncoder().encode(String(entrySnapshot.password.value));
-      ipcRenderer.send('guest-vault-capture', { username: usernameValue, usernameDetected, password: passwordBytes });
-      armGestureDetachWatch('login', [entry.username, entry.password]);
-    } catch {
-      /* page navigated away mid-send — nothing was held, nothing to release */
     }
   }
 

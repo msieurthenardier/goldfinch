@@ -4,28 +4,36 @@
 
 ## Summary
 
-**Legs 1-4 (all autonomous legs) landed, passed flight-end code review
-(`[HANDOFF:confirmed]`, no blocking issues), and are committed.** Leg 5
-(`hat-and-alignment`, optional) is pending the operator.
+**LANDED 2026-09-21.** Six legs completed: four autonomous legs, an operator HAT,
+and a fix leg the HAT spawned. Legs 1-4 committed as `45a9a44` after flight-end
+review; Legs 5-6 committed after their own code review. Draft PR #228 marked ready.
 
 - **Leg 1** `sheet-type-dispatch` — type-keyed dispatch in both vault sheet
   templates; auth/cert challenge flow extracted to `auth-challenge-controller.js`;
   `renderer.js` 1577 → 1550. Zero behavioural assertions touched.
 - **Leg 2** `multi-hold` — one pending capture per (tab, family); `captureRelease`
   returns an array; a serial chrome-side offer queue incl. the locked-vault drain;
-  a per-family detach watch. Post-landing: a stuck-`sheetOpen` defect found and
-  fixed in scope.
-- **Leg 3** `identity-fill` — identity fillable end to end (detection, third icon
-  kind, picker, `fillHuman`); the fill-precision regression closed for all three
-  families by reusing `resolveOrdinalInFamily`.
-- **Leg 4** `identity-capture` — identity capture with fail-closed three-way
-  dispatch, zeroize-every-Buffer, `classifyCapture` wired to a live caller, a
-  field-labels-only offer model, and `billing-jostens` promoted to `offers`.
+  a per-family detach watch. Post-landing: a stuck-`sheetOpen` defect fixed in scope.
+- **Leg 3** `identity-fill` — identity fillable end to end; fill precision restored
+  for all three families (mission Known Issue 3 closed, verified live).
+- **Leg 4** `identity-capture` — fail-closed three-way dispatch, zeroize-every-Buffer,
+  `classifyCapture` wired to a live caller, a field-labels-only offer model.
+- **Leg 5** `hat-and-alignment` — every step passed live. Found a DESIGN gap before
+  step 1: one gesture resolved to exactly one family, so a combined card + billing
+  checkout — the mission's motivating shape — could never offer the identity.
+- **Leg 6** `gesture-holds-every-family` — spawned from the HAT to close that gap;
+  per-family planning moved into a pure, unit-tested, neuter-verified module.
+  Re-walked live: the combined checkout and a sign-up form each offer both families.
 
-Suite 5294 → **5432** tests, 0 failing. Squawks opened and deferred: **0096**,
-**0097**, **0098**. Five enumeration misses by the Flight Director across planning
-and legs, each caught by review before shipping — the recurring theme of this
-flight, and the main input its debrief should examine.
+Suite 5294 → **5458** tests, 0 failing. Squawks opened and deferred: **0096, 0097,
+0098** (flight code), **0099, 0100** (pre-existing, found during the HAT). Carried to
+mission Flight 5: before/after values on the identity update sheet (reverses DD6).
+
+**The theme for the debrief**: five Flight-Director enumeration misses and one
+causal-layer miss (the headline gap — root cause named at planning, fix designed one
+layer away, no AC asserting the end-to-end scenario). Every one was caught before
+shipping — the enumeration misses by review, the layer miss by writing the HAT's
+expected results against the code.
 
 ---
 
@@ -577,6 +585,39 @@ would have been disproportionate), along with the line's stale
 again to 1577 at Leg 2" is preserved. **Lesson**: a count of the OLD literal is a
 cheaper and more reliable check on a doc update than reading the agent's claim —
 it turns "did you change it?" into "is it still there?".
+
+**Leg 5 (HAT) — pre-walk finding: the flight's HEADLINE case does not work, and
+it is a design gap, not an implementation bug.** Found by the Flight Director while
+writing the checkout step's expected result — by checking the premise against the
+code before telling the operator what to expect.
+
+`resolveGestureTarget` returns exactly ONE family (the first to resolve: login,
+card, identity) and `onCaptureGesture` sends exactly ONE capture. On a checkout
+with card and billing fields, "Pay now" resolves to the card and identity is never
+checked — never held, never offered. DD1 described this exact outcome as the
+problem, then fixed four things at the hold / release / present layers and nothing
+at gesture resolution, where the cause is. Multi-hold lets two holds COEXIST;
+nothing CREATES two from one gesture.
+
+**The planning recon had the root cause written down verbatim** ("resolveGestureTarget
+returns exactly one `{kind, ordinal}`") and the design still fixed the layer below
+it. Every design-review round and the flight-end Reviewer missed it too — Leg 2's
+tests proved coexistence using two SEPARATE hold calls, the one case that works.
+
+This is a different class from the flight's five enumeration misses: not "I missed
+a site" but "I named the cause and designed the fix one layer away from it" — and
+no reviewer tested the end-to-end claim the fix existed to deliver. **The lesson
+for the debrief**: a DD whose motivating scenario is concrete should carry an AC
+that exercises THAT scenario end to end (one gesture on a card+identity checkout →
+two offers), not only ACs for each mechanism it builds. Every mechanism here is
+correct and tested; the composition was never asserted.
+
+Classified FEATURE-class under the fix-vs-feature gate (one gesture holding every
+family it maps to — widens what a gesture can capture; open question on whether a
+password in the same form should suppress identity). Not an inline fix. The walk
+proceeds — every other step is independent of it — with the checkout step reframed
+to confirm the gap, and the operator decides at the end: fix in this HAT via a
+scoped design review, or carry forward.
 
 ---
 
@@ -1907,6 +1948,335 @@ Leg status → `landed`.
 
 ---
 
+### Leg 6: gesture-holds-every-family
+**Status**: landed
+**Started**: 2026-09-21
+**Completed**: 2026-09-21
+
+#### Changes Made
+
+- **`src/preload/vault-gesture-policy.js`** (AC1, AC2): `resolveGestureTarget`
+  RENAMED (not changed in place, per LD1) to `resolveGestureTargets`, now
+  returning a LIST — every family that resolves (login, card, identity, in
+  that fixed order, kept purely for determinism/offer-order), each resolved
+  independently via the pre-existing `resolveOrdinalInFamily`. `[]` on nothing
+  resolving, never `null`. No new resolution logic; the module header and the
+  function's own doc comment updated to describe the list contract and the
+  reason for the rename (a stale singular caller would silently read
+  `undefined.kind` and fall into the guest dispatch's old login else-branch —
+  a rename turns that into a loud break).
+- **`src/preload/vault-capture-plan.js`** (new, AC3/AC4/LD2): the pure planner.
+  `planCaptures({ resolved, entriesByKind, snapshot })` owns every per-family
+  decision `onCaptureGesture` used to inline — the entry-existence check, each
+  family's own value-layer gate (via the unchanged `snapshotHasProvenancedSecret`),
+  the payload encoding (card PAN/CVV/cardholder/expiry, the identity
+  `Uint8Array` secrets bundle + plain `fullName`, DD3c's `usernameDetected`),
+  and the watch-field list — moved VERBATIM from the old inline branches (no
+  payload-shape change). The per-kind lookup (`{login,card,identity}`) fails
+  CLOSED on an unrecognised kind — skipped, never planned, never a login
+  default. Plain CJS (`TextEncoder` is a Node/browser global) —
+  `require()`-able under `node --test`.
+- **`src/preload/webview-preload.js`** (AC4c): `onCaptureGesture` shrunk to
+  four steps — resolve the list (`resolveGestureTargets`), read the isolated-
+  world snapshot ONCE, build the plan (`planCaptures`), and
+  `for (const c of plan) { try { ipcRenderer.send(...); armGestureDetachWatch(...); } catch {} }`
+  — a per-iteration `try/catch`, no `return` anywhere inside the loop. The old
+  `expiryFromSnapshot` helper and every per-family branch body (previously
+  riddled with whole-function early returns) are gone from this file — they
+  now live in the planner. The import list dropped `snapshotHasProvenancedSecret`
+  (no longer called here) and gained `planCaptures`.
+- **`eslint.config.mjs`** (AC2b): `src/preload/vault-capture-plan.js` added to
+  the CJS-required-by-the-preload `files:` array (no `src/preload/**`
+  wildcard exists — an unlisted module fails lint with `'module' is not
+  defined`, the Leg 2 AC13b / Leg 3 AC23 lesson).
+- **`test/unit/vault-gesture-policy.test.js`** (AC5): the 13 remaining
+  `resolveGestureTarget`-spelled references (after the import rename) were
+  rewritten to the plural, at the SAME strength, never deleted or weakened —
+  every one is listed below with what it now asserts (computed against the
+  REAL renamed function via a throwaway `node -e` probe before writing the
+  assertions, not guessed):
+  1. `"resolveGestureTarget: resolves a LOGIN entry before ever checking
+     cards"` → `"resolveGestureTargets: LOGIN and CARD both resolve
+     (list [login, card], in that order — Leg 6 rewrite…)"`. This is the
+     leg's own AC5 worked example — under the plural resolver the card
+     entry (no `.form` of its own) resolves too, via
+     `resolveOrdinalInFamily`'s step-3 sole-entry fallback; the fixture's
+     shape was never isolating pure precedence, it also happens to exercise
+     the fallback.
+  2. `"resolveGestureTarget: resolves a CARD entry when no login entry
+     matches"` → same name pattern, plural call, asserts
+     `[{kind:'card',ordinal:0}]` (logins stays `[]`, short-circuits to no
+     match — unaffected).
+  3. `"resolveGestureTarget: neither family resolves anything -> null;
+     missing entries default to empty arrays"` → asserts `[]` in all three
+     shapes (not `null`).
+  4. `"AC5: resolveGestureTarget resolves an IDENTITY entry when neither
+     login nor card matches, checked LAST (DD5)"` → renamed to drop "checked
+     LAST" (order is now list order, not precedence); asserts
+     `[{kind:'identity',ordinal:0}]`.
+  5. `"AC5: DD5 precedence — login beats card beats identity when all three
+     could resolve"` → this is the leg's own named "AC5's synthetic 'all
+     three families resolve' test" (Edge Cases). Rewritten with an extended
+     test-name comment stating explicitly that this shape cannot occur on a
+     real page (LD3's detection-time claims remove a contested field from
+     identity's candidates before three entries could ever point at the same
+     node) — a resolver-in-isolation worst case, not a reachable page.
+     Asserts `[login, card, identity]`, in that order.
+  6. `"AC5: missing \`identities\` defaults to an empty array"` → asserts
+     `[]`, not `null`.
+  - Also added: **AC1's full 7-row pinned table**, one test per row, using
+    the same plain-fake-entry style as the file's existing tests (never real
+    DOM) — every expected list value computed and cross-checked against the
+    real renamed resolver via the same throwaway probe before being written
+    into an assertion.
+- **`src/preload/vault-gesture-policy.js`** doc-comment wording: two spots
+  that would have literally spelled the OLD singular function name
+  (`resolveGestureTarget`, no trailing "s") were reworded to avoid the exact
+  substring — AC2's own grep is exact and would otherwise still match a
+  comment, not just a consumer.
+- **`test/helpers/save-moment-assertions.js`** (AC6): the two internal
+  `resolveGestureTarget` call sites (`resolveCaptureWorthyGesture`,
+  `assertNoOffer`) were updated to the plural — `resolveCaptureWorthyGesture`
+  now finds its target `family` within the returned list (defensive against a
+  future single-family fixture that also resolves a second family), and
+  `assertNoOffer` now checks that EVERY resolved family carries nothing
+  provenanced, not just the first (a real strengthening, harmless to every
+  existing negative fixture, which carries no values at all). A new exported
+  **`assertOffersFamilies(doc, expectedKinds, opts)`** was added — the
+  multi-family assertion AC6 asks for. Per AC6's stated preference, it calls
+  the REAL `resolveGestureTargets` + `planCaptures` (imported from production,
+  never reimplemented) and asserts the planned kinds equal `expectedKinds` in
+  order, PLUS the same `wouldNativelySubmit` settle check `assertOffersEntry`
+  already uses (both new fixtures wire their gesture to a real native form
+  submission, so both honestly earn offers-strength, not just captures-strength).
+- **`test/fixtures/save-moment/multi-family/checkout-combined-card-billing.html`**
+  and **`.../signup-with-address.html`** (new, AC6) — see Fixtures section
+  below.
+- **`test/fixtures/save-moment/manifest.js`**: entry-shape doc comment gained
+  `'offers-multi'` and the `families` field; two new manifest entries added
+  (`checkout-combined-card-billing` → `families: ['card','identity']`,
+  `gestureSelector: '#pay-now'`; `signup-with-address` →
+  `families: ['login','identity']`, `gestureSelector: '#create-account'`),
+  both `tier: 'gated'`.
+- **`test/unit/save-moment-corpus.test.js`**: `KNOWN_ASSERTS` gained
+  `'offers-multi'`; `runAssertion` gained a dispatch branch that asserts the
+  entry carries a non-empty `families` array and calls `assertOffersFamilies`.
+- **`test/unit/vault-capture-plan.test.js`** (new): 13 tests for the planner —
+  see AC4/AC4b verification below.
+- **`CLAUDE.md:345`** (AC8): corrected — see Documentation below.
+- **`missions/.../flight.md`**: DD5 amendment note added (see Documentation
+  below); Leg 6 checked off in the Legs list.
+
+#### Fixtures — written FIRST, confirmed FAIL against pre-fix code (AC6, Implementation Guidance step 1)
+
+Both fixtures were written and their manifest entries drafted BEFORE any
+resolver/planner code changed. A throwaway probe script
+(`extractFixtureFile` + the real `findAllLoginFields`/`findAllCardFields`/
+`findAllIdentityFields` + a real `vault-entry-observer` with provenance
+granted for every non-empty value, exactly `buildProvenancedObserver`'s
+shape) was run against the pre-fix `resolveGestureTarget` (singular, as it
+existed on disk at that point) to confirm the fixtures reproduce the bug.
+Recorded output:
+
+```
+test/fixtures/save-moment/multi-family/checkout-combined-card-billing.html
+  detected logins: 0 cards: 1 identities: 1
+  isCaptureGesture: true
+  resolveGestureTarget (SINGULAR, today's code): {"kind":"card","ordinal":0}
+  provenanced? true
+  => ONE capture would be sent today; every OTHER family that should also resolve is NEVER checked.
+
+test/fixtures/save-moment/multi-family/signup-with-address.html
+  detected logins: 1 cards: 0 identities: 1
+  isCaptureGesture: true
+  resolveGestureTarget (SINGULAR, today's code): {"kind":"login","ordinal":0}
+  provenanced? true
+  => ONE capture would be sent today; every OTHER family that should also resolve is NEVER checked.
+```
+
+Both fixtures detect BOTH intended families (card=1/identity=1;
+login=1/identity=1 — confirming the fixtures themselves are well-formed), and
+the pre-fix singular resolver returns exactly ONE `{kind, ordinal}` for each,
+proving the fixture would have produced only one capture, silently dropping
+the other — the exact HAT 4a finding, reproduced headlessly. This is the
+"fixture that would have proven nothing" check the leg's own guidance
+requires: these two fixtures FAIL to prove multi-family capture before the
+fix, and PASS after it (see corpus run below).
+
+#### AC1 verification
+
+7-row table, each pinned as its own test in `vault-gesture-policy.test.js`
+(`AC1 row 1`–`AC1 row 7`), run against the landed `resolveGestureTargets`:
+all 7 pass — `[card, identity]` (form submit), `[card, identity]` (Enter in
+billing email, target itself carrying `.form`), `[card, identity]` (outside
+both forms, each via its family's own sole-entry fallback), `[card]` only
+(inside the card form specifically, identity's OWN form doesn't match), `[login,
+identity]` (sign-up submit), `[login]` (plain login submit), `[]` (nothing
+detected).
+
+#### AC2 verification
+
+`grep -rn "resolveGestureTarget\b" src/ test/`, run AFTER `npm run
+build:preload` — **zero hits** (confirmed; the two comment-only near-misses
+found before the rebuild were reworded to avoid the exact substring, since
+AC2's grep is literal and doesn't distinguish a comment from a consumer).
+`webview-preload.bundle.js` (gitignored) regenerated and grepped for
+`resolveGestureTargets`/`planCaptures` — 8 hits, confirming the rebuild
+picked up both renamed/new symbols.
+
+#### AC3/AC4/AC4b verification
+
+`test/unit/vault-capture-plan.test.js`: 13/13 pass. Pinned per AC4: a
+card-only plan, a login-only plan (plus a `usernameDetected:false` variant),
+an identity-only plan (payload/secrets/watchFields shape all asserted),
+`[card, identity]` with both provenanced → 2 entries, card-provenanced/
+identity-anchor-unprovenanced → only card, **the order-sensitive case**
+(card resolved FIRST but its OWN gate fails; identity resolved SECOND and IS
+provenanced) → only identity is planned — proving the first-listed family's
+own failure never ends the plan for a family listed after it — an unknown
+kind mixed with a real one → only the real one is planned, never a login
+payload; `[]` resolved → `[]`; all three families → `[login, card,
+identity]` in order with cross-payload isolation asserted (no family's
+values leak into another's payload); plus defensive shape guards (non-array
+`resolved`, an out-of-range ordinal, a missing snapshot entry) — none throw.
+
+**AC4b neuter-verification** (recorded output, not just claimed): the
+planner's loop was temporarily changed from
+
+```js
+const planned = planner(entry, entrySnapshot);
+if (planned) plan.push(planned);
+```
+
+to the same plus an unconditional `break;` immediately after (stop after the
+first family — the exact shape of the HIGH the design review found). Re-run
+of `test/unit/vault-capture-plan.test.js` against the neutered code:
+
+```
+not ok 5 - AC4: [card, identity] with BOTH provenanced -> TWO plan entries
+ok 6 - AC4: card provenanced, identity NOT (its anchor is unprovenanced) -> only the card is planned
+not ok 7 - AC4 (the ORDER-SENSITIVE case): identity provenanced, card NOT (its number is unprovenanced), card resolved FIRST -> the FIRST-LISTED family failing its gate must not end the plan; only identity is planned
+not ok 10 - AC4: three families, all provenanced, all planned in order [login, card, identity]
+# tests 13
+# pass 10
+# fail 3
+```
+
+Exactly the two-family test, the order-sensitive first-listed-family-fails
+test, and the three-family test went RED — precisely the property AC4b
+exists to prove has teeth. The file was then restored from a pre-neuter
+backup and verified byte-identical via `diff` (reported "IDENTICAL — clean
+restore confirmed"); re-run confirmed 13/13 pass again.
+
+#### AC4c verification
+
+Source-scanned programmatically (locate the `for (const c of plan) {` block
+by brace-depth matching, not a line-number guess): the loop body is exactly
+
+```js
+{
+      try {
+        ipcRenderer.send(c.channel, c.payload);
+        armGestureDetachWatch(c.kind, c.watchFields);
+      } catch {
+        /* … */
+      }
+    }
+```
+
+`/\breturn\b/.test(body)` → `false`. No `return` statement anywhere between
+the loop's opening and closing braces.
+
+#### AC5 verification
+
+All 6 rewritten tests plus the 7 new AC1 tests pass (see the per-test list
+under Changes Made and the AC1 verification above); no existing assertion
+was deleted or weakened — every one asserts an equal-or-stronger claim about
+the SAME underlying behavior (a full ordered list instead of one winner).
+
+#### AC6 verification
+
+`test/unit/save-moment-corpus.test.js` run in full: both new fixtures pass
+as `[gated] checkout-combined-card-billing` and `[gated]
+signup-with-address` — the multi-family assertion (`assertOffersFamilies`,
+calling the real `resolveGestureTargets` + `planCaptures`, per AC6's stated
+preference — no parallel reimplementation was needed) confirms `[card,
+identity]` and `[login, identity]` respectively, each backed by a real
+native form submission (`wouldNativelySubmit`).
+
+#### AC7 verification
+
+Full corpus run: 23 tests, 20 pass, 0 fail, 3 todo (the pre-existing
+`known-unsolved` tier). The `negative-detection` (7 fixtures) and
+`negative-gesture` (`decoy-cancel-beside-password`) tiers are unaffected and
+still pass; the standing canaries
+(`assertNoDetectableEntry`-must-FAIL-against-a-known-positive and
+`assertOffersEntry`-must-FAIL-against-checkout-submit-outside-form) both
+still invert and throw as expected.
+
+#### AC8 verification (Documentation)
+
+- **`CLAUDE.md:345`** (the identity fill-and-capture bullet): the sentence
+  "...completing the precedence login > card > identity at detection, icon
+  placement, and gesture resolution alike" corrected to state the precedence
+  holds at detection and icon placement ONLY, and that a capture gesture now
+  holds every family it maps to — with a new clause documenting
+  `resolveGestureTargets`'s list-return + fixed-order-for-determinism-only
+  semantics and `vault-capture-plan.js`'s role as the pure per-family
+  planner. `docs/vault.md` grepped for "gesture resolution" / DD5 /
+  "winner-take-all" / "checked LAST" — zero hits, confirming it needed no
+  change (it describes only the detection-layer contest, per DD1's own
+  citation audit).
+- **`missions/.../flight.md`**: an amendment note appended directly under
+  DD5's precedence bullet, stating the retirement of "gesture resolution" as
+  a winner-take-all instance of the precedence, citing the HAT finding and
+  the operator's two rulings, and naming what stayed unchanged (the
+  field-level detection contest) versus what changed (the gesture layer).
+  Leg 6 checked off in the Legs list.
+
+#### AC9 verification (Gates)
+
+- `npm test` → **5454 tests total, 5451 pass, 0 fail, 0 cancelled, 3 todo, 0
+  skipped** (the 3 todo are the pre-existing `known-unsolved` tier,
+  unrelated to this leg). Before this leg (per this flight-log's own Leg 4
+  summary): 5432 total / 5429 pass / 0 fail / 3 todo. **Delta: +22 tests**
+  (7 new AC1 rows + 13 new `vault-capture-plan.test.js` tests + 2 new gated
+  corpus fixtures = 22; the 6 rewritten `vault-gesture-policy.test.js` tests
+  are in-place rewrites, not additions).
+- `npm run lint` → clean, zero findings.
+- `npm run typecheck` → clean.
+- `npm run format` → reformatted only this leg's own new/edited files
+  (confirmed via `git status --short` immediately after); `npm run
+  format:check` → "All matched files use Prettier code style!".
+- `renderer.js` line count (`split(/\r?\n/).length`) → **1550**, matching
+  `RENDERER_LINE_BUDGET` (`test/unit/seam-contract.test.js:306`) —
+  untouched by this leg. `SEAM_COUNT` → **41**
+  (`test/unit/seam-contract.test.js:107`) — untouched; this leg added no new
+  sheet, menuType, or audit hook.
+- **Local Concourse CI needs an interactive login unavailable in this
+  environment — these four local gates stood in for it. This is not a claim
+  that hosted CI ran.**
+
+#### AC10
+
+Deliberately NOT attempted — the operator's own re-walk via the resumed
+HAT, per the task brief. Leg 6 is checked off in flight.md's Legs list per
+the orchestrator's explicit instruction, but AC10 in this leg's own
+Acceptance Criteria list is left unchecked.
+
+#### Scope note
+
+No pre-existing defect outside this leg's surface was found during
+implementation. The two Flight-1-vintage squawks (0099, 0100) found during
+the Leg 5 HAT walk are untouched by this leg — confirmed unrelated (neither
+touches `vault-gesture-policy.js`, `vault-capture-plan.js`, or
+`webview-preload.js`'s capture-gesture wiring).
+
+Leg status → `landed`. **Not committed** — per the task brief, this hands
+off to code review before any commit.
+
+---
+
 ## Decisions
 
 *(runtime decisions not in the original plan — none yet)*
@@ -2342,3 +2712,486 @@ thoroughness.
   legs already left in the working tree.
 
 Nothing committed — signaling `[HANDOFF:review-needed]` per the task brief.
+
+**HAT Step 0 — setup PASSED, with one operator report.** Vault set up and
+unlocked, a persistent-jar tab, no pre-existing identity profile, pages loading
+from `http://127.0.0.1:8765/`. Operator reported that clicking the toolbar lock
+icon neither opens the vault page nor offers to unlock. Diagnosed before
+classifying: PRE-EXISTING since Mission 12, not a Flight 3 regression — the
+indicator has only ever had a `contextmenu` listener (`vault-controller.js:261-264`)
+whose sole item, "Lock now", is omitted when locked; no commit ever added a click
+handler, and `git diff 016e540 HEAD` on the indicator wiring is empty. Logged as
+**squawk 0099** and deferred (may need a one-line operator ruling on click
+semantics). The walk continues.
+
+**HAT Step 1 — fresh identity save: PASSED on substance (save verified; sheet
+contents pending confirmation).** The first attempt was reported as "nothing
+saved"; the Flight Director misread that as "no sheet appeared" and began
+diagnosing a capture failure. Relaunching with `GOLDFINCH_VAULT_TRACE=1` and
+repeating produced `gesture-hold {"kind":"identity","held":true}` and an
+**"Update your saved details?"** sheet — update mode, which only arises when a
+profile ALREADY exists. `personal.gfvault` carried a write at 2026-09-21 09:19:53,
+inside the first attempt. The operator then confirmed the item WAS there — they
+had been looking at the wrong vault (the sheet defaults to the tab's jar vault,
+"personal"). **No defect.** The whole chain works live: identity detection,
+provenance, the DD2 value-layer gate, the hold, navigation settle, disposition
+through `classifyCapture`, the offer, and a `type: 'identity'` save.
+
+Two process notes worth keeping:
+- **The trace was the right instrument, and should be the HAT default.** It split
+  "did the page send a capture / did main hold it / did the sheet open" in one
+  repeat. Future capture HATs should launch with `GOLDFINCH_VAULT_TRACE=1` from
+  the start.
+- **The capture sheet is dismissed by window blur, by design** (`vault-capture` is
+  deliberately absent from `VAULT_BLUR_SURVIVAL_MENU_TYPES`; an occlusion close
+  now also drops the queue, LD2). So the operator switching to the terminal to
+  report CLOSES the sheet — the trace's `dismiss` line was exactly that. A HAT
+  step must ask the operator to read the sheet fully BEFORE switching windows.
+  (Worth a debrief note: is dismiss-on-alt-tab the right behaviour for a sheet
+  holding a pending save? It is consistent and deliberate, but it is the reason
+  this step needed two attempts.)
+
+Suspected, UNVERIFIED, and NOT the cause here: `goldfinch://vault` appears to
+re-read only on lock-state changes (`vault.js:2076`), not when a capture saves an
+item, so a vault page already open may show stale contents. Not squawked — only
+one subscription site was grepped; a refresh trigger elsewhere (focus,
+visibility) was not ruled out.
+
+**HAT interruption — overlay sheet wedged in one window (squawk 0100).** Before
+Step 2, the operator reported the kebab dead. Narrowed with four operator checks
+rather than a relaunch (a relaunch would have destroyed the reproduction): nothing
+at all on click; right-click page context menu ALSO dead (so the whole per-window
+sheet, not one menu); a new window works (per-window state); trigger was closing
+the `goldfinch://vault` tab and loading a web page. App log clean — no exception,
+crash, or renderer restart — so stuck state, not a throw. **Classified
+pre-existing**: `git diff 016e540 HEAD` is empty for every sheet / tab-close /
+window-lifecycle file. Same symptom class as completed squawk 0057 (sheet bounds
+track the active guest), undiagnosed. Logged as **squawk 0100**, deferred; the
+walk moves to a new window.
+
+**HAT Step 2 — update: added + changed + nothing erased: PASSED** (in a new
+window). Operator typed only Address line 1 (matching the stored value), a new
+Email, and a Phone (none stored), leaving five fields empty. Sheet: "Update your
+saved details?", naming Email as changed and Phone as added, Address line 1 NOT
+named, NO typed value visible, NO vault choice. After Update: new email, phone
+present, First name / Last name / City / Postal code / Country all UNCHANGED.
+- **DD6 verified live** — the offer model carries field labels only. Same
+  labels-only render path as Step 1's save sheet, so this discharges Step 1's
+  pending sheet-contents check for the security property. **Residual**: Step 1's
+  fresh-save HEADING and vault-choice rendering were not directly observed (the
+  item did land in the default jar vault, consistent with a save-mode sheet);
+  unit-covered, judged low-risk, not re-walked.
+- **LD8 verified live** — the data-loss fix holds on a real page: an update
+  writes exactly `gapFilled ∪ conflicting`, never blanking a field the capture
+  did not carry.
+- **Squawk 0100 data point**: closing the vault tab in this second window was
+  NOT reported to wedge its menus — the trigger is narrower than "close the vault
+  tab". Recorded as not-re-reported rather than confirmed.
+
+**HAT Step 3 — identity fill + clicked-form precision: PASSED.** On
+`two-forms.html` the identity icon rendered on a Form B anchor field (DD8's third
+kind + `anchorKinds()`'s third walk), the picker showed the Identity row
+(`reachableIdentityItems` + the picker's `KIND_TABLE` entry), and the fill landed
+in **Form B only — Form A stayed empty**. This closes **mission Known Issue 3
+live** in its "no precision at all" form: an icon fill on a multi-form page now
+lands in the clicked form (DD9's integer ordinal through the existing
+`resolveOrdinalInFamily`). Form B's Full name stayed empty, correctly — the
+profile came from split first/last fields and LD4 forbids composition.
+
+**Pre-Step-4 correction to the HAT leg — the gap is stronger than first
+stated.** The leg's first-draft Step 4b claimed a working variant: Enter in the
+billing Email field of the SAME checkout form, then Pay now, yields two sheets.
+Re-derived before sending the operator on it: `resolveOrdinalInFamily`'s step 2
+is a FORM match and cards are resolved before identity, so in a form shared by
+card and billing fields EVERY gesture target resolves to the card — the Email
+field included. **In a combined form, identity capture is impossible by any
+gesture.** It works only where identity has its own scope (an identity-only form,
+or a form-less page like `spa.html`). Step 4b replaced with `split-checkout.html`
+(card and billing in separate forms, gestured separately), which genuinely
+exercises Leg 2's multi-hold + serial queue live. Recorded as a correction in the
+leg, not a silent edit. Note the pattern: the same premise-check discipline that
+found the pre-walk gap also caught my own mistaken workaround for it — writing
+expected results against the code, not against the design, is what surfaced both.
+
+**HAT Step 4 — checkout: PASSED as described, both halves.**
+- **4a — the gap, confirmed live.** `checkout.html` (card + billing in ONE form),
+  every field typed, "Pay now": ONE sheet ("Save card?"), NO identity offer. The
+  pre-walk finding reproduces exactly as predicted from the code.
+- **4b — Leg 2's multi-hold + serial queue, proven live for the first time.**
+  `split-checkout.html` (card and billing in SEPARATE forms): "Save card", "Save
+  address", "Place order" produced TWO sheets IN SEQUENCE — the second did not
+  open until the first closed. So a card hold and an identity hold coexisted on
+  one tab, one navigation settle released both, and the chrome queue presented
+  them serially. Every mechanism Leg 2 built works; what does not work is the
+  single-gesture composition the headline case needs (4a).
+
+**HAT Step 5 — SPA detach settle: PASSED**, confirmed independently by trace:
+`gesture-hold {"wcId":17,"held":true,"kind":"identity"}` then
+`settle {"wcId":17,"via":"detachment","count":1,"modes":["update"]}` — the
+identity hold was released by FIELD DETACHMENT, with no navigation (operator
+confirmed the URL did not change). Leg 2's per-family detach watch works live.
+**Honest limit**: `spa.html` removes the whole wrapper in one mutation, so it
+cannot distinguish Leg 2's unintentional semantics change (full-detachment vs
+the old any-field firing) — both fire here. That Deviation remains unverified
+live; a partial-removal page would be needed.
+
+Step 4b's trace corroborates the design exactly (wcId 16): repeated `card` holds
+(same-family supersession, last wins), then `identity` ("Save address"), then a
+final `card` — "Place order" sits outside both forms, so `resolveOrdinalInFamily`'s
+sole-entry fallback resolves it to the one card entry, as predicted from the code.
+
+**HAT Step 6 — supersede does not kill future offers: PASSED.** Opening the kebab
+over a live capture sheet replaced it; a later capture raised a NEW sheet. This is
+the Leg 2 post-landing stuck-`sheetOpen` fix — the defect the Flight Director
+overruled out of "squawk" and into scope — verified live. No menu wedge occurred
+(squawk 0100 did not recur on the kebab-supersede path).
+
+**Operator observation during Step 6 — DD2's value-layer gate, confirmed live.**
+First name + last name + a new email: NOTHING offered. Adding Address line 1:
+offered. Correct by design: DD2 holds an identity only when the scope's POSTAL
+ANCHOR is provenanced AND at least one non-postal role is; first/last/email are
+all non-postal. **Consequence worth the debrief's attention** (a direct
+consequence of the operator's own DD2 ruling, now seen live): on a site that
+PRE-FILLS the address server-side, an operator who only changes their email is
+never offered an update — the pre-filled anchor was not typed, so it is not
+provenanced. A coverage cost (wrong-moment budget), never a wrong value. Not
+changed.
+
+**Step 7 replaced — the original was not performable** (see the HAT leg for the
+full reasoning): locking from window B blurs window A, and the capture sheet is
+dismissed on blur by design, so a lock can never land while a sheet is up by any
+manual gesture. Replaced with 7a (a cross-window lock must drop a PENDING hold —
+LD7 + `dropAllCaptures` on the new identity family) and 7b (the locked-vault
+multi-offer drain — Leg 2's round-1 HIGH, live). The design flaw was in the HAT
+plan, caught by thinking through the operator's actual gestures rather than the
+abstract scenario.
+
+**HAT Step 7a — a cross-window lock drops a PENDING hold: PASSED, non-vacuously.**
+The trace shows `gesture-hold {"wcId":19,"held":true,"kind":"identity"}` BEFORE the
+lock (so "nothing appeared" is not a vacuous pass); the lock came from a separate
+window; "Place order" then navigated and settle found nothing — had the held
+record survived, settle would have raised it in locked mode as an unlock prompt.
+LD7 + `dropAllCaptures` hold live on the new identity family, cross-window.
+
+**HAT Step 7b — the locked-vault multi-offer drain (Leg 2's round-1 HIGH): PASSED
+on retest.**
+- **First attempt: ONE sheet.** Trace: `gesture-hold identity`, `gesture-hold card`,
+  then a SINGLE `finalize … offer:update`. No `dismiss` line anywhere after it —
+  which rules out LD2's occlusion drop, since `dismissQueuedOffers` dismisses every
+  entry through the traced `vault-capture-dismiss`. Diagnosed rather than retested
+  blind: `holdGestureCard` holds WITHOUT a Luhn check by design, and `captureCard`
+  applies Luhn at release. The PAN given, `6011 1111 1111 1117`, is Luhn-valid but a
+  run of 1s where a single miscounted digit is invalid (`6011 1111 1111 117` and
+  `6011 1111 1111 1111` both fail) — and the operator was unsure what they had typed.
+- **Retest** with `5555 5555 5555 4444` (hard to mistype, verified not saved), and
+  the first sheet closed by an explicit click rather than a window switch. Trace:
+  `finalize … offer:update` (identity) then `finalize … offer:save` (card) — ONE
+  unlock prompt, BOTH records finalized, TWO sheets in sequence. The round-1 HIGH's
+  fix — a locked-mode ARRAY drained serially through one idempotent `advance()` —
+  works live. Order (identity, then card) matched the code's prediction: "Place
+  order" re-held the card, re-inserting it at the end of the `captures` Map.
+- **The first attempt's single sheet is recorded as "most likely a mistyped card
+  correctly refused by Luhn" — likely, not proven.** The only varied input between
+  the two runs was the card number.
+- **HAT-design lesson**: test data must be unambiguous. A repetitive PAN turned a
+  pass into an apparent failure and cost a retest; so did Step 1's dual-vault
+  default. Choose test values whose mistyping is visually obvious.
+
+**HAT walk COMPLETE — every step passed.** Verified live: identity save (1), DD6
+labels-only + LD8 no-erasure on update (2), identity fill + DD9 clicked-form
+precision closing Known Issue 3 (3), the combined-form gap confirmed (4a),
+multi-hold + serial queue (4b), SPA detachment settle (5), the stuck-`sheetOpen`
+fix + DD2's gate (6), cross-window lock drops held identity (7a), the locked
+drain (7b). Squawks raised during the walk: **0099** (lock icon has no click
+action), **0100** (overlay sheet wedged after closing an internal tab) — both
+pre-existing, deferred.
+
+**One decision remains the operator's**: the combined-form gap (4a).
+
+**Operator rulings on the combined-form gap (2026-09-21)**: (1) **fix it in this
+flight**; (2) on a sign-up form carrying a password AND an address, **capture BOTH**
+login and identity (one consistent rule, no special case).
+
+**Leg 6 `gesture-holds-every-family` created** — spawned from the HAT. Legs are
+immutable once in-flight and Leg 5 is, so the fix gets its own leg; the HAT resumes
+afterwards to re-walk 4a (AC10). Feature-class under the fix-vs-feature gate, so a
+scoped design review precedes any code. **Risk tier HIGH**: the capture path
+(security-adjacent), and an interface rename with consumers.
+
+Design-time audits run before writing the leg, applying all three of this flight's
+lessons: (a) consumers of `resolveGestureTarget` enumerated by whole-tree grep — one
+production call site, the corpus helper, one test file (14 refs); (b) search-before-
+build — no existing multi-result resolver; (c) the NEGATIVE set checked for new
+exposure, since it is a zero-offers hard gate — structurally safe: its 7
+`negative-detection` fixtures assert nothing is detected (a gesture-resolution
+change cannot reach detection), and its one `negative-gesture` fixture has only
+username + password (no postal anchor, so no identity entry to newly capture).
+
+Notable leg decisions: LD1 RENAMES the resolver to `resolveGestureTargets` rather
+than changing its return type in place — an array is truthy with no `.kind`, so a
+stale singular caller would silently fall through the guest dispatch's `: logins[…]`
+else-branch into the login path; a rename makes every stale caller a loud break.
+LD2 applies Leg 4's fail-closed dispatch principle to the GUEST side, which Leg 4
+left with a login default. LD3 retires DD5 as a winner-take-all capture rule while
+keeping contested-field claims at detection.
+
+**Leg 6 design review — `approve with changes`, one HIGH; closed by a
+restructuring, not a warning.** The reviewer independently traced all seven AC1
+rows through `resolveOrdinalInFamily`, confirmed all 12 citation counts exactly,
+and extended the negative-set audit to the gated and known-unsolved tiers (9
+fixture files read in full; no cross-family exposure).
+
+- **[HIGH] The per-family loop could silently re-create the leg's own bug, and no
+  automated check would notice.** Verified, and BROADER than stated: `onCaptureGesture`
+  exits the whole function not only after the card and identity sends (`:62`,
+  `:86`) but on every per-family guard — `if (!entry) return` (`:25`) and
+  `if (!snapshotHasProvenancedSecret(…)) return` (`:40`) — inside one shared
+  `try/catch`. Loop those naively and the first family processed, or the first to
+  FAIL its gate, ends the gesture: identity dropped on the combined checkout, with
+  the resolver tests still green. The first draft left this path to "source
+  reading" because the preload cannot be required.
+- **Closed structurally (LD2 rewritten)**: that "cannot be required, so read it"
+  was the same resignation Leg 2's review rejected for the detach watch. ALL
+  per-family decision logic moves into a new pure `vault-capture-plan.js`
+  (`planCaptures`), unit-tested — including the order-sensitive case where the
+  FIRST-listed family fails its gate — and neuter-verified (AC4b: make it stop
+  after one family, watch it go red). The preload shrinks to resolve / read / plan
+  / send with a per-iteration `try/catch` and a grep-AC forbidding any `return`
+  inside the loop. The corpus helper is steered to call the REAL planner, so the
+  new fixtures exercise shipping code rather than a parallel reimplementation.
+- Suggestions applied: AC8 names the one stale sentence (`CLAUDE.md:345`, "and
+  gesture resolution alike"); AC2's grep runs after the rebuild (the gitignored
+  bundle holds 5 stale hits); AC2b adds the eslint entry for the new module; the
+  sole-entry fallback's fragility and the synthetic three-family test are stated.
+
+**Design round 2 deliberately SKIPPED — reasoning stated, since this fix adds a
+module.** The standing rule is "re-review when a fix adds mechanism", learned from
+Leg 2, where an unreviewed invented control flow hid two HIGHs. The difference
+here: the new module's one risky property — that EVERY resolving family is
+planned, independent of order and of any one family's gate — is exactly what AC4
+unit-pins and AC4b neuter-verifies. The check that the second review round would
+provide is replaced by a test that fails if the property breaks, which is stronger.
+And because Leg 6 lands after the flight-end review, it gets its own code Reviewer
+before its commit regardless. Leg status → `ready`.
+
+**Leg 6 accepted for the live re-walk after independent verification**: suite
+5454 / 5451 pass / 0 fail / 3 todo; zero stale `resolveGestureTarget` references
+in `src/` or `test/` after the rebuild; `onCaptureGesture` read in full — resolve →
+ONE snapshot read → `planCaptures` → a loop with its `try/catch` INSIDE and no
+`return` in it. The three `return`s that remain sit BEFORE the loop and are
+gesture-wide conditions (no target / nothing resolved / snapshot read failed),
+which is correct. One noted gap, handed to Leg 6's code Reviewer: the AC6 fixtures
+were shown to fail pre-fix with a throwaway probe against the old singular
+resolver (the new `offers-multi` assertion kind did not exist pre-fix, so the
+corpus test itself could not run), and AC4b's neuter-verification was run against
+the planner's unit tests — whether the corpus's `offers-multi` assertion ALSO goes
+red under that neuter has not been shown.
+
+**Ordering decision: live re-walk BEFORE Leg 6's code review, then commit.** The
+operator is present and the fix is ready; a HAT failure found after review would
+force a second review. The review then covers the final code. Dev build relaunched
+with `GOLDFINCH_VAULT_TRACE=1` to load the new preload — this closes squawk 0100's
+wedged window, whose written reproduction stands on its own.
+
+**HAT re-walk A (Leg 6 AC10, the flight's HEADLINE case): PASSED.**
+`checkout.html` — card + billing in ONE form, one "Pay now" — raised TWO sheets
+in sequence (card, then identity). Trace, consecutive lines from the single
+gesture: `gesture-hold {"wcId":8,…,"kind":"card"}` then
+`gesture-hold {"wcId":8,…,"kind":"identity"}` — in the planner's fixed order.
+Before Leg 6 the second line could not exist (HAT 4a showed exactly one). **The
+mission's motivating shape now works live.**
+
+**Operator feedback during re-walk A — dispositioned as a DESIGN question, not a
+squawk.** Request: the update sheet names the changing fields; show the
+before/after values, nicely formatted. It FAILS the squawk gate on two counts — it
+reverses a documented design decision, and it is security-sensitive:
+- it reverses **DD6** (the identity offer carries field LABELS, never values),
+  itself chosen because ten of eleven identity fields are declared SECRET in
+  `vault-item-schema.js` and the capture sheet is metadata-only by design;
+- the offer rides a plain `vault-capture-offer` IPC push, NOT the dual-zeroized
+  Buffer channel the mission reserves for secret display — values would land
+  un-zeroized in the message and as text in the sheet's DOM;
+- the "before" side would display STORED secrets on a sheet raised by a page
+  gesture (password managers conventionally do not show the old value on an
+  update prompt).
+**Carried to mission Flight 5** (the optional alignment flight, whose own scope
+already names "the identity sheet") as a named design question. Candidate shapes,
+each a real decision: masked hints per field (`j•••@example.com`, `•••• 0100` — the
+card's non-secret `last4` precedent); reveal-on-click through the sanctioned secret
+channel; or new values only (typed moments ago by the operator) with stored values
+never shown. Recorded here and in the HAT leg so the debrief carries it forward.
+
+**HAT re-walk B (Leg 6 AC10 — the operator's sign-up ruling): PASSED.**
+`signup.html` (Full name, Email, Password, Address line 1, Postal code — email
+directly before the password, the common real-world order) raised TWO sheets: a
+login save and an identity save. Trace, consecutive from the single "Create
+account": `gesture-hold … "kind":"login"` then `gesture-hold … "kind":"identity"`.
+**LD3 confirmed live**: the operator reports Email did NOT appear on the identity
+sheet — the login claimed it as its username (positional pick) and
+`isClaimedByLogin` removed it from identity's candidates. No field counted twice.
+
+**Test gap found by the re-walk, folded into Leg 6 (in scope)**: Leg 6's
+`signup-with-address` corpus fixture gives the login a DEDICATED `username` field,
+so login claims `username` and email stays with identity — it never exercises the
+common shape where the EMAIL IS the username, which is exactly what the live page
+proved. `isClaimedByLogin`'s 7 existing tests pin the detection rule in general,
+not this capture outcome. Added to Leg 6 rather than squawked: the operator's
+"capture both on sign-up" ruling is only safe because LD3 prevents the
+double-count, so pinning that outcome is part of delivering the ruling.
+
+**HAT walk COMPLETE — every step passed, including both re-walks.** Leg 6 AC10
+verified live.
+
+**Two bounded follow-ups closed AC6b and the corpus non-vacuity gap; leg
+status stays `landed`, not yet committed.**
+
+**AC6b — the email-as-username sign-up shape, pinned.** The live re-walk's
+`signup-with-address` fixture gives login a DEDICATED `username` field, so it
+never exercised the common real-world shape where the EMAIL is the field
+immediately before Password with no separate username field at all — where
+`resolveLoginEntry` (`vault-fill-fields.js`) picks the email POSITIONALLY as
+the username and `isClaimedByLogin` must then remove it from identity's
+candidates before it is double-counted. Closed with a THIRD multi-family
+corpus fixture, `test/fixtures/save-moment/multi-family/signup-email-as-username.html`
+(Full name, Email, Password, Address line 1, Postal code — email immediately
+precedes Password, no dedicated username field), registered in
+`manifest.js` as `tier: 'gated'`, `assert: 'offers-multi'`,
+`families: ['login', 'identity']` — the standard corpus regression net,
+proving the KINDS outcome via the real production chain. **Chose corpus
+fixture + a dedicated unit test, not a fake-DOM-only unit test**: the
+generic `offers-multi` assertion (`assertOffersFamilies`) only checks WHICH
+families plan, never PAYLOAD contents, and AC6b's actual claim — the login
+payload's username IS the email value, the identity payload carries NO
+email — needs value inspection. A fake-entry unit test (the existing
+`vault-capture-plan.test.js` style, hand-built `{kind,ordinal}` +
+plain-object entries) would also have missed the point: the property under
+test lives in the DOM-based detection layer (`isClaimedByLogin`'s filtering
+of `candidateFields`), which a fake-entry test bypasses entirely by
+construction. So the same real fixture backs BOTH: the generic corpus
+assertion (kinds), and three new dedicated tests in
+`test/unit/vault-capture-plan.test.js` that load the fixture via
+`extractFixtureFile` and drive the REAL `createEntryObserver` /
+`resolveGestureTargets` / `planCaptures` chain (mirroring
+`buildProvenancedObserver` in `save-moment-assertions.js`, never a
+reimplementation), then inspect the planned payloads directly:
+  - `AC6b: signup-email-as-username — one gesture plans BOTH login and identity`
+  - `AC6b: the login payload's username is the EMAIL value (positional pick — no dedicated username field)`
+  - `AC6b: the identity payload carries NO email — isClaimedByLogin removed it from identity candidates before role resolution`
+
+**AC6b neuter-verification — bypassed `isClaimedByLogin` in
+`candidateFields` (`vault-identity-fields.js`), confirmed RED, restored.**
+The filter chain
+
+```js
+return Array.from(scope.querySelectorAll('input, select'))
+  .filter(isIdentityCapableField)
+  .filter((field) => !isClaimedByLogin(field, doc))
+  .filter((field) => !isClaimedByCard(field, doc));
+```
+
+had its `isClaimedByLogin` line commented out. Re-run of
+`test/unit/vault-capture-plan.test.js` against the neutered code:
+
+```
+not ok 16 - AC6b: the identity payload carries NO email — isClaimedByLogin removed it from identity candidates before role resolution
+  ---
+  error: |-
+    the email must not appear in the identity payload — it was claimed by login
+    + actual - expected
+
+    + 'grace@example.com'
+    - ''
+  expected: ''
+  actual: 'grace@example.com'
+  operator: 'strictEqual'
+  ---
+# tests 16
+# pass 15
+# fail 1
+```
+
+Exactly the double-count the fix exists to prevent — the email is planned
+into BOTH the login payload and the identity payload once
+`isClaimedByLogin` no longer excludes it (the other two AC6b tests, and
+every pre-existing test, stayed green — this is precisely the property the
+new test pins, nothing broader). The file was restored to the exact
+pre-neuter text (`git diff src/preload/vault-identity-fields.js` empty,
+confirming a byte-identical restore since the file was untouched by any
+other leg-6 edit); re-run confirmed 16/16 pass.
+
+AC6b checked off in the leg artifact.
+
+**Task 2 — proving the corpus's `offers-multi` assertion is non-vacuous
+under AC4b's own neuter.** AC4b's neuter-verification (the `break;`
+immediately after `if (planned) plan.push(planned);` inside
+`planCaptures`'s loop — see the AC3/AC4/AC4b verification section above) was
+run only against the planner's OWN unit tests. Applied the IDENTICAL neuter
+to `src/preload/vault-capture-plan.js` and re-ran
+`test/unit/save-moment-corpus.test.js`:
+
+```
+not ok 20 - [gated] checkout-combined-card-billing
+    expected the gesture to plan captures for [card, identity], planned [card] (resolved [card, identity])
+not ok 21 - [gated] signup-with-address
+    expected the gesture to plan captures for [login, identity], planned [login] (resolved [login, identity])
+not ok 22 - [gated] signup-email-as-username
+    expected the gesture to plan captures for [login, identity], planned [login] (resolved [login, identity])
+# tests 24
+# pass 18
+# fail 3
+# todo 3
+```
+
+All three `offers-multi` fixtures (the original two from AC6, plus the new
+AC6b fixture) went RED under the neuter, each planning only its
+first-listed family — confirming the corpus's `assertOffersFamilies`
+assertion genuinely exercises and pins the planner's multi-family property,
+not merely restating what `vault-capture-plan.test.js` already proved in
+isolation. The file was restored to the exact pre-neuter text (`git diff
+src/preload/vault-capture-plan.js` empty — the file is untracked, so the
+restore was verified by re-reading the loop body directly and confirming no
+`break` remains and the two-line body matches the pre-neuter source
+verbatim); re-run confirmed `save-moment-corpus.test.js` back to 21 pass /
+0 fail / 3 todo (24 total).
+
+**New test counts.** `npm test`: 5458 total (5455 pass / 0 fail / 3 todo,
+up from the pre-follow-up 5454 total / 5451 pass / 3 todo — net +4: the
+three new `vault-capture-plan.test.js` AC6b tests plus the new
+`signup-email-as-username` corpus-manifest entry picked up by
+`save-moment-corpus.test.js`). `npm run lint`, `npm run typecheck`,
+`npm run format`, and `npm run format:check` all clean — no formatting
+drift, no new lint/type errors. Local Concourse CI needs an interactive
+login unavailable in this environment; the local gates stood in.
+
+Leg status stays `landed`. Not committed — awaiting code review per the
+orchestrator's ordering decision (live re-walk before review, review before
+commit).
+
+**Test-count reconciliation (appended, not rewritten — the log is append-only).**
+The Leg 6 code Reviewer noted that the Leg 6 entry's recorded counts are stale:
+`vault-capture-plan.test.js` "13/13", AC4b's neuter "fail 3", AC7's "23 tests, 20
+pass", AC9's "5454 total, +22". Those figures were ACCURATE WHEN WRITTEN — they
+predate the AC6b follow-up, which added 3 planner tests and 1 corpus fixture. Final
+figures: `vault-capture-plan.test.js` **16** tests (the Reviewer's independent
+neuter turned **5** red); corpus **24** tests, 21 pass, 3 todo; project-wide
+**5458 / 5455 pass / 0 fail / 3 todo**, a Leg 6 delta of **+26**. Left in place
+above as a point-in-time record; reconciled here.
+
+**Leg 6 code review: `[HANDOFF:confirmed]`, no blocking issues.** The Reviewer ran
+all four gates, independently re-neutered the planner (5 of 16 red), confirmed zero
+stale `resolveGestureTarget` consumers across `src/`, `test/`, `scripts/`, `docs/`
+and CLAUDE.md, and — the check no test covered — verified each family's planned
+payload matches what `register-browser-ipc.js`'s handler destructures, byte for
+byte: login `{username, usernameDetected, password}`, card `{number, cvv,
+cardholder, expiry}`, identity `{identitySecrets, fullName}`. Security properties
+re-verified with up to three families per gesture: `isCaptureGesture` unchanged,
+each family's own value gate unmodified, `isClaimedByLogin` / `isClaimedByCard`
+byte-identical to before the flight. Squawks 0099 and 0100 independently confirmed
+pre-existing.
+
+**FLIGHT LANDED 2026-09-21.** All six legs `completed`; flight status `landed`;
+mission.md updated — Flight 3 checked off, Known Issue 3 closed with its residual
+(the DOM-mutation race) split into a narrower open item, and the before/after
+update-sheet request carried to Flight 5. HAT apparatus (the scratchpad page
+server) stopped at close-out. The flight debrief is a separate step
+(`/mission-control:flight-debrief`), which moves the flight to `completed`.

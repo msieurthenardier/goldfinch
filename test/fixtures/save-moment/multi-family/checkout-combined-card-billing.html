@@ -1,0 +1,64 @@
+<!--
+  Fixture: checkout-combined-card-billing
+  Corpus tier: gated (multi-family). Families: card AND identity, from ONE
+  gesture. Added at Mission 21 Flight 3 Leg 6 (gesture-holds-every-family) —
+  the HAT's Step 4a finding, reproduced headlessly: card fields and billing
+  identity fields sharing ONE <form>, with ONE native submit button inside it.
+
+  Before this leg, the gesture resolver returned exactly one family (the
+  FIRST to resolve — login, card, identity, in that order) and
+  `resolveOrdinalInFamily`'s step 2 is a FORM match, so with every family's
+  entries sharing this one form, EVERY gesture on it resolved to card and
+  identity was never even checked. This fixture is the multi-family regression
+  net for that fix: the "Pay now" submit must now resolve, hold, and offer
+  BOTH families from the single click.
+
+  Card fields (autocomplete cc-*, the same vocabulary as
+  checkout-submit-outside-form-formattr.html) and billing identity fields
+  (name/id-vocabulary fallback, the same field names as billing-jostens.html —
+  reused deliberately rather than inventing a new vocabulary this leg does not
+  own) are DISJOINT: "Name on card" carries autocomplete="cc-name" (card's
+  ROLE-based detection, no vocabulary contest), and the billing name/email/
+  phone/address fields carry no cc-* hint at all — so DD5's isClaimedByCard
+  never needs to arbitrate anything on this page.
+
+  `value` attributes are the corpus's own stand-in for "the operator typed
+  this" (assertOffersEntry/the multi-family assertion grant provenance for
+  every non-empty value). The submit button sits INSIDE this single form (a
+  bare `<button type="submit">`), so a real, headlessly-provable native form
+  submission (DD4's navigation-commit settle signal) fires on click.
+  Sample card number (4111111111111111, the standard Visa test PAN) is
+  Luhn-valid, matching every other positive card fixture in this corpus.
+  Added: 2026-09-21 (Mission 21, Flight 3, Leg 6 — gesture-holds-every-family).
+-->
+<form id="checkout" action="/checkout/pay" method="post">
+  <h2>Payment</h2>
+  <label for="cc-number">Card number</label>
+  <input type="text" id="cc-number" name="cardnumber" autocomplete="cc-number" value="4111111111111111" />
+  <label for="cc-name">Name on card</label>
+  <input type="text" id="cc-name" name="ccname" autocomplete="cc-name" value="Ada Lovelace" />
+  <label for="cc-exp">Expiry (MM/YY)</label>
+  <input type="text" id="cc-exp" name="cc-exp" autocomplete="cc-exp" maxlength="5" value="04/29" />
+  <label for="cc-csc">Security code</label>
+  <input type="text" id="cc-csc" name="cvc" autocomplete="cc-csc" value="123" />
+
+  <h2>Billing address</h2>
+  <label for="bf-first">First name</label>
+  <input type="text" id="bf-first" name="billingFirstName" autocomplete="on" value="Grace" />
+  <label for="bf-last">Last name</label>
+  <input type="text" id="bf-last" name="billingLastName" autocomplete="on" value="Hopper" />
+  <label for="bf-email">Email</label>
+  <input type="email" id="bf-email" name="billingEmail" autocomplete="on" value="grace@example.com" />
+  <label for="bf-phone">Phone</label>
+  <input type="tel" id="bf-phone" name="billingPhone" autocomplete="on" value="555-0101" />
+  <label for="bf-addr1">Address line 1</label>
+  <input type="text" id="bf-addr1" name="billingAddress1" autocomplete="on" value="1 Compiler Way" />
+  <label for="bf-city">City</label>
+  <input type="text" id="bf-city" name="billingCity" autocomplete="on" value="Arlington" />
+  <label for="bf-zip">Postal code</label>
+  <input type="text" id="bf-zip" name="billingPostalCode" autocomplete="on" value="22201" />
+  <label for="bf-country">Country</label>
+  <input type="text" id="bf-country" name="billingCountry" autocomplete="on" value="USA" />
+
+  <button type="submit" id="pay-now">Pay now</button>
+</form>

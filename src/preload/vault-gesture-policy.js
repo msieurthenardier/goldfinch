@@ -142,22 +142,38 @@ function resolveOrdinalInFamily(target, entries, roles) {
 }
 
 /**
- * The full gesture-target resolution across all three families (AC5, DD5's
- * precedence): login checked first, then card, then identity LAST. Returns
- * `{ kind, ordinal }` or `null`. Reuses `resolveOrdinalInFamily` with
- * `IDENTITY_ROLES` for the identity arm — no new resolver (Guidance 3).
+ * The full gesture-target resolution across all three families (Leg 6 —
+ * gesture-holds-every-family, LD1/LD3). Returns a LIST — one `{ kind,
+ * ordinal }` per family that resolves, in the fixed order login, card,
+ * identity, each resolved INDEPENDENTLY via the existing
+ * `resolveOrdinalInFamily`. The fixed order is kept purely for determinism
+ * (offer order) — it is no longer a winner-take-all precedence: DD5's
+ * login > card > identity contest is resolved at DETECTION (`isClaimedByLogin`
+ * / `isClaimedByCard` remove a contested field from identity's candidates
+ * before this function ever runs), not by this function stopping early. A
+ * gesture with nothing detected in any family returns `[]`, never `null`.
+ *
+ * RENAMED (deliberately, not changed in place — Leg 6 LD1) from the old
+ * SINGULAR resolver, which returned `{ kind, ordinal } | null`, exactly one
+ * match: an array is truthy and has no `.kind`, so a stale caller still
+ * written against the old return shape would silently read `undefined` for
+ * `.kind` and — through a guest dispatch's old `: logins[…]` else-branch
+ * shape — fall into the LOGIN path. A rename turns every stale caller into a
+ * loud break instead. There is no parallel singular helper left anywhere.
  * @param {any} target
  * @param {{ logins?: any[], cards?: any[], identities?: any[] }} entries
- * @returns {{ kind: 'login' | 'card' | 'identity', ordinal: number } | null}
+ * @returns {Array<{ kind: 'login' | 'card' | 'identity', ordinal: number }>}
  */
-function resolveGestureTarget(target, { logins = [], cards = [], identities = [] } = {}) {
+function resolveGestureTargets(target, { logins = [], cards = [], identities = [] } = {}) {
+  /** @type {Array<{ kind: 'login' | 'card' | 'identity', ordinal: number }>} */
+  const resolved = [];
   const loginOrdinal = resolveOrdinalInFamily(target, logins, LOGIN_ROLES);
-  if (loginOrdinal !== null) return { kind: 'login', ordinal: loginOrdinal };
+  if (loginOrdinal !== null) resolved.push({ kind: 'login', ordinal: loginOrdinal });
   const cardOrdinal = resolveOrdinalInFamily(target, cards, CARD_ROLES);
-  if (cardOrdinal !== null) return { kind: 'card', ordinal: cardOrdinal };
+  if (cardOrdinal !== null) resolved.push({ kind: 'card', ordinal: cardOrdinal });
   const identityOrdinal = resolveOrdinalInFamily(target, identities, IDENTITY_ROLES);
-  if (identityOrdinal !== null) return { kind: 'identity', ordinal: identityOrdinal };
-  return null;
+  if (identityOrdinal !== null) resolved.push({ kind: 'identity', ordinal: identityOrdinal });
+  return resolved;
 }
 
 /** The isolated-world three-state snapshot's secret-bearing role, per kind (login/card only —
@@ -217,7 +233,7 @@ module.exports = {
   isFieldElement,
   isCaptureGesture,
   resolveOrdinalInFamily,
-  resolveGestureTarget,
+  resolveGestureTargets,
   snapshotHasProvenancedSecret,
   secretRoleForKind,
   LOGIN_ROLES,
