@@ -1,6 +1,6 @@
 # Squawk 0083: `closeTab` returns `false` for a failed tab in a background window
 
-**Status**: open
+**Status**: deferred
 **Type**: defect
 **Severity**: routine
 **Reported**: 2026-09-17
@@ -35,3 +35,15 @@ gap in a non-focused window; reproduce and fix or document.
 ## Sign-Off
 
 *(written at completion)*
+
+## Disposition
+
+**Deferred** (2026-09-21, turnaround planning): excluded from the 2026-09-21
+turnaround because it cannot be reproduced headlessly — it needs a live
+multi-window session with an admin automation key, a failed tab in a NON-focused
+window, and the admin `closeTab` op. Its fix path ("fix, or document an admin-scope
+quirk") is not knowable until that reproduction is done. **Revisit when**: the next
+behavior-test run that exercises `enumerateTabs` / `closeTab` across windows, or the
+next leg that touches `src/main/automation/tabs.js`'s `closeTab` — whichever comes
+first.
+
