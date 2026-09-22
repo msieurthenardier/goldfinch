@@ -759,3 +759,17 @@ Ready (operator-approved 2026-09-21). Not yet in flight.
   pending.
 - **Step 8 PASS** (squawk 0100 fixed live): the operator's exact repro (tab → kebab → Secrets → Unlock → switch back) plus a repeat and the Settings-page variant: kebab and right-click menus paint. Squawk 0100 is verified live.
 - **Step 9 PASS** (regression: a plain typed sign-in offers save/update as before; card checkout offers card then identity serially). **All HAT steps pass.** The FD spawned a Reviewer over the uncommitted HAT inline fixes before the commit (they touched security-sensitive surfaces).
+- HAT-fix Reviewer: code, tests and gates clean (5654 tests, 0 fail; lint,
+  typecheck, format:check, build:preload all clean; `renderer.js` exactly 1550). One
+  blocker, documentation only: squawks 0099/0100 still read "pending live
+  verification". Fixed by closing both squawks (completed, live HAT evidence, sign-off).
+  Committed `cc8b3b7`.
+
+### Flight landed (2026-09-22)
+
+- Leg 5 → `completed`; the flight → `landed`; checked off in mission.md. The docs
+  check found CLAUDE.md (password roles, generate-in-picker, badge, the Unlock now
+  indicator, the squawk 0100 sheet rule) and `docs/vault.md` (password roles, generate)
+  current. Squawk candidate, filed at flight end: retrofit the owner-window check onto
+  `vault-fill-human` / `vault-reachable-items`. PR #230 marked ready for review. Next:
+  `/mission-control:flight-debrief` (operator request).

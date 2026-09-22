@@ -1,6 +1,6 @@
 # Leg: hat-and-alignment
 
-**Status**: ready
+**Status**: completed
 **Flight**: [The In-Field Affordance](../flight.md)
 
 ## Objective

@@ -1,6 +1,6 @@
 # Flight: The In-Field Affordance
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Saving, Not Just Filling](../../mission.md)
 
 > **Scope note — axes counted at drafting (Flight 2 debrief rule).** This flight
@@ -430,7 +430,7 @@ badge by eye.
       provenance, guest-side `pattern` (DD5–DD8). *High-risk tier (new secret path).*
 - [x] `goldfinch-badge` — the vector mark + lock overlay across login/card/identity
       icons, rebuilt whole, attribute pin unchanged (DD9).
-- [ ] `hat-and-alignment` *(optional, operator opted in)* — badge legibility (both
+- [x] `hat-and-alignment` *(optional, operator opted in)* — badge legibility (both
       states, light and dark fields, three kinds), sign-up generation to a saved
       item, rotation generation to an UPDATED item, the lock click, and a HUMAN
       reproduction + diagnosis of squawk 0100 (moved here from Leg 1; fix inline per the
@@ -442,10 +442,10 @@ badge by eye.
 
 ### Completion Checklist
 
-- [ ] All legs completed
+- [x] All legs completed
 - [ ] Code merged
-- [ ] Tests passing
-- [ ] Documentation updated (CLAUDE.md Password vault pattern: roles, generator,
+- [x] Tests passing
+- [x] Documentation updated (CLAUDE.md Password vault pattern: roles, generator,
       badge, the gesture payload; `docs/vault.md`)
 
 ### Verification

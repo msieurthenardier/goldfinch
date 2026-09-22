@@ -348,7 +348,7 @@ that follows it fires.
       hardest of the three families), a third arm in the reachable-items merge, and
       the capture and picker sheet templates — both of which currently hand-branch
       on a binary `isCard` and become three-way.
-- [ ] Flight 4: **The in-field affordance** — what the injected icon *is* and what
+- [x] Flight 4: **The in-field affordance** *(landed 2026-09-22, PR #230 — HAT passed, squawks 0099/0100 closed)* — what the injected icon *is* and what
       it *offers*: password generation at account creation and password rotation
       (including new-password-field discrimination), and the redesigned Goldfinch
       mark-plus-lock badge that replaces the generic padlock. Grouped because both
