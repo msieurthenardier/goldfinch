@@ -1,7 +1,7 @@
 // @ts-check
 
 import { buildVaultIndicatorModel } from '../../shared/vault-indicator-model.js';
-import { parsePickIndex, MANAGE_ID } from '../../shared/vault-picker-template.js';
+import { parsePickIndex, MANAGE_ID, GENERATE_ID, UNLOCK_ID } from '../../shared/vault-picker-template.js';
 
 // Close-reason classification for the vault-capture presentation queue's `advance()`
 // gate (M21 F3 L2, AC5c). Mirrors the resolution-vs-occlusion vocabulary
@@ -72,7 +72,14 @@ export function createVaultController({
   // the picker on a stale tab — we continue to the picker only when we are the tab
   // mid-unlock (`phase === 'unlocking'`). Last-wins: a new gesture replaces it, and
   // opening a sheet model-replaces any open one.
-  /** @type {{ wcId: number, phase: 'unlocking' | 'picking' } | null} */
+  //
+  // `generate` (Mission 21, Flight 4, Leg 3 — generate-in-picker, DD5/AC10) carries
+  // the main-validated { canGenerate, constraints } from the gesture that opened this
+  // flow, when one exists — so the LOCKED unlock-then-pick continuation
+  // (onVaultLockState below) can re-show the Generate row once the picker actually
+  // opens, and the GENERATE_ID activation (handleActivation below) has the
+  // constraints to hand to `vaultFillGenerated`.
+  /** @type {{ wcId: number, phase: 'unlocking' | 'picking', generate?: { canGenerate: boolean, constraints: any } | null } | null} */
   let pendingVaultFlow = null;
   /** @type {any[]} the last picker model — the index→item source for dispatch. */
   let lastPickerModel = [];
@@ -110,8 +117,12 @@ export function createVaultController({
   /** Open the badged vault picker for a tab: read the origin-filtered, metadata-only
    * reachable items (in main) and raise the vault-picker sheet. Enriches each row with
    * a jar display-name badge (Global vs the jar's name) — the store returns vaultId only.
-   * @param {number} wcId */
-  async function openVaultPicker(wcId) {
+   * `generate` (Mission 21, Flight 4, Leg 3, AC10), when `canGenerate`, PREPENDS a
+   * `{ action: 'generate' }` row ahead of every real item — the unlocked branch of
+   * DD5's picker row.
+   * @param {number} wcId
+   * @param {{ canGenerate: boolean, constraints: any } | null} [generate] */
+  async function openVaultPicker(wcId, generate) {
     let model;
     try {
       model = await goldfinch.vaultReachableItems(wcId);
@@ -131,6 +142,9 @@ export function createVaultController({
         // Global (skipped here) and colorless/unsafe jars get the neutral chip.
         row.badgeColor = jar && isSafeColor(jar.color) ? jar.color : null;
       }
+    }
+    if (generate && generate.canGenerate) {
+      lastPickerModel = [{ action: 'generate' }, ...lastPickerModel];
     }
     openOverlayMenu('vault-picker', lastPickerModel, null, 0);
   }
@@ -263,18 +277,43 @@ export function createVaultController({
       e.preventDefault();
       openToolbarContextMenu('vault', els.vaultIndicator);
     });
+
+    // Left-click (squawk 0099, flight DD10): locked → raise the F2 unlock sheet;
+    // unlocked → open the Secrets page (goldfinch://vault). The indicator is a native
+    // <button>, so Enter/Space fire this same `click` — no keydown handler needed.
+    // Deliberately uses the `onVaultRequestUnlock` SHAPE, not `onVaultGesture`'s locked
+    // branch: `pendingVaultFlow` stays unset, so a subsequent unlock does not spring the
+    // fill picker (there is no gesture/wcId behind this click to pick for).
+    els.vaultIndicator.addEventListener('click', () => {
+      if (!lockState.setUp) return; // defense in depth — the indicator is hidden then.
+      if (lockState.unlocked) openVaultPage();
+      else openOverlayMenu('vault-unlock', [], null, 0);
+    });
   }
 
-  goldfinch.onVaultGesture(({ wcId }) => {
+  goldfinch.onVaultGesture(({ wcId, generate }) => {
     if (!lockState.setUp) return; // manager not set up — no setup UI in F2 (DD; F3 owns setup).
+    // Generate-in-picker (Mission 21, Flight 4, Leg 3 — generate-in-picker, DD5):
+    // `generate` is main-validated ({ canGenerate, constraints } or absent/malformed).
+    // canGenerate false/absent behaves EXACTLY as today, in both lock states.
+    const canGenerate = !!(generate && generate.canGenerate);
     if (lockState.unlocked) {
-      pendingVaultFlow = { wcId, phase: 'picking' };
-      openVaultPicker(wcId);
+      pendingVaultFlow = { wcId, phase: 'picking', generate: canGenerate ? generate : null };
+      openVaultPicker(wcId, pendingVaultFlow.generate);
+    } else if (canGenerate) {
+      // Locked-vault branch, ONE state machine (DD5): show Generate + Unlock rows
+      // WITHOUT unlocking and WITHOUT a store read — reachableItems is never even
+      // invoked. Choosing Unlock (handleActivation's UNLOCK_ID case) enters the
+      // SAME 'unlocking' phase a today's locked gesture would, so there remains one
+      // unlock-then-pick entry point, not two.
+      pendingVaultFlow = { wcId, phase: 'picking', generate };
+      lastPickerModel = [{ action: 'generate' }, { action: 'unlock' }];
+      openOverlayMenu('vault-picker', lastPickerModel, null, 0);
     } else {
       // Locked → raise the Leg-2 unlock prompt first; onVaultLockState continues to the
       // picker on a successful unlock. openOverlayMenu is POSITIONAL (menuType, model,
       // anchor, startIndex, opts); the vault-unlock card is centered (anchor ignored).
-      pendingVaultFlow = { wcId, phase: 'unlocking' };
+      pendingVaultFlow = { wcId, phase: 'unlocking', generate: null };
       openOverlayMenu('vault-unlock', [], null, 0);
     }
   });
@@ -428,7 +467,10 @@ export function createVaultController({
     // the picker on a stale tab.
     if (pendingVaultFlow && pendingVaultFlow.phase === 'unlocking' && state.unlocked) {
       pendingVaultFlow.phase = 'picking';
-      openVaultPicker(pendingVaultFlow.wcId);
+      // `pendingVaultFlow.generate` (AC10) survives the unlock — a Generate row
+      // opened while locked, then routed through Unlock, re-shows on the now-
+      // unlocked full picker rather than being lost.
+      openVaultPicker(pendingVaultFlow.wcId, pendingVaultFlow.generate);
     }
     // Unlock-to-save continuation (M21 F3 L2, DD1's amendment): a login/card-form
     // submit into a LOCKED vault held the credential(s) and raised the unlock prompt;
@@ -619,6 +661,29 @@ export function createVaultController({
       if (id === MANAGE_ID) {
         pendingVaultFlow = null;
         openVaultPage();
+        return true;
+      }
+      // Generate-in-picker action rows (Mission 21, Flight 4, Leg 3, AC11).
+      if (id === GENERATE_ID) {
+        const genWcId = pendingVaultFlow ? pendingVaultFlow.wcId : null;
+        const constraints =
+          pendingVaultFlow && pendingVaultFlow.generate ? pendingVaultFlow.generate.constraints : null;
+        pendingVaultFlow = null;
+        if (genWcId == null || !constraints) return true;
+        // Main re-validates + re-resolves the constraints (never trusting what it
+        // itself handed the chrome earlier) and generates + fills entirely main-side
+        // — the chrome never receives or holds the generated password. A resolved
+        // { filled:false } (a page mutation raced the fill, or the gate refused)
+        // shows no sheet — the operator can simply click the badge again.
+        Promise.resolve(goldfinch.vaultFillGenerated({ wcId: genWcId, constraints })).catch(() => {});
+        return true;
+      }
+      if (id === UNLOCK_ID) {
+        // Enter the SAME 'unlocking' phase today's locked gesture uses — keeping
+        // wcId + generate so the post-unlock continuation (onVaultLockState above)
+        // re-shows the Generate row on the now-unlocked full picker.
+        if (pendingVaultFlow) pendingVaultFlow.phase = 'unlocking';
+        openOverlayMenu('vault-unlock', [], null, 0);
         return true;
       }
       const idx = parsePickIndex(id);

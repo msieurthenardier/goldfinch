@@ -64,3 +64,8 @@ is not findable in one read pass, this fails the squawk gate and escalates.**
 ## Disposition
 
 Deferred — out of Mission 21 Flight 3's path; the HAT continues in a new window.
+
+**Re-deferred (M21 F4, 2026-09-21):** two automation diagnosis passes could not reproduce it.
+The kebab and page-context sheets are unobservable to automation by design, and the
+instrumented bounds/viewport chain was healthy. Operator ruling: reproduce by hand at
+Mission 21 Flight 4's HAT (see that flight's log).

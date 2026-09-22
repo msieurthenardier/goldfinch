@@ -26,7 +26,7 @@
 // (DD3g: "It emits a snapshot of plain, serializable values — never a handle.").
 
 const { createEntryObserver } = require('./vault-entry-observer');
-const { findAllLoginFields, fillLoginForm } = require('./vault-fill-fields');
+const { findAllLoginFields, fillLoginForm, fillGeneratedForm } = require('./vault-fill-fields');
 const { findAllCardFields, fillCardForm } = require('./vault-card-fields');
 const { findAllIdentityFields, fillIdentityForm } = require('./vault-identity-fields');
 const { VAULT_ENTRY_OBSERVER_HANDLE } = require('./vault-entry-observer-handle');
@@ -67,6 +67,18 @@ if (!window[VAULT_ENTRY_OBSERVER_HANDLE]) {
     /** @param {{ identity?: any, ordinal?: number|null }} [arg] */
     fillIdentity(arg = {}) {
       const result = fillIdentityForm(document, arg.identity, arg.ordinal);
+      observer.grantForFill(result);
+      return { filled: !!result.filled };
+    },
+    // Generate-in-picker (Mission 21, Flight 4, Leg 3 — generate-in-picker,
+    // DD7/AC15): `{ candidates, ordinal }` — `candidates` are the two
+    // main-generated password strings (never the operator's typed input);
+    // `ordinal` is the CLICKED field's own entry index, with NO first-field
+    // fallback on a null/stale ordinal (fillGeneratedForm's own rule — a
+    // generated password in the wrong form is worse than none).
+    /** @param {{ candidates?: any, ordinal?: number|null }} [arg] */
+    fillGenerated(arg = {}) {
+      const result = fillGeneratedForm(document, arg.candidates, arg.ordinal);
       observer.grantForFill(result);
       return { filled: !!result.filled };
     },

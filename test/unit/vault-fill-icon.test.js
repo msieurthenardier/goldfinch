@@ -138,6 +138,17 @@ function bodyIcon(doc) {
 
 // --- buildVaultLockIcon: SVG glyph, not emoji -----------------------------
 
+// The expected structural child list for buildVaultLockIcon's output, per
+// Mission 21 Flight 4 Leg 4 (goldfinch-badge, DD9/AC7): the Goldfinch mark
+// (disc, cap, mask, beak, eye) plus the lock-state overlay (backing, shackle,
+// body).
+const EXPECTED_CHILD_TAGS = ['circle', 'path', 'path', 'path', 'circle', 'circle', 'path', 'rect'];
+
+// The overlay shackle is the `path` whose `stroke` is `currentColor` — NOT
+// "the first path" (that's now the bird's cap, AC3).
+const shackleOf = (icon) =>
+  icon.children.find((c) => c.tagName === 'path' && c.getAttribute('stroke') === 'currentColor');
+
 test('buildVaultLockIcon: an inline SVG element (not an emoji), correctly labelled', () => {
   const doc = makeDoc([]);
   const icon = buildVaultLockIcon(doc); // default: locked
@@ -153,23 +164,90 @@ test('buildVaultLockIcon: an inline SVG element (not an emoji), correctly labell
   assert.equal(icon.textContent, '', 'no text glyph — the lock is drawn, never typed');
   assert.ok(!/🔒|□/.test(icon.textContent));
   // Drawn from real SVG child shapes, all in the SVG namespace.
-  assert.ok(icon.children.length >= 2, 'has shape children (shackle + body)');
+  assert.ok(icon.children.length >= 2, 'has shape children (the mark + the lock overlay)');
   for (const child of icon.children) assert.equal(child.namespaceURI, SVG_NS);
 });
 
-test('buildVaultLockIcon: locked vs unlocked glyph + label + marker', () => {
+test('buildVaultLockIcon: overlay shackle carries lock state (AC3, renamed from the old first-path shackle test)', () => {
   const doc = makeDoc([]);
-  const shackleD = (icon) => icon.children.find((c) => c.tagName === 'path').getAttribute('d');
 
   const locked = buildVaultLockIcon(doc, true);
   assert.equal(locked.getAttribute('data-locked'), 'true');
   assert.equal(locked.getAttribute('aria-label'), 'Unlock vault to fill login');
-  assert.ok(/V11$/.test(shackleD(locked)), 'closed shackle: both legs reach the body (…V11)');
+  assert.ok(/V17\.6$/.test(shackleOf(locked).getAttribute('d')), 'closed shackle: both legs reach the body (…V17.6)');
 
   const unlocked = buildVaultLockIcon(doc, false);
   assert.equal(unlocked.getAttribute('data-locked'), 'false');
   assert.equal(unlocked.getAttribute('aria-label'), 'Fill login from vault');
-  assert.ok(!/V11$/.test(shackleD(unlocked)), 'open shackle: the right leg lifts free (no trailing …V11)');
+  assert.ok(
+    !/V17\.6$/.test(shackleOf(unlocked).getAttribute('d')),
+    'open shackle: the right leg lifts free (no trailing …V17.6)'
+  );
+});
+
+test('buildVaultLockIcon: AC4 — the mark children (disc, cap, mask, beak, eye) are IDENTICAL between locked and unlocked builds', () => {
+  const doc = makeDoc([]);
+  const locked = buildVaultLockIcon(doc, true);
+  const unlocked = buildVaultLockIcon(doc, false);
+
+  // The mark is the first five children (disc, cap, mask, beak, eye); the
+  // overlay (backing, shackle, body) is the last three and is the ONLY part
+  // that may differ between the two builds.
+  const markOf = (icon) => icon.children.slice(0, 5).map((c) => ({ tagName: c.tagName, attrs: { ...c.attributes } }));
+
+  assert.deepEqual(markOf(locked), markOf(unlocked), 'the mark never changes with lock state');
+  // Sanity: the overlay's shackle DOES differ (proves the comparison above isn't vacuous).
+  assert.notEqual(shackleOf(locked).getAttribute('d'), shackleOf(unlocked).getAttribute('d'));
+});
+
+test('buildVaultLockIcon: AC7 — all three kinds, both lock states, build the same structural child list', () => {
+  const doc = makeDoc([]);
+  for (const kind of ['login', 'card', 'identity']) {
+    for (const locked of [true, false]) {
+      const icon = buildVaultLockIcon(doc, locked, kind);
+      assert.deepEqual(
+        icon.children.map((c) => c.tagName),
+        EXPECTED_CHILD_TAGS,
+        `kind=${kind} locked=${locked}`
+      );
+    }
+  }
+});
+
+test('buildVaultLockIcon: AC1 — every child shape carries only geometry/paint attributes, no innerHTML/text/href', () => {
+  const ALLOWED_SHAPE_ATTRS = new Set([
+    'cx',
+    'cy',
+    'r',
+    'd',
+    'x',
+    'y',
+    'width',
+    'height',
+    'rx',
+    'fill',
+    'stroke',
+    'stroke-width',
+    'stroke-linecap',
+    'stroke-linejoin'
+  ]);
+  const doc = makeDoc([]);
+  for (const kind of ['login', 'card', 'identity']) {
+    for (const locked of [true, false]) {
+      const icon = buildVaultLockIcon(doc, locked, kind);
+      for (const child of icon.children) {
+        assert.ok(['circle', 'path', 'rect'].includes(child.tagName), `unexpected child tag ${child.tagName}`);
+        assert.equal(child.textContent, '', 'no text content on any child');
+        for (const attr of Object.keys(child.attributes)) {
+          assert.ok(ALLOWED_SHAPE_ATTRS.has(attr), `disallowed attribute "${attr}" on ${child.tagName}`);
+        }
+        // No href/xlink:href (no <use>/<image>-style external reference) and no style attribute.
+        assert.equal(child.getAttribute('href'), null);
+        assert.equal(child.getAttribute('xlink:href'), null);
+        assert.equal(child.getAttribute('style'), null);
+      }
+    }
+  }
 });
 
 // --- placement: both fields, focus-gated ----------------------------------
@@ -258,7 +336,7 @@ test('click on the icon keeps field focus (mousedown preventDefault) so the clic
 
 // --- F2 invariants: isTrusted guard + bare IPCs ---------------------------
 
-test('click: a trusted gesture sends the BARE guest-vault-gesture IPC; a scripted click is ignored', () => {
+test('click: a trusted gesture sends the guest-vault-gesture IPC (no secret, wcId derived by main); a scripted click is ignored', () => {
   const user = new FakeInput('text', 'username');
   const pass = new FakeInput('password', 'password');
   const doc = makeDoc([new FakeForm([user, pass])]);
@@ -272,11 +350,19 @@ test('click: a trusted gesture sends the BARE guest-vault-gesture IPC; a scripte
   icon.dispatch('click', { isTrusted: false });
   assert.deepEqual(sends, [], 'a synthetic/scripted click raises nothing');
 
-  // Genuine user gesture → bare IPC, empty payload, NO secret.
+  // Genuine user gesture on a resolved login target → the AC7 { generate }
+  // payload (Mission 21, Flight 4, Leg 3 — generate-in-picker); this single
+  // sign-in-shaped field (no autocomplete/tokens) classifies 'sign-in', so
+  // `generate.passwordRole` is null — still no secret, no password, no DOM
+  // value anywhere on the wire.
   icon.dispatch('click', { isTrusted: true });
   assert.equal(sends.length, 1);
   assert.equal(sends[0].channel, 'guest-vault-gesture');
-  assert.deepEqual(sends[0].payload, {}, 'bare payload — main derives the wcId from the sender');
+  assert.deepEqual(
+    sends[0].payload,
+    { generate: { passwordRole: null, constraints: null } },
+    'a resolved login target always carries a generate payload — main degrades a non-"new" role to bare {wcId} (AC8)'
+  );
 });
 
 test("a trusted gesture binds the clicked form's password as the single-use, TTL-bound fill target (PR#112 finding 9)", () => {
@@ -640,4 +726,88 @@ test('consumeFillTarget("identity") is null for a login-bound gesture, and vice 
   bodyIcon(doc).dispatch('click', { isTrusted: true });
 
   assert.equal(ctl.consumeFillTarget('identity'), null, 'a login-bound target does not satisfy an identity consume');
+});
+
+// --- Generate-in-picker gesture payload (Mission 21, Flight 4, Leg 3, AC7) ---
+
+test('AC7: a classified new-password field sends the login/new generate payload', () => {
+  const user = new FakeInput('text', 'username');
+  const pass = new FakeInput('password', 'password');
+  pass.setAttribute('autocomplete', 'new-password');
+  pass.setAttribute('minlength', '10');
+  const doc = makeDoc([new FakeForm([user, pass])]);
+  const sends = [];
+  const ctl = makeController(doc, sends);
+
+  ctl.handleFocusIn({ target: pass });
+  bodyIcon(doc).dispatch('click', { isTrusted: true });
+
+  assert.equal(sends.length, 1);
+  assert.equal(sends[0].channel, 'guest-vault-gesture');
+  assert.deepEqual(sends[0].payload, {
+    generate: { passwordRole: 'new', constraints: { minLength: 10, maxLength: null, passwordRules: null } }
+  });
+});
+
+test('AC7: a sign-in field sends a generate payload with a null passwordRole (no secret either way)', () => {
+  const pass = new FakeInput('password', 'signin-password');
+  const doc = makeDoc([new FakeForm([pass])]);
+  const sends = [];
+  const ctl = makeController(doc, sends);
+
+  ctl.handleFocusIn({ target: pass });
+  bodyIcon(doc).dispatch('click', { isTrusted: true });
+
+  assert.deepEqual(sends[0].payload, { generate: { passwordRole: null, constraints: null } });
+});
+
+test('AC7: a card gesture stays bare — {} — never a generate payload', () => {
+  const number = new FakeInput('text', 'cc-number');
+  const doc = makeDoc([new FakeForm([number])]);
+  const sends = [];
+  const cardEntry = { number, cardholder: null, expiry: null, csc: null };
+  const ctl = makeControllerWithFinders(doc, sends, { findAllCardFields: () => [cardEntry] });
+
+  ctl.handleFocusIn({ target: number });
+  bodyIcon(doc).dispatch('click', { isTrusted: true });
+
+  assert.equal(sends.length, 1);
+  assert.deepEqual(sends[0].payload, {});
+});
+
+test('AC7: an identity gesture stays bare — {} — never a generate payload', () => {
+  const street = new FakeInput('text', 'street');
+  const doc = makeDoc([new FakeForm([street])]);
+  const sends = [];
+  const identityEntry = { anchor: street, nonPostalAnchor: null };
+  const ctl = makeControllerWithFinders(doc, sends, { findAllIdentityFields: () => [identityEntry] });
+
+  ctl.handleFocusIn({ target: street });
+  bodyIcon(doc).dispatch('click', { isTrusted: true });
+
+  assert.deepEqual(sends[0].payload, {});
+});
+
+test('AC7: an unresolved anchor (targetForAnchor returns null) stays bare — {}', () => {
+  // A stale/foreign anchor that no detector recognises — resolveTarget always
+  // returns null — models the "unresolved" branch (AC7's third listed case).
+  const user = new FakeInput('text', 'username');
+  const pass = new FakeInput('password', 'password');
+  const doc = makeDoc([new FakeForm([user, pass])]);
+  const sends = [];
+  const ctl = createVaultIconController({
+    document: doc,
+    window: { scrollX: 0, scrollY: 0 },
+    ipcRenderer: { send: (channel, payload) => sends.push({ channel, payload }) },
+    isTrustedGet: { call: (e) => !!e.isTrusted },
+    findAllLoginFields,
+    getEnabled: () => true,
+    resolveTarget: () => null
+  });
+
+  ctl.handleFocusIn({ target: pass });
+  bodyIcon(doc).dispatch('click', { isTrusted: true });
+
+  assert.equal(sends.length, 1);
+  assert.deepEqual(sends[0].payload, {});
 });

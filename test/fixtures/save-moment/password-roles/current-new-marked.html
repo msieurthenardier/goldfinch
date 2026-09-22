@@ -1,0 +1,18 @@
+<!--
+  Fixture: current-new-marked
+  Corpus tier: gated (positive). Family: login. Leg: password-field-roles.
+  A change-password form with NO confirm field — just current + new, both
+  marked via autocomplete (`current-password` / `new-password`). Proves AC8's
+  "a `confirm` field is OPTIONAL" path: the plan is admitted on the new
+  field's own provenanced value with no agreement check to run at all.
+  Added: 2026-09-22 (Mission 21, Flight 4, Leg 2 — password-field-roles).
+-->
+<form id="change-password" action="/account/password" method="post">
+  <label for="cn-username">Username</label>
+  <input type="text" id="cn-username" name="username" autocomplete="username" value="bob" readonly />
+  <label for="cn-current">Current password</label>
+  <input type="password" id="cn-current" name="current_password" autocomplete="current-password" value="OldPass9!" />
+  <label for="cn-new">New password</label>
+  <input type="password" id="cn-new" name="new_password" autocomplete="new-password" value="FreshPass8!" />
+  <button type="submit">Change password</button>
+</form>

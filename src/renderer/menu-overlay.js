@@ -65,7 +65,7 @@ import {
   certPickId,
   CERT_CANCEL_ID
 } from '../shared/cert-picker-template.js';
-import { buildVaultPickerCard, renderVaultPickerRows, pickId, MANAGE_ID } from '../shared/vault-picker-template.js';
+import { buildVaultPickerCard, renderVaultPickerRows, activationIdFor } from '../shared/vault-picker-template.js';
 import { buildVaultCaptureCard, renderVaultCaptureCard, selectedVaultId } from '../shared/vault-capture-template.js';
 import { buildVaultSetCard } from '../shared/vault-set-template.js';
 import { buildVaultRecoveryCard } from '../shared/vault-recovery-template.js';
@@ -1048,11 +1048,12 @@ import {
     pickerRows.forEach((btn) => {
       btn.addEventListener('click', () => {
         // A credential row reports its INDEX (`pick:<i>`, from data-pick-index); the
-        // separated footer (no data-pick-index) reports MANAGE_ID → chrome routes it to
-        // openVaultPage() (a navigation, no secret). Activation wins over the onClose
+        // separated footer (no data-pick-index) reports MANAGE_ID; a Generate-in-picker
+        // action row (AC9b) reports its own fixed GENERATE_ID/UNLOCK_ID — resolved by the
+        // shared `activationIdFor` CHOKEPOINT (design review round 1 HIGH) so an action row
+        // can never silently fall through to MANAGE_ID. Activation wins over the onClose
         // dismissal (one report per token). The password is NEVER on this path.
-        const pi = btn.dataset.pickIndex;
-        const id = pi != null && pi !== '' ? pickId(Number(pi)) : MANAGE_ID;
+        const id = activationIdFor(btn.dataset);
         if (sendActivatedOnce({ id })) menuController.close(pickerEntry);
       });
     });

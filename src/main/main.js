@@ -43,6 +43,9 @@ const { registerHistoryIpc } = require('./history-ipc');
 const { createFaviconFetcher } = require('./favicon-fetch');
 const { isSafeTabUrl, isInternalPageUrl } = require('../shared/url-safety');
 const { devUserDataPath } = require('../shared/dev-profile');
+// Generate-in-picker (Mission 21, Flight 4, Leg 3 — generate-in-picker, AC13):
+// re-validated + regenerated HERE, never trusting the chrome's earlier canGenerate.
+const { sanitizeGenerateConstraints, generateCandidates } = require('../shared/password-policy');
 // Mission 20 Flight 3 Leg 3 (DD7/DD8): the crash-record writer (field
 // allowlist) — Electron-free, injected {dir, fs, now}.
 const { createCrashLog, kindOfChildProcess } = require('./crash-log');
@@ -1383,6 +1386,16 @@ function getVaultHuman() {
       fillIdentityDelegate: ({ wcId, identity }) => {
         webContents.fromId(wcId)?.send('vault-fill-identity', identity);
       },
+      // Generate-in-picker fill (Mission 21, Flight 4, Leg 3, AC13): the same
+      // trust boundary as fillDelegate/fillCardDelegate/fillIdentityDelegate
+      // above — webContents.send targets the TOP frame only, so a cross-origin
+      // iframe is never reached, and the generated candidates are never
+      // returned to chrome. Wired ONLY here (the HUMAN fill path) — never on
+      // the MCP automation vault-human deps block below (generation stays off
+      // the MCP surface entirely, per the leg's instruction).
+      fillGeneratedDelegate: ({ wcId, candidates }) => {
+        webContents.fromId(wcId)?.send('vault-fill-generated', { candidates });
+      },
       // Leg 4 (capture-save): the held-record safety-drop timer, injected so the
       // ~2-min timeout is unit-testable (mirrors the vault-store idle timer).
       setTimeout: (fn, ms) => setTimeout(fn, ms),
@@ -2397,6 +2410,31 @@ ipcMain.handle('vault-fill-human', (_event, payload) => {
     return { filled: false, reason: 'ineligible' };
   }
   return getVaultHuman().fillHuman({ wcId, vaultId, itemId });
+});
+
+// Generate-in-picker (Mission 21, Flight 4, Leg 3 — generate-in-picker, DD5/AC13):
+// the chosen "Generate strong password" row's dispatch. FD ruling (design review
+// round 1 HIGH): this channel is deliberately STRICTER than vault-fill-human /
+// vault-reachable-items above (no owner check on either) — a write into a guest
+// from chrome-supplied input needs the owner check those two lack; retrofitting
+// them is out of scope here (squawk candidate, logged at flight end). The sender
+// must be the OWNING window's chrome for wcId (the register-tab-ipc.js `ownsTab`
+// shape, reimplemented here since it is closure-local there). Re-runs
+// sanitizeGenerateConstraints + generateCandidates on the chrome-supplied
+// constraints — never trusting the earlier canGenerate a gesture handed the
+// chrome — and delegates the actual generate+fill entirely to vault-human, which
+// never returns a candidate.
+ipcMain.handle('vault-fill-generated', (event, payload) => {
+  const { wcId, constraints: rawConstraints } = /** @type {any} */ (payload || {});
+  if (typeof wcId !== 'number') return { filled: false, reason: 'ineligible' };
+  const ownerRec = registry.getWindowForChrome(event.sender);
+  if (!ownerRec || ownerRec !== registry.getWindowForGuest(wcId)) {
+    return { filled: false, reason: 'ineligible' };
+  }
+  const constraints = sanitizeGenerateConstraints(rawConstraints);
+  if (!constraints) return { filled: false, reason: 'unsatisfiable' };
+  const candidates = generateCandidates(constraints);
+  return getVaultHuman().fillGenerated({ wcId, candidates });
 });
 
 // Guest media-list / privacy-fp forwarding from webview-preload to chrome renderer.

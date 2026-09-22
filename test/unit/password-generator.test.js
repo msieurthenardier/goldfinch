@@ -134,3 +134,70 @@ test('rejects a non-integer / non-positive length', () => {
   assert.throws(() => generatePassword({ length: -5 }), /positive integer/i);
   assert.throws(() => generatePassword({ length: 12.5 }), /positive integer/i);
 });
+
+// --- policy mode (Mission 21, Flight 4, Leg 3 — generate-in-picker, AC4) ---
+
+test('policy mode: requiredSets absent behaves exactly as the four-flag default (regression gate)', () => {
+  const pw = generatePassword();
+  assert.equal(pw.length, 20);
+  assert.deepEqual(classesPresent(pw), { lower: true, upper: true, digits: true, symbols: true });
+});
+
+test('policy mode: one char from each required set, rest from alphabet', () => {
+  const requiredSets = ['A', '1'];
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  const pw = generatePassword({ length: 16, requiredSets, alphabet });
+  assert.equal(pw.length, 16);
+  assert.ok([...pw].includes('A'), 'must include the sole "A" required-set char');
+  assert.ok([...pw].includes('1'), 'must include the sole "1" required-set char');
+  assert.ok(
+    [...pw].every((c) => alphabet.includes(c)),
+    'every char must be drawn from the alphabet'
+  );
+});
+
+test('policy mode: length equal to requiredSets.length never touches alphabet', () => {
+  const pw = generatePassword({ length: 2, requiredSets: ['A', 'B'], alphabet: '' });
+  assert.equal(pw.length, 2);
+  assert.ok(pw.includes('A') && pw.includes('B'));
+});
+
+test('policy mode: maxConsecutive is enforced by redraw (a single-char alphabet cannot satisfy it and throws)', () => {
+  assert.throws(
+    () => generatePassword({ length: 6, requiredSets: ['a'], alphabet: 'a', maxConsecutive: 1 }),
+    /max-consecutive/i
+  );
+});
+
+test('policy mode: maxConsecutive is satisfiable with a rich alphabet (never throws across many draws)', () => {
+  for (let i = 0; i < 25; i += 1) {
+    const pw = generatePassword({
+      length: 20,
+      requiredSets: ['A', '1'],
+      alphabet: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
+      maxConsecutive: 2
+    });
+    let run = 1;
+    let maxRun = 1;
+    for (let j = 1; j < pw.length; j += 1) {
+      run = pw[j] === pw[j - 1] ? run + 1 : 1;
+      maxRun = Math.max(maxRun, run);
+    }
+    assert.ok(maxRun <= 2, `run of ${maxRun} exceeds maxConsecutive=2`);
+  }
+});
+
+test('policy mode: rejects length below requiredSets.length', () => {
+  assert.throws(
+    () => generatePassword({ length: 1, requiredSets: ['A', 'B'], alphabet: 'AB' }),
+    /below the 2 required/i
+  );
+});
+
+test('policy mode: rejects an empty alphabet when a remainder is needed', () => {
+  assert.throws(() => generatePassword({ length: 5, requiredSets: ['A'], alphabet: '' }), /alphabet/i);
+});
+
+test('policy mode: rejects a requiredSets entry that is not a non-empty string', () => {
+  assert.throws(() => generatePassword({ length: 5, requiredSets: ['A', ''], alphabet: 'AB' }), /requiredSets/i);
+});

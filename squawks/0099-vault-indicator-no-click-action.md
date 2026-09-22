@@ -1,6 +1,6 @@
 # Squawk 0099: The toolbar vault lock indicator has no click action — no path to unlock or to the vault page
 
-**Status**: open
+**Status**: in-progress
 **Type**: defect
 **Severity**: routine
 **Reported**: 2026-09-21
@@ -30,9 +30,15 @@ to unlocking.
 
 ## Corrective Action
 
-*(written at completion)*
+Implemented in Mission 21 Flight 4 Leg 1 (`lock-indicator-click`), per operator ruling DD10.
+`vault-controller.js` adds a `click` listener beside the `contextmenu` one. Locked →
+`openOverlayMenu('vault-unlock', …)` in the `onVaultRequestUnlock` shape (no
+`pendingVaultFlow`, so no fill picker springs after the unlock); unlocked →
+`openVaultPage()`; not set up → no-op. The native `<button>` gives Enter/Space for free.
+Unit-tested in `vault-controller-capture.test.js`. Live verification: Flight 4's HAT,
+step 3. The squawk completes there.
 
-Likely: a left-click listener — locked → raise the existing `vault-unlock` sheet;
+Original note: a left-click listener — locked → raise the existing `vault-unlock` sheet;
 unlocked → open `goldfinch://vault`. **Needs a one-line operator ruling on the
 click semantics first** (issue #113 already carried one operator ruling on this
 indicator — "the pinnable half is DECLINED"). If settling the semantics turns into

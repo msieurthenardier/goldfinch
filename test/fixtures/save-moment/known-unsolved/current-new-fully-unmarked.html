@@ -1,0 +1,28 @@
+<!--
+  Fixture: current-new-fully-unmarked
+  Corpus tier: known-unsolved (positive, {todo:true}). Family: login. Leg:
+  password-field-roles (Mission 21, Flight 4, Leg 2).
+  DD1's own named limit: a change-password form with exactly TWO password
+  fields — semantically current + new — carrying NO autocomplete hint and NO
+  recognisable name/id token at all (`password`/`password2`, plain, no
+  separator, no digit hump). Layers 1 and 2 resolve nothing; layer 3
+  (structure) then applies the two-field rule for "neither resolved current"
+  -> new + confirm, which MISREADS this shape (there is no confirm field
+  here at all — the second field is the NEW password, not a repeat of it).
+  Because the two fields' values genuinely differ (a real current != new
+  password), DD3's confirm-agreement check then finds the "confirm" field
+  (really the new field) disagreeing with the "new" field (really the
+  current field) and plans NO capture — a MISSED capture, fail-safe, never a
+  wrong value (DD8's counted miss). This fixture pins the expectation a
+  future, stronger classifier would need to satisfy (`expectRoles:
+  ['current','new']`), which current code cannot meet — hence `{todo:true}`,
+  never deleted, promoted only if a future leg solves it (see flight.md DD1).
+  Added: 2026-09-22 (Mission 21, Flight 4, Leg 2 — password-field-roles).
+-->
+<form id="change-password" action="/account/password" method="post">
+  <label for="cp-current">Current password</label>
+  <input type="password" id="cp-current" name="password" value="OldSecret1" />
+  <label for="cp-new">New password</label>
+  <input type="password" id="cp-new" name="password2" value="NewSecret2" />
+  <button type="submit">Change password</button>
+</form>

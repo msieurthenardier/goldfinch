@@ -89,11 +89,29 @@ function shuffle(arr) {
  *   - the whole result is shuffled (unbiased) so the guaranteed-class chars are not
  *     pinned to the front.
  * Throws on all-classes-off or `length < enabled-class-count`.
- * @param {{ length?: number, lower?: boolean, upper?: boolean, digits?: boolean, symbols?: boolean }} [opts]
+ *
+ * POLICY MODE (Mission 21, Flight 4, Leg 3 — generate-in-picker, AC4): an
+ * `opts.requiredSets` array (see `generateFromPolicy` below) routes to the
+ * field-constraint-driven generator instead — see that function's own
+ * doc-comment. The two shapes are a union here so BOTH call forms typecheck.
+ * @param {{ length?: number, lower?: boolean, upper?: boolean, digits?: boolean, symbols?: boolean, requiredSets?: undefined, alphabet?: undefined, maxConsecutive?: undefined } | { length?: number, requiredSets: string[], alphabet?: string, maxConsecutive?: number|null, lower?: undefined, upper?: undefined, digits?: undefined, symbols?: undefined }} [opts]
  * @returns {string}
  */
 function generatePassword(opts = {}) {
-  const { length = 20, lower = true, upper = true, digits = true, symbols = true } = opts || {};
+  const o = opts || {};
+
+  // Policy mode (Mission 21, Flight 4, Leg 3 — generate-in-picker, DD6/AC4):
+  // an EXPLICIT `requiredSets` array routes to the field-constraint-driven
+  // generator instead of the four-flag mode below. Absent `requiredSets` is
+  // the ONLY discriminator — every pre-existing call (the vault page's own
+  // Generate button, every prior test) omits it and is byte-for-byte
+  // unaffected.
+  if (Array.isArray(o.requiredSets)) {
+    const policyOpts = /** @type {any} */ (o);
+    return generateFromPolicy(policyOpts);
+  }
+
+  const { length = 20, lower = true, upper = true, digits = true, symbols = true } = o;
 
   if (!Number.isInteger(length) || length < 1) {
     throw new RangeError(`password-generator: length must be a positive integer (got ${length})`);
@@ -124,6 +142,81 @@ function generatePassword(opts = {}) {
   // Unbiased shuffle so the guaranteed chars are not front-loaded.
   shuffle(chars);
   return chars.join('');
+}
+
+/**
+ * True iff `chars` contains a run of the SAME character strictly longer than
+ * `max` consecutive positions.
+ * @param {string[]} chars
+ * @param {number} max
+ * @returns {boolean}
+ */
+function hasRunLongerThanMax(chars, max) {
+  let run = 1;
+  for (let i = 1; i < chars.length; i += 1) {
+    run = chars[i] === chars[i - 1] ? run + 1 : 1;
+    if (run > max) return true;
+  }
+  return false;
+}
+
+// A bounded attempt count for the max-consecutive redraw loop (AC4) — never an
+// unbounded retry against a policy a caller handed us that happens to be very
+// hard (or impossible) to satisfy without a long run.
+const MAX_CONSECUTIVE_ATTEMPTS = 100;
+
+/**
+ * Policy-driven generation (`src/shared/password-policy.js`'s `resolvePolicy`/
+ * `generateCandidates` are the only intended callers — this function does not
+ * itself parse `passwordrules` or field attributes, it only draws characters):
+ *   - one character from each of `requiredSets` (in order), the rest drawn
+ *     from `alphabet`, then an unbiased Fisher-Yates shuffle (same `pickFrom`/
+ *     `shuffle` helpers as the four-flag mode above — one audited randomness
+ *     path);
+ *   - `maxConsecutive`, when given, is enforced by REDRAWING THE WHOLE
+ *     password (never patching one character in place, which would bias the
+ *     redraw) up to `MAX_CONSECUTIVE_ATTEMPTS` times, then throws.
+ * @param {{ length?: number, requiredSets: string[], alphabet?: string, maxConsecutive?: number|null }} opts
+ * @returns {string}
+ */
+function generateFromPolicy(opts) {
+  const { length = 20, requiredSets, alphabet = '', maxConsecutive = null } = opts;
+
+  if (!Number.isInteger(length) || length < 1) {
+    throw new RangeError(`password-generator: length must be a positive integer (got ${length})`);
+  }
+  if (!Array.isArray(requiredSets) || requiredSets.some((s) => typeof s !== 'string' || s.length === 0)) {
+    throw new RangeError('password-generator: requiredSets must be an array of non-empty charset strings');
+  }
+  if (length < requiredSets.length) {
+    throw new RangeError(
+      `password-generator: length ${length} is below the ${requiredSets.length} required sets — cannot include one of each`
+    );
+  }
+  const remainderNeeded = length > requiredSets.length;
+  if (remainderNeeded && (typeof alphabet !== 'string' || alphabet.length === 0)) {
+    throw new RangeError(
+      'password-generator: alphabet must be a non-empty string when length exceeds requiredSets.length'
+    );
+  }
+
+  const attempts =
+    typeof maxConsecutive === 'number' && Number.isInteger(maxConsecutive) && maxConsecutive > 0
+      ? MAX_CONSECUTIVE_ATTEMPTS
+      : 1;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    /** @type {string[]} */
+    const chars = [];
+    for (const set of requiredSets) chars.push(pickFrom(set));
+    for (let i = requiredSets.length; i < length; i += 1) chars.push(pickFrom(alphabet));
+    shuffle(chars);
+    if (attempts === 1 || !hasRunLongerThanMax(chars, /** @type {number} */ (maxConsecutive))) {
+      return chars.join('');
+    }
+  }
+  throw new RangeError(
+    `password-generator: could not satisfy max-consecutive (${maxConsecutive}) within ${MAX_CONSECUTIVE_ATTEMPTS} attempts`
+  );
 }
 
 export { generatePassword, CLASSES, CLASS_NAMES };

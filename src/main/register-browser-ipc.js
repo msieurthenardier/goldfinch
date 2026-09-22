@@ -1,9 +1,34 @@
 'use strict';
 
 const { resolvePersistJar } = require('./persist-jar-gate');
+// Generate-in-picker gesture payload validation (Mission 21, Flight 4, Leg 3 —
+// generate-in-picker, DD5/AC8). Real ES module, loaded via Node's synchronous
+// require(esm) — the settings-store.js / search-engines.js precedent.
+const { sanitizeGenerateConstraints, resolvePolicy } = require('../shared/password-policy');
 
 const PAGE_CONTEXT_ACTIONS = new Set(['cut', 'copy', 'paste', 'undo', 'redo']);
 const EMPTY_COOKIES = Object.freeze({ firstParty: null, first: 0, third: 0, total: 0, list: [] });
+
+/**
+ * Validate the page-influenced `generate` sub-payload a `guest-vault-gesture`
+ * IPC MAY carry (flight DD5/AC8) — the guest preload's own `generateGestureInfo`
+ * output, re-validated here rather than trusted: `passwordRole` must be the
+ * LITERAL string `'new'`, and `constraints` must sanitize cleanly
+ * (`sanitizeGenerateConstraints`). Returns `{ canGenerate, constraints }`
+ * (availability decided by the SAME `resolvePolicy` the eventual generate
+ * request re-runs, so the two can never disagree) or `null` when anything is
+ * malformed or the role is not `'new'` — the caller then forwards today's bare
+ * `{ wcId }` shape.
+ * @param {any} payload
+ * @returns {{ canGenerate: boolean, constraints: any } | null}
+ */
+function validateGenerateGesture(payload) {
+  const g = payload && typeof payload === 'object' ? payload.generate : null;
+  if (!g || typeof g !== 'object' || g.passwordRole !== 'new') return null;
+  const constraints = sanitizeGenerateConstraints(g.constraints);
+  if (!constraints) return null;
+  return { canGenerate: resolvePolicy(constraints).ok, constraints };
+}
 
 function registerBrowserIpc({
   ipcMain,
@@ -135,13 +160,21 @@ function registerBrowserIpc({
     event.returnValue = { eligible, unlocked };
   });
 
-  // Vault gesture (M12 F2 Leg 1, DD1/DD3): a TRUSTED click on the injected lock
-  // icon arrives here carrying NO secret ({}). Derive the trusted wcId from
-  // event.sender.id (never a renderer-supplied id) and forward a bare trigger to
-  // the owning window's chrome — mirrors the guest-media-list → chromeForTab idiom.
-  ipcMain.on('guest-vault-gesture', (event) => {
+  // Vault gesture (M12 F2 Leg 1, DD1/DD3; extended M21 F4 Leg 3 — generate-in-
+  // picker, DD5/AC8): a TRUSTED click on the injected lock icon arrives here
+  // carrying NO secret — either bare ({}) or a small, page-influenced, non-
+  // secret `{ generate: { passwordRole, constraints } }` sub-payload. Derive
+  // the trusted wcId from event.sender.id (never a renderer-supplied id);
+  // re-validate `generate` (never trust the guest to have kept it honest) via
+  // `validateGenerateGesture`, and forward EITHER `{ wcId, generate:
+  // { canGenerate, constraints } }` (a valid `passwordRole: 'new'` gesture) or
+  // today's bare `{ wcId }` (everything else — card/identity/sign-in/
+  // malformed) to the owning window's chrome — mirrors the guest-media-list →
+  // chromeForTab idiom.
+  ipcMain.on('guest-vault-gesture', (event, payload) => {
     const wcId = event.sender.id;
-    chromeForTab(wcId)?.send('vault-gesture', { wcId });
+    const generate = validateGenerateGesture(payload);
+    chromeForTab(wcId)?.send('vault-gesture', generate ? { wcId, generate } : { wcId });
   });
 
   // Guest tab-boundary signal (M17 Flight 1 Leg 1, DD2): the guest preload's
@@ -189,12 +222,16 @@ function registerBrowserIpc({
   ipcMain.on('guest-vault-capture', (event, payload) => {
     if (!getVaultHuman) return;
     const wcId = event.sender.id;
-    const { username, usernameDetected, password } = /** @type {any} */ (payload || {});
+    // `currentPassword` (Mission 21, Flight 4, Leg 2 — password-field-roles,
+    // DD3a/DD4) is OPTIONAL — present only when the gesture's login scope
+    // classified with a provenanced `current` field (a rotation form).
+    const { username, usernameDetected, password, currentPassword } = /** @type {any} */ (payload || {});
     const held = getVaultHuman().holdGestureLogin({
       wcId,
       username,
       usernameDetected: usernameDetected === true,
-      passwordBytes: password
+      passwordBytes: password,
+      currentPasswordBytes: currentPassword
     });
     vaultTrace('gesture-hold', { wcId, held: !!held, kind: 'login' });
   });

@@ -15,8 +15,9 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { createVaultController } = require('../../src/renderer/chrome/vault-controller');
 
-// Minimal fake DOM element for the vault-indicator contextmenu-wiring cases below:
-// records the listener so a test can fire a synthetic 'contextmenu' event.
+// Minimal fake DOM element for the vault-indicator contextmenu/click-wiring cases below:
+// records the listener so a test can fire a synthetic event. classList/setAttribute are
+// no-op stubs — renderVaultIndicator (driven by onVaultLockState) touches both.
 function fakeVaultIndicatorEl() {
   /** @type {Record<string, Function>} */
   const listeners = {};
@@ -26,7 +27,9 @@ function fakeVaultIndicatorEl() {
     },
     fire(type, evt) {
       listeners[type] && listeners[type](evt);
-    }
+    },
+    classList: { toggle() {} },
+    setAttribute() {}
   };
 }
 
@@ -47,6 +50,7 @@ function harness({
   const toasts = [];
   const vaultLockCalls = [];
   const toolbarContextMenuCalls = [];
+  const openVaultPageCalls = [];
   /** @type {Record<string, Function>} */
   const on = {};
   const goldfinch = new Proxy(
@@ -84,7 +88,7 @@ function harness({
     goldfinch,
     jarsClient: { containers: [] },
     isSafeColor: () => false,
-    openVaultPage: () => {},
+    openVaultPage: () => openVaultPageCalls.push(true),
     openToolbarContextMenu: (item, anchorEl) => toolbarContextMenuCalls.push({ item, anchorEl }),
     openOverlayMenu: (menuType, model, anchor, startIndex, opts) => {
       opens.push({ menuType, model, opts });
@@ -92,7 +96,17 @@ function harness({
     },
     toast: (title, body) => toasts.push([title, body])
   });
-  return { controller, on, opens, dismissed, finalized, toasts, vaultLockCalls, toolbarContextMenuCalls };
+  return {
+    controller,
+    on,
+    opens,
+    dismissed,
+    finalized,
+    toasts,
+    vaultLockCalls,
+    toolbarContextMenuCalls,
+    openVaultPageCalls
+  };
 }
 
 // Fire a locked-vault capture offer and return its captureId.
@@ -272,6 +286,43 @@ test('right-click on the vault indicator opens the toolbar-mode sheet via openTo
 
 test('no vaultIndicator element (offline harness / not-yet-attached DOM) never throws wiring up', () => {
   assert.doesNotThrow(() => harness({ vaultIndicatorEl: null }));
+});
+
+// ---------------------------------------------------------------------------
+// Vault indicator left-click (squawk 0099, flight DD10).
+// ---------------------------------------------------------------------------
+
+test('left-click while locked raises the unlock sheet exactly once and does not set pendingVaultFlow', () => {
+  const indicator = fakeVaultIndicatorEl();
+  const h = harness({ unlocked: false, vaultIndicatorEl: indicator });
+  h.on.onVaultLockState({ setUp: true, unlocked: false });
+  indicator.fire('click');
+  assert.equal(h.opens.length, 1);
+  assert.deepEqual(h.opens[0], { menuType: 'vault-unlock', model: [], opts: undefined });
+  assert.equal(h.openVaultPageCalls.length, 0);
+
+  // pendingVaultFlow must be unset: a subsequent unlock broadcast must NOT spring the
+  // fill picker (the onVaultRequestUnlock shape, not onVaultGesture's locked branch).
+  h.on.onVaultLockState({ setUp: true, unlocked: true });
+  assert.equal(h.opens.length, 1, 'unlock success must open no additional sheet (no picker)');
+});
+
+test('left-click while unlocked opens the vault page exactly once and opens no sheet', () => {
+  const indicator = fakeVaultIndicatorEl();
+  const h = harness({ unlocked: true, vaultIndicatorEl: indicator });
+  h.on.onVaultLockState({ setUp: true, unlocked: true });
+  indicator.fire('click');
+  assert.equal(h.openVaultPageCalls.length, 1);
+  assert.equal(h.opens.length, 0);
+});
+
+test('left-click when not set up does nothing (defense in depth; the indicator is hidden then)', () => {
+  const indicator = fakeVaultIndicatorEl();
+  const h = harness({ unlocked: false, vaultIndicatorEl: indicator });
+  h.on.onVaultLockState({ setUp: false, unlocked: false });
+  indicator.fire('click');
+  assert.equal(h.opens.length, 0);
+  assert.equal(h.openVaultPageCalls.length, 0);
 });
 
 test('isVaultLocked reflects the stashed lock-state broadcast, not a re-fetch', () => {

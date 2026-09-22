@@ -8,6 +8,12 @@
 // bubbling `input`/`change` events, same init options), so this is a pure
 // import swap — no behavior change.
 const { setFieldValue } = require('./field-setters');
+// Generate-in-picker (Mission 21, Flight 4, Leg 3 — generate-in-picker, AC15):
+// the SAME pure scope-widening + classification module DD3a/DD7 already use in
+// the main world (planLogin) and (via generateGestureInfo) at gesture time —
+// no hand-mirror. Bundles into the isolated-world observer script via this
+// require, alongside every other module this file already pulls in.
+const { loginScopeOrdinals, classifyPasswordScope } = require('./password-field-roles');
 
 // Pure login-form field-selection + fill helpers for the guest main-world
 // preload (Mission 12, Flight 1, Leg 4). Factored OUT of webview-preload.js so
@@ -144,4 +150,107 @@ function fillLoginForm(doc, cred, ordinal) {
   return { filled: true, fields: written };
 }
 
-module.exports = { findLoginFields, findAllLoginFields, fillLoginForm };
+// Bounded pattern length — a hostile page's `pattern` attribute is never
+// compiled if it exceeds this (DD6, axis 6: a page-supplied regex run
+// main-side would be a ReDoS vector against the browser process; this runs in
+// the GUEST's isolated world instead, but the length bound stays as
+// defense-in-depth against a pathological compile/match cost regardless).
+const MAX_PATTERN_LENGTH = 1024;
+// Only candidates at or under this length are ever considered/filled — the
+// generator's own hard ceiling (password-policy.js's resolvePolicy).
+const MAX_CANDIDATE_LENGTH = 128;
+
+/**
+ * Select which of `candidates` to fill into the NEW field, per DD6/AC15:
+ *   - read the field's `pattern` attribute (guarded, defensive style);
+ *   - present, <= 1024 chars, and compiles as `new RegExp('^(?:'+pattern+')$', 'v')`
+ *     -> the FIRST candidate (of the length-filtered set) that matches; no
+ *     match among them -> `null` (fill nothing — never falls back to
+ *     candidates[0] in this branch);
+ *   - absent, too long, or fails to compile -> the first length-filtered
+ *     candidate.
+ * Only strings <= 128 chars are ever considered, in either branch.
+ * @param {any} field
+ * @param {any} candidates
+ * @returns {string | null}
+ */
+function selectGeneratedCandidate(field, candidates) {
+  const list = Array.isArray(candidates)
+    ? candidates.filter((c) => typeof c === 'string' && c.length <= MAX_CANDIDATE_LENGTH)
+    : [];
+  if (list.length === 0) return null;
+
+  const pattern = typeof field?.getAttribute === 'function' ? field.getAttribute('pattern') : null;
+  if (typeof pattern === 'string' && pattern.length > 0 && pattern.length <= MAX_PATTERN_LENGTH) {
+    let re = null;
+    try {
+      re = new RegExp(`^(?:${pattern})$`, 'v');
+    } catch {
+      re = null;
+    }
+    if (re) {
+      const match = list.find((c) => re.test(c));
+      return match === undefined ? null : match;
+    }
+  }
+  return list[0];
+}
+
+/**
+ * Fill a CSPRNG-generated password into a scope's `new` (+ `confirm`, when
+ * present) field(s) — the Generate-in-picker isolated-world fill (Mission 21,
+ * Flight 4, Leg 3 — generate-in-picker, DD7/AC15). Top-frame only.
+ *
+ * `ordinal` identifies the CLICKED field's own `findAllLoginFields(doc)`
+ * entry — a non-integer, negative, or out-of-range ordinal fills NOTHING
+ * (deliberately NO first-field fallback, unlike `fillLoginForm`: a generated
+ * password landing in the wrong form is worse than no fill at all). The scope
+ * is widened via `loginScopeOrdinals` and classified via
+ * `classifyPasswordScope` — anything other than `'classified'` with a `new`
+ * role fills nothing (a page mutation between the gesture and this fill
+ * re-classifies fresh, per the mission's mutation-race Known Issue).
+ *
+ * Candidate selection is `selectGeneratedCandidate` above (the field's
+ * `pattern`, tested ONLY here in the isolated world — never in main, DD6's
+ * ReDoS defense). The SAME value fills `new` and `confirm` — NEVER `current`,
+ * NEVER a username.
+ * @param {any} doc
+ * @param {any} candidates
+ * @param {number | null} [ordinal]
+ * @returns {{ filled: boolean, fields: Array<{ field: any, value: string }> }}
+ */
+function fillGeneratedForm(doc, candidates, ordinal) {
+  if (typeof window !== 'undefined' && window.top !== window) return { filled: false, fields: [] };
+  if (typeof ordinal !== 'number' || !Number.isInteger(ordinal) || ordinal < 0) {
+    return { filled: false, fields: [] };
+  }
+  const all = findAllLoginFields(doc);
+  if (ordinal >= all.length) return { filled: false, fields: [] };
+
+  const scopeOrdinals = loginScopeOrdinals(all, ordinal);
+  if (scopeOrdinals.length === 0) return { filled: false, fields: [] };
+  const scopeEntries = scopeOrdinals.map((i) => all[i]);
+  const classification = classifyPasswordScope(scopeEntries.map((e) => e.password));
+  if (classification.kind !== 'classified') return { filled: false, fields: [] };
+
+  const newIdx = classification.roles.indexOf('new');
+  if (newIdx === -1) return { filled: false, fields: [] };
+  const newField = scopeEntries[newIdx].password;
+  const confirmIdx = classification.roles.indexOf('confirm');
+  const confirmField = confirmIdx !== -1 ? scopeEntries[confirmIdx].password : null;
+
+  const value = selectGeneratedCandidate(newField, candidates);
+  if (value == null) return { filled: false, fields: [] };
+
+  /** @type {Array<{ field: any, value: string }>} */
+  const written = [];
+  setFieldValue(newField, value);
+  written.push({ field: newField, value });
+  if (confirmField) {
+    setFieldValue(confirmField, value);
+    written.push({ field: confirmField, value });
+  }
+  return { filled: true, fields: written };
+}
+
+module.exports = { findLoginFields, findAllLoginFields, fillLoginForm, fillGeneratedForm };

@@ -481,6 +481,22 @@ ipcRenderer.on('vault-fill-identity', (_e, identity) => {
   entryTracker.fillIdentity({ identity, ordinal });
 });
 
+// Generate-in-picker fill (Mission 21, Flight 4, Leg 3 — generate-in-picker,
+// DD7): the two main-generated candidate passwords arrive ONLY here (never
+// over the MCP wire — generation is not exposed there at all). Same
+// ordinal-resolution shape as the three families above — a LOGIN target
+// (the badge is only ever offered on a password field's own icon), resolved
+// via the same `resolveOrdinalInFamily`/`LOGIN_ROLES` this file already uses
+// for `vault-fill`. The fill itself (which of `new`/`confirm` to write, and
+// which candidate to choose against the field's `pattern`) runs entirely in
+// the isolated world's `fillGeneratedForm` — this listener never reads a
+// field or a candidate itself.
+ipcRenderer.on('vault-fill-generated', (_e, { candidates } = {}) => {
+  const target = vaultIcons.consumeFillTarget('login');
+  const ordinal = resolveOrdinalInFamily(target, findAllLoginFields(document), LOGIN_ROLES);
+  entryTracker.fillGenerated({ candidates, ordinal });
+});
+
 // ---------------------------------------------------------------------------
 // Vault capture — BROADENED GESTURE trigger (Mission 21, Flight 1, Leg 5 —
 // broadened-capture). Supersedes the old capturing `submit` listener

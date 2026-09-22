@@ -153,6 +153,10 @@ const {
 // parallel reimplementation — see assertOffersFamilies below and the module
 // header's own note on AC6's preference.
 const { planCaptures } = require('../../src/preload/vault-capture-plan');
+// Mission 21, Flight 4, Leg 2 (password-field-roles): the REAL classifier +
+// scope-widening helper, exercised directly by assertPlansLogin below (never
+// a reimplementation) — see that function's own header.
+const { loginScopeOrdinals, classifyPasswordScope } = require('../../src/preload/password-field-roles');
 
 /**
  * Assert that detection finds an entry for `family` ('login' | 'card' |
@@ -205,6 +209,29 @@ function assertNoDetectableEntry(doc) {
 }
 
 /**
+ * Resolve `opts.ungranted` (Mission 21, Flight 4, Leg 2 — password-field-roles,
+ * AC16) — an array of selector strings, `#id`-style or handed to the
+ * extractor's own narrow `querySelectorAll` — into a Set of the actual field
+ * NODES they resolve to, so `buildProvenancedObserver` below can skip
+ * granting provenance to exactly those fields despite them carrying a value
+ * (the corpus's honest stand-in for "detected but never typed into" — a
+ * read-only, server-prefilled field). A selector that resolves nothing is
+ * silently skipped (defensive; every real use pins a real fixture id).
+ * @param {any} doc
+ * @param {string[] | undefined} selectors
+ * @returns {Set<any>}
+ */
+function resolveUngrantedSet(doc, selectors) {
+  const out = new Set();
+  if (!Array.isArray(selectors)) return out;
+  for (const sel of selectors) {
+    const el = sel.startsWith('#') ? doc.getElementById(sel.slice(1)) : doc.querySelectorAll(sel)[0];
+    if (el) out.add(el);
+  }
+  return out;
+}
+
+/**
  * A real `vault-entry-observer` over `doc`, with provenance GRANTED for every
  * detected field that carries a non-empty `.value` — the corpus's stand-in for
  * "the operator typed this" (a static HTML fixture has no live keystroke to
@@ -212,35 +239,43 @@ function assertNoDetectableEntry(doc) {
  * `vault-entry-observer.test.js` itself uses). THREE-WAY (M21 F3 Leg 4) —
  * identity joins login/card, never a binary observer. Returns
  * `{ observer, logins, cards, identities, snapshot }`.
+ *
+ * `opts.ungranted` (Mission 21, Flight 4, Leg 2 — password-field-roles, AC16):
+ * an optional list of selectors naming fields that must NOT be granted
+ * despite carrying a value — models a read-only, server-prefilled field the
+ * operator never typed into. Defaults to `[]`, which leaves every existing
+ * call site (none of which pass a second argument) unchanged.
  * @param {any} doc
+ * @param {{ ungranted?: string[] }} [opts]
  * @returns {{ observer: any, logins: any[], cards: any[], identities: any[], snapshot: { logins: any[], cards: any[], identities: any[] } }}
  */
-function buildProvenancedObserver(doc) {
+function buildProvenancedObserver(doc, opts = {}) {
   const observer = createEntryObserver({
     document: doc,
     findAllLoginFields,
     findAllCardFields,
     findAllIdentityFields
   });
+  const ungranted = resolveUngrantedSet(doc, opts.ungranted);
   const logins = findAllLoginFields(doc);
   const cards = findAllCardFields(doc);
   const identities = findAllIdentityFields(doc);
   for (const entry of logins) {
     for (const role of LOGIN_ROLES) {
       const field = entry[role];
-      if (field && field.value) observer._grant(field);
+      if (field && field.value && !ungranted.has(field)) observer._grant(field);
     }
   }
   for (const entry of cards) {
     for (const role of CARD_ROLES) {
       const field = entry[role];
-      if (field && field.value) observer._grant(field);
+      if (field && field.value && !ungranted.has(field)) observer._grant(field);
     }
   }
   for (const entry of identities) {
     for (const role of IDENTITY_ROLES) {
       const field = entry[role];
-      if (field && field.value) observer._grant(field);
+      if (field && field.value && !ungranted.has(field)) observer._grant(field);
     }
   }
   return { observer, logins, cards, identities, snapshot: observer.snapshot() };
@@ -479,6 +514,143 @@ function assertNoOffer(doc, opts = {}) {
   }
 }
 
+/**
+ * REAL, PAYLOAD-STRENGTH assertion (Mission 21, Flight 4, Leg 2 —
+ * password-field-roles, AC16). Drives the fixture's designated gesture
+ * through the REAL `resolveGestureTargets`, `password-field-roles.js`'s
+ * `loginScopeOrdinals`/`classifyPasswordScope`, and `planCaptures` — never a
+ * reimplementation of any of them — and asserts:
+ *   - the gesture resolves a login family;
+ *   - `classifyPasswordScope` over the scope's own password fields yields
+ *     `opts.expectRoles` (an array of roles, OR the literal string
+ *     `'sign-in'`, matching `classifyPasswordScope`'s own `kind`);
+ *   - a login capture IS planned, whose decoded `password` equals
+ *     `opts.expectPassword`;
+ *   - the planned payload's `currentPassword` key matches `opts.expectCurrentPassword`
+ *     (decoded) when given, or is ABSENT when `opts.expectCurrentPassword` is
+ *     omitted/null;
+ *   - `opts.expectUsernameDetected`/`opts.expectUsername`, when given, match
+ *     the planned payload's own fields;
+ *   - `wouldNativelySubmit(target)` holds (the same settle-strength bar
+ *     `assertOffersEntry` sets — see this module's own header).
+ * @param {any} doc
+ * @param {{
+ *   expectRoles: Array<'current'|'new'|'confirm'|null> | 'sign-in',
+ *   expectPassword: string,
+ *   expectCurrentPassword?: string | null,
+ *   expectUsernameDetected?: boolean,
+ *   expectUsername?: string | null,
+ *   gestureSelector?: string,
+ *   ungranted?: string[]
+ * }} opts
+ */
+function assertPlansLogin(doc, opts) {
+  const { logins, cards, identities, snapshot } = buildProvenancedObserver(doc, { ungranted: opts.ungranted });
+
+  const target = resolveGestureElement(doc, opts.gestureSelector);
+  assert.ok(
+    target,
+    `no gesture element resolved (selector: ${opts.gestureSelector || '(default: first button-like)'})`
+  );
+
+  const event = { type: 'click', isTrusted: true, target };
+  assert.ok(isCaptureGesture(event), "expected the designated element's click to qualify as a capture gesture");
+
+  const resolved = resolveGestureTargets(target, { logins, cards, identities });
+  const loginResolved = resolved.find((r) => r.kind === 'login');
+  assert.ok(
+    loginResolved,
+    `expected the gesture to resolve a login entry; resolved [${resolved.map((r) => r.kind).join(', ')}]`
+  );
+
+  const scopeOrdinals = loginScopeOrdinals(logins, loginResolved.ordinal);
+  const scopeFields = scopeOrdinals.map((i) => logins[i].password);
+  const classification = classifyPasswordScope(scopeFields);
+  if (opts.expectRoles === 'sign-in') {
+    assert.equal(
+      classification.kind,
+      'sign-in',
+      `expected classifyPasswordScope to yield kind 'sign-in', got '${classification.kind}' (roles ${JSON.stringify(classification.roles)})`
+    );
+  } else {
+    assert.deepEqual(
+      classification.roles,
+      opts.expectRoles,
+      `expected classifyPasswordScope roles ${JSON.stringify(opts.expectRoles)}, got ${JSON.stringify(classification.roles)} (kind '${classification.kind}')`
+    );
+  }
+
+  const entriesByKind = { login: logins, card: cards, identity: identities };
+  const plan = planCaptures({ resolved, entriesByKind, snapshot });
+  const loginPlan = plan.find((c) => c.kind === 'login');
+  assert.ok(loginPlan, 'expected a login capture to be planned, none was');
+
+  const decoder = new TextDecoder();
+  assert.equal(
+    decoder.decode(loginPlan.payload.password),
+    opts.expectPassword,
+    'planned login password did not match expectPassword'
+  );
+
+  if (opts.expectCurrentPassword == null) {
+    assert.ok(
+      !Object.prototype.hasOwnProperty.call(loginPlan.payload, 'currentPassword'),
+      'expected NO currentPassword key on the planned payload'
+    );
+  } else {
+    assert.ok(
+      Object.prototype.hasOwnProperty.call(loginPlan.payload, 'currentPassword'),
+      'expected a currentPassword key on the planned payload'
+    );
+    assert.equal(
+      decoder.decode(loginPlan.payload.currentPassword),
+      opts.expectCurrentPassword,
+      'planned currentPassword did not match expectCurrentPassword'
+    );
+  }
+
+  if (opts.expectUsernameDetected !== undefined) {
+    assert.equal(loginPlan.payload.usernameDetected, opts.expectUsernameDetected);
+  }
+  if (opts.expectUsername !== undefined) {
+    assert.equal(loginPlan.payload.username, opts.expectUsername);
+  }
+
+  assert.ok(
+    wouldNativelySubmit(target),
+    "expected the gesture element to trigger a REAL native form submission — this fixture's gesture " +
+      'element is not a resolvable submit-type control'
+  );
+}
+
+/**
+ * REAL negative assertion (Mission 21, Flight 4, Leg 2 — password-field-roles,
+ * AC16). The designated gesture must plan NO login capture — whether because
+ * it does not qualify as a capture gesture at all, resolves no login family,
+ * or `planCaptures`' own login planner refuses it (an ambiguous scope, an
+ * unprovenanced/mismatched confirm, …). Every one of those is "no login
+ * plan"; this helper does not distinguish between them.
+ * @param {any} doc
+ * @param {{ gestureSelector?: string, ungranted?: string[] }} [opts]
+ */
+function assertNoLoginPlan(doc, opts = {}) {
+  const { logins, cards, identities, snapshot } = buildProvenancedObserver(doc, { ungranted: opts.ungranted });
+
+  const target = resolveGestureElement(doc, opts.gestureSelector);
+  assert.ok(
+    target,
+    `no gesture element resolved (selector: ${opts.gestureSelector || '(default: first button-like)'})`
+  );
+
+  const event = { type: 'click', isTrusted: true, target };
+  if (!isCaptureGesture(event)) return; // not even a qualifying gesture — definitely no plan
+
+  const resolved = resolveGestureTargets(target, { logins, cards, identities });
+  const entriesByKind = { login: logins, card: cards, identity: identities };
+  const plan = planCaptures({ resolved, entriesByKind, snapshot });
+  assert.ok(!plan.some((c) => c.kind === 'login'), 'expected no login capture to be planned, one was');
+}
+
 module.exports = {
   assertDetectsEntry,
   assertNoDetectableEntry,
@@ -486,5 +658,7 @@ module.exports = {
   assertOffersEntry,
   assertOffersFamilies,
   assertNoOffer,
+  assertPlansLogin,
+  assertNoLoginPlan,
   wouldNativelySubmit
 };

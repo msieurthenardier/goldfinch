@@ -1,0 +1,21 @@
+<!--
+  Fixture: signup-confirm-mismatch
+  Corpus tier: negative-gesture. Family: null (asserted via no-login-plan, not
+  a family-specific assertion). Leg: password-field-roles (Mission 21, Flight
+  4, Leg 2).
+  A sign-up form marked new-password/new-password (AC1's second-new->confirm
+  rule resolves roles ['new','confirm'] cleanly), but the two typed values
+  DISAGREE — a mistyped confirm. DD3: a mismatch (or an unprovenanced
+  confirm) plans NO login capture at all — the site will reject the submit
+  anyway, and Goldfinch must never save a value the site did not accept.
+  Added: 2026-09-22 (Mission 21, Flight 4, Leg 2 — password-field-roles).
+-->
+<form id="signup" action="/signup" method="post">
+  <label for="su-username">Username</label>
+  <input type="text" id="su-username" name="username" autocomplete="username" value="frank" />
+  <label for="su-password">Password</label>
+  <input type="password" id="su-password" name="password" autocomplete="new-password" value="Correct1!" />
+  <label for="su-password-confirm">Confirm password</label>
+  <input type="password" id="su-password-confirm" name="password2" autocomplete="new-password" value="Correct2!" />
+  <button type="submit">Create account</button>
+</form>

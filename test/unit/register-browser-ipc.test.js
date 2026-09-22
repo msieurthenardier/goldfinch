@@ -147,6 +147,84 @@ function makeHarness(options = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// guest-vault-gesture (M12 F2 Leg 1; extended M21 F4 Leg 3 — generate-in-
+// picker, DD5/AC8): sender-derived wcId, the optional `generate` sub-payload
+// re-validated main-side (never trusting the guest to have kept it honest).
+// ---------------------------------------------------------------------------
+
+test('AC8: a bare gesture (no payload) forwards the bare { wcId } shape (regression gate)', () => {
+  const h = makeHarness();
+  h.listeners.get('guest-vault-gesture')({ sender: { id: 5 } });
+  assert.deepEqual(h.events, [['chrome-send', 'vault-gesture', { wcId: 5 }]]);
+});
+
+test('AC8: an empty {} payload forwards the bare { wcId } shape', () => {
+  const h = makeHarness();
+  h.listeners.get('guest-vault-gesture')({ sender: { id: 5 } }, {});
+  assert.deepEqual(h.events, [['chrome-send', 'vault-gesture', { wcId: 5 }]]);
+});
+
+test('AC8: a valid { generate: { passwordRole: "new", constraints } } payload forwards { wcId, generate: { canGenerate, constraints } }', () => {
+  const h = makeHarness();
+  h.listeners.get('guest-vault-gesture')(
+    { sender: { id: 5 } },
+    { generate: { passwordRole: 'new', constraints: { minLength: 10, maxLength: 20, passwordRules: null } } }
+  );
+  assert.deepEqual(h.events, [
+    [
+      'chrome-send',
+      'vault-gesture',
+      { wcId: 5, generate: { canGenerate: true, constraints: { minLength: 10, maxLength: 20, passwordRules: null } } }
+    ]
+  ]);
+});
+
+test('AC8: an unsatisfiable-but-well-formed constraints object still forwards, with canGenerate: false', () => {
+  const h = makeHarness();
+  h.listeners.get('guest-vault-gesture')(
+    { sender: { id: 5 } },
+    { generate: { passwordRole: 'new', constraints: { minLength: 20, maxLength: 10, passwordRules: null } } }
+  );
+  assert.deepEqual(h.events, [
+    [
+      'chrome-send',
+      'vault-gesture',
+      { wcId: 5, generate: { canGenerate: false, constraints: { minLength: 20, maxLength: 10, passwordRules: null } } }
+    ]
+  ]);
+});
+
+test('AC8: passwordRole other than the literal "new" degrades to the bare shape', () => {
+  const h = makeHarness();
+  for (const role of [null, 'current', 'confirm', 'sign-in', 42, undefined]) {
+    h.events.length = 0;
+    h.listeners.get('guest-vault-gesture')(
+      { sender: { id: 5 } },
+      { generate: { passwordRole: role, constraints: {} } }
+    );
+    assert.deepEqual(h.events, [['chrome-send', 'vault-gesture', { wcId: 5 }]], `role ${String(role)} must degrade`);
+  }
+});
+
+test('AC8: malformed constraints degrade to the bare shape', () => {
+  const h = makeHarness();
+  for (const constraints of [{ minLength: -5 }, { passwordRules: 'x'.repeat(513) }, { minLength: 1.5 }, null, 'x', 5]) {
+    h.events.length = 0;
+    h.listeners.get('guest-vault-gesture')({ sender: { id: 5 } }, { generate: { passwordRole: 'new', constraints } });
+    assert.deepEqual(h.events, [['chrome-send', 'vault-gesture', { wcId: 5 }]]);
+  }
+});
+
+test('AC8: a non-object generate, or a non-object payload, degrades to the bare shape', () => {
+  const h = makeHarness();
+  for (const payload of [{ generate: null }, { generate: 'x' }, { generate: 5 }, null, 'x', 5]) {
+    h.events.length = 0;
+    h.listeners.get('guest-vault-gesture')({ sender: { id: 5 } }, payload);
+    assert.deepEqual(h.events, [['chrome-send', 'vault-gesture', { wcId: 5 }]]);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // guest-tab-boundary (M17 Flight 1 Leg 1, DD2/AC3): the guest preload's
 // capturing Tab/Shift+Tab handoff. Sender-derived wcId, direction allowlist,
 // forwards only 'tab-boundary' to chromeForTab(wcId) — the guest-vault-gesture
@@ -303,11 +381,30 @@ test('vault capture (Leg 5, broadened-capture): guest-vault-capture HOLDS only �
     wcId: 5,
     username: 'me@a',
     usernameDetected: true,
-    passwordBytes
+    passwordBytes,
+    currentPasswordBytes: undefined
   });
   // GESTURE-TIME HOLD never forwards an offer — settle does that (guest-wiring.js's
   // did-navigate hook, or guest-vault-gesture-settle below).
   assert.deepEqual(h.events, [], 'a gesture hold never itself forwards a vault-capture-offer');
+});
+
+test('vault capture (Mission 21, Flight 4, Leg 2 — password-field-roles): guest-vault-capture forwards an OPTIONAL currentPassword as currentPasswordBytes', () => {
+  const h = makeHarness();
+  const passwordBytes = new TextEncoder().encode('typed-new-secret');
+  const currentPasswordBytes = new TextEncoder().encode('typed-current-secret');
+
+  h.listeners.get('guest-vault-capture')(
+    { sender: { id: 5 } },
+    { username: 'me@a', usernameDetected: true, password: passwordBytes, currentPassword: currentPasswordBytes }
+  );
+  assert.deepEqual(h.human.captures[0], {
+    wcId: 5,
+    username: 'me@a',
+    usernameDetected: true,
+    passwordBytes,
+    currentPasswordBytes
+  });
 });
 
 test('vault capture identity (M21 F3 Leg 4, AC10): guest-vault-capture-identity HOLDS only', () => {

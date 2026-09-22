@@ -43,7 +43,8 @@
 //   tier             'gated' | 'known-unsolved' | 'negative-detection' |
 //                     'negative-gesture'
 //   assert           'detects' | 'no-detect' | 'captures' | 'offers' |
-//                     'offers-multi' | 'no-offer' — which assertion function in
+//                     'offers-multi' | 'no-offer' | 'plans-login' |
+//                     'no-login-plan' — which assertion function in
 //                     test/helpers/save-moment-assertions.js runs. 'captures'
 //                     proves only capture-worthiness; 'offers' proves that PLUS
 //                     a real, headlessly-provable settle signal (Leg 6 —
@@ -54,7 +55,11 @@
 //                     every family in `families`, in order (via the real
 //                     resolveGestureTargets + planCaptures, never a
 //                     reimplementation), AND settles via the same real native
-//                     form submission check.
+//                     form submission check. 'plans-login'/'no-login-plan'
+//                     (Mission 21, Flight 4, Leg 2 — password-field-roles) are
+//                     the sign-up/rotation PAYLOAD-strength siblings of
+//                     'offers'/'no-offer' — see assertPlansLogin's own header
+//                     in save-moment-assertions.js for exactly what they pin.
 //   family           'login' | 'card' | 'identity' | null — required when
 //                     assert is 'detects', 'captures', or 'offers'. Three-way
 //                     as of Mission 21, Flight 2, Leg 2 (identity-boundary) —
@@ -78,12 +83,33 @@
 //                     entry, among all entries of `family`, is the one this
 //                     fixture is about. Defaults to 0.
 //   gestureSelector  optional selector string for `assert:
-//                     'captures'|'offers'|'no-offer'` — which element
-//                     assertCapturesEntry/assertOffersEntry/assertNoOffer
-//                     synthesize the trusted click on. A leading `#` resolves
+//                     'captures'|'offers'|'no-offer'|'plans-login'|
+//                     'no-login-plan'` — which element the assertion
+//                     synthesizes the trusted click on. A leading `#` resolves
 //                     by id; otherwise it is handed to the extractor's own
 //                     (deliberately narrow) `querySelectorAll`. Defaults to the
 //                     first button-like element in document order.
+//   ungranted        optional string[] of selectors (Mission 21, Flight 4, Leg
+//                     2 — password-field-roles, AC16), meaningful only for
+//                     'plans-login'/'no-login-plan' — fields the corpus's
+//                     provenance stand-in must NOT grant despite carrying a
+//                     value (models a read-only, server-prefilled field the
+//                     operator never typed into). Defaults to `[]`, which
+//                     leaves every fixture without this field unaffected.
+//   expectRoles      required for 'plans-login' — the expected
+//                     `classifyPasswordScope(...).roles` array, OR the literal
+//                     string `'sign-in'` when the scope is expected to
+//                     classify as a one-field sign-in (matching
+//                     `classifyPasswordScope`'s `kind`, not its `roles` array).
+//   expectPassword   required for 'plans-login' — the planned login capture's
+//                     decoded `password` must equal this string.
+//   expectCurrentPassword  optional for 'plans-login' — when given, the
+//                     planned payload's decoded `currentPassword` must equal
+//                     it; when omitted/null, the payload must carry NO
+//                     `currentPassword` key at all.
+//   expectUsernameDetected / expectUsername  optional for 'plans-login' — when
+//                     given, checked against the planned payload's own
+//                     `usernameDetected`/`username` fields.
 
 const { createFragment } = require('../../helpers/fixture-extractor');
 
@@ -344,5 +370,162 @@ module.exports = [
     families: ['login', 'identity'],
     file: 'multi-family/signup-email-as-username.html',
     gestureSelector: '#join-now'
+  },
+
+  // --- password-field-roles (Mission 21, Flight 4, Leg 2): sign-up /
+  // rotation payload correctness — DD1's layered role classifier, DD3's
+  // confirm-agreement + new-field capture, DD4's current-password
+  // disposition rule (disposition itself is a vault-human.js unit test
+  // concern, not this corpus — see that leg's own AC14). ---------------------
+  {
+    id: 'signup-password-confirm-unmarked',
+    tier: 'gated',
+    assert: 'plans-login',
+    family: 'login',
+    file: 'password-roles/signup-password-confirm-unmarked.html',
+    expectRoles: ['new', 'confirm'],
+    expectPassword: 'NewPass123!',
+    expectUsernameDetected: true,
+    expectUsername: 'newuser'
+  },
+  {
+    id: 'signup-new-password-marked',
+    tier: 'gated',
+    assert: 'plans-login',
+    family: 'login',
+    file: 'password-roles/signup-new-password-marked.html',
+    expectRoles: ['new', 'confirm'],
+    expectPassword: 'Correct-Horse-1!',
+    expectUsernameDetected: true,
+    expectUsername: 'newuser2'
+  },
+  {
+    // THE MOTIVATING SHAPE — see the fixture's own header: before this leg,
+    // the gesture resolved to the FIRST in-form login entry (the CURRENT
+    // password), so a rotation would have saved the OLD password.
+    id: 'change-password-three-unmarked',
+    tier: 'gated',
+    assert: 'plans-login',
+    family: 'login',
+    file: 'password-roles/change-password-three-unmarked.html',
+    expectRoles: ['current', 'new', 'confirm'],
+    expectPassword: 'NewPass2!',
+    expectCurrentPassword: 'OldPass1!',
+    expectUsernameDetected: true,
+    expectUsername: 'alice'
+  },
+  {
+    id: 'change-password-three-marked',
+    tier: 'gated',
+    assert: 'plans-login',
+    family: 'login',
+    file: 'password-roles/change-password-three-marked.html',
+    expectRoles: ['current', 'new', 'confirm'],
+    expectPassword: 'NewPass2!',
+    expectCurrentPassword: 'OldPass1!',
+    expectUsernameDetected: true,
+    expectUsername: 'alice'
+  },
+  {
+    id: 'change-password-no-username',
+    tier: 'gated',
+    assert: 'plans-login',
+    family: 'login',
+    file: 'password-roles/change-password-no-username.html',
+    expectRoles: ['current', 'new', 'confirm'],
+    expectPassword: 'NewPass2!',
+    expectCurrentPassword: 'OldPass1!',
+    expectUsernameDetected: false,
+    expectUsername: null
+  },
+  {
+    id: 'signin-current-password',
+    tier: 'gated',
+    assert: 'plans-login',
+    family: 'login',
+    file: 'password-roles/signin-current-password.html',
+    expectRoles: 'sign-in',
+    expectPassword: 'hunter2',
+    expectUsernameDetected: true,
+    expectUsername: 'alice'
+  },
+  {
+    id: 'current-new-marked',
+    tier: 'gated',
+    assert: 'plans-login',
+    family: 'login',
+    file: 'password-roles/current-new-marked.html',
+    expectRoles: ['current', 'new'],
+    expectPassword: 'FreshPass8!',
+    expectCurrentPassword: 'OldPass9!',
+    expectUsernameDetected: true,
+    expectUsername: 'bob'
+  },
+  {
+    id: 'current-new-token-named',
+    tier: 'gated',
+    assert: 'plans-login',
+    family: 'login',
+    file: 'password-roles/current-new-token-named.html',
+    expectRoles: ['current', 'new'],
+    expectPassword: 'ShinyPass6!',
+    expectCurrentPassword: 'StalePass7!',
+    expectUsernameDetected: true,
+    expectUsername: 'carol'
+  },
+  {
+    // DD4's downgrade-exemption scenario — see the fixture's own header.
+    // `#cp-username` is listed in `ungranted` so the corpus's provenance
+    // stand-in does NOT grant it despite carrying a value.
+    id: 'change-password-readonly-username',
+    tier: 'gated',
+    assert: 'plans-login',
+    family: 'login',
+    file: 'password-roles/change-password-readonly-username.html',
+    ungranted: ['#cp-username'],
+    expectRoles: ['current', 'new', 'confirm'],
+    expectPassword: 'NewPass2!',
+    expectCurrentPassword: 'OldPass1!',
+    expectUsernameDetected: true,
+    expectUsername: null
+  },
+  {
+    // DD2's "lying autocomplete" negative for THIS leg — see the fixture's
+    // own header. AC7's regression gate: a one-field scope captures exactly
+    // today's payload regardless of what classifyPasswordScope reports.
+    id: 'signin-lying-new-password',
+    tier: 'gated',
+    assert: 'plans-login',
+    family: 'login',
+    file: 'password-roles/signin-lying-new-password.html',
+    expectRoles: ['new'],
+    expectPassword: 'hunter3',
+    expectUsernameDetected: true,
+    expectUsername: 'erin'
+  },
+  {
+    id: 'signup-confirm-mismatch',
+    tier: 'negative-gesture',
+    assert: 'no-login-plan',
+    family: null,
+    file: 'negative-gesture/signup-confirm-mismatch.html'
+  },
+  {
+    // DD1's own named limit — see the fixture's own header for the full
+    // accounting. `expectRoles`/`expectPassword`/`expectCurrentPassword` pin
+    // the outcome a future, stronger classifier would need; current code
+    // cannot meet it (the shape resolves new+confirm structurally and then
+    // fails DD3's agreement check), hence `{todo:true}` — promoted only if a
+    // future leg solves it, never deleted.
+    id: 'current-new-fully-unmarked',
+    tier: 'known-unsolved',
+    assert: 'plans-login',
+    family: 'login',
+    file: 'known-unsolved/current-new-fully-unmarked.html',
+    expectRoles: ['current', 'new'],
+    expectPassword: 'NewSecret2',
+    expectCurrentPassword: 'OldSecret1',
+    expectUsernameDetected: false,
+    expectUsername: null
   }
 ];

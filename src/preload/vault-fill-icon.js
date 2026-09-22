@@ -1,12 +1,18 @@
 'use strict';
 
 // Decorative vault fill-icon subsystem for the guest main-world preload
-// (Mission 12, Flight 2 / Flight 5 HAT). Factored OUT of webview-preload.js so
+// (Mission 12, Flight 2 / Flight 5 HAT; the glyph itself redesigned Mission 21
+// Flight 4 Leg 4 — goldfinch-badge, DD9). Factored OUT of webview-preload.js so
 // the icon glyph, placement, focus-gating and the isTrusted-guarded click /
 // contextmenu handlers unit-test headlessly against a hand-rolled fake
 // `document` — the preload itself cannot be required under `node --test` (its
 // top-level `window` / MutationObserver / ipcRenderer side-effects throw in
 // plain Node), so the testable core lives here, mirroring vault-fill-fields.js.
+//
+// The glyph is a small Goldfinch-mark disc (bird silhouette, unchanged across
+// lock states) with a lock-state overlay in the bottom-right corner (closed/
+// amber when locked, open/green when unlocked) — see `buildVaultLockIcon`'s
+// own doc comment for the shape breakdown.
 //
 // F2 SECURITY INVARIANTS PRESERVED HERE (do not weaken):
 //   - the icon is DECORATIVE — it holds NO credential/secret; a hostile page
@@ -16,6 +22,12 @@
 //   - clicking sends a BARE IPC (`guest-vault-gesture`, no payload) and
 //     right-click sends a BARE IPC (`guest-vault-icon-menu`, no payload) — main
 //     derives the trusted wcId from the sender; no secret ever enters the DOM.
+
+// Generate-in-picker gesture payload (Mission 21, Flight 4, Leg 3 —
+// generate-in-picker, DD5/AC7): a pure, Electron-free preload module already
+// required directly by password-field-roles.test.js and vault-capture-plan.js
+// — a plain `require()` here, not an injected dep, matching that precedent.
+const { generateGestureInfo } = require('./password-field-roles');
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const ICON_ATTR = 'data-goldfinch-vault-lock';
@@ -27,20 +39,33 @@ const COLOR_LOCKED = '#b06000';
 const COLOR_UNLOCKED = '#137333';
 
 /**
- * Build the decorative lock glyph as an INLINE SVG (never innerHTML, never an
- * emoji — the guest has no emoji font, so `🔒` renders as a tofu box `□`). A
- * ~16px padlock: a currentColor shackle + body inside a light rounded chip, so
- * it stays legible on both light and dark form fields. Carries role="img",
- * aria-label and the `data-goldfinch-vault-lock` marker.
+ * Build the decorative fill badge as an INLINE SVG (never innerHTML, never an
+ * emoji, never a `<use>`/`<image>`/external reference — the guest has no emoji
+ * font, so `🔒` renders as a tofu box `□`, and a fetched image would be a new
+ * network request from the browser chrome's own preload). The badge is a small
+ * Goldfinch-mark disc (Mission 21, Flight 4, Leg 4, DD9) shown IDENTICALLY in
+ * both lock states, with a small padlock overlay in the bottom-right corner
+ * that carries lock state (closed/amber when locked, open/green when
+ * unlocked). Carries role="img", aria-label and the `data-goldfinch-vault-lock`
+ * marker.
  *
- * State (the vault lock indicator): when `locked` the shackle is CLOSED (both legs
- * into the body) and the label says the vault must be unlocked; when unlocked the
- * shackle is OPEN (the right leg lifts free of the body) and the label offers the
- * fill. Color is applied by the controller (createIcon) via the chip's `color`.
+ * State (the vault lock indicator): the mark (disc, cap, mask, beak, eye) is
+ * IDENTICAL between locked and unlocked builds — only the overlay's shackle
+ * path changes. When `locked` the shackle is CLOSED (both legs reach the lock
+ * body) and the label says the vault must be unlocked; when unlocked the
+ * shackle is OPEN (the right leg lifts free of the body) and the label offers
+ * the fill. The overlay's color is applied by the controller (createIcon) via
+ * the chip's `color` (`currentColor`, unchanged: `COLOR_LOCKED`/`COLOR_UNLOCKED`).
  *
  * `kind` names the ANCHOR's field family ('login' | 'card' | 'identity', issue
  * #152 / M21 F3 Leg 3) and drives the accessible name only — the glyph is
  * identical, and the icon stays decorative and secret-free either way.
+ *
+ * Every child is a bare presentational shape (`circle`/`path`/`rect`) built via
+ * `createElementNS` + `setAttribute`, carrying only geometry/paint attributes
+ * (`cx cy r d x y width height rx fill stroke stroke-width stroke-linecap
+ * stroke-linejoin`) — never an inline `style` attribute (a new page-unreadable-
+ * but-still-new pattern the leg spec calls out to avoid).
  * @param {any} doc  a `document`-like object exposing createElementNS.
  * @param {boolean} [locked]  vault lock state (default true — the safe/closed default).
  * @param {'login'|'card'|'identity'} [kind]  the anchor's field family (default 'login').
@@ -63,34 +88,82 @@ function buildVaultLockIcon(doc, locked = true, kind = 'login') {
   svg.setAttribute('height', '16');
   svg.setAttribute('focusable', 'false');
 
-  // Shackle (the arc): stroked, no fill. CLOSED → both legs reach the body (…V11);
-  // OPEN → the right leg lifts free (no trailing …V11), reading as an open hasp.
+  // --- the Goldfinch mark (disc, cap, mask, beak, eye) — IDENTICAL in both
+  // lock states; only the overlay below carries state.
+
+  const disc = doc.createElementNS(SVG_NS, 'circle');
+  disc.setAttribute('cx', '12');
+  disc.setAttribute('cy', '12');
+  disc.setAttribute('r', '10.5');
+  disc.setAttribute('fill', '#E8B83A');
+
+  const cap = doc.createElementNS(SVG_NS, 'path');
+  cap.setAttribute(
+    'd',
+    'M5.6 9.4 C6.6 4.9 11.4 3.2 15.6 4.6 C19.4 5.9 21.4 9.8 20.2 14.2 ' +
+      'C19.2 11.4 17 9.3 14.3 8.8 C11.2 8.3 8.4 8.6 5.6 9.4 Z'
+  );
+  cap.setAttribute('fill', '#141414');
+
+  const mask = doc.createElementNS(SVG_NS, 'path');
+  mask.setAttribute(
+    'd',
+    'M5.6 9.4 C8.2 8.5 11.2 8.4 13.4 9.3 C13.8 11.6 12.6 13.9 10.4 15.4 ' + 'C9.2 13.4 7.6 12.1 5.8 11.6 Z'
+  );
+  mask.setAttribute('fill', '#D7222B');
+
+  const beak = doc.createElementNS(SVG_NS, 'path');
+  beak.setAttribute('d', 'M5.8 9.5 L1.2 11.2 L5.9 12.3 Z');
+  beak.setAttribute('fill', '#E8B83A');
+  beak.setAttribute('stroke', '#141414');
+  beak.setAttribute('stroke-width', '0.7');
+  beak.setAttribute('stroke-linejoin', 'round');
+
+  const eye = doc.createElementNS(SVG_NS, 'circle');
+  eye.setAttribute('cx', '10.2');
+  eye.setAttribute('cy', '10.4');
+  eye.setAttribute('r', '1.15');
+  eye.setAttribute('fill', '#141414');
+
+  // --- the lock-state overlay (backing, shackle, body) — the ONLY part that
+  // changes between locked and unlocked builds.
+
+  const overlayBacking = doc.createElementNS(SVG_NS, 'circle');
+  overlayBacking.setAttribute('cx', '18.2');
+  overlayBacking.setAttribute('cy', '18.2');
+  overlayBacking.setAttribute('r', '5.6');
+  overlayBacking.setAttribute('fill', '#ffffff');
+
+  // Shackle (the arc): stroked, no fill, currentColor (set by the controller
+  // per lock state). CLOSED → both legs reach the lock body (…V17.6); OPEN →
+  // the right leg lifts free (no trailing …V17.6), reading as an open hasp.
   const shackle = doc.createElementNS(SVG_NS, 'path');
-  shackle.setAttribute('d', locked ? 'M8 11 V8 a4 4 0 0 1 8 0 V11' : 'M8 11 V8 a4 4 0 0 1 8 0');
+  shackle.setAttribute(
+    'd',
+    locked ? 'M16.4 17.6 V15.9 a1.8 1.8 0 0 1 3.6 0 V17.6' : 'M16.4 17.6 V15.9 a1.8 1.8 0 0 1 3.6 0'
+  );
   shackle.setAttribute('fill', 'none');
   shackle.setAttribute('stroke', 'currentColor');
-  shackle.setAttribute('stroke-width', '2');
+  shackle.setAttribute('stroke-width', '1.5');
   shackle.setAttribute('stroke-linecap', 'round');
 
-  // Body (the lock box): filled with currentColor.
-  const body = doc.createElementNS(SVG_NS, 'rect');
-  body.setAttribute('x', '5');
-  body.setAttribute('y', '11');
-  body.setAttribute('width', '14');
-  body.setAttribute('height', '9');
-  body.setAttribute('rx', '2');
-  body.setAttribute('fill', 'currentColor');
+  // Lock body: filled with currentColor.
+  const lockBody = doc.createElementNS(SVG_NS, 'rect');
+  lockBody.setAttribute('x', '14.8');
+  lockBody.setAttribute('y', '17.4');
+  lockBody.setAttribute('width', '6.8');
+  lockBody.setAttribute('height', '5');
+  lockBody.setAttribute('rx', '1.1');
+  lockBody.setAttribute('fill', 'currentColor');
 
-  // Keyhole (negative space) so the body reads as a lock even at 16px.
-  const keyhole = doc.createElementNS(SVG_NS, 'circle');
-  keyhole.setAttribute('cx', '12');
-  keyhole.setAttribute('cy', '15');
-  keyhole.setAttribute('r', '1.4');
-  keyhole.setAttribute('fill', 'rgba(255,255,255,0.9)');
-
+  svg.appendChild(disc);
+  svg.appendChild(cap);
+  svg.appendChild(mask);
+  svg.appendChild(beak);
+  svg.appendChild(eye);
+  svg.appendChild(overlayBacking);
   svg.appendChild(shackle);
-  svg.appendChild(body);
-  svg.appendChild(keyhole);
+  svg.appendChild(lockBody);
   return svg;
 }
 
@@ -282,8 +355,24 @@ function createVaultIconController({
     pendingFillTarget = target
       ? { kind: target.kind, field: target.field, expiresAt: clock() + FILL_TARGET_TTL_MS }
       : null;
+    // Generate-in-picker gesture payload (Mission 21, Flight 4, Leg 3, DD5/AC7):
+    // computed ONLY for a resolved LOGIN target — a card/identity/unresolved
+    // gesture stays bare ({}), exactly as every gesture did before this leg.
+    // The ordinal is the CLICKED entry's own index (there is one
+    // findAllLoginFields entry PER password field, so a multi-password scope
+    // has one ordinal per field) — never re-derived from `anchor` (which may
+    // be the entry's username field, not its password field).
+    /** @type {{ generate?: any }} */
+    let payload = {};
+    if (target && target.kind === 'login') {
+      const loginEntries = findAllLoginFields(doc);
+      const ordinal = loginEntries.findIndex((entry) => entry.password === target.field);
+      if (ordinal !== -1) {
+        payload = { generate: generateGestureInfo(loginEntries, ordinal) };
+      }
+    }
     try {
-      ipcRenderer.send('guest-vault-gesture', {}); // NO secret — wcId derived in main
+      ipcRenderer.send('guest-vault-gesture', payload); // NO secret — wcId derived in main
     } catch {
       /* page navigated away mid-click */
     }
