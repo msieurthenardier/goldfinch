@@ -1,6 +1,6 @@
 # Mission: Saving, Not Just Filling
 
-**Status**: active
+**Status**: completed
 
 ## Outcome
 
@@ -115,40 +115,47 @@ that follows it fires.
       submit is still offered for saving — for **every** shape in the corpus's
       gated set, both families, with no exceptions. *(behavior-test-backed; the
       gated set IS the definition of coverage — see Constraints)*
-- [ ] The offer is raised when the entry has demonstrably gone somewhere, not at
+      *(Partially met — see [mission-debrief.md](mission-debrief.md), criterion 1.)*
+
+
+- [x] The offer is raised when the entry has demonstrably gone somewhere, not at
       the instant of the gesture — so a trusted click that led nowhere produces no
       card, and a held snapshot that never settles is dropped and zeroized rather
       than surfacing late.
-- [ ] A name, address, email and phone can be saved from a checkout form and filled
+- [x] A name, address, email and phone can be saved from a checkout form and filled
       into a later one, scoped per jar like every other vault item.
-- [ ] A password can be generated from within the field being typed, at account
+- [x] A password can be generated from within the field being typed, at account
       creation and at password rotation, and the generated value survives into the
       vault through the same save path as a typed one.
-- [ ] No save offer can be raised without a genuine operator gesture: page script
+- [x] No save offer can be raised without a genuine operator gesture: page script
       acting alone — including script that forges events, calls `form.submit()`,
       or synthesises clicks — raises no offer and cannot influence whether a save
       is dispositioned as a new entry or an update to an existing one.
-- [ ] The committed fixture corpus enumerates the known-failing form shapes —
+- [x] The committed fixture corpus enumerates the known-failing form shapes —
       including deliberate near-misses, decoy controls and multi-step forms, not
       only the winnable cases — and is curated **before** the detection heuristic is
       written, so it specifies the behaviour rather than ratifying it. Shapes that
       resist solution are demoted to the documented known-unsolved set, never
       deleted.
-- [ ] The exclusions that bound the existing capture path still hold for every new
+- [x] The exclusions that bound the existing capture path still hold for every new
       path: no offers from burner or internal tabs, none from subframes, and no
       secret reaches a page DOM or crosses a channel outside the existing
       zeroized-buffer discipline.
-- [ ] The in-field vault affordance is recognisably Goldfinch — the product mark
+- [x] The in-field vault affordance is recognisably Goldfinch — the product mark
       and the lock state in one badge — legible at in-field size in both lock
       states, on light and dark form fields, while still carrying nothing a hostile
       page could read.
-- [ ] Zero offers on the corpus's entire negative set — decoy controls, cancel
+      *(Met — shipped as the operator-chosen toggle-pill badge; see the debrief.)*
+
+
+- [x] Zero offers on the corpus's entire negative set — decoy controls, cancel
       buttons, search fields, mid-flow multi-step forms, and pages actively trying
       to provoke one. This is the hard gate that the two absolute failure modes
       (wrong value, wrong disposition) reduce to in practice.
 - [ ] Identity capture is gated by a stated plausibility rule, so that the family
       with no structural anchor cannot write an arbitrary form value into the vault
       — the same protection Luhn already gives cards.
+      *(Partially met — see [mission-debrief.md](mission-debrief.md), criterion 10.)*
 
 ## Stakeholders
 
@@ -312,6 +319,12 @@ that follows it fires.
       stable between them). Narrowed from the item above — this is what remains.
       Affects fill and capture alike.
 
+- [ ] **Owner-check asymmetry on chrome-trust vault handles** — discovered in Flight 4,
+      affects the vault fill/list IPC. `vault-fill-generated` requires the sender to be the
+      owning window's chrome; `vault-fill-human` and `vault-reachable-items` do not. Failed
+      the squawk gate (security-sensitive surface); needs a design-reviewed leg in the next
+      vault-touching work.
+
 ## Flights
 
 > **Note:** These are tentative suggestions, not commitments. Flights are planned
@@ -356,7 +369,7 @@ that follows it fires.
       flight carries little of its security risk — generation is triggered by a
       trusted click on Goldfinch's own injected element, which is already gated
       today — and is instead the mission's highest UI-craft risk.
-- [ ] Flight 5 *(optional)* — **carried from Flight 3's debrief, DECIDED by the
+- [~] **DROPPED (operator, 2026-09-22)** — Flight 5 *(optional)* — **carried from Flight 3's debrief, DECIDED by the
       operator**: a pending save offer should SURVIVE window blur (today the
       `vault-capture` sheet is deliberately excluded from blur survival, so
       alt-tabbing to check a detail discards the offer). A decided behaviour change,
@@ -365,11 +378,11 @@ that follows it fires.
       Flight 3 Leg 2's LD2 (blur is an occlusion close that drops the whole queue)
       and with the lock-close safety valve (`closesOnVaultLock` would then also close
       it, so the dismiss-drop must fire on that reason).
-- [ ] Flight 5 *(optional)* — **carried from Flight 3's HAT**: the operator asked
+- [~] **DROPPED (operator, 2026-09-22)** — Flight 5 *(optional)* — **carried from Flight 3's HAT**: the operator asked
       for before/after VALUES on the identity update sheet. Not a squawk — it reverses
       Flight 3's DD6 (labels only, never values) and is security-sensitive (secret PII
       over a non-zeroized channel into the sheet DOM; stored secrets shown on a
       page-raised sheet). A named design question for this flight: masked hints,
       reveal-on-click via the secret channel, or new-values-only.
-- [ ] Flight 5 *(optional)*: Alignment — vibe coding session for the feel of the
+- [~] **DROPPED (operator, 2026-09-22)** — Flight 5 *(optional)*: Alignment — vibe coding session for the feel of the
       offers, the generator affordance, and the identity sheet.
