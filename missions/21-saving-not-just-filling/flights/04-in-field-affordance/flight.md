@@ -1,6 +1,6 @@
 # Flight: The In-Field Affordance
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Saving, Not Just Filling](../../mission.md)
 
 > **Scope note — axes counted at drafting (Flight 2 debrief rule).** This flight
