@@ -770,6 +770,9 @@ Ready (operator-approved 2026-09-21). Not yet in flight.
 - Leg 5 → `completed`; the flight → `landed`; checked off in mission.md. The docs
   check found CLAUDE.md (password roles, generate-in-picker, badge, the Unlock now
   indicator, the squawk 0100 sheet rule) and `docs/vault.md` (password roles, generate)
-  current. Squawk candidate, filed at flight end: retrofit the owner-window check onto
-  `vault-fill-human` / `vault-reachable-items`. PR #230 marked ready for review. Next:
+  current. Squawk candidate, the owner-window check retrofit onto
+  `vault-fill-human` / `vault-reachable-items`: it **failed the squawk gate** (criterion 3,
+  security-sensitive surface: vault IPC access control), so it was NOT logged as a
+  squawk. It is carried as a flight-level action item for the debrief (the candidate home
+  is Mission 21's next or hardening flight). PR #230 marked ready for review. Next:
   `/mission-control:flight-debrief` (operator request).
