@@ -348,6 +348,59 @@ test("a rejected lockNow() invoke never throws (fire-and-forget, like the vault 
 });
 
 // ---------------------------------------------------------------------------
+// unlockNow() / indicatorAction() (Flight 4 Leg 5 HAT fix): the locked toolbar
+// right-click menu used to OMIT its one item entirely (an empty dropdown); the
+// operator ruling replaces it with a single "Unlock now" item that shares the
+// left-click's locked body exactly — no pendingVaultFlow, so a successful
+// unlock never springs the fill picker.
+// ---------------------------------------------------------------------------
+
+test('unlockNow() raises the unlock sheet exactly once and does not set pendingVaultFlow', () => {
+  const h = harness({ unlocked: false });
+  h.on.onVaultLockState({ setUp: true, unlocked: false });
+  h.controller.unlockNow();
+  assert.equal(h.opens.length, 1);
+  assert.deepEqual(h.opens[0], { menuType: 'vault-unlock', model: [], opts: undefined });
+
+  // pendingVaultFlow must be unset: a subsequent unlock broadcast must NOT spring the
+  // fill picker (same assertion as the left-click test above).
+  h.on.onVaultLockState({ setUp: true, unlocked: true });
+  assert.equal(h.opens.length, 1, 'unlock success must open no additional sheet (no picker)');
+});
+
+test('unlockNow() when not set up does nothing (defense in depth)', () => {
+  const h = harness({ unlocked: false });
+  h.on.onVaultLockState({ setUp: false, unlocked: false });
+  h.controller.unlockNow();
+  assert.equal(h.opens.length, 0);
+});
+
+test("indicatorAction('lock') routes to lockNow()", () => {
+  const h = harness({ unlocked: true });
+  h.controller.indicatorAction('lock');
+  assert.deepEqual(h.vaultLockCalls, [true]);
+  assert.equal(h.opens.length, 0);
+});
+
+test("indicatorAction('unlock') routes to unlockNow()", () => {
+  const h = harness({ unlocked: false });
+  h.on.onVaultLockState({ setUp: true, unlocked: false });
+  h.controller.indicatorAction('unlock');
+  assert.equal(h.opens.length, 1);
+  assert.deepEqual(h.opens[0], { menuType: 'vault-unlock', model: [], opts: undefined });
+  assert.deepEqual(h.vaultLockCalls, []);
+});
+
+test('indicatorAction() ignores any action other than lock/unlock (validated no-op)', () => {
+  const h = harness({ unlocked: false });
+  h.on.onVaultLockState({ setUp: true, unlocked: false });
+  h.controller.indicatorAction('bogus');
+  h.controller.indicatorAction(undefined);
+  assert.equal(h.opens.length, 0);
+  assert.deepEqual(h.vaultLockCalls, []);
+});
+
+// ---------------------------------------------------------------------------
 // Multi-hold (M21 F3 L2, DD1 + its amendment): the chrome-side presentation
 // queue (already-unlocked offers) and the locked-mode pending-unlock drain.
 // ---------------------------------------------------------------------------

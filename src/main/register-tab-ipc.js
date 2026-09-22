@@ -1262,14 +1262,33 @@ function registerTabIpc(deps) {
       // window B's tab activity is structurally unable to move/close/re-raise window A's
       // menu, so the pre-F7 attachment conditioning is deleted (syncBounds stores always
       // regardless; closeMenuOverlay is idempotent when no menu is open).
-      if (rounded && !fullscreenSameTab) owner.sheet?.syncBounds(rounded);
-      if (owner.activeTabWcId !== null && owner.activeTabWcId !== wcId) {
+      // Squawk 0100: on a genuine SWITCH the menu now closes BEFORE syncBounds runs —
+      // the reverse of the old order. A syncBounds that resizes the sheet WHILE IT IS
+      // STILL VISIBLE, immediately followed in the same tick by closeMenuOverlay ->
+      // hide() -> removeChildView (exactly this branch's old order, on an internal<->web
+      // switch where the two tabs' guest bounds differ), was measured live to leave
+      // Chromium's page document.visibilityState on the sheet's OWN document stuck
+      // 'hidden' for the rest of the window's life: every LATER openMenu still runs its
+      // full main/sheet/chrome protocol correctly and show() still re-shows the view,
+      // but the surface never repaints again. State stays correct everywhere; only
+      // pixels go missing — and this is structurally invisible to
+      // automation, since the kebab/page-context menuTypes are not in
+      // AUTOMATABLE_MENU_TYPES (redacted from every capture) and captureWindow
+      // composites the sheet layer by capturePage regardless of page visibility.
+      // Closing first means hide()'s removeChildView never follows a same-tick resize
+      // of a still-visible sheet. The same-tab re-activation branch is UNCHANGED
+      // (syncBounds then show()) — that path never closes the menu, so it can never
+      // hit this mechanism.
+      const switching = owner.activeTabWcId !== null && owner.activeTabWcId !== wcId;
+      if (switching) {
         // Close family: activating a DIFFERENT tab (any driver, incl. MCP activateTab —
         // the DD4 "never blurs the sheet" path) closes any open menu. The DD5 hook
         // skips the find-restore for 'tab-switch' — this handler's own per-tab
         // find-restore logic above governs.
         owner.sheet?.closeMenuOverlay('tab-switch');
-      } else if (owner.sheet?.isMenuOpen()) {
+      }
+      if (rounded && !fullscreenSameTab) owner.sheet?.syncBounds(rounded);
+      if (!switching && owner.sheet?.isMenuOpen()) {
         // Same-tab re-activation with a menu open: the re-add keeps the sheet
         // top-of-stack via re-add-last (the recorded attachment — never re-resolved).
         owner.sheet.show();

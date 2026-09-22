@@ -36,6 +36,12 @@ test('sanitizeGenerateConstraints: -1 sentinel resolves to null (unset), for eit
   });
 });
 
+test('sanitizeGenerateConstraints: a literal null minLength/maxLength resolves to null (unset) — the shape readGenerateConstraints actually emits for an attribute-less field, via parseIntOrNull, not -1', () => {
+  const sanitized = sanitizeGenerateConstraints({ minLength: null, maxLength: null, passwordRules: null });
+  assert.deepEqual(sanitized, { minLength: null, maxLength: null, passwordRules: null });
+  assert.equal(resolvePolicy(sanitized).ok, true);
+});
+
 test('sanitizeGenerateConstraints: integers clamp into [1, 128]', () => {
   assert.deepEqual(sanitizeGenerateConstraints({ minLength: 0, maxLength: 9999 }), {
     minLength: 1,

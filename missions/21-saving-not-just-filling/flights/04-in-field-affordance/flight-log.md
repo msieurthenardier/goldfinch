@@ -558,3 +558,204 @@ Ready (operator-approved 2026-09-21). Not yet in flight.
   `passwordrules` parser, CSPRNG use, the picker dispatch, and the badge pins. Legs 1–4
   → `completed`. Squawk 0099 → `in-progress` (its fix is committed; it completes at HAT
   step 3). Committing, then opening a draft PR, then Leg 5 HAT.
+
+### Leg 5 HAT: session notes (2026-09-22)
+
+- Setup: the dev app via `GOLDFINCH_AUTOMATION_ADMIN=1 npm run dev:automation`; fixtures
+  served on `http://127.0.0.1:8765/` (`test/fixtures/save-moment`).
+- **Step 1 (badge, locked) FAIL.** The operator found the round badge hard to read.
+  Operator request: make it a toggle-switch pill, with the goldfinch as the knob, the
+  lock to the left in the darkened track, and no border. First, build a page showing
+  only the icon, in several versions, so one can be picked. **FD call: a look-and-feel
+  FIX, not a feature.** It is a single surface (the `buildVaultLockIcon` shape plus the
+  chip styling in `vault-fill-icon.js`). A design lab page was built in the scratchpad
+  (not committed) and served on `http://127.0.0.1:8766/`. Six variants (A–F: classic,
+  state-tinted track, bold bird, bold + tinted, full-height knob, hairline edge), each
+  at actual size in light and dark fields and at 4× zoom. Implementation waits for the
+  operator's pick. Note: a 30×16 pill changes the icon's WIDTH, so `positionIcon`'s
+  `rect.width - 20` trailing offset must change with it. The root attribute KEYS stay
+  pinned (only the width/viewBox values change).
+- **Step 1 fix implemented.** Operator picked variant 'A' from the lab (classic toggle:
+  neutral dark track, the original bird scaled into a 6.6-radius knob at cx 22.4, lock
+  coloured by state) with its "bigger lock" geometry. `buildVaultLockIcon` in
+  `src/preload/vault-fill-icon.js` rebuilt: viewBox `0 0 30 16`, width `30`
+  (height stays `16`); track `rect` (neutral `#2b2d31`, no border/chip); lock shackle
+  `path` (stroke-width 1.7, closed d ends `…V7.2`, open d omits the trailing V) + lock
+  body `rect` (fill currentColor) drawn IN the track on the left; knob `circle`
+  (cx 22.4 cy 8 r 6.6, fill `#E8B83A`) plus the bird's cap/mask/beak/eye SCALED
+  NUMERICALLY into knob-space (no `<g transform>` — coordinates baked in at 2-decimal
+  precision, beak stroke-width scaled too) on the right. `COLOR_LOCKED`/`COLOR_UNLOCKED`
+  brightened to `#e8a33d`/`#34c46a` (the lab's dark-track-legible pair). `createIcon`
+  drops the chip entirely (`background: transparent`, `border: none`, no
+  `borderRadius`) — the track rect is now the visible shape. New `ICON_WIDTH`(30)/
+  `ICON_HEIGHT`(16) constants drive `positionIcon`'s vertical centering and its
+  trailing-edge inset, now `rect.width - ICON_WIDTH - 4` (a 4px gap, replacing the old
+  16px-icon-sized `- 20`). Root attribute KEYS unchanged (only `viewBox`/`width` VALUES
+  moved). **Mid-fix addendum (operator ruling): a native hover tooltip**, exact text
+  `"Open Vault"` for every kind and both lock states — implemented as a `<title>` CHILD
+  element (`createElementNS` + `textContent`), appended FIRST, never a `title`
+  ATTRIBUTE on the root (keeps the attribute-key pin byte-identical); aria-label stays
+  the accessible name and stays kind/state-specific.
+  `test/unit/vault-fill-icon.test.js` updated in step: `EXPECTED_CHILD_TAGS` →
+  `['title','rect','path','rect','circle','path','path','path','circle']`; the
+  shackle-state regex → `/V7\.2$/`; the "identical across states" test rewritten to
+  compare every child EXCEPT the shackle (filtered by predicate, not a hardcoded
+  slice) rather than a fixed first-five/last-three split; the AC1 attribute test
+  special-cases exactly one bare `<title>` with text `"Open Vault"` and asserts every
+  other child stays shape-only; the two in-tree/body-placement positioning tests'
+  expected `left` values recomputed for `ICON_WIDTH=30` + the 4px inset (1345→1331,
+  360→346); `width` pin `'16'`→`'30'`; `setVaultLocked` color assertions →
+  `#e8a33d`/`#34c46a`. `npm run build:preload`, the full unit suite, lint, typecheck,
+  and format all green after the change.
+- **Step 1 (redo) PASS.** The operator approved the variant-A toggle badge ("much
+  better") at in-field size, locked. DD9's badge approval is satisfied with the
+  toggle-switch revision.
+- **Step 2 PASS** (unlocked badge green/open, knob unchanged; card and identity fields show the same badge).
+- **Step 3 PASS** (toolbar lock: unlocked → vault page; right-click Lock now; locked → unlock sheet with no picker after; Enter/Space match click). Squawk 0099 verified live.
+- **Step 4 FAIL → fix: unconstrained new-password fields never showed "Generate strong
+  password."** Reproduced headlessly against
+  `test/fixtures/save-moment/password-roles/signup-new-password-marked.html`. Cause:
+  `src/preload/password-field-roles.js`'s `generateGestureInfo` reads a clicked field's
+  length attributes via `readGenerateConstraints`/`parseIntOrNull`, which emits `null`
+  (not `-1`) for an ATTRIBUTE-LESS field — so an unconstrained new-password field's real
+  payload is `{ minLength: null, maxLength: null, passwordRules: null }`. But
+  `src/shared/password-policy.js`'s `sanitizeGenerateConstraints` → its inner
+  `sanitizeInt` treated only `undefined`/the sentinel `-1` as "absent"; a literal `null`
+  fell through to `Number.isInteger(null) === false` and sanitized the WHOLE constraints
+  object to `null`. `src/main/register-browser-ipc.js`'s `validateGenerateGesture` then
+  degraded every such gesture to the bare `{ wcId }` shape — no `generate` sub-payload,
+  no Generate row — for EVERY new-password field lacking `minlength`/`maxlength`
+  attributes (the common case). Fix: `sanitizeInt` now treats `v === null` identically to
+  `undefined`/`-1` (one added disjunct); every other rule (integer bounds, clamp,
+  negative-not-`-1` rejection) is unchanged. Regression coverage, two layers: (1) a
+  targeted unit case in `test/unit/password-policy.test.js` pinning
+  `{minLength:null,maxLength:null,passwordRules:null}` → itself, `resolvePolicy(...).ok`
+  true; (2) a new CONTRACT test, `test/unit/generate-gesture-contract.test.js`, that
+  drives the REAL chain end to end with no hand-built payload at any hop —
+  `findAllLoginFields` (real fixture DOM) → `generateGestureInfo` (real preload output) →
+  `validateGenerateGesture` (real main validator, newly exported alongside
+  `registerBrowserIpc`) — over every gated `plans-login` corpus fixture whose
+  `expectRoles` includes `'new'` (9 fixtures, incl. the 6 named at diagnosis:
+  signup-new-password-marked, signup-password-confirm-unmarked,
+  change-password-three-marked, change-password-three-unmarked,
+  change-password-no-username, current-new-marked), asserting `canGenerate: true`; plus
+  the inverse for `signin-current-password` (no ordinal ever resolves a `new` role, so
+  `validateGenerateGesture` is never even reachable with a truthy `generate` payload).
+  **Neuter check**: reverted the `sanitizeInt` fix, reran
+  `generate-gesture-contract.test.js` — 9 of 11 subtests went red with
+  `AssertionError: expected validateGenerateGesture to accept the real preload payload`,
+  confirming the test has teeth; restored the fix, reran — all green (11/11, and
+  `password-policy.test.js` 50/50). **Lesson**: Leg 3's own test suite validated each
+  hop of the chain (preload role classification, `sanitizeGenerateConstraints`,
+  `resolvePolicy`, `validateGenerateGesture`) individually with HAND-BUILT payloads at
+  every hop's own boundary — none of them ever fed one real module's actual output into
+  the next real module's real input, so a boundary-shape mismatch between two adjacent
+  hops (preload's `null` vs. main's `undefined`/`-1` "absent" vocabulary) was invisible
+  to the whole suite until a live HAT walk hit it. The fix: at least one CONTRACT test
+  per multi-hop chain that runs the real functions back to back against real fixture
+  input, alongside (never instead of) the existing per-hop unit tests.
+- **HAT (operator, between steps 3 and 4): empty right-click menu on the locked toolbar
+  lock** → right-clicking `#vault-indicator` while the vault is LOCKED opened an empty
+  dropdown — `page-context-model.js`'s toolbar-mode `'vault'` branch (squawk 0038) pushed
+  `"Lock now"` only `if (!opts.vaultLocked)`, so the locked case pushed nothing. Operator
+  ruling: locked now shows a single `"Unlock now"` item that runs the exact same body as
+  a LEFT click on the locked indicator (Flight 4 Leg 1's `onVaultRequestUnlock` shape — no
+  `pendingVaultFlow`, so a successful unlock springs no fill picker). Fix: `vault-
+  controller.js` extracts that body into an exported `unlockNow()`, shared by the click
+  listener and by a new `indicatorAction('lock'|'unlock')` router; `renderer.js`'s single
+  `lockVaultNow` dep line was replaced 1:1 by `vaultIndicatorAction`, keeping the file at
+  its zero-headroom 1550-line budget unchanged; `overlay-dispatch.js` gained an
+  `'action:vault-unlock'` case beside the existing `'action:vault-lock'`, both routed
+  through `vaultIndicatorAction`. Coverage: `page-context-model.test.js`'s locked-case
+  test retargeted to assert the new item (not the omission); new `vault-controller-
+  capture.test.js` cases for `unlockNow()`/`indicatorAction()`; new `overlay-
+  dispatch.test.js` case for `'action:vault-unlock'`. `wc -l src/renderer/renderer.js`
+  and `seam-contract.test.js` confirmed unchanged at 1550.
+- **Step 4 (redo) PASS** (after the null-constraints fix): the Generate row is first; new and confirm filled with the same 20-char value (verified via the DevTools console); submit → save offer → the item is in the vault with the generated password. Note: the first restart after the badge fix left the old app instance running beside the new one; the FD killed it before this step.
+- **Step 5 PASS** (generate while locked: Generate + "Unlock to fill a saved login" rows
+  with no unlock first; the generated fill needs no unlock; submit → unlock-to-save →
+  saved; the Unlock row → unlock → the full picker with Generate first). The operator
+  reported "username not saved". Diagnosis: the fixture's username is PRE-FILLED by page
+  markup (`value="newuser2"`) and never typed, so it is unprovenanced and deliberately
+  excluded (DD3/DD3c: only typed or Goldfinch-filled values enter a capture). A retry
+  with a typed username saved it. Working as designed; no change.
+- App restarted cleanly: one instance, with all HAT fixes loaded. **"Unlock now" fix
+  PASS**: locked right-click → "Unlock now" → the unlock sheet, with no picker after;
+  unlocked → "Lock now".
+- **Step 6 PASS** (rotation to an UPDATED item): on `change-password-no-username`, the
+  current password was pasted from the vault and Generate was used for new; the offer
+  was an UPDATE to the `alice-test` login; after saving, the same item kept its
+  username with the new password and no new item was created. This proves DD3 + DD4 +
+  the round-1 HIGH (username preserved on a no-username rotation) live.
+- **Step 7 PASS** (constraints: maxlength 12 + passwordrules → ≤12 chars, alphanumeric, lower + digit present; maxlength 6 → no Generate row).
+- **Step 8: squawk 0100 REPRODUCED by operator** with a live, instrumented repro:
+  regular tab → kebab → Secrets (`goldfinch://vault` opens) → on the vault page
+  click Unlock (the `vault-unlock` sheet opens) → click back to the original
+  tab — every later kebab/right-click menu in that window opens correctly in
+  main/sheet/chrome state but never paints again. **Root cause**: `register-
+  tab-ipc.js`'s `tab-set-active` calls `owner.sheet?.syncBounds(rounded)` while
+  the sheet is still VISIBLE (applying the newly-active tab's bounds), then in
+  the same tick calls `owner.sheet?.closeMenuOverlay('tab-switch')` →
+  `menu-overlay-manager.js`'s `hide()` → `removeChildView` — a resize-then-
+  remove in one tick that the live instrumentation showed leaves the sheet
+  document's `document.visibilityState` permanently `'hidden'`; `show()`'s
+  later `v.setVisible(true)` becomes a no-op because the view's tracked
+  `visible` flag was never actually flipped `false` by the old
+  `removeChildView`-only `hide()`. State stays correct everywhere; only pixels
+  go missing, and it is invisible to automation by design (kebab/page-context
+  are not in `AUTOMATABLE_MENU_TYPES`). **Fix**: `hide()` now also calls
+  `view.setVisible(false)` after `removeChildView`, so the next `show()`'s
+  `setVisible(true)` is a genuine `false`→`true` toggle. Considered and
+  declined reordering `register-tab-ipc.js`'s `syncBounds`/`closeMenuOverlay`
+  calls (it would change behavior on an unrelated same-tab-reactivation
+  branch); the `hide()` fix is the more general one and covers every close
+  path, not just `tab-switch`. New/renamed unit tests in `menu-overlay-manager.test.js`
+  pin the `false`→`true` toggle; neuter-checked (exactly those two tests go
+  red with the fix reverted). See squawk 0100 for the full write-up. Live
+  verification at this HAT step is pending a re-run of the repro against the
+  fix.
+- **Step 8 re-test FAIL → FD live diagnosis → fix**: the operator re-tested the
+  `hide()` `setVisible(false)` remedy above against the live app — the sheet
+  was **still stuck hidden**. The FD then ran a second live-instrumented
+  diagnosis pass (temporary logging of the sheet's own `document.visibilityState`,
+  one fresh app per experiment) rather than guessing again:
+  - Repro confirmed: internal tab active (`goldfinch://settings` or
+    `goldfinch://vault`), any sheet open (site-info suffices; `vault-unlock` in
+    the operator's original report), switch to a web tab → every later sheet
+    open in that window inits with `visibilityState: 'hidden'` and never
+    paints.
+  - web→web switch: fine (same guest bounds — internal tabs have no bookmarks
+    bar, so an internal↔web switch is the one case whose guest/sheet bounds
+    actually differ, `y=89` vs `y=119`).
+  - Closing the menu BEFORE the switch: fine.
+  - Moving `closeMenuOverlay('tab-switch')` to run BEFORE
+    `owner.sheet?.syncBounds(rounded)` in `tab-set-active`: **FIXED** — tested
+    both at the top of the `if (entry)` block and immediately before the old
+    `syncBounds` line; both fixed it.
+  - The previous attempt's `hide()` `setVisible(false)` addition did **NOT**
+    fix it (re-confirmed still-hidden under the same instrumentation).
+  - **Conclusion**: a `setBounds` that RESIZES the still-visible sheet,
+    followed in the same tick by `removeChildView`, leaves the sheet
+    webContents' page visibility stuck `'hidden'` for the window's life — a
+    view-API flag reset (the first remedy) does not touch this mechanism; only
+    reordering to close-before-resize does.
+
+  Disposition: reverted the `hide()` `setVisible(false)` remedy and its two
+  tests entirely (back to HEAD — the original `hide never uses
+  setVisible(false)-only` test and comment stand as they were). Fixed
+  `register-tab-ipc.js`'s `tab-set-active` instead: on a genuine tab SWITCH,
+  `closeMenuOverlay('tab-switch')` now runs before `syncBounds`; the same-tab
+  re-activation branch (`syncBounds` then `show()`) is unchanged, since it
+  never closes the menu and can't hit this mechanism. Audited `tab-set-bounds`,
+  `tab-hide`, `tab-close`, and the cross-window move core's
+  `target.sheet?.closeMenuOverlay('tab-switch')` for the same
+  resize-then-remove-in-one-tick shape — none of them precede a
+  `closeMenuOverlay`/`hide` with a same-tick sheet `syncBounds`, so none needed
+  the reorder. Two new unit tests in `register-tab-ipc.test.js` pin the order
+  (switch: close before sync; same-tab: sync before show, unchanged) and are
+  neuter-checked (reverting the reorder turns exactly the switch-order test
+  red). See squawk 0100's rewritten Corrective Action for the full write-up.
+  Live re-verification against the running app at this HAT step is still
+  pending.
+- **Step 8 PASS** (squawk 0100 fixed live): the operator's exact repro (tab → kebab → Secrets → Unlock → switch back) plus a repeat and the Settings-page variant: kebab and right-click menus paint. Squawk 0100 is verified live.
+- **Step 9 PASS** (regression: a plain typed sign-in offers save/update as before; card checkout offers card then identity serially). **All HAT steps pass.** The FD spawned a Reviewer over the uncommitted HAT inline fixes before the commit (they touched security-sensitive surfaces).

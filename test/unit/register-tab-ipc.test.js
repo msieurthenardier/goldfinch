@@ -620,6 +620,67 @@ test('tab activation conditionally rearms page focus after visibility and view i
   assert.equal(record.activeTabWcId, 102);
 });
 
+test('squawk 0100: a tab SWITCH closes the menu BEFORE syncBounds (never the reverse)', () => {
+  // Root cause: a syncBounds that resizes the sheet WHILE STILL VISIBLE,
+  // immediately followed in the same tick by closeMenuOverlay -> hide() ->
+  // removeChildView, was measured live to leave the sheet's page
+  // document.visibilityState stuck 'hidden' forever after (every later menu
+  // opens correctly in state but never paints). The fix is call order: on a
+  // genuine switch, close first.
+  const h = setup();
+  const record = h.makeRecord(1);
+  h.addTab(record, 101);
+  h.addTab(record, 102);
+  record.activeTabWcId = 101;
+  record.tabViews.get(101).active = true;
+  h.log.length = 0;
+
+  h.ipcMain.send('tab-set-active', record.chromeView.webContents, {
+    wcId: 102,
+    bounds: { x: 0, y: 89, width: 1200, height: 711 }
+  });
+
+  const closeIdx = h.log.findIndex((x) => x[0] === 'close-menu');
+  const syncIdx = h.log.findIndex((x) => x[0] === 'sync-menu');
+  assert.ok(closeIdx !== -1, 'closeMenuOverlay is called on a switch');
+  assert.ok(syncIdx !== -1, 'syncBounds is called on a switch');
+  assert.ok(closeIdx < syncIdx, 'close-menu must run BEFORE sync-menu on a switch');
+  assert.deepEqual(
+    h.log.find((x) => x[0] === 'close-menu'),
+    ['close-menu', 1, 'tab-switch']
+  );
+  assert.equal(
+    h.log.some((x) => x[0] === 'show-menu'),
+    false,
+    'a switch never calls show() on the sheet'
+  );
+});
+
+test('squawk 0100: same-tab re-activation with a menu open keeps syncBounds THEN show() (unchanged order)', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  h.addTab(record, 101);
+  record.activeTabWcId = 101;
+  record.tabViews.get(101).active = true;
+  record.sheet.isMenuOpen = () => true;
+  h.log.length = 0;
+
+  h.ipcMain.send('tab-set-active', record.chromeView.webContents, {
+    wcId: 101,
+    bounds: { x: 0, y: 89, width: 1200, height: 711 }
+  });
+
+  const syncIdx = h.log.findIndex((x) => x[0] === 'sync-menu');
+  const showIdx = h.log.findIndex((x) => x[0] === 'show-menu');
+  assert.ok(syncIdx !== -1 && showIdx !== -1, 'both syncBounds and show() are called');
+  assert.ok(syncIdx < showIdx, 'same-tab re-activation still runs syncBounds BEFORE show()');
+  assert.equal(
+    h.log.some((x) => x[0] === 'close-menu'),
+    false,
+    'same-tab re-activation never closes the menu'
+  );
+});
+
 test('remaining lifecycle channels execute through captured handlers with their established shapes', () => {
   const h = setup();
   const source = h.makeRecord(1);

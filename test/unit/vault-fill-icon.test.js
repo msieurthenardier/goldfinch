@@ -139,10 +139,11 @@ function bodyIcon(doc) {
 // --- buildVaultLockIcon: SVG glyph, not emoji -----------------------------
 
 // The expected structural child list for buildVaultLockIcon's output, per
-// Mission 21 Flight 4 Leg 4 (goldfinch-badge, DD9/AC7): the Goldfinch mark
-// (disc, cap, mask, beak, eye) plus the lock-state overlay (backing, shackle,
-// body).
-const EXPECTED_CHILD_TAGS = ['circle', 'path', 'path', 'path', 'circle', 'circle', 'path', 'rect'];
+// Mission 21 Flight 4 Leg 5 HAT (the toggle-switch redesign, superseding Leg
+// 4's round disc+corner-overlay shape): a native-tooltip `<title>` first
+// (same HAT, operator ruling), then track, lock shackle, lock body, knob
+// (the Goldfinch disc), then the bird's cap/mask/beak/eye.
+const EXPECTED_CHILD_TAGS = ['title', 'rect', 'path', 'rect', 'circle', 'path', 'path', 'path', 'circle'];
 
 // The overlay shackle is the `path` whose `stroke` is `currentColor` — NOT
 // "the first path" (that's now the bird's cap, AC3).
@@ -159,7 +160,7 @@ test('buildVaultLockIcon: an inline SVG element (not an emoji), correctly labell
   assert.equal(icon.getAttribute('role'), 'img');
   assert.equal(icon.getAttribute('aria-label'), 'Unlock vault to fill login', 'the locked default label');
   assert.equal(icon.getAttribute('data-locked'), 'true');
-  assert.equal(icon.getAttribute('width'), '16');
+  assert.equal(icon.getAttribute('width'), '30');
   // No emoji / tofu glyph anywhere.
   assert.equal(icon.textContent, '', 'no text glyph — the lock is drawn, never typed');
   assert.ok(!/🔒|□/.test(icon.textContent));
@@ -174,29 +175,37 @@ test('buildVaultLockIcon: overlay shackle carries lock state (AC3, renamed from 
   const locked = buildVaultLockIcon(doc, true);
   assert.equal(locked.getAttribute('data-locked'), 'true');
   assert.equal(locked.getAttribute('aria-label'), 'Unlock vault to fill login');
-  assert.ok(/V17\.6$/.test(shackleOf(locked).getAttribute('d')), 'closed shackle: both legs reach the body (…V17.6)');
+  assert.ok(/V7\.2$/.test(shackleOf(locked).getAttribute('d')), 'closed shackle: both legs reach the body (…V7.2)');
 
   const unlocked = buildVaultLockIcon(doc, false);
   assert.equal(unlocked.getAttribute('data-locked'), 'false');
   assert.equal(unlocked.getAttribute('aria-label'), 'Fill login from vault');
   assert.ok(
-    !/V17\.6$/.test(shackleOf(unlocked).getAttribute('d')),
-    'open shackle: the right leg lifts free (no trailing …V17.6)'
+    !/V7\.2$/.test(shackleOf(unlocked).getAttribute('d')),
+    'open shackle: the right leg lifts free (no trailing …V7.2)'
   );
 });
 
-test('buildVaultLockIcon: AC4 — the mark children (disc, cap, mask, beak, eye) are IDENTICAL between locked and unlocked builds', () => {
+test('buildVaultLockIcon: AC4 — every shape except the lock shackle is IDENTICAL between locked and unlocked builds', () => {
   const doc = makeDoc([]);
   const locked = buildVaultLockIcon(doc, true);
   const unlocked = buildVaultLockIcon(doc, false);
 
-  // The mark is the first five children (disc, cap, mask, beak, eye); the
-  // overlay (backing, shackle, body) is the last three and is the ONLY part
-  // that may differ between the two builds.
-  const markOf = (icon) => icon.children.slice(0, 5).map((c) => ({ tagName: c.tagName, attrs: { ...c.attributes } }));
+  // The shackle is the ONLY child whose shape may differ between the two
+  // builds (track, lock body, knob, and the whole bird never change) —
+  // filtered out by the same predicate shackleOf uses, not by a hardcoded
+  // index, so the comparison doesn't silently go stale if child order shifts.
+  const nonShackleOf = (icon) =>
+    icon.children
+      .filter((c) => !(c.tagName === 'path' && c.getAttribute('stroke') === 'currentColor'))
+      .map((c) => ({ tagName: c.tagName, attrs: { ...c.attributes }, textContent: c.textContent }));
 
-  assert.deepEqual(markOf(locked), markOf(unlocked), 'the mark never changes with lock state');
-  // Sanity: the overlay's shackle DOES differ (proves the comparison above isn't vacuous).
+  assert.deepEqual(
+    nonShackleOf(locked),
+    nonShackleOf(unlocked),
+    'everything but the shackle never changes with lock state'
+  );
+  // Sanity: the shackle DOES differ (proves the comparison above isn't vacuous).
   assert.notEqual(shackleOf(locked).getAttribute('d'), shackleOf(unlocked).getAttribute('d'));
 });
 
@@ -214,7 +223,7 @@ test('buildVaultLockIcon: AC7 — all three kinds, both lock states, build the s
   }
 });
 
-test('buildVaultLockIcon: AC1 — every child shape carries only geometry/paint attributes, no innerHTML/text/href', () => {
+test('buildVaultLockIcon: AC1 — every shape child carries only geometry/paint attributes (no innerHTML/text/href), plus exactly one bare <title> tooltip', () => {
   const ALLOWED_SHAPE_ATTRS = new Set([
     'cx',
     'cy',
@@ -235,7 +244,15 @@ test('buildVaultLockIcon: AC1 — every child shape carries only geometry/paint 
   for (const kind of ['login', 'card', 'identity']) {
     for (const locked of [true, false]) {
       const icon = buildVaultLockIcon(doc, locked, kind);
+      // Exactly one <title> child (the native hover tooltip, Flight 4 Leg 5
+      // HAT), carrying no attributes and only the literal tooltip text.
+      const titles = icon.children.filter((c) => c.tagName === 'title');
+      assert.equal(titles.length, 1, 'exactly one title element');
+      assert.equal(titles[0].textContent, 'Open Vault', 'fixed tooltip text');
+      assert.deepEqual(Object.keys(titles[0].attributes), [], 'title carries no attributes');
+
       for (const child of icon.children) {
+        if (child.tagName === 'title') continue; // covered above
         assert.ok(['circle', 'path', 'rect'].includes(child.tagName), `unexpected child tag ${child.tagName}`);
         assert.equal(child.textContent, '', 'no text content on any child');
         for (const attr of Object.keys(child.attributes)) {
@@ -479,14 +496,14 @@ test('setVaultLocked flips the shown icon glyph + color live (no reload)', () =>
 
   let icon = bodyIcon(doc);
   assert.equal(icon.getAttribute('data-locked'), 'true', 'starts locked (amber/closed)');
-  assert.equal(icon.style.color, '#b06000', 'locked → amber');
+  assert.equal(icon.style.color, '#e8a33d', 'locked → amber');
 
   // Main pushes an unlock → the shown icon is re-rendered open/green.
   ctl.setVaultLocked(false);
   icon = bodyIcon(doc);
   assert.ok(icon, 'an icon is still shown for the focused field');
   assert.equal(icon.getAttribute('data-locked'), 'false', 'now unlocked (open)');
-  assert.equal(icon.style.color, '#137333', 'unlocked → green');
+  assert.equal(icon.style.color, '#34c46a', 'unlocked → green');
 
   // A repeat of the same state is a no-op (no re-render churn).
   const before = icon;
@@ -582,12 +599,12 @@ test("the icon is inserted inside the focused field's parent element, not <body>
   const icon = innerDiv.children.find((c) => c.getAttribute(ICON_ATTR) !== null);
   assert.ok(icon, "the icon is appended inside the field's parentElement");
 
-  // top = fieldRect.top - ancestorRect.top - ancestor.clientTop + (fieldRect.height - 16) / 2
+  // top = fieldRect.top - ancestorRect.top - ancestor.clientTop + (fieldRect.height - ICON_HEIGHT) / 2
   //     = 230 - 50 - 2 + (32 - 16) / 2 = 186
-  // left = fieldRect.left - ancestorRect.left - ancestor.clientLeft + fieldRect.width - 20
-  //      = 1052 - 20 - 3 + 336 - 20 = 1345
+  // left = fieldRect.left - ancestorRect.left - ancestor.clientLeft + fieldRect.width - ICON_WIDTH - 4
+  //      = 1052 - 20 - 3 + 336 - 30 - 4 = 1331
   assert.equal(icon.style.top, '186px', 'top relative to the nearest positioned ancestor');
-  assert.equal(icon.style.left, '1345px', 'left relative to the nearest positioned ancestor');
+  assert.equal(icon.style.left, '1331px', 'left relative to the nearest positioned ancestor');
 });
 
 test('no window.getComputedStyle (a plain test double) falls back to body placement wholesale, even with an in-tree parentElement', () => {
@@ -609,7 +626,11 @@ test('no window.getComputedStyle (a plain test double) falls back to body placem
   const icon = bodyIcon(doc);
   assert.ok(icon, 'falls back to appending on <body>');
   assert.equal(icon.style.top, `${100 + (24 - 16) / 2}px`, 'body-relative top math unchanged');
-  assert.equal(icon.style.left, `${200 + 180 - 20}px`, 'body-relative left math unchanged');
+  assert.equal(
+    icon.style.left,
+    `${200 + 180 - 30 - 4}px`,
+    'body-relative left math unchanged (ICON_WIDTH=30, 4px inset)'
+  );
 });
 
 test('honeypot / zero-rect focused field gets NO icon', () => {

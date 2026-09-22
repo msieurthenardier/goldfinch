@@ -694,4 +694,4 @@ function registerBrowserIpc({
   return { rerollSeed };
 }
 
-module.exports = { registerBrowserIpc };
+module.exports = { registerBrowserIpc, validateGenerateGesture };

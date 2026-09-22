@@ -67,11 +67,19 @@ export function pageContextModel(params, toolbarItem, opts = {}) {
   if (toolbarItem) {
     // Squawk 0038 (#113 "Lock now" half — the pinnable half is DECLINED by operator
     // ruling; the vault indicator stays put, never enters toolbarPins/UNPIN_LABELS).
-    // A single "Lock now" item, OMITTED — not disabled — when the vault is already
-    // locked (nothing to lock; the L3-DD-D omit-not-disable convention above, and the
-    // "no dead controls" house test convention rules out a present-but-inert item).
+    // Unlocked: a single "Lock now" item. Locked: a single "Unlock now" item —
+    // NOT an omission (Flight 4 Leg 5 HAT fix: the prior "OMIT when nothing to
+    // lock" rule left an EMPTY dropdown on a right-click while locked, an
+    // operator-reported defect). "Unlock now" runs the exact same body as a LEFT
+    // click on the locked indicator (Flight 4 Leg 1: raises the F2 unlock sheet
+    // with no pendingVaultFlow set, so a successful unlock does not spring the
+    // fill picker) — see vault-controller.js's unlockNow().
     if (toolbarItem === 'vault') {
-      if (!opts.vaultLocked) model.push({ type: 'item', id: 'action:vault-lock', label: 'Lock now' });
+      model.push(
+        opts.vaultLocked
+          ? { type: 'item', id: 'action:vault-unlock', label: 'Unlock now' }
+          : { type: 'item', id: 'action:vault-lock', label: 'Lock now' }
+      );
       return model;
     }
     const label = UNPIN_LABELS[toolbarItem];

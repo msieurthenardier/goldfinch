@@ -218,9 +218,12 @@ export function parsePasswordRules(str) {
  * badge's gesture carries (flight DD5). `raw` must be a plain object; every
  * PRESENT field is individually re-validated — a malformed field fails the
  * WHOLE sanitize (`null`), never a partial pass-through.
- *   - `minLength`/`maxLength`: `undefined` or the sentinel `-1` -> `null`
- *     (unset); any other non-negative integer clamps into [1, 128]; a
- *     non-integer or any OTHER negative is malformed;
+ *   - `minLength`/`maxLength`: `undefined`, `null`, or the sentinel `-1` ->
+ *     `null` (unset — a field with no `minlength`/`maxlength` attribute reads
+ *     back as `null`, not `-1`, via `readGenerateConstraints`'s
+ *     `parseIntOrNull`, so `null` must be treated as absent here too); any
+ *     other non-negative integer clamps into [1, 128]; a non-integer or any
+ *     OTHER negative is malformed;
  *   - `passwordRules`: `undefined`/`null` -> `null`; a string > 512 chars, or
  *     any non-string, is malformed; `''` -> `null`;
  *   - unknown keys on `raw` are ignored.
@@ -231,7 +234,7 @@ export function sanitizeGenerateConstraints(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
 
   const sanitizeInt = (/** @type {any} */ v) => {
-    if (v === undefined || v === -1) return { ok: true, value: null };
+    if (v === undefined || v === null || v === -1) return { ok: true, value: null };
     if (!Number.isInteger(v) || v < 0) return { ok: false };
     return { ok: true, value: Math.max(1, Math.min(128, v)) };
   };

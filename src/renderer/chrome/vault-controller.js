@@ -265,13 +265,36 @@ export function createVaultController({
     Promise.resolve(goldfinch.vaultLock()).catch(() => {});
   }
 
+  /** The vault indicator's "Unlock now" action (Flight 4 Leg 5 HAT fix — the locked
+   * toolbar right-click menu used to OMIT "Lock now" entirely, opening an empty
+   * dropdown; the operator ruling replaces it with this single item, which runs the
+   * EXACT SAME body as a left click on the locked indicator: Flight 4 Leg 1 deliberately
+   * uses the `onVaultRequestUnlock` SHAPE, not `onVaultGesture`'s locked branch —
+   * `pendingVaultFlow` stays unset, so a subsequent unlock does not spring the fill
+   * picker (there is no gesture/wcId behind this click/menu item to pick for). Guarded
+   * on `setUp` for symmetry with the click handler, even though the indicator (and its
+   * context menu) is hidden before setup in practice. */
+  function unlockNow() {
+    if (!lockState.setUp) return;
+    openOverlayMenu('vault-unlock', [], null, 0);
+  }
+
+  /** Routes the toolbar vault indicator's right-click menu item id to the lock/unlock
+   * bodies above (squawk 0038 + the Flight 4 Leg 5 HAT fix) — anything other than
+   * 'lock'/'unlock' is a validated no-op (page-context-model.js's id-space discipline). */
+  function indicatorAction(action) {
+    if (action === 'lock') lockNow();
+    else if (action === 'unlock') unlockNow();
+  }
+
   // Right-click → the shared toolbar-mode page-context sheet (squawk 0038, GitHub #113
   // "Lock now" half — the pinnable half is DECLINED by operator ruling: the indicator
   // stays put and is NEVER added to toolbarPins/UNPIN_LABELS). Same wiring shape as the
   // media/shields/devtools pin buttons' own contextmenu listeners (CLAUDE.md's Toolbar-
-  // pins pattern); the model omits "Lock now" when already locked (page-context-model.js,
-  // opts.vaultLocked below). Guarded on `els.vaultIndicator` for the offline harnesses
-  // that construct with `els: { vaultIndicator: null }` (no DOM).
+  // pins pattern); the model swaps to "Unlock now" when already locked (Flight 4 Leg 5
+  // HAT fix — page-context-model.js, opts.vaultLocked below). Guarded on
+  // `els.vaultIndicator` for the offline harnesses that construct with
+  // `els: { vaultIndicator: null }` (no DOM).
   if (els.vaultIndicator) {
     els.vaultIndicator.addEventListener('contextmenu', (e) => {
       e.preventDefault();
@@ -287,7 +310,7 @@ export function createVaultController({
     els.vaultIndicator.addEventListener('click', () => {
       if (!lockState.setUp) return; // defense in depth — the indicator is hidden then.
       if (lockState.unlocked) openVaultPage();
-      else openOverlayMenu('vault-unlock', [], null, 0);
+      else unlockNow();
     });
   }
 
@@ -887,6 +910,8 @@ export function createVaultController({
     handleClosed,
     isVaultLocked,
     lockNow,
+    unlockNow,
+    indicatorAction,
     openVaultSetOverlayForAudit,
     openVaultRecoveryShowOverlayForAudit,
     openVaultStepupOverlayForAudit,

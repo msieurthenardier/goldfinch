@@ -86,7 +86,7 @@ function setup(overrides = {}) {
     handleBookmarkStarActivate: [],
     dispatchSuggestion: [],
     handleSuggestionsClosed: [],
-    lockVaultNow: [],
+    vaultIndicatorAction: [],
     vaultHandleClosed: [],
     siteSecurityHandleClosed: [],
     clipboardWriteText: [],
@@ -169,7 +169,7 @@ function setup(overrides = {}) {
     handleBookmarkStarActivate: (tab) => calls.handleBookmarkStarActivate.push(tab),
     dispatchSuggestion: (id) => calls.dispatchSuggestion.push(id),
     handleSuggestionsClosed: (reason) => calls.handleSuggestionsClosed.push(reason),
-    lockVaultNow: () => calls.lockVaultNow.push(true),
+    vaultIndicatorAction: (action) => calls.vaultIndicatorAction.push(action),
     vaultHandleClosed: (payload) => calls.vaultHandleClosed.push(payload),
     siteSecurityHandleClosed: (payload) => calls.siteSecurityHandleClosed.push(payload),
     bridge,
@@ -453,10 +453,16 @@ describe("case 'page-context'", () => {
     assert.deepEqual(h.calls.addressFocus, []);
   });
 
-  test("'action:vault-lock' locks the vault now", () => {
+  test("'action:vault-lock' routes 'lock' through vaultIndicatorAction", () => {
     const h = setup({ pageCtxState: { wcId: 7, params: {} } });
     h.overlay.dispatchActivation({ menuType: 'page-context', id: 'action:vault-lock' });
-    assert.deepEqual(h.calls.lockVaultNow, [true]);
+    assert.deepEqual(h.calls.vaultIndicatorAction, ['lock']);
+  });
+
+  test("'action:vault-unlock' routes 'unlock' through vaultIndicatorAction (Flight 4 Leg 5 HAT fix)", () => {
+    const h = setup({ pageCtxState: { wcId: 7, params: {} } });
+    h.overlay.dispatchActivation({ menuType: 'page-context', id: 'action:vault-unlock' });
+    assert.deepEqual(h.calls.vaultIndicatorAction, ['unlock']);
   });
 });
 

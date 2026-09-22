@@ -1,10 +1,10 @@
 # Squawk 0099: The toolbar vault lock indicator has no click action — no path to unlock or to the vault page
 
-**Status**: in-progress
+**Status**: completed
 **Type**: defect
 **Severity**: routine
 **Reported**: 2026-09-21
-**Completed**: —
+**Completed**: 2026-09-22
 
 ## Report
 
@@ -46,14 +46,20 @@ design work rather than one ruling, this fails the squawk gate and escalates.
 
 ## Verification
 
-*(written at completion)*
+- Unit: `test/unit/vault-controller-capture.test.js`, covering the locked click (one
+  `vault-unlock` open, no picker after unlock), the unlocked click (vault page), and
+  the not-set-up no-op. HAT addition: the locked right-click shows "Unlock now"
+  (`unlockNow()` / `indicatorAction()`), with the same tests plus `page-context-model`
+  and `overlay-dispatch` cases.
+- Live: Mission 21 Flight 4 HAT step 3 PASS (operator, 2026-09-22). Unlocked click →
+  `goldfinch://vault`; locked click → unlock sheet with no picker after; Enter/Space match
+  the click; right-click "Lock now" unlocked / "Unlock now" locked.
 
 ## Sign-Off
 
-*(written at completion)*
-**Reviewer**: —
-**Verdict**: —
-**Commit**: —
+**Reviewer**: Flight-end Reviewer (Legs 1–4) + HAT-fix Reviewer (agents); operator live HAT
+**Verdict**: confirmed
+**Commit**: branch `flight/04-in-field-affordance` (Mission 21 Flight 4, PR #230); see that branch's HAT commit
 
 ## Disposition
 
