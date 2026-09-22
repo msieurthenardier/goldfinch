@@ -218,9 +218,9 @@ test('toolbar mode "vault": unlocked yields the single "Lock now" item, page sec
   assert.deepEqual(model, [{ type: 'item', id: 'action:vault-lock', label: 'Lock now' }]);
 });
 
-test('toolbar mode "vault": already locked OMITS the item (nothing to lock) — empty model, not disabled', () => {
+test('toolbar mode "vault": already locked yields the single "Unlock now" item (Flight 4 Leg 5 HAT fix — no longer an empty model)', () => {
   const model = pageContextModel(null, /** @type {any} */ ('vault'), { vaultLocked: true });
-  assert.deepEqual(model, []);
+  assert.deepEqual(model, [{ type: 'item', id: 'action:vault-unlock', label: 'Unlock now' }]);
 });
 
 test('toolbar mode "vault": vaultLocked defaults to falsy when opts is omitted (item present)', () => {

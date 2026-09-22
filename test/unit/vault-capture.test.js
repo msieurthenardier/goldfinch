@@ -240,6 +240,292 @@ test("captureFinalize: an unchanged login discovered AFTER unlock → { reason: 
   }
 });
 
+/* --- DD4 (Mission 21, Flight 4, Leg 2 — password-field-roles): rotation
+   disposition by provenanced current-password match — AC12/AC13/AC14/AC15 */
+
+test('AC14(a): no username field, ONE reachable login whose password equals current → UPDATE to it', async () => {
+  const dir = tmpDir();
+  try {
+    const { store, human } = await makeHarness(dir);
+    store.saveItem('work', { type: 'login', username: null, password: 'OldPass1!', origin: A });
+    const offer = human.capture({
+      wcId: 10,
+      username: null,
+      usernameDetected: false,
+      passwordBytes: bytesOf('NewPass2!'),
+      currentPasswordBytes: bytesOf('OldPass1!')
+    });
+    assert.ok(offer);
+    assert.equal(offer.model.mode, 'update');
+    assert.equal(offer.model.defaultVaultId, 'work');
+  } finally {
+    rm(dir);
+  }
+});
+
+test("AC14(b): TWO reachable logins sharing the current password → today's origin+username rule, never an update by guess", async () => {
+  const dir = tmpDir();
+  try {
+    const { store, human } = await makeHarness(dir);
+    store.saveItem('work', { type: 'login', username: 'alice', password: 'SharedPw!', origin: A });
+    store.saveItem('global', { type: 'login', username: 'bob', password: 'SharedPw!', origin: A });
+    const offer = human.capture({
+      wcId: 10,
+      username: null,
+      usernameDetected: false,
+      passwordBytes: bytesOf('NewPass2!'),
+      currentPasswordBytes: bytesOf('SharedPw!')
+    });
+    assert.ok(offer);
+    assert.equal(
+      offer.model.mode,
+      'save',
+      'two password-matched candidates fall through to the origin+username rule — neither is guessed'
+    );
+  } finally {
+    rm(dir);
+  }
+});
+
+test("AC14(c): a PROVENANCED username that disagrees with the single password-matched row → today's rule (never the password-matched item)", async () => {
+  const dir = tmpDir();
+  try {
+    const { store, human } = await makeHarness(dir);
+    store.saveItem('work', { type: 'login', username: 'alice', password: 'OldPass1!', origin: A });
+    const offer = human.capture({
+      wcId: 10,
+      username: 'bob', // provenanced, disagrees with the matched row's 'alice'
+      usernameDetected: true,
+      passwordBytes: bytesOf('NewPass2!'),
+      currentPasswordBytes: bytesOf('OldPass1!')
+    });
+    assert.ok(offer);
+    assert.equal(offer.model.mode, 'save', "a disagreeing provenanced username excludes the row from DD4's candidates");
+  } finally {
+    rm(dir);
+  }
+});
+
+test('AC14(d): detected-but-UNPROVENANCED username + a password match against a NULL-username stored row → UPDATE survives applyUsernameDowngrade (matchedByPassword exemption)', async () => {
+  const dir = tmpDir();
+  try {
+    const { store, human } = await makeHarness(dir);
+    // The STORED login itself has no username (a genuinely username-less
+    // change-password rotation, saved before this leg, or from a form that
+    // never carried one) — reassigning rec.username to the matched row's OWN
+    // username leaves it null, so ONLY the matchedByPassword exemption (not
+    // the reassignment) is what keeps applyUsernameDowngrade from firing:
+    // without it, `rec.username == null && rec.usernameDetected === true` is
+    // exactly DD3c's own downgrade trigger.
+    store.saveItem('work', { type: 'login', username: null, password: 'OldPass1!', origin: A });
+    const offer = human.capture({
+      wcId: 10,
+      username: null, // read-only prefilled field, never typed into — unprovenanced
+      usernameDetected: true,
+      passwordBytes: bytesOf('NewPass2!'),
+      currentPasswordBytes: bytesOf('OldPass1!')
+    });
+    assert.ok(offer);
+    assert.equal(
+      offer.model.mode,
+      'update',
+      "DD3c's downgrade (username detected but unprovenanced) must NOT undo a password-matched update"
+    );
+    assert.equal(offer.model.username, null);
+  } finally {
+    rm(dir);
+  }
+});
+
+test('AC14(d)b: detected-but-UNPROVENANCED username + a password match against a NAMED stored row → UPDATE, username reassigned', async () => {
+  const dir = tmpDir();
+  try {
+    const { store, human } = await makeHarness(dir);
+    store.saveItem('work', { type: 'login', username: 'alice', password: 'OldPass1!', origin: A });
+    const offer = human.capture({
+      wcId: 10,
+      username: null, // read-only prefilled field, never typed into — unprovenanced
+      usernameDetected: true,
+      passwordBytes: bytesOf('NewPass2!'),
+      currentPasswordBytes: bytesOf('OldPass1!')
+    });
+    assert.ok(offer);
+    assert.equal(offer.model.mode, 'update');
+    assert.equal(offer.model.username, 'alice', "rec.username was reassigned to the matched row's own username");
+  } finally {
+    rm(dir);
+  }
+});
+
+test('AC14(e): the same password match through the LOCKED path (capture → captureFinalize after unlock) → UPDATE', async () => {
+  const dir = tmpDir();
+  try {
+    const { store, human } = await makeHarness(dir);
+    store.saveItem('work', { type: 'login', username: null, password: 'OldPass1!', origin: A });
+    store.lockNow();
+    const held = human.capture({
+      wcId: 10,
+      username: null,
+      usernameDetected: false,
+      passwordBytes: bytesOf('NewPass2!'),
+      currentPasswordBytes: bytesOf('OldPass1!')
+    });
+    assert.equal(held.model.mode, 'locked');
+    await store.unlock(MASTER);
+    const finalized = human.captureFinalize(held.captureId);
+    assert.ok(finalized.captureId);
+    assert.equal(finalized.model.mode, 'update');
+  } finally {
+    rm(dir);
+  }
+});
+
+test("AC14(g)/design-review-HIGH: captureSave persists the MATCHED row's username, not null — an update, not a duplicate item", async () => {
+  const dir = tmpDir();
+  try {
+    const { store, human } = await makeHarness(dir);
+    store.saveItem('work', { type: 'login', username: 'alice', password: 'old', origin: A });
+    const beforeCount = store.listItems('work').length;
+
+    const offer = human.capture({
+      wcId: 10,
+      username: null,
+      usernameDetected: false,
+      passwordBytes: bytesOf('new'),
+      currentPasswordBytes: bytesOf('old')
+    });
+    assert.ok(offer);
+    assert.equal(offer.model.mode, 'update');
+    assert.equal(offer.model.username, 'alice', "rec.username reassigned to the matched row's username after dispose");
+
+    const saved = human.captureSave({ captureId: offer.captureId, vaultId: 'work' });
+    assert.deepEqual(saved, { saved: true });
+
+    const items = store.listItems('work');
+    assert.equal(items.length, beforeCount, 'an UPDATE, not a new item');
+    const item = items.find((i) => i.password === 'new');
+    assert.ok(item, 'the rotated password was persisted');
+    assert.equal(item.username, 'alice', 'the stored username survived the update — not silently blanked to null');
+  } finally {
+    rm(dir);
+  }
+});
+
+test("AC12: never match an EMPTY current-password value (an empty currentPasswordBytes never runs DD4's match)", async () => {
+  const dir = tmpDir();
+  try {
+    const { store, human } = await makeHarness(dir);
+    // A login whose stored password happens to be the empty string, with a
+    // username that does NOT tie to the capture's own (so the ONLY way this
+    // could resolve 'update' is a DD4 match against the empty stored value).
+    store.saveItem('work', { type: 'login', username: 'someone-else', password: '', origin: A });
+    const offer = human.capture({
+      wcId: 10,
+      username: null,
+      usernameDetected: false,
+      passwordBytes: bytesOf('NewPass2!'),
+      currentPasswordBytes: new Uint8Array(0) // explicitly EMPTY, not absent
+    });
+    assert.ok(offer);
+    assert.equal(
+      offer.model.mode,
+      'save',
+      "an empty currentPasswordBytes must never match a login's own empty stored password"
+    );
+  } finally {
+    rm(dir);
+  }
+});
+
+test("AC12: no currentPassword at all never triggers the DD4 match path (today's rule alone decides)", async () => {
+  const dir = tmpDir();
+  try {
+    const { store, human } = await makeHarness(dir);
+    store.saveItem('work', { type: 'login', username: 'someone-else', password: 'anything', origin: A });
+    const offer = human.capture({
+      wcId: 10,
+      username: null,
+      usernameDetected: false,
+      passwordBytes: bytesOf('NewPass2!')
+      // no currentPasswordBytes at all
+    });
+    assert.ok(offer);
+    assert.equal(offer.model.mode, 'save');
+  } finally {
+    rm(dir);
+  }
+});
+
+test("AC15: capture()'s unlocked branch zeroizes+DELETES rec.currentPassword once disposition is computed", async () => {
+  const dir = tmpDir();
+  try {
+    const { human } = await makeHarness(dir);
+    const offer = human.capture({
+      wcId: 10,
+      username: 'me@a',
+      usernameDetected: true,
+      passwordBytes: bytesOf('new-pw'),
+      currentPasswordBytes: bytesOf('old-pw')
+    });
+    assert.ok(offer, 'a save offer was returned (no stored login yet)');
+    const dropped = human.dropCapturesForTab(10);
+    assert.equal(dropped.length, 1);
+    assert.equal(
+      dropped[0].currentPassword,
+      undefined,
+      'currentPassword was DELETED (not merely zeroized-in-place) once disposition was computed'
+    );
+  } finally {
+    rm(dir);
+  }
+});
+
+test("AC15: captureFinalize's login dispatch also zeroizes+DELETES rec.currentPassword", async () => {
+  const dir = tmpDir();
+  try {
+    const { store, human } = await makeHarness(dir);
+    store.lockNow();
+    const held = human.capture({
+      wcId: 10,
+      username: 'me@a',
+      usernameDetected: true,
+      passwordBytes: bytesOf('new-pw'),
+      currentPasswordBytes: bytesOf('old-pw')
+    });
+    assert.equal(held.model.mode, 'locked');
+    await store.unlock(MASTER);
+    const finalized = human.captureFinalize(held.captureId);
+    assert.ok(finalized.captureId);
+    const dropped = human.dropCapturesForTab(10);
+    assert.equal(dropped.length, 1);
+    assert.equal(dropped[0].currentPassword, undefined);
+  } finally {
+    rm(dir);
+  }
+});
+
+test("AC15b: capture()'s GATE-REFUSAL early return zeroizes an incoming currentPasswordBytes, symmetric with passwordBytes", async () => {
+  const dir = tmpDir();
+  try {
+    const { human } = await makeHarness(dir, { setup: false }); // not set up -> gate refusal
+    const currentBytes = bytesOf('old-pw');
+    const offer = human.capture({
+      wcId: 10,
+      username: 'me@a',
+      usernameDetected: true,
+      passwordBytes: bytesOf('new-pw'),
+      currentPasswordBytes: currentBytes
+    });
+    assert.equal(offer, null);
+    assert.ok(
+      currentBytes.every((b) => b === 0),
+      'the incoming currentPasswordBytes array is zeroized even on a gate refusal'
+    );
+  } finally {
+    rm(dir);
+  }
+});
+
 /* ------------------------------------------------------------------- gate (integration) */
 
 test('capture GATE: not set up → null (no offer), incoming array still zeroized', async () => {

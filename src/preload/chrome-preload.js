@@ -441,6 +441,10 @@ contextBridge.exposeInMainWorld('goldfinch', {
   // chrome-originated invokes; the wcId is the trusted, main-derived gesture tab id.
   vaultReachableItems: (wcId) => ipcRenderer.invoke('vault-reachable-items', wcId),
   vaultFillHuman: (payload) => ipcRenderer.invoke('vault-fill-human', payload),
+  // Generate-in-picker (Mission 21, Flight 4, Leg 3, AC12): the chosen "Generate
+  // strong password" row's dispatch. Carries the (main-re-validated) field
+  // constraints only — NEVER a password; returns { filled } only, no secret.
+  vaultFillGenerated: (payload) => ipcRenderer.invoke('vault-fill-generated', payload),
   // Capture-save (M12 F2 Leg 4, DD7): main forwards a save/update offer as
   // { captureId, model } (model = origin/username/mode/defaultVaultId/choices — NO
   // password). The chrome opens the vault-capture sheet with it; the sheet's own Save

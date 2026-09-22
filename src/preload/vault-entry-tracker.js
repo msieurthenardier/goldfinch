@@ -227,6 +227,8 @@ function createEntryTracker({ execInWorld, installScript, warn }) {
     fillLogin: (payload) => runFill('fillLogin', payload),
     fillCard: (payload) => runFill('fillCard', payload),
     fillIdentity: (payload) => runFill('fillIdentity', payload),
+    // Generate-in-picker (Mission 21, Flight 4, Leg 3 — generate-in-picker, DD7).
+    fillGenerated: (payload) => runFill('fillGenerated', payload),
     // The gesture-time snapshot read (Leg 5).
     readSnapshot
   };

@@ -145,6 +145,28 @@ test('dropCapturesForTab: drops only the named tab’s capture; a sibling tab in
   }
 });
 
+test("AC11 (Mission 21, Flight 4, Leg 2 — password-field-roles): dropCapture zeroizes a held currentPassword buffer (LD7's zeroize-every-Buffer sweep, no edit needed)", async () => {
+  const dir = tmpDir();
+  try {
+    const { human } = await makeHarness(dir);
+    // holdGestureLogin's 'pending-settle' state keeps rec.currentPassword held
+    // (unzeroized) until a settle release computes disposition — drop it directly
+    // to read the buffer back, the only way a test can reach a held secret.
+    human.holdGestureLogin({
+      wcId: 10,
+      username: 'a@a',
+      usernameDetected: true,
+      passwordBytes: bytesOf('new-secret'),
+      currentPasswordBytes: bytesOf('old-secret')
+    });
+    const dropped = human.dropCapturesForTab(10);
+    assert.equal(dropped.length, 1);
+    assert.ok(allZero(dropped[0].currentPassword), 'currentPassword buffer reads all-zero after drop');
+  } finally {
+    rm(dir);
+  }
+});
+
 test('dropCapturesForTab: idempotent — dropping an already-empty tab returns []', async () => {
   const dir = tmpDir();
   try {

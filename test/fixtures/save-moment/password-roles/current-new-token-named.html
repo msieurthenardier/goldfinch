@@ -1,0 +1,19 @@
+<!--
+  Fixture: current-new-token-named
+  Corpus tier: gated (positive). Family: login. Leg: password-field-roles.
+  Same current+new, no-confirm shape as current-new-marked.html, but resolved
+  entirely through DD1's layer 2 (fallback name/id tokens) instead of
+  autocomplete: `oldPassword` -> current (the "old" token), `newPassword` ->
+  new (the "new" token) — camelCase, so `normalizeFieldHaystack`'s hump-space
+  insertion is what makes the word-boundary match fire at all.
+  Added: 2026-09-22 (Mission 21, Flight 4, Leg 2 — password-field-roles).
+-->
+<form id="change-password" action="/account/password" method="post">
+  <label for="cn-username">Username</label>
+  <input type="text" id="cn-username" name="username" autocomplete="username" value="carol" readonly />
+  <label for="cn-old">Current password</label>
+  <input type="password" id="cn-old" name="oldPassword" value="StalePass7!" />
+  <label for="cn-new">New password</label>
+  <input type="password" id="cn-new" name="newPassword" value="ShinyPass6!" />
+  <button type="submit">Change password</button>
+</form>

@@ -523,7 +523,15 @@ interface GoldfinchBridge {
   onTabMediaList(cb: (d: { wcId: number; mediaList: any[] }) => void): void;
   onTabPrivacyFp(cb: (d: { wcId: number; fpCounts: any }) => void): void;
   onTabSelfClose(cb: (d: { wcId: number; historyLength: number }) => void): void;
-  onVaultGesture(cb: (d: { wcId: number }) => void): void;
+  onVaultGesture(
+    cb: (d: {
+      wcId: number;
+      generate?: {
+        canGenerate: boolean;
+        constraints: { minLength: number | null; maxLength: number | null; passwordRules: string | null };
+      };
+    }) => void
+  ): void;
   // HTTP auth challenge presentation trigger (M14 F1 L2, flight DD2). Main's
   // pending-challenge store forwards host + realm (NEVER a secret); the chrome
   // opens the auth-basic sheet through the standard open path. `popup` (M14 F2
@@ -587,6 +595,13 @@ interface GoldfinchBridge {
     wcId: number;
     vaultId: string;
     itemId: string;
+  }): Promise<{ filled: boolean; reason?: string }>;
+  /** Generate-in-picker (Mission 21, Flight 4, Leg 3, AC12/AC13): main re-validates the
+   * constraints, generates the candidates, and fills main->guest entirely in main — the
+   * chrome never receives or holds the generated password. */
+  vaultFillGenerated(payload: {
+    wcId: number;
+    constraints: { minLength: number | null; maxLength: number | null; passwordRules: string | null };
   }): Promise<{ filled: boolean; reason?: string }>;
   // Capture-save (M12 F2 Leg 4, DD7): the save/update offer subscriber (model is
   // metadata only — never a password) + the dismiss-drop invoke. Both chrome-side.

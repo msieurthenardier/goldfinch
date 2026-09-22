@@ -1,12 +1,22 @@
 'use strict';
 
 // Decorative vault fill-icon subsystem for the guest main-world preload
-// (Mission 12, Flight 2 / Flight 5 HAT). Factored OUT of webview-preload.js so
-// the icon glyph, placement, focus-gating and the isTrusted-guarded click /
-// contextmenu handlers unit-test headlessly against a hand-rolled fake
-// `document` — the preload itself cannot be required under `node --test` (its
-// top-level `window` / MutationObserver / ipcRenderer side-effects throw in
-// plain Node), so the testable core lives here, mirroring vault-fill-fields.js.
+// (Mission 12, Flight 2 / Flight 5 HAT; the glyph redesigned Mission 21 Flight
+// 4 Leg 4 — goldfinch-badge, DD9 — as a round disc+corner-overlay, then
+// REDESIGNED AGAIN at Flight 4 Leg 5's HAT ("look-and-feel FIX, not a
+// feature" — the operator found the round badge hard to read). Factored OUT
+// of webview-preload.js so the icon glyph, placement, focus-gating and the
+// isTrusted-guarded click / contextmenu handlers unit-test headlessly against
+// a hand-rolled fake `document` — the preload itself cannot be required under
+// `node --test` (its top-level `window` / MutationObserver / ipcRenderer
+// side-effects throw in plain Node), so the testable core lives here,
+// mirroring vault-fill-fields.js.
+//
+// The current glyph is a TOGGLE-SWITCH pill (30×16, no border/chip): a dark
+// neutral track, the padlock drawn IN the track on the left (closed/amber
+// when locked, open/green when unlocked), and the Goldfinch mark as the
+// switch's KNOB on the right (bird silhouette, unchanged across lock states)
+// — see `buildVaultLockIcon`'s own doc comment for the shape breakdown.
 //
 // F2 SECURITY INVARIANTS PRESERVED HERE (do not weaken):
 //   - the icon is DECORATIVE — it holds NO credential/secret; a hostile page
@@ -17,30 +27,67 @@
 //     right-click sends a BARE IPC (`guest-vault-icon-menu`, no payload) — main
 //     derives the trusted wcId from the sender; no secret ever enters the DOM.
 
+// Generate-in-picker gesture payload (Mission 21, Flight 4, Leg 3 —
+// generate-in-picker, DD5/AC7): a pure, Electron-free preload module already
+// required directly by password-field-roles.test.js and vault-capture-plan.js
+// — a plain `require()` here, not an injected dep, matching that precedent.
+const { generateGestureInfo } = require('./password-field-roles');
+
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const ICON_ATTR = 'data-goldfinch-vault-lock';
 
-// Glyph colors (drive currentColor → shackle stroke + body fill). Amber when LOCKED
-// (an action — unlock — is needed before a fill), green when UNLOCKED (ready to fill).
-// Both read on the light chip background AND on light/dark form fields.
-const COLOR_LOCKED = '#b06000';
-const COLOR_UNLOCKED = '#137333';
+// The badge's rendered size (Flight 4 Leg 5 HAT — a 30×16 toggle-switch pill,
+// up from the 16×16 disc). Drives both `createIcon`'s inline style and
+// `positionIcon`'s trailing-edge/vertical-centering math below.
+const ICON_WIDTH = 30;
+const ICON_HEIGHT = 16;
+
+// Glyph colors (drive currentColor → shackle stroke + lock-body fill). Amber
+// when LOCKED (an action — unlock — is needed before a fill), green when
+// UNLOCKED (ready to fill). Brighter than the prior chip-era pair (Flight 4
+// Leg 4's #b06000/#137333) — these read against the DARK toggle track itself
+// (there is no light chip background any more), not against a form field.
+const COLOR_LOCKED = '#e8a33d';
+const COLOR_UNLOCKED = '#34c46a';
 
 /**
- * Build the decorative lock glyph as an INLINE SVG (never innerHTML, never an
- * emoji — the guest has no emoji font, so `🔒` renders as a tofu box `□`). A
- * ~16px padlock: a currentColor shackle + body inside a light rounded chip, so
- * it stays legible on both light and dark form fields. Carries role="img",
- * aria-label and the `data-goldfinch-vault-lock` marker.
+ * Build the decorative fill badge as an INLINE SVG (never innerHTML, never an
+ * emoji, never a `<use>`/`<image>`/external reference — the guest has no emoji
+ * font, so `🔒` renders as a tofu box `□`, and a fetched image would be a new
+ * network request from the browser chrome's own preload). The badge is a
+ * 30×16 TOGGLE-SWITCH pill, no border/chip (Mission 21, Flight 4, Leg 5 HAT —
+ * variant 'A' of a design-lab page the operator picked from, superseding
+ * Leg 4's round disc+corner-overlay shape): a dark neutral track (`#2b2d31`),
+ * the padlock drawn directly IN the track on the LEFT, and the Goldfinch mark
+ * as the switch's KNOB on the RIGHT (bird silhouette, unchanged across lock
+ * states). Carries role="img", aria-label and the `data-goldfinch-vault-lock`
+ * marker.
  *
- * State (the vault lock indicator): when `locked` the shackle is CLOSED (both legs
- * into the body) and the label says the vault must be unlocked; when unlocked the
- * shackle is OPEN (the right leg lifts free of the body) and the label offers the
- * fill. Color is applied by the controller (createIcon) via the chip's `color`.
+ * State (the vault lock indicator): every shape except the lock's shackle is
+ * IDENTICAL between locked and unlocked builds — track, lock body, knob, and
+ * the whole bird (cap/mask/beak/eye) never change. When `locked` the shackle
+ * is CLOSED (both legs reach the lock body) and the label says the vault must
+ * be unlocked; when unlocked the shackle is OPEN (the right leg lifts free of
+ * the body) and the label offers the fill. The shackle's color is applied by
+ * the controller (createIcon) via `currentColor`
+ * (`COLOR_LOCKED`/`COLOR_UNLOCKED`); the lock body always fills with the same
+ * `currentColor` so body + shackle read as one glyph.
  *
  * `kind` names the ANCHOR's field family ('login' | 'card' | 'identity', issue
  * #152 / M21 F3 Leg 3) and drives the accessible name only — the glyph is
  * identical, and the icon stays decorative and secret-free either way.
+ *
+ * The FIRST child is a `<title>` element (native hover tooltip, Flight 4 Leg 5
+ * HAT operator ruling) with fixed text `"Open Vault"` — same for every kind
+ * and both lock states, and a CHILD element rather than a `title` ATTRIBUTE
+ * on the root (an attribute would widen the root attribute-key pin below).
+ * Every remaining child is a bare presentational shape (`circle`/`path`/
+ * `rect`) built via `createElementNS` + `setAttribute`, carrying only
+ * geometry/paint attributes (`cx cy r d x y width height rx fill stroke
+ * stroke-width stroke-linecap stroke-linejoin`) — never an inline `style`
+ * attribute, and never a `<g transform>` (the bird's knob-space coordinates
+ * are baked in numerically at build time instead — see the inline comment
+ * below).
  * @param {any} doc  a `document`-like object exposing createElementNS.
  * @param {boolean} [locked]  vault lock state (default true — the safe/closed default).
  * @param {'login'|'card'|'identity'} [kind]  the anchor's field family (default 'login').
@@ -58,39 +105,106 @@ function buildVaultLockIcon(doc, locked = true, kind = 'login') {
   // hostile page can read" guard, and a second kind carrier would widen that pin
   // for pure redundancy.
   svg.setAttribute('data-locked', locked ? 'true' : 'false');
-  svg.setAttribute('viewBox', '0 0 24 24');
-  svg.setAttribute('width', '16');
+  svg.setAttribute('viewBox', '0 0 30 16');
+  svg.setAttribute('width', '30');
   svg.setAttribute('height', '16');
   svg.setAttribute('focusable', 'false');
 
-  // Shackle (the arc): stroked, no fill. CLOSED → both legs reach the body (…V11);
-  // OPEN → the right leg lifts free (no trailing …V11), reading as an open hasp.
+  // Native hover tooltip (Flight 4 Leg 5 HAT, operator ruling): a `<title>`
+  // CHILD element, not a `title` ATTRIBUTE on the root — an attribute would
+  // widen the root attribute-KEY pin below; a child element leaves it byte-
+  // identical. Same fixed text for every kind and both lock states
+  // (aria-label remains the accessible name and stays kind/state-specific —
+  // aria-label outranks <title> for accessibility, this is purely the
+  // mouse-hover native tooltip). Appended FIRST so it precedes every shape.
+  const title = doc.createElementNS(SVG_NS, 'title');
+  title.textContent = 'Open Vault';
+  svg.appendChild(title);
+
+  // --- the track (the pill's background) — always the same neutral dark
+  // fill, regardless of lock state.
+
+  const track = doc.createElementNS(SVG_NS, 'rect');
+  track.setAttribute('x', '0');
+  track.setAttribute('y', '0');
+  track.setAttribute('width', '30');
+  track.setAttribute('height', '16');
+  track.setAttribute('rx', '8');
+  track.setAttribute('fill', '#2b2d31');
+
+  // --- the lock (shackle + body), drawn IN the track on the left — the ONLY
+  // part whose shape changes between locked and unlocked builds.
+
+  // Shackle (the arc): stroked, no fill, currentColor (set by the controller
+  // per lock state). CLOSED → both legs reach the lock body (…V7.2); OPEN →
+  // the right leg lifts free (no trailing …V7.2), reading as an open hasp.
   const shackle = doc.createElementNS(SVG_NS, 'path');
-  shackle.setAttribute('d', locked ? 'M8 11 V8 a4 4 0 0 1 8 0 V11' : 'M8 11 V8 a4 4 0 0 1 8 0');
+  shackle.setAttribute('d', locked ? 'M6.2 7.2 V5.5 a1.8 1.8 0 0 1 3.6 0 V7.2' : 'M6.2 7.2 V5.5 a1.8 1.8 0 0 1 3.6 0');
   shackle.setAttribute('fill', 'none');
   shackle.setAttribute('stroke', 'currentColor');
-  shackle.setAttribute('stroke-width', '2');
+  shackle.setAttribute('stroke-width', '1.7');
   shackle.setAttribute('stroke-linecap', 'round');
 
-  // Body (the lock box): filled with currentColor.
-  const body = doc.createElementNS(SVG_NS, 'rect');
-  body.setAttribute('x', '5');
-  body.setAttribute('y', '11');
-  body.setAttribute('width', '14');
-  body.setAttribute('height', '9');
-  body.setAttribute('rx', '2');
-  body.setAttribute('fill', 'currentColor');
+  // Lock body: filled with currentColor (same color as the shackle).
+  const lockBody = doc.createElementNS(SVG_NS, 'rect');
+  lockBody.setAttribute('x', '4.5');
+  lockBody.setAttribute('y', '7.2');
+  lockBody.setAttribute('width', '7');
+  lockBody.setAttribute('height', '5.4');
+  lockBody.setAttribute('rx', '1.2');
+  lockBody.setAttribute('fill', 'currentColor');
 
-  // Keyhole (negative space) so the body reads as a lock even at 16px.
-  const keyhole = doc.createElementNS(SVG_NS, 'circle');
-  keyhole.setAttribute('cx', '12');
-  keyhole.setAttribute('cy', '15');
-  keyhole.setAttribute('r', '1.4');
-  keyhole.setAttribute('fill', 'rgba(255,255,255,0.9)');
+  // --- the Goldfinch mark, as the switch's KNOB on the right (cx 22.4, cy 8,
+  // r 6.6) — IDENTICAL in both lock states. The knob circle IS the mark's
+  // disc backdrop; cap/mask/beak/eye are the original 24-unit bird shapes
+  // (unchanged coordinates from the Leg 4 disc badge), scaled and translated
+  // into the knob's coordinate space numerically (scale factor (2*6.6)/21,
+  // rounded to 2 decimals at each point) rather than via a `<g transform>`,
+  // per this function's own "no transform" rule above.
 
+  const knob = doc.createElementNS(SVG_NS, 'circle');
+  knob.setAttribute('cx', '22.4');
+  knob.setAttribute('cy', '8');
+  knob.setAttribute('r', '6.6');
+  knob.setAttribute('fill', '#E8B83A');
+
+  const cap = doc.createElementNS(SVG_NS, 'path');
+  cap.setAttribute(
+    'd',
+    'M18.38 6.37 C19.01 3.54 22.02 2.47 24.66 3.35 C27.05 4.17 28.31 6.62 27.55 9.38 ' +
+      'C26.93 7.62 25.54 6.30 23.85 5.99 C21.90 5.67 20.14 5.86 18.38 6.37 Z'
+  );
+  cap.setAttribute('fill', '#141414');
+
+  const mask = doc.createElementNS(SVG_NS, 'path');
+  mask.setAttribute(
+    'd',
+    'M18.38 6.37 C20.01 5.80 21.90 5.74 23.28 6.30 C23.53 7.75 22.78 9.19 21.39 10.14 ' +
+      'C20.64 8.88 19.63 8.06 18.50 7.75 Z'
+  );
+  mask.setAttribute('fill', '#D7222B');
+
+  const beak = doc.createElementNS(SVG_NS, 'path');
+  beak.setAttribute('d', 'M18.50 6.43 L15.61 7.50 L18.57 8.19 Z');
+  beak.setAttribute('fill', '#E8B83A');
+  beak.setAttribute('stroke', '#141414');
+  beak.setAttribute('stroke-width', '0.44');
+  beak.setAttribute('stroke-linejoin', 'round');
+
+  const eye = doc.createElementNS(SVG_NS, 'circle');
+  eye.setAttribute('cx', '21.27');
+  eye.setAttribute('cy', '6.99');
+  eye.setAttribute('r', '0.79');
+  eye.setAttribute('fill', '#141414');
+
+  svg.appendChild(track);
   svg.appendChild(shackle);
-  svg.appendChild(body);
-  svg.appendChild(keyhole);
+  svg.appendChild(lockBody);
+  svg.appendChild(knob);
+  svg.appendChild(cap);
+  svg.appendChild(mask);
+  svg.appendChild(beak);
+  svg.appendChild(eye);
   return svg;
 }
 
@@ -282,8 +396,24 @@ function createVaultIconController({
     pendingFillTarget = target
       ? { kind: target.kind, field: target.field, expiresAt: clock() + FILL_TARGET_TTL_MS }
       : null;
+    // Generate-in-picker gesture payload (Mission 21, Flight 4, Leg 3, DD5/AC7):
+    // computed ONLY for a resolved LOGIN target — a card/identity/unresolved
+    // gesture stays bare ({}), exactly as every gesture did before this leg.
+    // The ordinal is the CLICKED entry's own index (there is one
+    // findAllLoginFields entry PER password field, so a multi-password scope
+    // has one ordinal per field) — never re-derived from `anchor` (which may
+    // be the entry's username field, not its password field).
+    /** @type {{ generate?: any }} */
+    let payload = {};
+    if (target && target.kind === 'login') {
+      const loginEntries = findAllLoginFields(doc);
+      const ordinal = loginEntries.findIndex((entry) => entry.password === target.field);
+      if (ordinal !== -1) {
+        payload = { generate: generateGestureInfo(loginEntries, ordinal) };
+      }
+    }
     try {
-      ipcRenderer.send('guest-vault-gesture', {}); // NO secret — wcId derived in main
+      ipcRenderer.send('guest-vault-gesture', payload); // NO secret — wcId derived in main
     } catch {
       /* page navigated away mid-click */
     }
@@ -322,14 +452,14 @@ function createVaultIconController({
     s.zIndex = '2147483647';
     s.cursor = 'pointer';
     s.boxSizing = 'border-box';
-    s.width = '16px';
-    s.height = '16px';
-    // Light chip; the glyph is color-coded by lock state (amber=locked, green=unlocked) and
-    // reads on both light AND dark form fields against the near-white chip.
+    s.width = `${ICON_WIDTH}px`;
+    s.height = `${ICON_HEIGHT}px`;
+    // No chip (Flight 4 Leg 5 HAT) — the track rect drawn by buildVaultLockIcon
+    // IS the visible shape; the glyph is color-coded by lock state
+    // (amber=locked, green=unlocked) and reads directly against the dark track.
     s.color = vaultLocked ? COLOR_LOCKED : COLOR_UNLOCKED;
-    s.background = 'rgba(255,255,255,0.9)';
-    s.border = '1px solid rgba(0,0,0,0.2)';
-    s.borderRadius = '3px';
+    s.background = 'transparent';
+    s.border = 'none';
     s.userSelect = 'none';
     s.pointerEvents = 'auto';
     el.addEventListener('mousedown', onIconMouseDown);
@@ -382,16 +512,19 @@ function createVaultIconController({
   // its padding box, the actual `position:absolute` containing block. Absent an
   // ancestor (none found, or the icon is body-placed), fall back to the original
   // scroll-relative math — which is already correct for a body-placed icon.
+  // ICON_WIDTH/ICON_HEIGHT drive both the trailing-edge inset (a 4px gap from
+  // the field's own edge, Flight 4 Leg 5 HAT — was a bare `- 20` sized for the
+  // old 16px-wide badge) and the vertical centering.
   function positionIcon(icon, rect, ancestor) {
     let top;
     let left;
     if (ancestor && typeof ancestor.getBoundingClientRect === 'function') {
       const aRect = ancestor.getBoundingClientRect();
-      top = rect.top - aRect.top - (ancestor.clientTop || 0) + (rect.height - 16) / 2;
-      left = rect.left - aRect.left - (ancestor.clientLeft || 0) + rect.width - 20;
+      top = rect.top - aRect.top - (ancestor.clientTop || 0) + (rect.height - ICON_HEIGHT) / 2;
+      left = rect.left - aRect.left - (ancestor.clientLeft || 0) + rect.width - ICON_WIDTH - 4;
     } else {
-      top = rect.top + (win.scrollY || 0) + (rect.height - 16) / 2;
-      left = rect.left + (win.scrollX || 0) + rect.width - 20;
+      top = rect.top + (win.scrollY || 0) + (rect.height - ICON_HEIGHT) / 2;
+      left = rect.left + (win.scrollX || 0) + rect.width - ICON_WIDTH - 4;
     }
     icon.style.top = `${Math.max(0, top)}px`;
     icon.style.left = `${Math.max(0, left)}px`;

@@ -977,7 +977,7 @@ const overlayDispatch = createOverlayDispatch({
   handleBookmarkStarActivate,
   dispatchSuggestion: (id) => navigationController.dispatchSuggestion(id),
   handleSuggestionsClosed: (reason) => navigationController.handleSuggestionsClosed(reason),
-  lockVaultNow: () => vaultController.lockNow(),
+  vaultIndicatorAction: (action) => vaultController.indicatorAction(action),
   vaultHandleClosed: (payload) => vaultController.handleClosed(payload),
   siteSecurityHandleClosed: (payload) => siteSecurityController.handleClosed(payload),
   bridge: window.goldfinch,

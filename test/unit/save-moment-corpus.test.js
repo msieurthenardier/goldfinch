@@ -55,7 +55,9 @@ const {
   assertCapturesEntry,
   assertOffersEntry,
   assertOffersFamilies,
-  assertNoOffer
+  assertNoOffer,
+  assertPlansLogin,
+  assertNoLoginPlan
 } = require('../helpers/save-moment-assertions');
 
 const FIXTURES_DIR = path.join(__dirname, '..', 'fixtures', 'save-moment');
@@ -69,7 +71,22 @@ const KNOWN_TIERS = new Set(['gated', 'known-unsolved', 'negative-detection', 'n
 // 'offers-multi' (Mission 21, Flight 3, Leg 6 — gesture-holds-every-family) is
 // the multi-family sibling — see manifest.js's own entry-shape doc and
 // save-moment-assertions.js's assertOffersFamilies.
-const KNOWN_ASSERTS = new Set(['detects', 'no-detect', 'captures', 'offers', 'offers-multi', 'no-offer']);
+// 'plans-login' / 'no-login-plan' (Mission 21, Flight 4, Leg 2 —
+// password-field-roles) are the sign-up/rotation-payload siblings of
+// 'offers'/'no-offer': 'plans-login' additionally pins classifyPasswordScope's
+// own roles AND the planned login payload's password/currentPassword/username
+// fields (see save-moment-assertions.js's assertPlansLogin); 'no-login-plan'
+// is the negative.
+const KNOWN_ASSERTS = new Set([
+  'detects',
+  'no-detect',
+  'captures',
+  'offers',
+  'offers-multi',
+  'no-offer',
+  'plans-login',
+  'no-login-plan'
+]);
 // Tiers whose real-world outcome cannot be computed yet — the mechanism the
 // flight settled on for clean promotion (Node 22.22.0-verified in the flight
 // log: a todo that starts passing does not fail the run). Leg 5
@@ -126,6 +143,22 @@ function runAssertion(entry) {
   }
   if (entry.assert === 'no-offer') {
     assertNoOffer(doc, { gestureSelector: entry.gestureSelector });
+    return;
+  }
+  if (entry.assert === 'plans-login') {
+    assertPlansLogin(doc, {
+      expectRoles: entry.expectRoles,
+      expectPassword: entry.expectPassword,
+      expectCurrentPassword: entry.expectCurrentPassword,
+      expectUsernameDetected: entry.expectUsernameDetected,
+      expectUsername: entry.expectUsername,
+      gestureSelector: entry.gestureSelector,
+      ungranted: entry.ungranted
+    });
+    return;
+  }
+  if (entry.assert === 'no-login-plan') {
+    assertNoLoginPlan(doc, { gestureSelector: entry.gestureSelector, ungranted: entry.ungranted });
     return;
   }
   throw new Error(`manifest entry "${entry.id}" carries an unknown assert kind: ${entry.assert}`);

@@ -67,14 +67,16 @@ async function makeHarness(dir) {
   ]);
 
   const fillCalls = [];
+  const fillGeneratedCalls = [];
   const human = createVaultHuman({
     getVaultStore: () => store,
     fromId: (id) => (urls[id] != null ? { getURL: () => urls[id] } : null),
     getTabEntry: (id) => entries.get(id),
     listJars: () => JARS,
-    fillDelegate: (arg) => fillCalls.push(arg)
+    fillDelegate: (arg) => fillCalls.push(arg),
+    fillGeneratedDelegate: (arg) => fillGeneratedCalls.push(arg)
   });
-  return { store, human, fillCalls, workItem, globalItem };
+  return { store, human, fillCalls, fillGeneratedCalls, workItem, globalItem };
 }
 
 test('happy path (jar credential): fillDelegate gets the resolved credential; no password returned', async () => {
@@ -199,6 +201,109 @@ test('reachableItems: [] when the store is locked', async () => {
     const { store, human } = await makeHarness(dir);
     store.lockNow();
     assert.deepEqual(human.reachableItems(10), []);
+  } finally {
+    rm(dir);
+  }
+});
+
+// --- fillGenerated (Mission 21, Flight 4, Leg 3 — generate-in-picker, AC13) ---
+
+test('fillGenerated: happy path — delegate gets the candidates, no unlock required, return carries no candidate', async () => {
+  const dir = tmpDir();
+  try {
+    const { store, human, fillGeneratedCalls } = await makeHarness(dir);
+    store.lockNow(); // AC13: fillGenerated does NOT require unlocked.
+    const res = human.fillGenerated({ wcId: 10, candidates: ['Abc123!!', 'xyz98765'] });
+
+    assert.deepEqual(res, { filled: true });
+    assert.equal(fillGeneratedCalls.length, 1);
+    assert.deepEqual(fillGeneratedCalls[0], { wcId: 10, candidates: ['Abc123!!', 'xyz98765'] });
+    assert.ok(!('candidates' in res) && !('candidate' in res), 'the return never carries a candidate');
+  } finally {
+    rm(dir);
+  }
+});
+
+test('fillGenerated: a burner tab is ineligible (no persistent jar) — no delegate call', async () => {
+  const dir = tmpDir();
+  try {
+    const { human, fillGeneratedCalls } = await makeHarness(dir);
+    const res = human.fillGenerated({ wcId: 20, candidates: ['Abc123!!'] });
+    assert.deepEqual(res, { filled: false, reason: 'ineligible' });
+    assert.equal(fillGeneratedCalls.length, 0);
+  } finally {
+    rm(dir);
+  }
+});
+
+test('fillGenerated: a closed tab (no origin) is ineligible', async () => {
+  const dir = tmpDir();
+  try {
+    const { human, fillGeneratedCalls } = await makeHarness(dir);
+    const res = human.fillGenerated({ wcId: 30, candidates: ['Abc123!!'] });
+    assert.deepEqual(res, { filled: false, reason: 'ineligible' });
+    assert.equal(fillGeneratedCalls.length, 0);
+  } finally {
+    rm(dir);
+  }
+});
+
+test('fillGenerated: an empty/non-array candidates list is unsatisfiable', async () => {
+  const dir = tmpDir();
+  try {
+    const { human, fillGeneratedCalls } = await makeHarness(dir);
+    assert.deepEqual(human.fillGenerated({ wcId: 10, candidates: [] }), {
+      filled: false,
+      reason: 'unsatisfiable'
+    });
+    assert.deepEqual(human.fillGenerated({ wcId: 10, candidates: null }), {
+      filled: false,
+      reason: 'unsatisfiable'
+    });
+    assert.equal(fillGeneratedCalls.length, 0);
+  } finally {
+    rm(dir);
+  }
+});
+
+test('fillGenerated: the vault must be set up (no store row) -> ineligible', async () => {
+  const dir = tmpDir();
+  try {
+    // A store that was never set up: isSetUp() is false regardless of jar/origin.
+    const store = vs.load(dir, { scryptParams: FAST_SCRYPT, getAutoLockMinutes: () => 10, listJars: () => JARS });
+    const human = createVaultHuman({
+      getVaultStore: () => store,
+      fromId: (id) => (id === 10 ? { getURL: () => A + '/login' } : null),
+      getTabEntry: (id) => (id === 10 ? { partition: 'persist:container:work', trusted: false } : null),
+      listJars: () => JARS,
+      fillGeneratedDelegate: () => {}
+    });
+    assert.equal(store.isSetUp(), false);
+    assert.deepEqual(human.fillGenerated({ wcId: 10, candidates: ['Abc123!!'] }), {
+      filled: false,
+      reason: 'ineligible'
+    });
+  } finally {
+    rm(dir);
+  }
+});
+
+test('fillGenerated: an omitted fillGeneratedDelegate refuses rather than throwing', async () => {
+  const dir = tmpDir();
+  try {
+    const store = vs.load(dir, { scryptParams: FAST_SCRYPT, getAutoLockMinutes: () => 10, listJars: () => JARS });
+    await store.setup({ masterPassword: MASTER });
+    const human = createVaultHuman({
+      getVaultStore: () => store,
+      fromId: (id) => (id === 10 ? { getURL: () => A + '/login' } : null),
+      getTabEntry: (id) => (id === 10 ? { partition: 'persist:container:work', trusted: false } : null),
+      listJars: () => JARS
+      // no fillGeneratedDelegate injected
+    });
+    assert.deepEqual(human.fillGenerated({ wcId: 10, candidates: ['Abc123!!'] }), {
+      filled: false,
+      reason: 'ineligible'
+    });
   } finally {
     rm(dir);
   }

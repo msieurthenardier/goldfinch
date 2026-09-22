@@ -15,8 +15,9 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { createVaultController } = require('../../src/renderer/chrome/vault-controller');
 
-// Minimal fake DOM element for the vault-indicator contextmenu-wiring cases below:
-// records the listener so a test can fire a synthetic 'contextmenu' event.
+// Minimal fake DOM element for the vault-indicator contextmenu/click-wiring cases below:
+// records the listener so a test can fire a synthetic event. classList/setAttribute are
+// no-op stubs — renderVaultIndicator (driven by onVaultLockState) touches both.
 function fakeVaultIndicatorEl() {
   /** @type {Record<string, Function>} */
   const listeners = {};
@@ -26,7 +27,9 @@ function fakeVaultIndicatorEl() {
     },
     fire(type, evt) {
       listeners[type] && listeners[type](evt);
-    }
+    },
+    classList: { toggle() {} },
+    setAttribute() {}
   };
 }
 
@@ -47,6 +50,7 @@ function harness({
   const toasts = [];
   const vaultLockCalls = [];
   const toolbarContextMenuCalls = [];
+  const openVaultPageCalls = [];
   /** @type {Record<string, Function>} */
   const on = {};
   const goldfinch = new Proxy(
@@ -84,7 +88,7 @@ function harness({
     goldfinch,
     jarsClient: { containers: [] },
     isSafeColor: () => false,
-    openVaultPage: () => {},
+    openVaultPage: () => openVaultPageCalls.push(true),
     openToolbarContextMenu: (item, anchorEl) => toolbarContextMenuCalls.push({ item, anchorEl }),
     openOverlayMenu: (menuType, model, anchor, startIndex, opts) => {
       opens.push({ menuType, model, opts });
@@ -92,7 +96,17 @@ function harness({
     },
     toast: (title, body) => toasts.push([title, body])
   });
-  return { controller, on, opens, dismissed, finalized, toasts, vaultLockCalls, toolbarContextMenuCalls };
+  return {
+    controller,
+    on,
+    opens,
+    dismissed,
+    finalized,
+    toasts,
+    vaultLockCalls,
+    toolbarContextMenuCalls,
+    openVaultPageCalls
+  };
 }
 
 // Fire a locked-vault capture offer and return its captureId.
@@ -274,6 +288,43 @@ test('no vaultIndicator element (offline harness / not-yet-attached DOM) never t
   assert.doesNotThrow(() => harness({ vaultIndicatorEl: null }));
 });
 
+// ---------------------------------------------------------------------------
+// Vault indicator left-click (squawk 0099, flight DD10).
+// ---------------------------------------------------------------------------
+
+test('left-click while locked raises the unlock sheet exactly once and does not set pendingVaultFlow', () => {
+  const indicator = fakeVaultIndicatorEl();
+  const h = harness({ unlocked: false, vaultIndicatorEl: indicator });
+  h.on.onVaultLockState({ setUp: true, unlocked: false });
+  indicator.fire('click');
+  assert.equal(h.opens.length, 1);
+  assert.deepEqual(h.opens[0], { menuType: 'vault-unlock', model: [], opts: undefined });
+  assert.equal(h.openVaultPageCalls.length, 0);
+
+  // pendingVaultFlow must be unset: a subsequent unlock broadcast must NOT spring the
+  // fill picker (the onVaultRequestUnlock shape, not onVaultGesture's locked branch).
+  h.on.onVaultLockState({ setUp: true, unlocked: true });
+  assert.equal(h.opens.length, 1, 'unlock success must open no additional sheet (no picker)');
+});
+
+test('left-click while unlocked opens the vault page exactly once and opens no sheet', () => {
+  const indicator = fakeVaultIndicatorEl();
+  const h = harness({ unlocked: true, vaultIndicatorEl: indicator });
+  h.on.onVaultLockState({ setUp: true, unlocked: true });
+  indicator.fire('click');
+  assert.equal(h.openVaultPageCalls.length, 1);
+  assert.equal(h.opens.length, 0);
+});
+
+test('left-click when not set up does nothing (defense in depth; the indicator is hidden then)', () => {
+  const indicator = fakeVaultIndicatorEl();
+  const h = harness({ unlocked: false, vaultIndicatorEl: indicator });
+  h.on.onVaultLockState({ setUp: false, unlocked: false });
+  indicator.fire('click');
+  assert.equal(h.opens.length, 0);
+  assert.equal(h.openVaultPageCalls.length, 0);
+});
+
 test('isVaultLocked reflects the stashed lock-state broadcast, not a re-fetch', () => {
   const h = harness({ unlocked: false });
   assert.equal(h.controller.isVaultLocked(), true, 'locked before any broadcast (initial default)');
@@ -294,6 +345,59 @@ test("a rejected lockNow() invoke never throws (fire-and-forget, like the vault 
   assert.doesNotThrow(() => h.controller.lockNow());
   await settle();
   assert.deepEqual(h.vaultLockCalls, [true], 'the bridge call was still made');
+});
+
+// ---------------------------------------------------------------------------
+// unlockNow() / indicatorAction() (Flight 4 Leg 5 HAT fix): the locked toolbar
+// right-click menu used to OMIT its one item entirely (an empty dropdown); the
+// operator ruling replaces it with a single "Unlock now" item that shares the
+// left-click's locked body exactly — no pendingVaultFlow, so a successful
+// unlock never springs the fill picker.
+// ---------------------------------------------------------------------------
+
+test('unlockNow() raises the unlock sheet exactly once and does not set pendingVaultFlow', () => {
+  const h = harness({ unlocked: false });
+  h.on.onVaultLockState({ setUp: true, unlocked: false });
+  h.controller.unlockNow();
+  assert.equal(h.opens.length, 1);
+  assert.deepEqual(h.opens[0], { menuType: 'vault-unlock', model: [], opts: undefined });
+
+  // pendingVaultFlow must be unset: a subsequent unlock broadcast must NOT spring the
+  // fill picker (same assertion as the left-click test above).
+  h.on.onVaultLockState({ setUp: true, unlocked: true });
+  assert.equal(h.opens.length, 1, 'unlock success must open no additional sheet (no picker)');
+});
+
+test('unlockNow() when not set up does nothing (defense in depth)', () => {
+  const h = harness({ unlocked: false });
+  h.on.onVaultLockState({ setUp: false, unlocked: false });
+  h.controller.unlockNow();
+  assert.equal(h.opens.length, 0);
+});
+
+test("indicatorAction('lock') routes to lockNow()", () => {
+  const h = harness({ unlocked: true });
+  h.controller.indicatorAction('lock');
+  assert.deepEqual(h.vaultLockCalls, [true]);
+  assert.equal(h.opens.length, 0);
+});
+
+test("indicatorAction('unlock') routes to unlockNow()", () => {
+  const h = harness({ unlocked: false });
+  h.on.onVaultLockState({ setUp: true, unlocked: false });
+  h.controller.indicatorAction('unlock');
+  assert.equal(h.opens.length, 1);
+  assert.deepEqual(h.opens[0], { menuType: 'vault-unlock', model: [], opts: undefined });
+  assert.deepEqual(h.vaultLockCalls, []);
+});
+
+test('indicatorAction() ignores any action other than lock/unlock (validated no-op)', () => {
+  const h = harness({ unlocked: false });
+  h.on.onVaultLockState({ setUp: true, unlocked: false });
+  h.controller.indicatorAction('bogus');
+  h.controller.indicatorAction(undefined);
+  assert.equal(h.opens.length, 0);
+  assert.deepEqual(h.vaultLockCalls, []);
 });
 
 // ---------------------------------------------------------------------------

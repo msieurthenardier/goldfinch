@@ -140,6 +140,96 @@ test('holdGestureLogin: last-wins-per-tab supersession — a second gesture on t
   }
 });
 
+/* ------- currentPassword chain (Mission 21, Flight 4, Leg 2 — password-field-roles) */
+
+test('AC11: holdGestureLogin copies currentPasswordBytes into rec.currentPassword and zeroizes the incoming array', async () => {
+  const dir = tmpDir();
+  try {
+    const { human } = await makeHarness(dir);
+    const currentBytes = bytesOf('OldPass1!');
+    human.holdGestureLogin({
+      wcId: 10,
+      username: 'a',
+      usernameDetected: true,
+      passwordBytes: bytesOf('NewPass2!'),
+      currentPasswordBytes: currentBytes
+    });
+    assert.ok(allZero(currentBytes), 'the incoming currentPasswordBytes array is zeroized after the hold');
+
+    const released = human.captureRelease(10);
+    assert.equal(released.length, 1);
+    // Released through capture()'s unlocked path, which zeroizes+deletes
+    // rec.currentPassword once disposition is computed (AC15) — the model
+    // itself never carries a password, and disposeCapture found no matching
+    // stored login (nothing saved yet), so a 'save' offer is expected.
+    assert.equal(released[0].model.mode, 'save');
+  } finally {
+    rm(dir);
+  }
+});
+
+test('AC11: holdGestureLogin ignores a non-Uint8Array currentPasswordBytes', async () => {
+  const dir = tmpDir();
+  try {
+    const { human } = await makeHarness(dir);
+    const held = human.holdGestureLogin({
+      wcId: 10,
+      username: 'a',
+      usernameDetected: true,
+      passwordBytes: bytesOf('NewPass2!'),
+      currentPasswordBytes: 'not-a-uint8array'
+    });
+    assert.ok(held && typeof held.captureId === 'string');
+  } finally {
+    rm(dir);
+  }
+});
+
+test('AC11: holdGestureLogin zeroizes an incoming currentPasswordBytes even on a GATE refusal', async () => {
+  const dir = tmpDir();
+  try {
+    const { human } = await makeHarness(dir, { setup: false }); // not set up
+    const currentBytes = bytesOf('OldPass1!');
+    const held = human.holdGestureLogin({
+      wcId: 10,
+      username: 'a',
+      usernameDetected: true,
+      passwordBytes: bytesOf('NewPass2!'),
+      currentPasswordBytes: currentBytes
+    });
+    assert.equal(held, null);
+    assert.ok(allZero(currentBytes), 'currentPasswordBytes is wiped even on a gate drop');
+  } finally {
+    rm(dir);
+  }
+});
+
+test('AC4/DD4: a rotation gesture released through captureRelease matches the stored login by CURRENT password, with no username field at all', async () => {
+  const dir = tmpDir();
+  try {
+    const { store, human } = await makeHarness(dir);
+    await store.saveItem('work', { type: 'login', title: 'a', origin: A, username: null, password: 'OldPass1!' });
+
+    human.holdGestureLogin({
+      wcId: 10,
+      username: null,
+      usernameDetected: false,
+      passwordBytes: bytesOf('NewPass2!'),
+      currentPasswordBytes: bytesOf('OldPass1!')
+    });
+    const released = human.captureRelease(10);
+    assert.equal(released.length, 1);
+    assert.equal(released[0].model.mode, 'update', 'DD4: the current-password match resolves an update');
+
+    const saved = human.captureSave({ captureId: released[0].captureId, vaultId: 'work' });
+    assert.deepEqual(saved, { saved: true });
+    const [item] = store.listItems('work');
+    assert.equal(item.password, 'NewPass2!');
+  } finally {
+    rm(dir);
+  }
+});
+
 /* ----------------------------------------------------------- captureRelease */
 
 test('captureRelease: nothing pending for the tab returns an EMPTY ARRAY (the ordinary case — most gestures/settles have no held record) — M21 F3 L2 AC2 contract update', async () => {

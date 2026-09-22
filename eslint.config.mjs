@@ -161,6 +161,10 @@ export default [
     // the pure per-family capture planner `webview-preload.js` calls — same
     // CJS-required-by-the-preload shape, same "no src/preload/** wildcard"
     // lesson as field-setters.js above.
+    // password-field-roles.js (Mission 21, Flight 4, Leg 2 — password-field-roles)
+    // is the pure password-field-role classifier `vault-capture-plan.js` calls —
+    // same CJS-required-by-the-preload shape, same "no src/preload/** wildcard"
+    // lesson.
     files: [
       'src/preload/webview-preload.js',
       'src/preload/vault-fill-fields.js',
@@ -176,7 +180,8 @@ export default [
       'src/preload/vault-gesture-policy.js',
       'src/preload/vault-gesture-detach-watch.js',
       'src/preload/vault-capture-plan.js',
-      'src/preload/guest-bookmark-drop.js'
+      'src/preload/guest-bookmark-drop.js',
+      'src/preload/password-field-roles.js'
     ],
     languageOptions: { sourceType: 'commonjs', globals: { ...globals.node, ...globals.browser } },
     rules: { 'no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }] }

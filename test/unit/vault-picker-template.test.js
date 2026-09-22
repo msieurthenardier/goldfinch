@@ -17,7 +17,10 @@ const {
   pickId,
   parsePickIndex,
   badgeLabelFor,
-  MANAGE_ID
+  MANAGE_ID,
+  GENERATE_ID,
+  UNLOCK_ID,
+  activationIdFor
 } = require('../../src/shared/vault-picker-template.js');
 
 // Row layout: [icon(svg), text(title+username), badges(chicklet [+ widened])].
@@ -284,4 +287,86 @@ test('AC4: the empty-picker copy appears exactly once in the module source', () 
   const src = fs.readFileSync(path.join(__dirname, '../../src/shared/vault-picker-template.js'), 'utf8');
   const matches = src.match(/No saved logins, cards, or identities to fill here/g) || [];
   assert.equal(matches.length, 1);
+});
+
+// --- Generate-in-picker action rows (Mission 21, Flight 4, Leg 3, AC9/AC9b) ---
+
+test('AC9: unlocked + canGenerate + zero saved items -> the Generate row AND the empty note both render', () => {
+  const document = createDocument();
+  const { list } = buildVaultPickerCard(document);
+  const rows = renderVaultPickerRows(document, list, [{ action: 'generate' }]);
+  // buttons = [generateBtn, manageBtn].
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].dataset.actionId, GENERATE_ID);
+  assert.equal(rows[0].dataset.pickIndex, undefined);
+  assert.equal(rows[0].children[0].textContent, 'Generate strong password');
+  // card = [note, generateBtn, separator, manageBtn].
+  assert.equal(list.children.length, 4);
+  assert.equal(list.children[0].textContent, 'No saved logins, cards, or identities to fill here');
+  assert.equal(list.children[1], rows[0]);
+});
+
+test('AC9: locked -> Generate + Unlock rows and NO empty note', () => {
+  const document = createDocument();
+  const { list } = buildVaultPickerCard(document);
+  const rows = renderVaultPickerRows(document, list, [{ action: 'generate' }, { action: 'unlock' }]);
+  // buttons = [generateBtn, unlockBtn, manageBtn] — no note.
+  assert.equal(rows.length, 3);
+  assert.equal(rows[0].dataset.actionId, GENERATE_ID);
+  assert.equal(rows[1].dataset.actionId, UNLOCK_ID);
+  assert.equal(rows[1].children[0].textContent, 'Unlock to fill a saved login');
+  // card = [generateBtn, unlockBtn, separator, manageBtn] — no note node.
+  assert.equal(list.children.length, 4);
+  for (const child of list.children) {
+    assert.notEqual(child.textContent, 'No saved logins, cards, or identities to fill here');
+  }
+});
+
+test('AC9: action rows sit under no section heading, even alongside real login+card items', () => {
+  const document = createDocument();
+  const { list } = buildVaultPickerCard(document);
+  const model = [
+    { action: 'generate' },
+    { vaultId: 'global', id: 'i1', type: 'login', title: 'GitHub' },
+    { vaultId: 'global', id: 'i2', type: 'card', last4: '4242' }
+  ];
+  renderVaultPickerRows(document, list, model);
+  const headings = list.children.filter((c) => c.className === 'vault-picker-section');
+  // Two distinct real kinds (login, card) -> sectioned, but the action row itself
+  // triggers no heading of its own and never merges into either section.
+  assert.equal(headings.length, 2);
+  assert.equal(list.children[0].dataset.actionId, GENERATE_ID, 'the action row leads, before any heading');
+});
+
+test('AC9: item rows keep pick:<i> keyed to the FULL model array (action rows occupy earlier indices)', () => {
+  const document = createDocument();
+  const { list } = buildVaultPickerCard(document);
+  const model = [{ action: 'generate' }, { vaultId: 'global', id: 'i1', title: 'GitHub' }];
+  const rows = renderVaultPickerRows(document, list, model);
+  // rows[1] is the real item row, at model index 1.
+  assert.equal(rows[1].dataset.pickIndex, '1');
+  assert.equal(rows[1].dataset.actionId, undefined);
+});
+
+test('AC9b: activationIdFor honours only GENERATE_ID/UNLOCK_ID as action ids; anything else falls through', () => {
+  assert.equal(activationIdFor({ actionId: GENERATE_ID }), GENERATE_ID);
+  assert.equal(activationIdFor({ actionId: UNLOCK_ID }), UNLOCK_ID);
+  // An unrecognised data-action-id (never produced today, defensive) falls through
+  // to the pick-index-or-MANAGE_ID rule rather than being honoured as an action.
+  assert.equal(activationIdFor({ actionId: 'something-else', pickIndex: '3' }), pickId(3));
+  assert.equal(activationIdFor({ actionId: 'something-else' }), MANAGE_ID);
+  // The pre-existing binary rule, unchanged for rows with no actionId.
+  assert.equal(activationIdFor({ pickIndex: '2' }), pickId(2));
+  assert.equal(activationIdFor({}), MANAGE_ID);
+  assert.equal(activationIdFor(undefined), MANAGE_ID);
+});
+
+test('AC9b: the dispatch chokepoint — without it, both action rows would have routed to MANAGE_ID (regression pin)', () => {
+  // The naive pre-AC9b rule: pick-index-present ? pickId : MANAGE_ID.
+  const naiveRule = (dataset) => {
+    const pi = dataset && dataset.pickIndex;
+    return pi != null && pi !== '' ? pickId(Number(pi)) : MANAGE_ID;
+  };
+  assert.equal(naiveRule({ actionId: GENERATE_ID }), MANAGE_ID, 'the naive rule mis-routes Generate');
+  assert.notEqual(activationIdFor({ actionId: GENERATE_ID }), MANAGE_ID, 'the real helper does not');
 });

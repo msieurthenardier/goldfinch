@@ -248,8 +248,9 @@
            state transition. .vault-locked (a closed padlock) / .vault-unlocked (an
            open padlock); a pure projection of pushed state via
            buildVaultIndicatorModel — never a cache. NOT a pinnable item
-           (applyToolbarPins must never touch it). The live open trigger + click
-           action are the pick-and-fill leg; this leg wires only the indicator. -->
+           (applyToolbarPins must never touch it). Left-click (M21 F4 L1, squawk 0099):
+           locked → raise the vault-unlock sheet; unlocked → open goldfinch://vault.
+           Right-click keeps the "Lock now" toolbar-mode context menu. -->
       <button
         id="vault-indicator"
         class="icon-btn hidden"

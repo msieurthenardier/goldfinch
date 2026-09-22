@@ -336,3 +336,170 @@ test('AC6b: the identity payload carries NO email — isClaimedByLogin removed i
   assert.equal(secrets.postalCode, '02139');
   assert.equal(identity.payload.fullName, 'Grace Hopper');
 });
+
+// --- Mission 21, Flight 4, Leg 2 (password-field-roles): planLogin's scope
+// widening (DD3a), the new-field capture + confirm-agreement rule (DD3), and
+// the currentPassword payload (DD4). Fake, hand-built multi-field login
+// scopes — never a corpus fixture reimplementation of what save-moment-
+// corpus.test.js's `plans-login` fixtures already gate end to end; these
+// tests instead pin planLogin's payload shape directly against
+// `entriesByKind`/`snapshot`, mirroring loginEntry()/loginSnapshot() above.
+
+/**
+ * @param {Array<{ value: string | null, provenanced?: boolean, autocomplete?: string }>} fields
+ *   one entry per password field, document order — `provenanced: false`
+ *   (default true) encodes a detected-but-untyped field (`value: null` in the
+ *   snapshot); `autocomplete` (optional) marks the field via
+ *   `getAttribute('autocomplete')` — real password-field-roles.js layer 1 —
+ *   so a scope can pin which fields are `current`/`new` without relying on
+ *   layer 3's structural default (which a plain, unmarked 2-field scope with
+ *   no `current` would otherwise resolve as new+confirm, per DD1).
+ * @param {{ username?: string | null, usernameDetected?: boolean }} [opts]
+ */
+function loginScope(fields, opts = {}) {
+  const form = { tag: 'shared-form' };
+  const entries = fields.map((f, i) => ({
+    username: opts.usernameDetected === false ? null : { tag: 'u' },
+    password: {
+      tag: `p${i}`,
+      getAttribute: (attr) => (attr === 'autocomplete' ? (f.autocomplete ?? null) : null)
+    },
+    form
+  }));
+  const logins = fields.map((f) => {
+    /** @type {any} */
+    const snap = { password: { detected: true, value: f.provenanced === false ? null : f.value } };
+    // DD3c's three-state shape: the KEY itself must be absent (not merely
+    // `undefined`-valued) to model "no username field detected at all" —
+    // `Object.prototype.hasOwnProperty` is what planLogin reads.
+    if (opts.usernameDetected !== false) {
+      snap.username = { detected: true, value: opts.username === undefined ? 'alice' : opts.username };
+    }
+    return snap;
+  });
+  return { entries, logins };
+}
+
+test('AC8: classified scope (current+new+confirm) plans the NEW value, carries currentPassword, username from the handle', () => {
+  const { entries, logins } = loginScope([
+    { value: 'OldPass1!' }, // current
+    { value: 'NewPass2!' }, // new
+    { value: 'NewPass2!' } // confirm (agrees)
+  ]);
+  const resolved = [{ kind: 'login', ordinal: 0 }];
+  const entriesByKind = { login: entries };
+  const snapshot = { logins };
+  const plan = planCaptures({ resolved, entriesByKind, snapshot });
+  assert.equal(plan.length, 1);
+  const [login] = plan;
+  assert.equal(login.kind, 'login');
+  assert.equal(login.channel, 'guest-vault-capture');
+  assert.equal(new TextDecoder().decode(login.payload.password), 'NewPass2!');
+  assert.ok(Object.prototype.hasOwnProperty.call(login.payload, 'currentPassword'));
+  assert.equal(new TextDecoder().decode(login.payload.currentPassword), 'OldPass1!');
+  assert.equal(login.payload.username, 'alice');
+  assert.equal(login.payload.usernameDetected, true);
+  // AC8: watchFields = every scope entry's password field + the handle's username.
+  assert.deepEqual(login.watchFields, [
+    entries[0].password,
+    entries[1].password,
+    entries[2].password,
+    entries[0].username
+  ]);
+});
+
+test('AC8: a confirm field is OPTIONAL — current+new with no confirm still plans, carries currentPassword', () => {
+  const { entries, logins } = loginScope([
+    { value: 'OldPass9!', autocomplete: 'current-password' },
+    { value: 'FreshPass8!', autocomplete: 'new-password' }
+  ]);
+  const resolved = [{ kind: 'login', ordinal: 1 }]; // the handle can be EITHER scope member
+  const plan = planCaptures({ resolved, entriesByKind: { login: entries }, snapshot: { logins } });
+  assert.equal(plan.length, 1);
+  assert.equal(new TextDecoder().decode(plan[0].payload.password), 'FreshPass8!');
+  assert.equal(new TextDecoder().decode(plan[0].payload.currentPassword), 'OldPass9!');
+});
+
+test('AC8: an unprovenanced confirm plans NO login', () => {
+  const { entries, logins } = loginScope([
+    { value: 'OldPass1!' },
+    { value: 'NewPass2!' },
+    { value: null, provenanced: false }
+  ]);
+  const resolved = [{ kind: 'login', ordinal: 0 }];
+  const plan = planCaptures({ resolved, entriesByKind: { login: entries }, snapshot: { logins } });
+  assert.deepEqual(
+    plan.map((c) => c.kind),
+    []
+  );
+});
+
+test('AC8/DD3: a MISMATCHED confirm plans NO login (never the wrong value)', () => {
+  const { entries, logins } = loginScope([{ value: 'OldPass1!' }, { value: 'NewPass2!' }, { value: 'Typo3!' }]);
+  const resolved = [{ kind: 'login', ordinal: 0 }];
+  const plan = planCaptures({ resolved, entriesByKind: { login: entries }, snapshot: { logins } });
+  assert.deepEqual(plan, []);
+});
+
+test('AC8: an unprovenanced `new` field plans NO login', () => {
+  const { entries, logins } = loginScope([
+    { value: 'OldPass1!' },
+    { value: null, provenanced: false },
+    { value: null, provenanced: false }
+  ]);
+  const resolved = [{ kind: 'login', ordinal: 0 }];
+  const plan = planCaptures({ resolved, entriesByKind: { login: entries }, snapshot: { logins } });
+  assert.deepEqual(plan, []);
+});
+
+test('AC8: currentPassword is OMITTED when no current role exists in the scope (sign-up shape)', () => {
+  const { entries, logins } = loginScope([{ value: 'NewPass2!' }, { value: 'NewPass2!' }]);
+  const resolved = [{ kind: 'login', ordinal: 0 }];
+  const plan = planCaptures({ resolved, entriesByKind: { login: entries }, snapshot: { logins } });
+  assert.equal(plan.length, 1);
+  assert.ok(!Object.prototype.hasOwnProperty.call(plan[0].payload, 'currentPassword'));
+});
+
+test('AC9: an AMBIGUOUS scope (four password fields) plans NO login capture', () => {
+  const { entries, logins } = loginScope([{ value: 'a' }, { value: 'b' }, { value: 'c' }, { value: 'd' }]);
+  const resolved = [{ kind: 'login', ordinal: 0 }];
+  const plan = planCaptures({ resolved, entriesByKind: { login: entries }, snapshot: { logins } });
+  assert.deepEqual(plan, []);
+});
+
+test('AC9: an ambiguous LOGIN scope does not affect a sibling CARD/IDENTITY plan in the same gesture', () => {
+  const { entries, logins } = loginScope([{ value: 'a' }, { value: 'b' }, { value: 'c' }, { value: 'd' }]);
+  const resolved = [
+    { kind: 'login', ordinal: 0 },
+    { kind: 'card', ordinal: 0 }
+  ];
+  const entriesByKind = { login: entries, card: [cardEntry()] };
+  const snapshot = { logins, cards: [cardSnapshot()] };
+  const plan = planCaptures({ resolved, entriesByKind, snapshot });
+  assert.deepEqual(
+    plan.map((c) => c.kind),
+    ['card']
+  );
+});
+
+test('AC10: a snapshot shorter than entries (mutation-race residual) plans NO login, never throws', () => {
+  const { entries, logins } = loginScope([{ value: 'OldPass1!' }, { value: 'NewPass2!' }, { value: 'NewPass2!' }]);
+  const resolved = [{ kind: 'login', ordinal: 0 }];
+  // Only ONE snapshot entry survives — entries[1]/[2] have no snapshot counterpart.
+  const shortSnapshot = { logins: [logins[0]] };
+  assert.doesNotThrow(() => planCaptures({ resolved, entriesByKind: { login: entries }, snapshot: shortSnapshot }));
+  const plan = planCaptures({ resolved, entriesByKind: { login: entries }, snapshot: shortSnapshot });
+  assert.deepEqual(plan, []);
+});
+
+test('AC8: usernameDetected:false / username:null (no username field anywhere in the scope) still plans, with no currentPassword mixed up', () => {
+  const { entries, logins } = loginScope([{ value: 'OldPass1!' }, { value: 'NewPass2!' }, { value: 'NewPass2!' }], {
+    usernameDetected: false
+  });
+  const resolved = [{ kind: 'login', ordinal: 0 }];
+  const plan = planCaptures({ resolved, entriesByKind: { login: entries }, snapshot: { logins } });
+  assert.equal(plan.length, 1);
+  assert.equal(plan[0].payload.usernameDetected, false);
+  assert.equal(plan[0].payload.username, null);
+  assert.equal(new TextDecoder().decode(plan[0].payload.currentPassword), 'OldPass1!');
+});

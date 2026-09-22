@@ -43,7 +43,7 @@
  *   handleBookmarkStarActivate: (tab: any) => void,
  *   dispatchSuggestion: (id: string) => void,
  *   handleSuggestionsClosed: (reason: string) => void,
- *   lockVaultNow: () => void,
+ *   vaultIndicatorAction: (action: 'lock'|'unlock') => void,
  *   vaultHandleClosed: (payload: { menuType: string, reason: string }) => void,
  *   siteSecurityHandleClosed: (payload: { menuType: string, reason: string }) => void,
  *   bridge: any,
@@ -79,7 +79,7 @@ export function createOverlayDispatch(deps) {
     handleBookmarkStarActivate,
     dispatchSuggestion,
     handleSuggestionsClosed,
-    lockVaultNow,
+    vaultIndicatorAction,
     vaultHandleClosed,
     siteSecurityHandleClosed,
     bridge,
@@ -267,8 +267,10 @@ export function createOverlayDispatch(deps) {
             els.address.focus();
           }
         } else if (id === 'action:vault-lock') {
-          lockVaultNow();
-        } // squawk 0038: anchor never hides (locked↔unlocked only) — no refocus override needed, unlike unpin above
+          vaultIndicatorAction('lock');
+        } else if (id === 'action:vault-unlock') {
+          vaultIndicatorAction('unlock');
+        } // squawk 0038 + Flight 4 Leg 5 HAT fix: anchor never hides (locked↔unlocked only) — no refocus override needed, unlike unpin above
         break;
       }
       case 'tab-context': {

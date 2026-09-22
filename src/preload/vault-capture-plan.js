@@ -53,6 +53,12 @@
 
 const { IDENTITY_ROLES } = require('./vault-identity-fields');
 const { snapshotHasProvenancedSecret } = require('./vault-gesture-policy');
+// Mission 21, Flight 4, Leg 2 (password-field-roles, DD3/DD3a): the pure
+// scope-widening + role classifier `planLogin` uses to tell a sign-up/
+// rotation scope apart from an ordinary sign-in one. See that module's own
+// header — same "one pure module, two execution contexts" discipline as
+// `resolveTargetForAnchor`.
+const { loginScopeOrdinals, classifyPasswordScope } = require('./password-field-roles');
 
 /**
  * The submitted expiry as a single `MM/YY`-ish string, from the isolated
@@ -134,28 +140,119 @@ function planIdentity(entry, entrySnapshot) {
 }
 
 /**
- * LOGIN's per-family plan step, moved verbatim from the old
- * `onCaptureGesture`'s (else-branch, implicit login) body. DD3c's wire field:
- * `usernameDetected` is whether a username FIELD was detected at all (the
- * snapshot key's presence — DD3h's three-state shape), independent of
- * whether it carried provenance — `normUsername` would otherwise collapse
+ * LOGIN's per-family plan step (Mission 21, Flight 4, Leg 2 —
+ * password-field-roles, DD3/DD3a — widened from the original single-field
+ * body, moved verbatim from the old `onCaptureGesture`'s else-branch). DD3c's
+ * wire field: `usernameDetected` is whether a username FIELD was detected at
+ * all (the snapshot key's presence — DD3h's three-state shape), independent
+ * of whether it carried provenance — `normUsername` would otherwise collapse
  * "detected but unprovenanced" into the SAME bucket as "never detected",
  * which is exactly the bucket DD3c forbids reaching the `update` branch.
- * @param {any} entry  the main-world detected entry (`logins[ordinal]`)
- * @param {any} entrySnapshot
+ *
+ * `ctx` (new, third argument — `entriesByKind`/`snapshot`, scoped to the
+ * login family and threaded with the resolved ordinal) is what lets this
+ * function see the handle's SIBLING password fields — `entry`/`entrySnapshot`
+ * alone are one field, but a sign-up/rotation scope spans several. `ctx` is
+ * OPTIONAL: an omitted/malformed one (a direct unit-test call with the old
+ * two-arg shape) degrades to a one-field scope, exactly AC7's regression
+ * gate requires.
+ * @param {any} entry  the main-world detected entry (`logins[ordinal]`), the scope's HANDLE
+ * @param {any} entrySnapshot  the handle's own isolated-world snapshot entry
+ * @param {{ entries?: any[], snapshotEntries?: any[], ordinal?: number }} [ctx]
  * @returns {{ kind: 'login', channel: string, payload: any, watchFields: any[] } | null}
  */
-function planLogin(entry, entrySnapshot) {
+function planLogin(entry, entrySnapshot, ctx) {
   if (!snapshotHasProvenancedSecret(entrySnapshot, 'login')) return null; // nothing worth holding
+
+  const entries = ctx && Array.isArray(ctx.entries) ? ctx.entries : null;
+  const ordinal = ctx ? ctx.ordinal : undefined;
+  const scopeOrdinals = entries && typeof ordinal === 'number' ? loginScopeOrdinals(entries, ordinal) : [ordinal];
+
+  // AC7 (regression gate): a scope of ONE password field — whatever
+  // password-field-roles.js would classify it as, including a lone field
+  // lying about being `new-password` (DD2's negative for this leg) — takes
+  // TODAY's body verbatim. The multi-field classification path below is
+  // never reached for it.
+  if (scopeOrdinals.length <= 1) {
+    const usernameDetected = Object.prototype.hasOwnProperty.call(entrySnapshot, 'username');
+    const usernameValue =
+      entrySnapshot.username && entrySnapshot.username.value != null ? entrySnapshot.username.value : null;
+    const passwordBytes = new TextEncoder().encode(String(entrySnapshot.password.value));
+    return {
+      kind: 'login',
+      channel: 'guest-vault-capture',
+      payload: { username: usernameValue, usernameDetected, password: passwordBytes },
+      watchFields: [entry.username, entry.password]
+    };
+  }
+
+  // Multi-field scope. AC10: tolerate a snapshot shorter than `entries` (the
+  // mutation-race residual) by planning nothing for the login family, rather
+  // than throwing or reading outside the scope's own ordinals.
+  const snapshotEntries = ctx && Array.isArray(ctx.snapshotEntries) ? ctx.snapshotEntries : null;
+  if (!snapshotEntries) return null;
+  const scopeEntries = scopeOrdinals.map((i) => entries[i]);
+  // Each `snapshotEntries[i]` is a WHOLE per-entry snapshot (`{ username,
+  // password }`, DD3h's three-state shape) — the PASSWORD field's own
+  // `{ detected, value }` sub-record is what every check below reads.
+  const scopeSnapshots = scopeOrdinals.map((i) => snapshotEntries[i] && snapshotEntries[i].password);
+  if (scopeSnapshots.some((s) => s === undefined)) return null;
+
+  const classification = classifyPasswordScope(scopeEntries.map((e) => e.password));
+  if (classification.kind !== 'classified') return null; // ambiguous (or, unreachably here, sign-in) -> no plan (AC9)
+
+  const newIndex = classification.roles.indexOf('new');
+  const currentIndex = classification.roles.indexOf('current');
+  const confirmIndex = classification.roles.indexOf('confirm');
+
+  const newSnapshot = scopeSnapshots[newIndex];
+  if (!newSnapshot || newSnapshot.value == null) return null; // unprovenanced `new` -> no plan
+
+  if (confirmIndex !== -1) {
+    const confirmSnapshot = scopeSnapshots[confirmIndex];
+    // DD3: an unprovenanced or mismatched confirm plans NO login — the site
+    // will reject the submit anyway; never save a value it did not accept.
+    if (!confirmSnapshot || confirmSnapshot.value == null) return null;
+    if (String(confirmSnapshot.value) !== String(newSnapshot.value)) return null;
+  }
+
+  const encoder = new TextEncoder();
+  const passwordBytes = encoder.encode(String(newSnapshot.value));
+
+  // The HANDLE entry's own snapshot supplies username, exactly as the
+  // one-field path does — `resolveLoginEntry`'s last-preceding-text-field
+  // walk converges on the same node for every password field in a
+  // top-to-bottom form, so any scope member's handle would read the same one.
   const usernameDetected = Object.prototype.hasOwnProperty.call(entrySnapshot, 'username');
   const usernameValue =
     entrySnapshot.username && entrySnapshot.username.value != null ? entrySnapshot.username.value : null;
-  const passwordBytes = new TextEncoder().encode(String(entrySnapshot.password.value));
+
+  /** @type {any} */
+  const payload = { username: usernameValue, usernameDetected, password: passwordBytes };
+  if (currentIndex !== -1) {
+    const currentSnapshot = scopeSnapshots[currentIndex];
+    // DD4: `currentPassword` rides the plan iff a `current` field exists AND
+    // is provenanced — an unprovenanced current field never contributes it.
+    if (currentSnapshot && currentSnapshot.value != null) {
+      payload.currentPassword = encoder.encode(String(currentSnapshot.value));
+    }
+  }
+
+  // AC8: every scope entry's password field, plus the handle's username
+  // field — nulls filtered, no duplicates (a form-less scope of otherwise
+  // unrelated fields could in principle repeat a node; realistically never
+  // does, but the filter is cheap insurance).
+  const watchFields = [];
+  for (const e of scopeEntries) {
+    if (e.password && !watchFields.includes(e.password)) watchFields.push(e.password);
+  }
+  if (entry.username && !watchFields.includes(entry.username)) watchFields.push(entry.username);
+
   return {
     kind: 'login',
     channel: 'guest-vault-capture',
-    payload: { username: usernameValue, usernameDetected, password: passwordBytes },
-    watchFields: [entry.username, entry.password]
+    payload,
+    watchFields
   };
 }
 
@@ -202,7 +299,11 @@ function planCaptures({ resolved, entriesByKind, snapshot }) {
     const snapshotEntries = snapshot && snapshot[snapshotKey];
     const entrySnapshot = Array.isArray(snapshotEntries) ? snapshotEntries[target.ordinal] : undefined;
 
-    const planned = planner(entry, entrySnapshot);
+    // Mission 21, Flight 4, Leg 2 (password-field-roles): the third argument
+    // is scoped to the family's own full entries/snapshot arrays plus the
+    // resolved ordinal — only `planLogin` reads it (DD3a's scope widening);
+    // `planCard`/`planIdentity` ignore it, unchanged.
+    const planned = planner(entry, entrySnapshot, { entries, snapshotEntries, ordinal: target.ordinal });
     if (planned) plan.push(planned);
   }
 

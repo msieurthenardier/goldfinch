@@ -33,6 +33,13 @@ const PICK_PREFIX = 'pick:';
 // index — the chrome dispatch routes it to openVaultPage() (a navigation, no secret).
 export const MANAGE_ID = 'manage-passwords';
 
+// Generate-in-picker action-row ids (Mission 21, Flight 4, Leg 3 —
+// generate-in-picker, DD5/AC9). Like MANAGE_ID, these are FIXED ids — never
+// `pick:<i>` — so a row rendered from a `{ action: 'generate' }` / `{ action:
+// 'unlock' }` model entry can never be confused with a real credential index.
+export const GENERATE_ID = 'generate-password';
+export const UNLOCK_ID = 'unlock-saved-logins';
+
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 // The empty-picker note (AC4, Mission 21 Flight 3 Leg 1; text updated Flight 3
@@ -240,6 +247,26 @@ export function parsePickIndex(id) {
 }
 
 /**
+ * The channel-4 activation id for a clicked picker row's `dataset` (AC9b,
+ * design review round 1 HIGH — the dispatch CHOKEPOINT). Today's binary
+ * pick-index-or-MANAGE_ID fallback would silently route BOTH Generate-in-
+ * picker action rows to "Manage passwords" (a navigation), since neither
+ * carries `data-pick-index`. Only the two exported action ids
+ * (GENERATE_ID/UNLOCK_ID) are honoured as `data-action-id` values — any
+ * OTHER `data-action-id` (defensive: none is ever produced today) falls
+ * through to the existing pick-index-or-MANAGE_ID rule, never silently
+ * mis-routed to an action.
+ * @param {{ actionId?: string, pickIndex?: string }} dataset
+ * @returns {string}
+ */
+export function activationIdFor(dataset) {
+  const actionId = dataset && dataset.actionId;
+  if (actionId === GENERATE_ID || actionId === UNLOCK_ID) return actionId;
+  const pi = dataset && dataset.pickIndex;
+  return pi != null && pi !== '' ? pickId(Number(pi)) : MANAGE_ID;
+}
+
+/**
  * The badge label for a row's source vault: "Global" for the global vault, else the
  * jar's display name (the row's `badgeLabel`, enriched by the chrome) falling back
  * to the raw vaultId. Text only — never markup.
@@ -379,6 +406,17 @@ function buildRowBadges(document, item) {
  * @param {Array<{ vaultId?: string, id?: string, type?: string, title?: string|null, username?: string|null, brand?: string|null, last4?: string|null, hasTotp?: boolean, badgeLabel?: string, badgeColor?: string|null, widened?: boolean }>} model
  * @returns {HTMLElement[]}
  */
+/**
+ * True iff `item` is a Generate-in-picker ACTION-ROW model entry — never a
+ * real credential row. (AC9, design review round 1 MEDIUM: action entries
+ * branch early, before any `kindOf`/`KIND_TABLE` use.)
+ * @param {any} item
+ * @returns {boolean}
+ */
+function isActionEntry(item) {
+  return !!item && (item.action === 'generate' || item.action === 'unlock');
+}
+
 export function renderVaultPickerRows(document, card, model) {
   card.textContent = '';
   const rows = Array.isArray(model) ? model : [];
@@ -386,7 +424,14 @@ export function renderVaultPickerRows(document, card, model) {
   /** @type {HTMLElement[]} */
   const buttons = [];
 
-  if (!rows.length) {
+  // The empty note shows only when there are NO real item rows AND no
+  // `unlock` action row (AC9) — a Generate-only picker (locked=false, zero
+  // saved items) still shows both the Generate row AND the note; a LOCKED
+  // picker (Generate + Unlock, zero items) shows no note (the Unlock row is
+  // itself an affordance to reach real items).
+  const hasUnlockRow = rows.some((r) => r && r.action === 'unlock');
+  const itemRowCount = rows.filter((r) => !isActionEntry(r)).length;
+  if (itemRowCount === 0 && !hasUnlockRow) {
     const note = document.createElement('div');
     note.className = 'cm-item vault-picker-note';
     note.setAttribute('aria-disabled', 'true');
@@ -406,12 +451,39 @@ export function renderVaultPickerRows(document, card, model) {
   // `item || {}`, renders that same null entry as a login row. Two derivations over
   // one array, on purpose: `filter(Boolean)` for sectioning, `item || {}` for
   // rendering — collapsing them would flip `[null, {type:'card'}]` from unsectioned to
-  // sectioned, a real output change.
-  const presentKinds = new Set(rows.filter(Boolean).map(kindOf));
+  // sectioned, a real output change. Action entries (AC9) are excluded here too — they
+  // never spawn or merge into a kind-based section heading.
+  const presentKinds = new Set(
+    rows
+      .filter(Boolean)
+      .filter((r) => !isActionEntry(r))
+      .map(kindOf)
+  );
   const sectioned = presentKinds.size >= 2;
   let lastKind = null;
 
   rows.forEach((item, i) => {
+    // Generate-in-picker action rows (AC9): fixed id (GENERATE_ID/UNLOCK_ID,
+    // never `pick:<i>`), no data-pick-index, no section heading, built via
+    // textContent only. Pushed into `buttons` in array order — since chrome
+    // always prepends action entries ahead of real items, this already keeps
+    // roving order = visual order with no extra bookkeeping.
+    if (isActionEntry(item)) {
+      const btn = document.createElement('button');
+      btn.className = 'cm-item vault-picker-action';
+      btn.type = 'button';
+      btn.setAttribute('role', 'menuitem');
+      btn.tabIndex = -1;
+      btn.dataset.actionId = item.action === 'generate' ? GENERATE_ID : UNLOCK_ID;
+      const label = document.createElement('span');
+      label.className = 'vault-picker-action-label';
+      label.textContent = item.action === 'generate' ? 'Generate strong password' : 'Unlock to fill a saved login';
+      btn.appendChild(label);
+      card.appendChild(btn);
+      buttons.push(btn);
+      return;
+    }
+
     const kind = kindOf(item);
     const entry = KIND_TABLE[kind];
     if (sectioned && kind !== lastKind) {

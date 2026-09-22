@@ -38,6 +38,9 @@ Module layout:
 | Per-session automation vault context (fill-only) | `src/main/vault/vault-context.js` |
 | Human fill orchestration (picker model, gesture fill, capture hold/settle) | `src/main/vault/vault-human.js` |
 | Broadened capture-gesture classification + entry-ordinal resolution (main world) | `src/preload/vault-gesture-policy.js` |
+| Password-field role classification (sign-in / sign-up / rotation) + login-scope widening | `src/preload/password-field-roles.js` |
+| Generate-in-picker policy: `passwordrules` parser, `resolvePolicy`, `generateCandidates` | `src/shared/password-policy.js` |
+| Isolated-world Generate-in-picker fill (`fillGeneratedForm`) | `src/preload/vault-fill-fields.js` |
 | Isolated-world entry observer (detection, value-bound provenance, DD3h snapshot) | `src/preload/vault-entry-observer.js` |
 | Main-world entry-tracker policy (install lifecycle, gesture-time snapshot read, fill routing) | `src/preload/vault-entry-tracker.js` |
 | Item schema SSOT (per-type secret/non-secret maps) | `src/shared/vault-item-schema.js` |
@@ -585,6 +588,84 @@ never offered; the existing `CAPTURE_DROP_MS` safety-timeout continues to cover 
 state via the same drop choke point Leg 1 hardened (vault lock, window close, tab close, TTL).
 Origin is derived and **frozen at gesture time** — never re-derived at settle, since the tab may
 already show a different origin by the time a navigation-commit settle fires.
+
+### Password-field roles: sign-up, sign-in, and rotation
+
+Mission 21, Flight 4 fixed a live defect: on a change-password form (current + new + confirm),
+the capture pipeline read the FIRST password field in the form — the CURRENT password — so a
+rotation would have saved the OLD one. `src/preload/password-field-roles.js` classifies every
+password field in a login **scope** (a `<form>`, or the whole document for form-less fields) as
+`current`, `new`, or `confirm`, using three layers in order:
+
+1. `autocomplete` — `new-password` → new, `current-password` → current; a SECOND
+   `new-password` field in the same scope resolves `confirm` (the WHATWG-recommended way real
+   sign-up forms mark both the password and confirm-password fields).
+2. Name/id/placeholder/aria-label tokens, for whatever layer 1 left unresolved (confirm > current
+   > new precedence within one field — `confirmNewPassword` resolves confirm, not new).
+3. Structure, for whatever layers 1-2 left unresolved: three fields → current + new + confirm in
+   document order; two fields → current + new if either already resolved current, otherwise new +
+   confirm; one field → no structural signal.
+
+A scope with nothing resolved at all (or exactly one field resolved null/current) is `sign-in` —
+capture is byte-identical to before this flight, including for a single field whose
+`autocomplete` LIES about being `new-password` (it still captures as a sign-in, and — because a
+one-field scope never carries a `current` role — it can never reach the rotation-disposition
+match below). A scope that resolves to exactly one `new`, at most one `current`, at most one
+`confirm`, and no unresolved field is `classified`; anything else is `ambiguous` — a MISSED
+capture, never a wrong value (a fully unmarked two-field current+new form is the one named,
+accepted gap: indistinguishable from new+confirm, so it captures nothing).
+
+**On a classified scope**, the planner captures the `new` field's provenanced value, admitted
+only when a present `confirm` field is ALSO provenanced and byte-equal to it (a mismatch, or an
+unprovenanced confirm, means no login is captured at all — the site will reject the submit
+anyway). When a `current` field exists and is provenanced, its value rides the capture too, as a
+second secret alongside the new password.
+
+**Rotation disposition.** A capture carrying a current-password value is matched against the
+operator's stored logins BEFORE the ordinary origin+username rule: main reads every reachable
+login's full stored item and looks for one whose password equals the captured current value
+byte-for-byte (and whose username agrees, when the capture's own username was provenanced).
+Exactly one match → the existing item is UPDATED with the new password — this is what makes a
+change-password form with no username field at all resolve correctly, instead of filing the
+rotation as a brand-new username-less login. Zero or several matches fall back to the ordinary
+rule unchanged (never guess among several current-password matches). The matched row's own
+username is preserved on the update even when the change-password page itself showed no
+provenanced username — a rotation never silently blanks a stored username.
+
+### Generate in picker
+
+Clicking the in-field badge on a field whose scope classifies as a sign-up or rotation `new`
+field (see above) offers **"Generate strong password"** as the first row of the same picker —
+even while the vault is **locked**. Choosing it:
+
+1. Main generates a CSPRNG password honouring the field's `minlength`/`maxlength` attributes and
+   its `passwordrules` attribute (a strict subset of the WebKit proposal: `required:`/`allowed:`
+   classes and `[...]` custom sets, `minlength:`/`maxlength:`/`max-consecutive:`; any syntax error
+   voids the whole attribute rather than partially applying it). Availability (the "Generate" row
+   shows at all) and generation are decided by the SAME function, `resolvePolicy`, run twice — once
+   at the gesture (to decide whether to offer the row) and again when the row is chosen (never
+   trusting what the chrome was told earlier).
+2. Main sends TWO candidates to the guest in one message — a full-policy password and an
+   alphanumeric-only fallback — so a page's `pattern` attribute (evaluated ONLY in the guest, never
+   main-side, to avoid running a page-supplied regex in the browser process) can pick whichever one
+   it accepts without a second main round-trip.
+3. The guest fills the generated value into the scope's `new` and (when present) `confirm` fields,
+   in the isolated world, granting provenance in the same call — never `current`, never a username.
+4. The ordinary broadened-capture gesture (a submit-button click, same as a typed password) then
+   captures the generated value through the exact same save path described above — including the
+   rotation-disposition match when the form also has a provenanced current password.
+
+**The chrome never receives or holds the generated password at any point** — the picker's
+"Generate strong password" row is a fixed, non-secret action id, never a credential row; the
+`vaultFillGenerated` bridge call carries only the (re-validated) field constraints out, and only
+`{ filled: boolean }` back. Generation is fill-only-on-decorator: it is NOT exposed on the MCP
+automation surface (the automation vault-human dependency block never receives the generate fill
+delegate).
+
+A stale gesture (the picker sat open past the fill-target's 60s TTL, or the page mutated the form
+between the gesture and the fill) fills nothing — deliberately, with **no first-field fallback**
+unlike the ordinary login fill: a generated password landing in the wrong form is worse than no
+fill at all.
 
 ## Portability
 
