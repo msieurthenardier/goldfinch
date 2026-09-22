@@ -345,7 +345,15 @@ const BOOKMARKS_BAR_LINE_BUDGET = 1100;
 // leave slack" discipline as the BOOKMARKS_BAR_LINE_BUDGET pin above. The new
 // vault-restore-controller.js gets NO budget of its own (the vault-browser-import-
 // controller.js sibling precedent — it has none either).
-const VAULT_PAGE_LINE_BUDGET = 2150;
+//
+// RAISED, NO BUFFER (Mission 22, Flight 1 / DD7): the page-wide filter's wiring (filter
+// construction, `render()`'s reset()/buildField() calls, and the { row, meta } pair
+// plumbing through renderItems/renderUnknownItems/buildVaultSection) landed vault.js at
+// 2153 lines. Per DD7's explicit operator pre-authorization, this pin is set to EXACTLY the
+// measured landed count — a deliberate departure from this pin's own "landed + buffer"
+// history above (no banked slack this leg; a future leg that needs more room bumps this
+// explicitly, named, same discipline as every other named bump on this pin).
+const VAULT_PAGE_LINE_BUDGET = 2153;
 
 // vault-restore-controller.js line budget (squawk 0069): the file (M19 F2 Leg 1
 // extraction target, the restore/export modal cluster pulled out of vault.js —

@@ -245,6 +245,10 @@ export default [
       // vault-restore-controller.js (Flight 2 Leg 1 / DD4) is the restore/export modal
       // cluster extracted out of vault.js — the same real-ES-module shape.
       'src/renderer/pages/vault-restore-controller.js',
+      // vault-filter-controller.js (Mission 22, Flight 1) is the page-wide item filter —
+      // the same real-ES-module shape (its `export function createVaultFilter` needs
+      // sourceType: module even though it carries no static import of its own).
+      'src/renderer/pages/vault-filter-controller.js',
       'src/renderer/menu-overlay.js'
     ],
     languageOptions: { sourceType: 'module' }

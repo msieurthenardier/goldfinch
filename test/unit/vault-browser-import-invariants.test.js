@@ -142,15 +142,23 @@ test('AC10: the vault route gained exactly two entries (jar-page-model.js, vault
     assert.ok(vaultBody.includes(entry), `Flight 2 Leg 1 entry present: ${entry}`);
   }
 
+  // Mission 22, Flight 1 (post-dates this leg): the page-wide item filter's own controller
+  // module — adds exactly one further entry on top of the above, same accounting
+  // discipline as the Leg 3 HAT fix and Flight 2 Leg 1 additions above.
+  const mission22Flight1 = ["'/vault-filter-controller.js': rendererPage('vault-filter-controller.js')"];
+  for (const entry of mission22Flight1) {
+    assert.ok(vaultBody.includes(entry), `Mission 22 Flight 1 entry present: ${entry}`);
+  }
+
   // No other route (settings/downloads/jars) changed in this leg — a coarse sanity that
   // the vault route's entry count is EXACTLY preExisting + added + the later HAT fix + the
-  // later restore-controller extraction.
+  // later restore-controller extraction + the later filter-controller extraction.
   const entryLines = vaultBody.split('\n').filter((l) => l.includes(': rendererPage(') || l.includes(': shared('));
   assert.equal(
     entryLines.length,
-    preExisting.length + added.length + legThreeHatFix.length + flight2Leg1.length,
-    'vault route entry count matches this leg’s two additions plus the Leg 3 HAT-fix burner.js route ' +
-      'plus the Flight 2 Leg 1 restore-controller route'
+    preExisting.length + added.length + legThreeHatFix.length + flight2Leg1.length + mission22Flight1.length,
+    'vault route entry count matches this leg’s two additions plus the Leg 3 HAT-fix burner.js route, ' +
+      'the Flight 2 Leg 1 restore-controller route, and the Mission 22 Flight 1 filter-controller route'
   );
 });
 

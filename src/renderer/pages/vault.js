@@ -3,7 +3,9 @@
 import {
   selectVaultView,
   compromiseCardRows,
-  vaultNavEntries
+  vaultNavEntries,
+  itemMatchesFilter,
+  filterStatusText
   // @ts-ignore — serving-path vs disk-path mismatch
 } from './vault-page-model.js';
 import {
@@ -28,6 +30,8 @@ import { createVaultNav } from './vault-nav-controller.js';
 import { createVaultBrowserImport } from './vault-browser-import-controller.js';
 // @ts-ignore — serving-path vs disk-path mismatch
 import { createVaultRestoreController } from './vault-restore-controller.js';
+// @ts-ignore — serving-path vs disk-path mismatch
+import { createVaultFilter } from './vault-filter-controller.js';
 
 /**
  * vault.js — the goldfinch://vault internal page controller (M12 Flight 3).
@@ -82,6 +86,15 @@ function init() {
     isSafeColor,
     fallbackColor: '#9aa0ac'
   });
+
+  // The page-wide item filter (Mission 22, Flight 1). No bridge access of its own — see
+  // vault-filter-controller.js (its matcher/status-copy functions are injected here rather
+  // than imported inside the controller, so it stays directly unit-testable via dynamic
+  // import — see the controller's own header comment). Constructed here, ahead of the
+  // first render()/refresh() call below (TDZ checklist, CLAUDE.md): render() calls
+  // filter.reset()/buildField() and the nav-click listener is wired at construction, so
+  // `filter` must exist before anything can reference it.
+  const filter = createVaultFilter({ document, navEl, itemMatchesFilter, filterStatusText });
 
   // Cached jar rows (id/name/color) for the nav dots — a non-secret metadata read,
   // refreshed alongside vault state. `[]` until the first fetch resolves.
@@ -1217,10 +1230,16 @@ function init() {
           return;
         }
         const buckets = partitionItemsByType(res.items || []);
+        // Mission 22, Flight 1 / DD1: collect every list's { row, meta } pairs, then
+        // register the WHOLE vault section in one shot — this is what makes a late
+        // vault's registration atomic (never partially loaded from the filter's view).
+        /** @type {Array<{ row: HTMLElement, meta: any }>} */
+        const pairs = [];
         for (const sub of ITEM_SUBSECTIONS) {
-          renderItems(lists[sub.type], buckets[sub.type], vaultId, sub.empty);
+          pairs.push(...renderItems(lists[sub.type], buckets[sub.type], vaultId, sub.empty));
         }
-        renderUnknownItems(unknown, buckets.unknown);
+        pairs.push(...renderUnknownItems(unknown, buckets.unknown));
+        filter.registerVault(section, pairs);
       })
       .catch(() => {});
 
@@ -1235,17 +1254,23 @@ function init() {
 
   /**
    * Render the defensive "Other items" subsection: a visible row per unknown-type item + a
-   * console warning, so nothing the partition could not bucket is silently lost.
+   * console warning, so nothing the partition could not bucket is silently lost. Returns
+   * the `{ row, meta }` pairs it built (Mission 22, Flight 1 / DD1) — empty for the
+   * empty-state path (the subsection's own "hidden while empty" state is untouched by the
+   * filter; the filter only ever ADDS `vault-filter-out`, never writes `hidden`).
    * @param {{ subsection: HTMLElement, list: HTMLElement }} sub
    * @param {Array<any>} items
+   * @returns {Array<{ row: HTMLElement, meta: any }>}
    */
   function renderUnknownItems(sub, items) {
     sub.list.textContent = '';
     if (!items || !items.length) {
       sub.subsection.hidden = true;
-      return;
+      return [];
     }
     sub.subsection.hidden = false;
+    /** @type {Array<{ row: HTMLElement, meta: any }>} */
+    const pairs = [];
     for (const meta of items) {
       console.warn('vault: unknown item type surfaced, not dropped:', meta && meta.type);
       const li = el('li', 'vault-item-row');
@@ -1254,7 +1279,9 @@ function init() {
       info.appendChild(el('span', 'vault-item-sub', `Unknown item${meta && meta.type ? ` (${meta.type})` : ''}`));
       li.appendChild(info);
       sub.list.appendChild(li);
+      pairs.push({ row: li, meta });
     }
+    return pairs;
   }
 
   /**
@@ -1426,17 +1453,22 @@ function init() {
    * textContent) plus a row-actions group: an Edit button (opens the edit modal) + a Delete
    * button (opens a confirm modal). Delete lives on the row now, OFF the editor. DD-A: an empty
    * subsection still renders its empty state (Add stays reachable in the head above).
+   * Returns the `{ row, meta }` pairs it built (Mission 22, Flight 1 / DD1) — empty for
+   * the empty-state ("No … yet") path, which renders no real item row.
    * @param {HTMLElement} list
    * @param {Array<any>} items
    * @param {string} vaultId
    * @param {string} emptyText
+   * @returns {Array<{ row: HTMLElement, meta: any }>}
    */
   function renderItems(list, items, vaultId, emptyText) {
     list.textContent = '';
     if (!items || !items.length) {
       list.appendChild(el('li', 'vault-empty', emptyText || 'No items yet.'));
-      return;
+      return [];
     }
+    /** @type {Array<{ row: HTMLElement, meta: any }>} */
+    const pairs = [];
     for (const meta of items) {
       const li = el('li', 'vault-item-row');
       li.dataset.itemId = meta.id;
@@ -1492,7 +1524,9 @@ function init() {
       li.appendChild(actions);
 
       list.appendChild(li);
+      pairs.push({ row: li, meta });
     }
+    return pairs;
   }
 
   /**
@@ -1983,6 +2017,12 @@ function init() {
     // close() runs neither onCancel nor a wipe, so this is the only teardown on that path).
     runEditorCleanups(); // also: clearing #vault-root would orphan any live TOTP widget's timers.
     accessKeyRefreshers = []; // clearing #vault-root drops the prior sections' refreshers.
+    // Mission 22, Flight 1 / DD4/AC8: reset the filter BEFORE the rebuild below — its query
+    // and row registry are one-render-lifetime state, and a stale registry pointing at
+    // about-to-be-detached rows/sections would just be dead weight (registerVault's own
+    // isConnected guard would refuse them anyway once resolved, but there's nothing to
+    // apply() against in the meantime).
+    filter.reset();
     // M5: an Import/Export modal lives on document.body (not #vault-root) so it survives this
     // re-render. Close it here — otherwise an idle auto-lock mid-modal fires onVaultLockState →
     // refresh → render and would strand a stale unlocked-context modal over the now-locked page.
@@ -2017,7 +2057,12 @@ function init() {
 
     // The Vaults group header, then one subsection per vault (the group entry's children).
     // Each unlocked vault section builds its OWN inline editor host (M12 F5 acceptance).
-    root.appendChild(buildVaultsGroupSection());
+    const vaultsGroupSection = buildVaultsGroupSection();
+    // Mission 22, Flight 1 / DD3: the filter field is appended here, gated on unlocked mode
+    // — new code, not existing behavior. This is what removes the field on lock (DD4):
+    // buildVaultsGroupSection() itself stays mode-agnostic (built in both modes, below).
+    if (view.mode === 'unlocked') vaultsGroupSection.appendChild(filter.buildField());
+    root.appendChild(vaultsGroupSection);
     const group = entries.find((e) => e.kind === 'group');
     for (const child of (group && group.children) || []) {
       if (view.mode === 'unlocked') root.appendChild(buildVaultSection(child));

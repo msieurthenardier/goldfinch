@@ -449,6 +449,70 @@ function browserImportOutcomeLines(counts) {
   return lines;
 }
 
+// ── Page-wide vault filter (Mission 22, Flight 1 / DD2) ──────────────────────
+//
+// A pure, phrase-based, whitelist-driven matcher for the goldfinch://vault page's
+// filter field. `FILTER_FIELDS` mirrors `vault-item-schema.js`'s `SCHEMA[type].nonSecret`
+// EXACTLY, per type — the page cannot import that main-only CJS module (it is served to
+// the browser page over the internal-page-map route, which never carries main-only
+// modules), so this is a pinned MIRROR, kept honest by a drift-guard unit test
+// (`test/unit/vault-page-model.test.js`) that `require()`s the real schema and asserts
+// equality. A new non-secret field fails that test until this list is updated, and a
+// secret field can never enter this list without failing it too.
+/** @type {Readonly<Record<string, ReadonlyArray<string>>>} */
+const FILTER_FIELDS = Object.freeze({
+  login: Object.freeze(['title', 'username', 'origin']),
+  card: Object.freeze(['title', 'cardholder', 'brand', 'last4']),
+  note: Object.freeze(['title']),
+  identity: Object.freeze(['title', 'fullName'])
+});
+
+/**
+ * Does `meta` match the filter `query`? The query is trimmed; an empty (or
+ * whitespace-only) query matches everything. Otherwise this is a case-insensitive
+ * substring check of the WHOLE trimmed phrase against every whitelisted field for
+ * `meta.type` (`FILTER_FIELDS[meta.type]`, or `['title']` for an unknown/missing
+ * type — defensive only: `metadataOf()` throws on an unknown type, so a live "Other
+ * items" row can never actually reach this path; it is covered by unit tests with
+ * synthetic meta only). Only whitelisted fields are ever read — a stray secret key on
+ * `meta` (e.g. a `password`/`notes`/`totp` field carried by mistake) is never
+ * consulted, and a non-string field value (`null`, a number, `hasTotp`, `matchMode`,
+ * `id`, …) is silently ignored rather than thrown on.
+ * @param {{ type?: unknown, [k: string]: unknown } | null | undefined} meta
+ * @param {string} query
+ * @returns {boolean}
+ */
+function itemMatchesFilter(meta, query) {
+  const q = typeof query === 'string' ? query.trim() : '';
+  if (!q) return true;
+  const needle = q.toLowerCase();
+  const m = meta && typeof meta === 'object' ? meta : {};
+  const type = typeof m.type === 'string' ? m.type : '';
+  const fields = Object.prototype.hasOwnProperty.call(FILTER_FIELDS, type) ? FILTER_FIELDS[type] : ['title'];
+  for (const field of fields) {
+    const value = m[field];
+    if (typeof value === 'string' && value.toLowerCase().includes(needle)) return true;
+  }
+  return false;
+}
+
+/**
+ * The filter's status-line copy (DD5): empty while inactive, singular/plural while
+ * active, and a worded no-match state at zero — never a blank line at zero (the
+ * operator must be told nothing matched, not shown silence). `count` is defensively
+ * coerced: a non-finite/negative value reads as zero rather than rendering `NaN` or a
+ * negative count.
+ * @param {number} count
+ * @param {boolean} active
+ * @returns {string}
+ */
+function filterStatusText(count, active) {
+  if (!active) return '';
+  const n = typeof count === 'number' && Number.isFinite(count) && count > 0 ? count : 0;
+  if (n === 0) return 'No items match';
+  return n === 1 ? '1 item matches' : `${n} items match`;
+}
+
 export {
   selectVaultView,
   compromiseCardRows,
@@ -459,5 +523,8 @@ export {
   browserImportSkipLines,
   browserImportOutcomeLines,
   SETTINGS_ID,
-  VAULTS_ID
+  VAULTS_ID,
+  FILTER_FIELDS,
+  itemMatchesFilter,
+  filterStatusText
 };
