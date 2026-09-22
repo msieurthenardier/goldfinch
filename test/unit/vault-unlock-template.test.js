@@ -24,7 +24,7 @@ test('vault-unlock card is a modal dialog with a password input, aria-live error
   // The card itself is the accessible dialog: role=dialog + aria-modal=true + a name.
   assert.equal(card.card.attributes.get('role'), 'dialog');
   assert.equal(card.card.attributes.get('aria-modal'), 'true');
-  assert.equal(card.card.attributes.get('aria-label'), 'Unlock password manager');
+  assert.equal(card.card.attributes.get('aria-label'), 'Unlock vault');
   assert.equal(card.card.parentNode, card.node);
 
   // A password input (never type=text) with autocomplete off + spellcheck off.
@@ -49,7 +49,7 @@ test('vault-unlock card is a modal dialog with a password input, aria-live error
   const [header, body] = card.card.children;
   assert.equal(header.className, 'vault-sheet-header');
   assert.equal(header.children[0].className, 'vault-sheet-title');
-  assert.equal(header.children[0].textContent, 'Unlock password manager');
+  assert.equal(header.children[0].textContent, 'Unlock vault');
   assert.equal(card.close.tagName, 'BUTTON');
   assert.equal(card.close.type, 'button');
   assert.equal(card.close.attributes.get('aria-label'), 'Close');

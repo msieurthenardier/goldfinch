@@ -14,7 +14,7 @@ export function buildKebabModel() {
     { id: 'settings', label: 'Settings' },
     { id: 'downloads', label: 'Downloads' },
     { id: 'jars', label: 'Cookie jars' },
-    { id: 'vault', label: 'Secrets' },
+    { id: 'vault', label: 'Vault' },
     { type: 'separator' },
     { id: 'print', label: 'Print…' },
     { id: 'exit', label: 'Exit' }

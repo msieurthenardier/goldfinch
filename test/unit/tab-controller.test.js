@@ -243,10 +243,10 @@ test('trusted internal jar name is derived per host, including vault (squawk 000
   assert.equal(settings.container.name, 'Settings');
   assert.equal(downloads.container.name, 'Downloads');
   assert.equal(jars.container.name, 'Cookie Jars');
-  // Matches the label the Vault page and kebab menu item both use ("Secrets" —
+  // Matches the label the Vault page and kebab menu item both use ("Vault" —
   // src/renderer/pages/vault.html's <title>/<h1> and overlay-menus.js's kebab
   // entry), not the host name.
-  assert.equal(vault.container.name, 'Secrets');
+  assert.equal(vault.container.name, 'Vault');
 });
 
 test('ordered movement, close fallback, and geometry use the live strip and shared context', async () => {

@@ -93,7 +93,7 @@ export function createTabController(deps) {
   // automation-indicator fallback) — tab TITLES still come from the page `<title>`.
   // `id: 'internal'` and the internal-partition pairing (below) are UNCHANGED — that
   // pairing is the documented data-loss guard.
-  const INTERNAL_JAR_NAMES = { settings: 'Settings', downloads: 'Downloads', jars: 'Cookie Jars', vault: 'Secrets' };
+  const INTERNAL_JAR_NAMES = { settings: 'Settings', downloads: 'Downloads', jars: 'Cookie Jars', vault: 'Vault' };
   function internalJarName(url) {
     try {
       return INTERNAL_JAR_NAMES[new URL(url).host] || 'Settings';

@@ -540,7 +540,7 @@ function init() {
   function buildNotSetUp() {
     const section = el('section', 'vault-section');
     section.setAttribute('aria-labelledby', 'vault-setup-heading');
-    const h2 = el('h2', undefined, 'Set up the password manager');
+    const h2 = el('h2', undefined, 'Set up the vault');
     h2.id = 'vault-setup-heading';
     section.appendChild(h2);
     section.appendChild(
@@ -559,7 +559,7 @@ function init() {
     // broadcasts the lock-state → the page re-renders to unlocked.
     const actions = el('div', 'vault-setup-actions');
     actions.appendChild(
-      button('Set up the password manager', 'vault-btn primary', () => {
+      button('Set up the vault', 'vault-btn primary', () => {
         // M12 F3 Leg 4: request the chrome-owned setup sheet (page → main → chrome → the
         // vault-set card). NO password is entered here — it lives only on the sheet + in
         // main; the page moves to unlocked off the vault-lock-state broadcast on success.
