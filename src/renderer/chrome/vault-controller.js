@@ -243,7 +243,7 @@ export function createVaultController({
     el.classList.toggle('hidden', !model.visible);
     el.classList.toggle('vault-locked', model.visible && model.state === 'locked');
     el.classList.toggle('vault-unlocked', model.visible && model.state === 'unlocked');
-    const label = model.visible && model.state === 'unlocked' ? 'Password manager unlocked' : 'Password manager locked';
+    const label = model.visible && model.state === 'unlocked' ? 'Vault unlocked' : 'Vault locked';
     el.setAttribute('aria-label', label);
   }
 

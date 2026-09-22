@@ -23,7 +23,7 @@ test('vault-set card is a modal dialog with password + confirm inputs, aria-live
   // The card itself is the accessible dialog: role=dialog + aria-modal=true + a name.
   assert.equal(card.card.attributes.get('role'), 'dialog');
   assert.equal(card.card.attributes.get('aria-modal'), 'true');
-  assert.equal(card.card.attributes.get('aria-label'), 'Set up the password manager');
+  assert.equal(card.card.attributes.get('aria-label'), 'Set up the vault');
   assert.equal(card.card.parentNode, card.node);
 
   // BOTH fields are password (never text) with spellcheck off + distinct ids.

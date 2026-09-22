@@ -56,7 +56,7 @@ body {
 }
 
 /* ── Left nav (sticky sidebar) — the jars rail, mirrored (M12 F5 HAT hat-page-sidebar) ── */
-nav[aria-label='Secrets'] {
+nav[aria-label='Vaults'] {
   flex: 0 0 var(--nav-w);
   position: sticky;
   top: var(--nav-top);
@@ -70,17 +70,17 @@ nav[aria-label='Secrets'] {
   flex-direction: column;
 }
 
-nav[aria-label='Secrets'] ul {
+nav[aria-label='Vaults'] ul {
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
-nav[aria-label='Secrets'] li {
+nav[aria-label='Vaults'] li {
   margin: 0;
 }
 
-nav[aria-label='Secrets'] a {
+nav[aria-label='Vaults'] a {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -94,18 +94,18 @@ nav[aria-label='Secrets'] a {
     color 0.1s;
 }
 
-nav[aria-label='Secrets'] a:hover {
+nav[aria-label='Vaults'] a:hover {
   background: var(--bg-3);
   color: var(--fg);
 }
 
-nav[aria-label='Secrets'] a:focus-visible {
+nav[aria-label='Vaults'] a:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
 
 /* Active section highlight (set by the scroll-spy in vault-nav-controller.js). */
-nav[aria-label='Secrets'] a[aria-current='true'] {
+nav[aria-label='Vaults'] a[aria-current='true'] {
   color: var(--accent);
   border-left-color: var(--accent);
   background: var(--bg-3);

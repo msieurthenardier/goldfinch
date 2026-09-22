@@ -36,7 +36,7 @@ export function buildVaultSetCard(document) {
   card.className = 'new-container-inner vault-set-inner';
   card.setAttribute('role', 'dialog');
   card.setAttribute('aria-modal', 'true');
-  card.setAttribute('aria-label', 'Set up the password manager');
+  card.setAttribute('aria-label', 'Set up the vault');
   node.appendChild(card);
 
   const label = document.createElement('label');

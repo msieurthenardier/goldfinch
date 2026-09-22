@@ -39,12 +39,12 @@ export function buildVaultUnlockCard(document) {
   card.className = 'new-container-inner vault-unlock-inner';
   card.setAttribute('role', 'dialog');
   card.setAttribute('aria-modal', 'true');
-  card.setAttribute('aria-label', 'Unlock password manager');
+  card.setAttribute('aria-label', 'Unlock vault');
   node.appendChild(card);
 
   // Shared header (title + close/X) — consistent chrome with the picker. menu-overlay.js
   // wires `close` (a deliberate dismiss, alongside Cancel/Escape).
-  const { header, close } = buildVaultSheetHeader(document, 'Unlock password manager');
+  const { header, close } = buildVaultSheetHeader(document, 'Unlock vault');
   card.appendChild(header);
 
   const label = document.createElement('label');
