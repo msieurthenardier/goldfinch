@@ -847,3 +847,15 @@ Signal `[READY]` now.
   its `lastFocused` flag, not by a remembered `windowId` — see same run
   (Checkpoint 15 Actions taken; Orchestrator Notes "Relaunch (row 15,
   after checkpoint 14)").
+- **`document.hasFocus()` false readings are page-scoped too, not only on the
+  chrome document**: on the internal `goldfinch://vault` guest it read true at
+  one step, then false for the rest of the run. That persisted through a real
+  click and through the operator focusing the window, while `activeElement` and
+  AX `focused` stayed consistent and the rendered ring was absent. Budget one
+  operator by-eye round-trip for every focus-asserting row — see
+  `tests/behavior/vault-filter/runs/2026-09-23-17-09-28.md` (Checkpoint 7).
+- **Tag-the-node refresh check**: to prove an action re-rendered a page rather
+  than mutating it in place, set a throwaway `data-*` attribute on the element
+  via `evaluate` before the action, then check that the attribute is gone while
+  an element with the same id exists afterwards. It's cheap and decisive — see
+  the same run (Checkpoint 9).

@@ -3,7 +3,7 @@
 **Slug**: `vault-filter`
 **Status**: active
 **Created**: 2026-09-22
-**Last Run**: never
+**Last Run**: 2026-09-23-17-09-28
 
 > **Hybrid witnessed** (Mission 22, Flight 1). The Executor drives the internal
 > `goldfinch://vault` page with the admin tier. Unlock is an operator step,
@@ -49,6 +49,12 @@ the accessibility tree, none of which a unit test observes.
     an **operator step** if the jar vault has no key yet, done before or during
     step 1's setup, the same way unlock itself is an operator step (see below).
   - The marker `zq7marker` appears **only** in secret fields.
+  - **One identity profile per vault** (app-enforced). If the jar vault already
+    holds an identity, seed "Home" in any other jar vault that has free identity
+    capacity (run 2026-09-23 used Work). Every Expected Result names items
+    individually, so the placement doesn't affect any verdict. Inventory all
+    pre-existing items before seeding, and adjust nothing that belongs to the
+    operator.
 - The page is reached via the chrome kebab menu → **Vault** (opens
   `goldfinch://vault` as a trusted internal tab). Record every vault section id on
   the page (`section#vault-<id>`) before step 2.

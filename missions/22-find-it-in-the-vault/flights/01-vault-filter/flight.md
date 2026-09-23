@@ -278,7 +278,7 @@ an inline fix.
 
 - [x] Matcher + drift guard green
 - [x] Controller + wiring green (`npm test`, typecheck, lint, format:check)
-- [ ] `vault-filter` behavior test passes on the live app
+- [x] `vault-filter` behavior test passes on the live app
 - [ ] Operator alignment complete
 
 ### Adaptation Criteria
@@ -297,7 +297,7 @@ an inline fix.
 
 > **Note:** These are tentative suggestions, not commitments. Legs are planned and created one at a time as the flight progresses. This list will evolve based on discoveries during implementation.
 
-- [ ] `vault-filter`: matcher + drift guard, filter controller, `vault.js`
+- [x] `vault-filter`: matcher + drift guard, filter controller, `vault.js`
       wiring, CSS (incl. `[hidden]` overrides), route, line budget, docs, finalize
       and run the `vault-filter` behavior test.
 - [ ] `hat-and-alignment`: guided HAT with the operator on the live page, tuning

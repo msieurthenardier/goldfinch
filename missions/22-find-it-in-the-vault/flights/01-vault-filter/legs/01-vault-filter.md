@@ -1,6 +1,6 @@
 # Leg: vault-filter
 
-**Status**: landed
+**Status**: completed
 **Flight**: [Vault Filter](../flight.md)
 
 ## Objective
@@ -302,15 +302,15 @@ docs. Finish with the finalized `vault-filter` behavior spec.
 
 **Complete ALL steps before signaling `[COMPLETE:leg]`:**
 
-- [ ] All acceptance criteria verified
-- [ ] Tests passing
-- [ ] Update flight-log.md with leg progress entry
-- [ ] Set this leg's status to `completed` (in this file's header)
-- [ ] Check off this leg in flight.md
+- [x] All acceptance criteria verified
+- [x] Tests passing
+- [x] Update flight-log.md with leg progress entry
+- [x] Set this leg's status to `completed` (in this file's header)
+- [x] Check off this leg in flight.md
 - [ ] If final leg of flight:
   - [ ] Update flight.md status to `landed`
   - [ ] Check off flight in mission.md
-- [ ] Commit all changes together (code + artifacts)
+- [x] Commit all changes together (code + artifacts)
 
 ## Citation Audit
 

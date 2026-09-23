@@ -245,3 +245,20 @@ unrelated) — includes the new aria-live test. `npm run typecheck`, `npm run li
   `landed`. It moves to `completed` only after the `vault-filter` behavior test
   passes on the live app. That run needs the admin MCP apparatus plus the operator
   for unlock and the access-key mint.
+- **Behavior test `vault-filter`: PASS**, 10/10 checkpoints (run log
+  `tests/behavior/vault-filter/runs/2026-09-23-17-09-28.md`).
+  - Checkpoint 7 was Validator-INCONCLUSIVE under the apparatus-focus rule and
+    resolved PASS by operator by-eye confirmation of the focus ring.
+  - Spec deviation: "Home" was seeded in Work because Personal already held its one
+    identity. The spec's Preconditions are now amended.
+  - Apparatus: the dev instance was relaunched with ADMIN + DEV_MINT and bound
+    49708. An attach-only client was used.
+  - Two crew apparatus notes were landed in
+    `.flightops/agent-crews/behavior-tests-execution.md`: `hasFocus` is
+    page-scoped, and the tag-the-node refresh check (the Mission 21 debrief's
+    "recommendations as actions" rule).
+- **Leg 1 `vault-filter` → completed.**
+- **Squawk 0103 logged (routine, deferred to the next turnaround):** the vault page
+  still says "Unlock the manager…" and "lock the manager". Squawk 0102 missed
+  these. It was found incidentally at checkpoint 10 and is out of this flight's
+  scope.
