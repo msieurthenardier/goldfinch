@@ -36,13 +36,18 @@
  * never itself a registered row): with a query active it still collapses, because it has
  * "no visible registered row" trivially.
  *
- * **The Access-keys subsection is never registered.** `buildAccessKeysSection` builds an
- * independent `section.vault-accesskeys` (not `.vault-type-subsection`), fetched over its
- * own async chain outside `registerVault`'s pairs — so it is never a match target and is
- * never individually toggled. It disappears only as a side effect of its OWNING vault
- * section collapsing (an FD ruling, flight log 2026-09-22: "a jar vault with zero item
- * matches hides whole, including its Access-keys subsection" — CSS `display: none` on an
- * ancestor collapses every descendant regardless of the descendant's own class).
+ * **The Access-keys subsection is never registered, but it IS toggled directly while a
+ * query is active.** `buildAccessKeysSection` builds an independent `section.vault-
+ * accesskeys` (not `.vault-type-subsection`), fetched over its own async chain outside
+ * `registerVault`'s pairs — so it is never a match target: no access-key row is ever read,
+ * and its own content can never make it survive or disappear on its own. **Operator ruling
+ * (HAT H3, 2026-09-23, superseding the original flight-log FD ruling of 2026-09-22):**
+ * "access keys are more confusing to include, and that's not what people are going to be
+ * searching for" — so `apply()` now hides EVERY loaded section's `.vault-accesskeys` child
+ * whenever a query is active, unconditionally, regardless of whether that section's own
+ * items matched. An inactive (empty) query always shows it, exactly like today. This is a
+ * direct `vault-filter-out` toggle on the access-keys element itself now (see `apply()`),
+ * not merely an ancestor-collapse side effect as before.
  *
  * **Stale registrations are dropped.** `registerVault` ignores a section that is not
  * `isConnected` — the guard is sufficient with no generation token, because `render()`
@@ -101,8 +106,12 @@ export function createVaultFilter(deps) {
   const HIDE_CLASS = 'vault-filter-out';
   // The DOM class the controller walks to find a vault section's per-type subsections
   // (login/card/note/identity + the defensive "Other items" one) — never the jar-only
-  // Access-keys subsection, which carries a different class and is deliberately excluded.
+  // Access-keys subsection, which carries a different class and is never a match target.
   const SUBSECTION_CLASS = 'vault-type-subsection';
+  // The jar-only Access-keys subsection's own class (HAT H3, 2026-09-23): hidden whenever a
+  // query is active, unconditionally — it is never registered and never itself evaluated for
+  // matches, but per the operator's ruling it is not worth showing while filtering.
+  const ACCESSKEYS_CLASS = 'vault-accesskeys';
 
   /** The current query, always the trimmed-or-not raw field value (trimming happens inside
    * `itemMatchesFilter`, so an in-progress trailing space still narrows live). */
@@ -180,13 +189,20 @@ export function createVaultFilter(deps) {
       if (visible) visibleCount += 1;
     }
 
-    // 2/3. Subsections, then sections — one loaded section at a time.
+    // 2/3. Subsections, then sections — one loaded section at a time. Also the
+    // Access-keys subsection (HAT H3): toggled directly by `active` alone, never by its own
+    // (nonexistent) match state — it hides whenever a query is active and shows whenever the
+    // query is empty, independent of whether the section itself has any matches.
     for (const [section, rows] of sectionRows) {
       const children = /** @type {any} */ (section).children || [];
       for (const child of children) {
-        if (!child.classList || !child.classList.contains(SUBSECTION_CLASS)) continue;
-        const hasVisible = rows.some((row) => child.contains(row) && ownVisible(row));
-        child.classList.toggle(HIDE_CLASS, active && !hasVisible);
+        if (!child.classList) continue;
+        if (child.classList.contains(SUBSECTION_CLASS)) {
+          const hasVisible = rows.some((row) => child.contains(row) && ownVisible(row));
+          child.classList.toggle(HIDE_CLASS, active && !hasVisible);
+        } else if (child.classList.contains(ACCESSKEYS_CLASS)) {
+          child.classList.toggle(HIDE_CLASS, active);
+        }
       }
       const sectionHasVisible = rows.some(ownVisible);
       /** @type {any} */ (section).classList.toggle(HIDE_CLASS, active && !sectionHasVisible);
@@ -254,6 +270,12 @@ export function createVaultFilter(deps) {
     // while every `.vault-type-subsection` (including "Other items") stays covered by the
     // section's `off`. Class-based, not a `.vault-accesskeys`-only special case, so a
     // future non-filter-managed child of `buildVaultSection` is covered with no edit here.
+    // HAT H3 note: `.vault-accesskeys` now ALSO gets `vault-filter-out` toggled on it
+    // directly by `apply()` whenever a query is active (see `apply()`'s own comment) — this
+    // re-declared `polite` is unaffected by that and keeps doing its job whenever the
+    // element is actually displayed (query empty, or the query is cleared): a mint/revoke
+    // that happens to land while the query is active is announced once the element is shown
+    // again, same as any other `aria-live="polite"` region that was temporarily hidden.
     const nonFilterChildren = /** @type {any} */ (sectionEl).children || [];
     for (const child of nonFilterChildren) {
       if (
@@ -297,12 +319,25 @@ export function createVaultFilter(deps) {
     const wrap = document.createElement('div');
     wrap.className = 'vault-filter-field';
 
+    // HAT H1 fix: the label wraps only its text now — the input/clear button moved into
+    // their own positioned box below, so a `<button>` never nests inside a `<label>`. The
+    // explicit `for`/`id` association keeps the input's accessible name identical to the
+    // old implicit-wrapping association ("Filter items" — the label's own text content is
+    // unchanged, only the input is no longer a label descendant).
     const label = document.createElement('label');
     label.className = 'vault-filter-label';
+    label.setAttribute('for', 'vault-filter');
     const labelText = document.createElement('span');
     labelText.className = 'vault-filter-label-text';
     labelText.textContent = 'Filter items';
     label.appendChild(labelText);
+    wrap.appendChild(label);
+
+    // The input and its inline clear (×) share this positioned box (HAT H1: "the × should
+    // be inside the box") — CSS absolutely-positions the button at the box's right edge and
+    // pads the input so typed text never runs under it.
+    const box = document.createElement('span');
+    box.className = 'vault-filter-box';
 
     const input = /** @type {HTMLInputElement} */ (document.createElement('input'));
     input.type = 'text';
@@ -310,8 +345,7 @@ export function createVaultFilter(deps) {
     input.className = 'vault-filter-input';
     input.value = query;
     input.setAttribute('autocomplete', 'off');
-    label.appendChild(input);
-    wrap.appendChild(label);
+    box.appendChild(input);
 
     const clearBtn = /** @type {HTMLButtonElement} */ (document.createElement('button'));
     clearBtn.type = 'button';
@@ -321,7 +355,9 @@ export function createVaultFilter(deps) {
     clearBtn.title = 'Clear filter';
     clearBtn.textContent = '×';
     clearBtn.hidden = true;
-    wrap.appendChild(clearBtn);
+    box.appendChild(clearBtn);
+
+    wrap.appendChild(box);
 
     const status = document.createElement('p');
     status.id = 'vault-filter-status';

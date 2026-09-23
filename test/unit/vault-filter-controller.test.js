@@ -209,10 +209,15 @@ function buildVaultSection(id) {
   return { section, login, card, accessKeys, akRow };
 }
 
-/** Locate the field's input/clear-button/status from buildField()'s returned wrapper. */
+/**
+ * Locate the field's label/input/clear-button/status/box from buildField()'s returned
+ * wrapper. HAT H1 fix: the input and clear button now share a positioned `.vault-filter-
+ * box` sibling of the label (no longer input-inside-label) — see vault-filter-controller.js.
+ */
 function fieldParts(wrap) {
   const label = wrap.children[0];
-  return { input: label.children[1], clearBtn: wrap.children[1], status: wrap.children[2] };
+  const box = wrap.children[1];
+  return { label, box, input: box.children[0], clearBtn: box.children[1], status: wrap.children[2] };
 }
 
 function typeQuery(input, value) {
@@ -227,7 +232,7 @@ test('buildField: input#vault-filter, button#vault-filter-clear (hidden, aria-la
   const navEl = new El('ul');
   const filter = await create({ document, navEl });
   const wrap = filter.buildField();
-  const { input, clearBtn, status } = fieldParts(wrap);
+  const { label, box, input, clearBtn, status } = fieldParts(wrap);
 
   assert.equal(input.tagName, 'INPUT');
   assert.equal(input.type, 'text');
@@ -242,6 +247,15 @@ test('buildField: input#vault-filter, button#vault-filter-clear (hidden, aria-la
   assert.equal(status.id, 'vault-filter-status');
   assert.equal(status.getAttribute('role'), 'status');
   assert.equal(status.textContent, '');
+
+  // HAT H1 fix: the input and clear button share the SAME wrapper (the box the × is
+  // positioned inside), and the button is never a descendant of the <label> — the label
+  // instead carries an explicit `for` pointing at the input's id.
+  assert.equal(input.parentNode, box, 'input lives in the box');
+  assert.equal(clearBtn.parentNode, box, 'clear button lives in the SAME box as the input');
+  assert.equal(label.getAttribute('for'), 'vault-filter', 'explicit label association');
+  assert.equal(label.children.indexOf(input), -1, 'input is not a descendant of the label');
+  assert.equal(label.children.indexOf(clearBtn), -1, 'button is not a descendant of the label');
 });
 
 test('buildField: no "search" anywhere — id, class, aria-label, or input type', async () => {
@@ -308,7 +322,13 @@ test('register-then-apply: filters rows, collapses emptied subsections and the s
   assert.equal(status.textContent, '');
 });
 
-test('the Access-keys subsection is never itself toggled; it disappears only via its ancestor section collapsing', async () => {
+// HAT H3 (2026-09-23, superseding the original FD ruling): while a filter query is active,
+// every LOADED vault's Access-keys subsection hides directly — never as a match target, and
+// regardless of whether that same vault has item matches. Renamed from the pre-H3 test
+// ("the Access-keys subsection is never itself toggled; it disappears only via its ancestor
+// section collapsing") to make the behavior shift visible in history rather than silently
+// dropping the old pin.
+test('HAT H3: Access-keys hides directly whenever the query is active, even when its vault HAS matches, and shows again once the query clears', async () => {
   const document = makeDocument();
   const navEl = new El('ul');
   const root = makeRoot();
@@ -321,12 +341,48 @@ test('the Access-keys subsection is never itself toggled; it disappears only via
   const only = addRow(v.login.list, { type: 'login', title: 'Alpha', username: 'a', origin: 'https://a.example' });
   filter.registerVault(v.section, [only]);
 
+  // A query with a MATCH: the section stays visible, but Access-keys hides anyway.
+  typeQuery(input, 'alpha');
+  assert.equal(v.section.classList.contains(HIDE_CLASS), false, 'the section still has a match');
+  assert.equal(
+    v.accessKeys.classList.contains(HIDE_CLASS),
+    true,
+    'Access-keys hides while filtering, regardless of matches'
+  );
+
+  // A query with NO match: the section hides too (unchanged), and Access-keys stays hidden.
   typeQuery(input, 'zzz-no-match');
   assert.equal(v.section.classList.contains(HIDE_CLASS), true);
-  // Access-keys itself never carries the class — only its ancestor section does (CSS
-  // !important collapses it visually regardless).
-  assert.equal(v.accessKeys.classList.contains(HIDE_CLASS), false);
-  assert.equal(v.akRow.classList.contains(HIDE_CLASS), false);
+  assert.equal(v.accessKeys.classList.contains(HIDE_CLASS), true);
+
+  // Clearing the query restores everything, Access-keys included.
+  typeQuery(input, '');
+  assert.equal(v.section.classList.contains(HIDE_CLASS), false);
+  assert.equal(
+    v.accessKeys.classList.contains(HIDE_CLASS),
+    false,
+    'Access-keys is visible again once the query is empty'
+  );
+  assert.equal(v.akRow.classList.contains(HIDE_CLASS), false, 'the filter never touches the access-key row itself');
+});
+
+test("HAT H3: an unloaded (never-registered) vault's Access-keys is left untouched by an active query", async () => {
+  const document = makeDocument();
+  const navEl = new El('ul');
+  const root = makeRoot();
+  const filter = await create({ document, navEl });
+  const wrap = filter.buildField();
+  const { input } = fieldParts(wrap);
+
+  const v = buildVaultSection('unloaded');
+  root.appendChild(v.section); // attached, but NEVER registered
+
+  typeQuery(input, 'anything');
+  assert.equal(
+    v.accessKeys.classList.contains(HIDE_CLASS),
+    false,
+    'an unloaded vault is never touched, access keys included'
+  );
 });
 
 test('an empty vault (zero items in every subsection) collapses whole once loaded under an active query', async () => {

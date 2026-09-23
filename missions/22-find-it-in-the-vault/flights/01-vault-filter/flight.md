@@ -1,6 +1,6 @@
 # Flight: Vault Filter
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Find It in the Vault](../../mission.md)
 
 ## Contributing to Criteria
@@ -91,6 +91,20 @@ last point.
   rule exists. A source-scan check pins the row override.
 - Trade-off: Rows exist in the DOM while hidden. That is harmless here, because the
   page already holds only metadata.
+
+**HAT amendment (H3, 2026-09-23, hat-and-alignment leg): Access-keys hides
+whenever a query is active, unconditionally.** The leg 1 FD ruling above
+("a jar vault with zero item matches hides whole, including its Access-keys
+subsection") is superseded. At alignment the operator reviewed the no-match
+state and ruled: "I think it's more confusing to include the access keys and
+that's not what people are going to be searching for in the first place,
+let's exclude." The controller now toggles `vault-filter-out` on a loaded
+section's `.vault-accesskeys` child directly whenever `query.trim()` is
+non-empty — independent of whether that section's own items matched — and
+removes it whenever the query is empty. Access keys are still never a match
+target and never feed the status count; only the *when it hides* rule
+changed, from "only alongside a zero-match vault" to "whenever filtering is
+active at all". See `flight-log.md`'s `hat-and-alignment` entry.
 
 **DD2: The matcher is pure, phrase-based, and whitelist-driven.**
 `vault-page-model.js` exports `FILTER_FIELDS` (per-type field lists) and
@@ -279,7 +293,7 @@ an inline fix.
 - [x] Matcher + drift guard green
 - [x] Controller + wiring green (`npm test`, typecheck, lint, format:check)
 - [x] `vault-filter` behavior test passes on the live app
-- [ ] Operator alignment complete
+- [x] Operator alignment complete
 
 ### Adaptation Criteria
 
@@ -300,7 +314,7 @@ an inline fix.
 - [x] `vault-filter`: matcher + drift guard, filter controller, `vault.js`
       wiring, CSS (incl. `[hidden]` overrides), route, line budget, docs, finalize
       and run the `vault-filter` behavior test.
-- [ ] `hat-and-alignment`: guided HAT with the operator on the live page, tuning
+- [x] `hat-and-alignment`: guided HAT with the operator on the live page, tuning
       placement, spacing, copy, and feel. Include a screen-reader spot check of the
       announcement behavior (DD5): typing announces only the status line, and a
       whole vault collapsing then reappearing does not re-announce its name or

@@ -4,7 +4,7 @@
 
 ## Summary
 
-Planning. Not yet in flight.
+Landed 2026-09-23. Leg 1 `vault-filter` (behavior test 10/10 pass) and leg 2 `hat-and-alignment` (operator sign-off; H1 inline clear button, H3 access keys hidden while filtering) are complete. Squawks 0103 and 0104 were logged.
 
 ---
 
@@ -262,3 +262,110 @@ unrelated) — includes the new aria-live test. `npm run typecheck`, `npm run li
   still says "Unlock the manager…" and "lock the manager". Squawk 0102 missed
   these. It was found incidentally at checkpoint 10 and is out of this flight's
   scope.
+
+### hat-and-alignment
+
+- **HAT H1 fix (2026-09-23)**: operator feedback — "the × should be inside the
+  box, otherwise everything looks good." `buildField()`
+  (`src/renderer/pages/vault-filter-controller.js`) no longer nests the input
+  inside the `<label>` (a `<button>`-inside-`<label>` is bad semantics); the
+  input and clear button now share a new `span.vault-filter-box` sibling of the
+  label, with the label carrying an explicit `for="vault-filter"` association
+  instead (accessible name unchanged: "Filter items"). `vault.css` gained
+  `.vault-filter-box` (`position: relative`) and repositioned `.vault-filter-
+  clear` `position: absolute` at the box's right edge, vertically centered via
+  `top: 50%; transform: translateY(-50%)`; `.vault-filter-input` gained right
+  padding (28px) so typed text never runs under the ×, and the clear button's
+  `:focus-visible` outline offset went negative (`-2px`) so the ring stays
+  inside the box instead of colliding with the input's own ring. All frozen
+  hooks (`#vault-filter`, `#vault-filter-clear`, `#vault-filter-status`,
+  `vault-filter-out`, the button's `aria-label`/native `<button>`/`hidden`
+  toggling, tab order input → clear, focus-return-on-clear) are unchanged.
+  `vault.js` was not touched — no `VAULT_PAGE_LINE_BUDGET` re-measurement
+  needed.
+  - `test/unit/vault-filter-controller.test.js`: `fieldParts` updated for the
+    new box wrapper; added assertions that the input and clear button share the
+    same `.vault-filter-box` parent and that neither is a label descendant, plus
+    a check on the label's new `for` attribute.
+  - Gates: `timeout 600 npm test` → 5677 pass / 0 fail / 4 todo (pre-existing,
+    unrelated). `npm run typecheck`, `npm run lint`, `npm run format` (no
+    changes — already Prettier-clean), `npm run format:check` all clean.
+  - Live-app visual verification via the admin MCP apparatus (port 49708):
+    reloaded the `goldfinch://vault` tab (internal-session `reload`/`navigate`
+    are refused for automation, so used `evaluate` → `location.reload()`,
+    which the internal session DOES permit under the admin tier), typed "al"
+    into `#vault-filter`, and captured a screenshot confirming the × sits
+    inside the field's right edge, vertically centered, with the "al" text
+    clear of it. Saved to
+    `/tmp/behavior-tests/goldfinch/vault-filter/hat/h1-filter-clear-inside-box.png`
+    (scratch/local, not part of the repo). Cleared the field again afterward.
+- **H1 verified by operator (2026-09-23)**: "looks great." No further changes
+  requested.
+- **H2 (feel): pass.** The operator typed several queries and cleared; filtering
+  read as immediate, with no jank or layout jumps flagged.
+- **H3 (no-match + access keys) ruling (2026-09-23)**: the operator reviewed
+  the "No items match" state and the access-keys behavior, and OVERTURNED the
+  leg 1 FD ruling. Operator's own words: "I think it's more confusing to
+  include the access keys and that's not what people are going to be
+  searching for in the first place, let's exclude." FD interpretation,
+  announced back to the operator: while a filter query is active (non-empty
+  after trim), every jar vault's Access-keys subsection is hidden, regardless
+  of whether that vault has item matches; with an empty query the page is
+  exactly as before (access keys visible). This replaces the narrower
+  zero-match-only rule.
+  - **Implemented**: `vault-filter-controller.js`'s `apply()` now toggles
+    `vault-filter-out` directly on a loaded section's `.vault-accesskeys`
+    child by `active` alone (see the new `ACCESSKEYS_CLASS` constant and the
+    updated subsection/section walk). Access keys are still never registered,
+    never a match target, and never feed the status count — only the hide
+    condition changed. The fix-cycle-1 `aria-live="polite"` re-declaration on
+    non-type-subsection children (incl. `.vault-accesskeys`) is unchanged:
+    mint/revoke announcements still fire correctly whenever the element is
+    actually displayed (query empty, or since cleared).
+  - `vault.js` was not touched; `VAULT_PAGE_LINE_BUDGET` needed no
+    re-measurement (confirmed: `vault.js` is 2152 lines, budget 2153, test
+    uses `<=`).
+  - Tests: `test/unit/vault-filter-controller.test.js` — renamed the old
+    "Access-keys subsection is never itself toggled" test to
+    `HAT H3: Access-keys hides directly whenever the query is active, even
+    when its vault HAS matches, and shows again once the query clears`
+    (covers: query-active-with-matches → access keys hidden while the
+    section stays visible; query-active-zero-matches → both hidden; query
+    cleared → access keys visible again); added a new test for an unloaded
+    vault's access keys staying untouched by an active query. 17/17 pass (was
+    15; net +2 after the rename/split).
+  - Gates re-run: `timeout 600 npm test` → 5678 pass / 0 fail / 4 todo
+    (pre-existing, unrelated). `npm run typecheck`, `npm run lint` both
+    clean. `npm run format` reformatted only the new test assertions'
+    line-wrapping; `npm run format:check` clean after.
+  - Live verification via the admin MCP apparatus (port 49708): reloaded
+    `goldfinch://vault`, set `#vault-filter` to `mail.example` (`evaluate`:
+    set `.value` + dispatch `input`), and confirmed via `evaluate` that
+    `section#vault-personal` is displayed, its `.vault-accesskeys` carries
+    `vault-filter-out` with computed `display: none`, and the "Beta Mail" row
+    is displayed. Screenshot saved to
+    `/tmp/behavior-tests/goldfinch/vault-filter/hat/h3-accesskeys-hidden.png`
+    (scratch/local). Cleared the field (`.value = ''` + `input` dispatch) and
+    confirmed `.vault-accesskeys` no longer carries `vault-filter-out` (access
+    keys displayed again). Left the field empty afterward.
+- **Artifacts re-authored to match the H3 ruling** (deliberate spec/doc
+  amendments, not silent edits): `tests/behavior/vault-filter.md` (a new
+  header note plus steps 5–7's Expected Results and the Preconditions/Out-of-
+  Scope wording), `mission.md`'s first success criterion, and `flight.md`
+  (a new "HAT amendment" note appended after DD1, leaving the original leg 1
+  FD ruling text intact as history rather than rewriting it).
+- **H4** pass: the operator tested a nav click on a hidden vault, and the
+  save-while-filtering reset is acceptable.
+- **H5** waived: the operator skipped the screen-reader spot check. Speech
+  behavior, including the collapsed-vault re-show residual, stays unverified by
+  ear. The AX roles and names were verified by the behavior test.
+- **H6** sign-off: "pass, looks good", given after an app relaunch to pick up the
+  H3 code.
+- **HAT review** (Reviewer): `[HANDOFF:confirmed]`. 5678 pass / 0 fail / 4 todo,
+  and gates clean.
+- **Squawk 0104 logged** (routine): in a running dev session, edits to
+  internal-page ES modules stay stale across `location.reload()` until the app is
+  relaunched. Found during H3's live verification.
+- **Leg 2 `hat-and-alignment` → completed. Flight → landed.** Behavior spec
+  steps 5–7 were re-authored for H3. The next `vault-filter` run exercises the new
+  access-keys rule. The last run (2026-09-23-17-09-28) predates it.

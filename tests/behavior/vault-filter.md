@@ -5,6 +5,15 @@
 **Created**: 2026-09-22
 **Last Run**: 2026-09-23-17-09-28
 
+> **Re-authored at HAT H3 (2026-09-23), after the run above.** Operator ruling:
+> access keys are excluded from the page while a filter query is active,
+> regardless of whether that vault has item matches — they were never a
+> filter target and are "not what people are going to be searching for". This
+> supersedes the prior FD ruling ("access keys collapse only with a
+> zero-match vault; otherwise stay visible"), which step 5 below exercised in
+> the run above. Steps 5 and 6 are re-authored against the new behavior; the
+> **next** run is the first to exercise it.
+
 > **Hybrid witnessed** (Mission 22, Flight 1). The Executor drives the internal
 > `goldfinch://vault` page with the admin tier. Unlock is an operator step,
 > because the `vault-unlock` sheet is not automatable. Finalized against the
@@ -43,8 +52,9 @@ the accessibility tree, none of which a unit test observes.
     `beta-user`, origin `https://mail.example`); note "Filter Recipe" (body
     `zq7marker-body`); identity profile titled "Home" (fullName "Pat Example",
     email `zq7marker@example.com`); at least one access key minted for this jar
-    (needed for the step-6 whole-vault-collapse check — an Access-keys subsection
-    with a row in it). **Minting goes through the chrome-owned step-up sheet**
+    (needed for the steps 5–7 Access-keys-hides-while-filtering checks — an
+    Access-keys subsection with a row in it). **Minting goes through the
+    chrome-owned step-up sheet**
     (re-enter the master password) — not on `AUTOMATABLE_MENU_TYPES`, so this is
     an **operator step** if the jar vault has no key yet, done before or during
     step 1's setup, the same way unlock itself is an operator step (see below).
@@ -88,9 +98,9 @@ the accessibility tree, none of which a unit test observes.
 | 2 | Read the page. | The "Vaults" section holds `#vault-filter`, which is empty. `#vault-filter-clear` is hidden (its `hidden` attribute) or absent. Every seeded item row is displayed (not `vault-filter-out`). The status line (`#vault-filter-status`) is empty. [a11y] The field's accessible name contains "Filter", and neither the field nor the status uses a "search" name or role. |
 | 3 | Click `#vault-filter` and type `filter`. | Displayed rows are exactly "Filter Alpha", "Filter Card", and "Filter Recipe" (title matches across both vaults). "Beta Mail" and "Home" rows are NOT displayed (carry `vault-filter-out` / `display: none`), and the jar vault's Logins and Identity subsections are NOT displayed for the same reason. The status reads exactly "3 items match". `#vault-filter-clear` is displayed (its `hidden` attribute cleared). Focus is still on `#vault-filter`. |
 | 4 | Clear the field by selecting all and typing `pat example`. | Only "Filter Card" (cardholder) and "Home" (fullName) are displayed. The match is case-insensitive. The status reads exactly "2 items match". |
-| 5 | Replace the text with `mail.example`. | Only "Beta Mail" (origin) is displayed. The Global vault's `section#vault-<id>` is NOT displayed (`vault-filter-out`) because it has zero matches. The jar vault section is displayed, and its Access-keys subsection — never itself a filter target — is still displayed alongside it. |
-| 6 | Replace the text with `zq7marker`. | Every item row is NOT displayed, and every vault section (`section#vault-<id>`, both Global and the jar vault) is NOT displayed (zero matches each). **The jar vault's Access-keys subsection is ALSO not displayed** — not because the filter ever targets it directly (it never registers or toggles Access-keys on its own), but because it collapses along with its whole owning vault section, per the flight's FD ruling: a jar vault with zero item matches hides whole, Access-keys included. The status reads exactly "No items match", and the page states it in words rather than going blank. No row that carries the marker in a secret field (password, notes, note body, identity email) is displayed. [a11y] `#vault-filter-status` has role `status`, and every not-displayed row/subsection/section is absent from the accessibility tree. |
-| 7 | Activate `#vault-filter-clear` (click it). | The field is empty, and every item row, subsection, and vault section (including the jar vault's Access-keys subsection) is displayed again — nothing carries `vault-filter-out`. The status is empty. The clear button is hidden (its `hidden` attribute). Focus is on `#vault-filter`. |
+| 5 | Replace the text with `mail.example`. | Only "Beta Mail" (origin) is displayed. The Global vault's `section#vault-<id>` is NOT displayed (`vault-filter-out`) because it has zero matches. The jar vault section IS displayed, showing only "Beta Mail" — but its Access-keys subsection is NOT displayed (`vault-filter-out`) while the filter is active, per the operator's HAT H3 ruling: access keys are never a filter target and hide unconditionally whenever a query is active, independent of whether their own vault has matches. |
+| 6 | Replace the text with `zq7marker`. | Every item row is NOT displayed, and every vault section (`section#vault-<id>`, both Global and the jar vault) is NOT displayed (zero matches each). The jar vault's Access-keys subsection is also NOT displayed — same HAT H3 rule as step 5 (any active query hides it), not specific to the zero-match case here. The status reads exactly "No items match", and the page states it in words rather than going blank. No row that carries the marker in a secret field (password, notes, note body, identity email) is displayed. [a11y] `#vault-filter-status` has role `status`, and every not-displayed row/subsection/section is absent from the accessibility tree. |
+| 7 | Activate `#vault-filter-clear` (click it). | The field is empty, and every item row, subsection, and vault section is displayed again, INCLUDING the jar vault's Access-keys subsection (a cleared/empty filter always shows it) — nothing carries `vault-filter-out`. The status is empty. The clear button is hidden (its `hidden` attribute). Focus is on `#vault-filter`. |
 | 8 | Type `filter recipe`. Then click the left nav entry for the **Global** vault, which is filtered out (not displayed). | Before the jump, the Global section is not displayed. After the click, the filter is cleared (the field is empty and all rows/subsections/sections are displayed again) and the page has scrolled to the Global vault section. |
 | 9 | Type `alpha`. Open "Filter Alpha"'s Edit, change nothing, and Save, so the page refreshes. | After the refresh, `#vault-filter` is empty, every item row is displayed, and the status is empty. The field and the page agree. |
 | 10 | Type `alpha`. Then click the page's "Lock now" control. | The page shows the locked view. `#vault-filter` is not present anywhere in the DOM. |
@@ -105,5 +115,6 @@ the accessibility tree, none of which a unit test observes.
   applies is a mechanism detail the operator's screen-reader spot-check verifies
   directly, not this test).
 - axe-core auditing: `goldfinch://vault` is an accepted internal-page audit gap.
-- The item editor, delete, import/restore, and access keys (beyond the whole-vault
-  collapse check in step 6), beyond being unaffected. Existing specs cover them.
+- The item editor, delete, import/restore, and access-key mint/revoke mechanics
+  themselves (beyond the hide/show checks in steps 5–7), beyond being
+  unaffected. Existing specs cover them.

@@ -61,8 +61,11 @@ reads "Vaults".
 - [ ] **One filter field filters every vault.** While the vault is unlocked, a
   single filter field appears in the top "Vaults" section, below its heading,
   above the per-vault sections. Typing narrows items in every vault at once.
-  Nothing else on the page (the Settings section, Add buttons, Access keys)
-  is filtered.
+  The Settings section and Add buttons are unaffected. Access keys are never
+  a filter target — a jar's Access-keys subsection is simply hidden whenever
+  a query is active, unconditionally, and shown again once the query is
+  cleared (operator ruling, HAT H3: access keys are not something people
+  search for).
 - [ ] **Non-matching items are removed from the page.** An item that doesn't
   match is not rendered or visible. A type subsection with no remaining
   matches, and a vault section with no remaining matches, are also removed
@@ -162,7 +165,7 @@ _None yet._
 
 > **Note:** These are tentative suggestions, not commitments. Flights are planned and created one at a time as work progresses. This list will evolve based on discoveries during implementation.
 
-- [ ] Flight 1: **Vault filter**. Pure matcher plus unit tests, filter
+- [x] Flight 1: **Vault filter**. Pure matcher plus unit tests, filter
   controller, integration with the page's render/refresh cycle
   (clean reset on refresh, async-load filtering, lock clears), accessible clear
   control and match announcement, behavior-test spec. The final
