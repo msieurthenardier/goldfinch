@@ -1,6 +1,6 @@
 # Flight: Vault Filter
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Find It in the Vault](../../mission.md)
 
 ## Contributing to Criteria

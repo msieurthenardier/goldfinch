@@ -1,6 +1,6 @@
 # Mission: Find It in the Vault
 
-**Status**: active
+**Status**: completed
 
 ## Outcome
 
@@ -58,7 +58,7 @@ reads "Vaults".
 
 ## Success Criteria
 
-- [ ] **One filter field filters every vault.** While the vault is unlocked, a
+- [x] **One filter field filters every vault.** While the vault is unlocked, a
   single filter field appears in the top "Vaults" section, below its heading,
   above the per-vault sections. Typing narrows items in every vault at once.
   The Settings section and Add buttons are unaffected. Access keys are never
@@ -66,35 +66,35 @@ reads "Vaults".
   a query is active, unconditionally, and shown again once the query is
   cleared (operator ruling, HAT H3: access keys are not something people
   search for).
-- [ ] **Non-matching items are removed from the page.** An item that doesn't
+- [x] **Non-matching items are removed from the page.** An item that doesn't
   match is not rendered or visible. A type subsection with no remaining
   matches, and a vault section with no remaining matches, are also removed
   while the filter is active. When nothing in any vault matches, the page says
   so in words instead of going blank.
-- [ ] **Matching uses only the non-secret fields listed in Context.** Matching
+- [x] **Matching uses only the non-secret fields listed in Context.** Matching
   is case-insensitive and substring-based over title, username, origin,
   cardholder, brand, last4, and fullName, per type. A value that appears only
   in a secret field (password, TOTP, notes, note body, card number, CVV,
   expiry, secret identity fields) never produces a match. Unit-tested against
   the pure matcher, including a negative case per type.
-- [ ] **A clear control restores the full page.** An × / clear control
+- [x] **A clear control restores the full page.** An × / clear control
   (keyboard-operable, with an accessible name) empties the filter and restores
   every item, subsection, and vault section. The control is present only when
   the filter has text.
-- [ ] **A page refresh resets the filter cleanly.** After an item save,
+- [x] **A page refresh resets the filter cleanly.** After an item save,
   delete, or edit, or any other in-page refresh, the filter field is empty and
   every item is shown. The field and the page never disagree: no empty field
   over a filtered page, and no leftover query over an unfiltered page.
   *(Behavior-test-backed: observable only on the running page.)*
-- [ ] **Locking clears the filter.** When the vault locks (manually or on idle
+- [x] **Locking clears the filter.** When the vault locks (manually or on idle
   autolock), the filter field is gone and no query survives into the locked
   view or the next unlock.
-- [ ] **Accessible.** The filter field has an accessible name. The
+- [x] **Accessible.** The filter field has an accessible name. The
   match / no-match state is announced to screen readers without stealing
   focus. Verified from the live page's accessibility tree in the behavior
   test. The axe audit can't target `goldfinch://vault` (an existing, accepted
   internal-page gap), so it is not an acceptance gate here.
-- [ ] **Built in the page's existing shape.** The matching logic is a pure,
+- [x] **Built in the page's existing shape.** The matching logic is a pure,
   DOM-free function with unit tests. The filter UI is its own controller, not
   new inline bulk in `vault.js`. Every existing vault-page test stays green;
   `VAULT_PAGE_LINE_BUDGET` moves only to the measured landed count.
@@ -159,7 +159,14 @@ reads "Vaults".
 
 ## Known Issues
 
-_None yet._
+- [ ] **Behavior-test record predates HAT H3.** Steps 5–7 of `tests/behavior/vault-filter.md`
+  were re-authored for the access-keys-hide-while-filtering ruling after the only
+  full run (2026-09-23-17-09-28). The operator declined a pre-merge re-run; the next
+  run exercises it. Discovered in Flight 1, affects the `vault-filter` spec record.
+- [ ] **Screen-reader speech unverified by ear.** HAT H5 was waived; the AX roles and
+  names were verified live, but announcement noise (including a collapsed vault
+  re-showing) was not listened to. Discovered in Flight 1, affects the
+  "Accessible" criterion's speech half.
 
 ## Flights
 
