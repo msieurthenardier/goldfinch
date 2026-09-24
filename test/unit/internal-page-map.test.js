@@ -46,6 +46,7 @@ test('createInternalPageMap returns the exact current host/path allowlist', () =
     '/safe-color.js',
     '/vault-browser-import-controller.js',
     '/vault-editor-model.js',
+    '/vault-filter-controller.js',
     '/vault-nav-controller.js',
     '/vault-page-model.js',
     '/vault-restore-controller.js',
@@ -76,6 +77,8 @@ test('createInternalPageMap returns the exact current host/path allowlist', () =
     map.vault['/vault-restore-controller.js'],
     '/app/src/main/../renderer/pages/vault-restore-controller.js'
   );
+  // Mission 22, Flight 1: the page-wide item filter's own controller module.
+  assert.equal(map.vault['/vault-filter-controller.js'], '/app/src/main/../renderer/pages/vault-filter-controller.js');
 });
 
 test('the existing resolver serves exact map entries and rejects traversal/wrong paths', () => {

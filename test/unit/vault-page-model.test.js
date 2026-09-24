@@ -18,8 +18,12 @@ const {
   browserImportSkipLines,
   browserImportOutcomeLines,
   SETTINGS_ID,
-  VAULTS_ID
+  VAULTS_ID,
+  FILTER_FIELDS,
+  itemMatchesFilter,
+  filterStatusText
 } = require('../../src/shared/vault-page-model.js');
+const { SCHEMA, ITEM_TYPES } = require('../../src/shared/vault-item-schema.js');
 
 const rows = [
   { vaultId: 'global', label: 'Global' },
@@ -601,4 +605,145 @@ test('browserImportOutcomeLines: malformed/missing counts coerce to 0, never NaN
   assert.deepEqual(browserImportOutcomeLines(undefined), ['0 imported']);
   assert.deepEqual(browserImportOutcomeLines({}), ['0 imported']);
   assert.deepEqual(browserImportOutcomeLines({ imported: 'nope', duplicate: -5, unmappable: null }), ['0 imported']);
+});
+
+// ── itemMatchesFilter / FILTER_FIELDS (Mission 22, Flight 1 / DD2, AC1) ──────
+
+test('FILTER_FIELDS drift guard: mirrors vault-item-schema.js SCHEMA[type].nonSecret exactly', () => {
+  assert.deepEqual(new Set(Object.keys(FILTER_FIELDS)), new Set(ITEM_TYPES));
+  for (const t of ITEM_TYPES) {
+    assert.deepEqual(FILTER_FIELDS[t], SCHEMA[t].nonSecret, `FILTER_FIELDS.${t} must equal SCHEMA.${t}.nonSecret`);
+  }
+});
+
+test('itemMatchesFilter: an empty or whitespace-only query matches everything', () => {
+  assert.equal(itemMatchesFilter({ type: 'login', title: 'Anything' }, ''), true);
+  assert.equal(itemMatchesFilter({ type: 'login', title: 'Anything' }, '   '), true);
+  assert.equal(itemMatchesFilter(null, ''), true);
+  assert.equal(itemMatchesFilter(undefined, ''), true);
+});
+
+test('itemMatchesFilter: positive match on every whitelisted field, per type, case-insensitive', () => {
+  assert.equal(itemMatchesFilter({ type: 'login', title: 'Filter Alpha' }, 'FILTER'), true);
+  assert.equal(itemMatchesFilter({ type: 'login', username: 'alpha-user' }, 'Alpha-User'), true);
+  assert.equal(itemMatchesFilter({ type: 'login', origin: 'https://alpha.example' }, 'ALPHA.EXAMPLE'), true);
+
+  assert.equal(itemMatchesFilter({ type: 'card', title: 'Filter Card' }, 'card'), true);
+  assert.equal(itemMatchesFilter({ type: 'card', cardholder: 'Pat Example' }, 'PAT EXAMPLE'), true);
+  assert.equal(itemMatchesFilter({ type: 'card', brand: 'Visa' }, 'visa'), true);
+  assert.equal(itemMatchesFilter({ type: 'card', last4: '4242' }, '4242'), true);
+
+  assert.equal(itemMatchesFilter({ type: 'note', title: 'Filter Recipe' }, 'recipe'), true);
+
+  assert.equal(itemMatchesFilter({ type: 'identity', title: 'Home' }, 'home'), true);
+  assert.equal(itemMatchesFilter({ type: 'identity', fullName: 'Pat Example' }, 'PAT'), true);
+});
+
+test('itemMatchesFilter: trims the query before matching (leading/trailing whitespace)', () => {
+  assert.equal(itemMatchesFilter({ type: 'login', title: 'Filter Alpha' }, '  filter  '), true);
+});
+
+test('itemMatchesFilter: a non-string field value (null / number) is ignored, never throws', () => {
+  assert.equal(itemMatchesFilter({ type: 'login', title: null, username: 42, origin: undefined }, 'x'), false);
+  assert.doesNotThrow(() => itemMatchesFilter({ type: 'card', last4: 4242 }, '4242'));
+  assert.equal(itemMatchesFilter({ type: 'card', last4: 4242 }, '4242'), false);
+});
+
+test('itemMatchesFilter: an unknown or missing type matches by title alone', () => {
+  assert.equal(itemMatchesFilter({ type: 'bogus', title: 'Foo Bar' }, 'foo'), true);
+  assert.equal(itemMatchesFilter({ type: 'bogus', username: 'foo' }, 'foo'), false);
+  assert.equal(itemMatchesFilter({ title: 'No Type Here' }, 'no type'), true);
+  assert.equal(itemMatchesFilter({}, 'x'), false);
+});
+
+test('itemMatchesFilter: per-type negative — the query appears only in a stray secret/derived key, never matches', () => {
+  assert.equal(
+    itemMatchesFilter(
+      {
+        type: 'login',
+        title: 'Alpha',
+        username: 'a',
+        origin: 'https://a.example',
+        password: 'zq7marker',
+        notes: 'zq7marker',
+        totp: 'zq7marker',
+        hasTotp: true,
+        matchMode: 'exact',
+        id: 'zq7marker'
+      },
+      'zq7marker'
+    ),
+    false
+  );
+  assert.equal(
+    itemMatchesFilter(
+      {
+        type: 'card',
+        title: 'Card',
+        cardholder: 'c',
+        brand: 'Visa',
+        last4: '4242',
+        number: 'zq7marker',
+        cvz: 'zq7marker',
+        cvv: 'zq7marker',
+        expiry: 'zq7marker',
+        notes: 'zq7marker',
+        id: 'zq7marker'
+      },
+      'zq7marker'
+    ),
+    false
+  );
+  assert.equal(
+    itemMatchesFilter({ type: 'note', title: 'Note', body: 'zq7marker', id: 'zq7marker' }, 'zq7marker'),
+    false
+  );
+  assert.equal(
+    itemMatchesFilter(
+      {
+        type: 'identity',
+        title: 'Home',
+        fullName: 'Pat',
+        firstName: 'zq7marker',
+        lastName: 'zq7marker',
+        email: 'zq7marker',
+        phone: 'zq7marker',
+        street: 'zq7marker',
+        street2: 'zq7marker',
+        city: 'zq7marker',
+        region: 'zq7marker',
+        country: 'zq7marker',
+        postalCode: 'zq7marker',
+        id: 'zq7marker'
+      },
+      'zq7marker'
+    ),
+    false
+  );
+});
+
+test('itemMatchesFilter: only reads FILTER_FIELDS[type] — no other key is ever consulted', () => {
+  const meta = { type: 'login', title: 'Match Me', extraneousKey: 'zq7marker' };
+  assert.equal(itemMatchesFilter(meta, 'zq7marker'), false);
+  assert.equal(itemMatchesFilter(meta, 'match me'), true);
+});
+
+// ── filterStatusText (Mission 22, Flight 1 / DD5, AC6) ───────────────────────
+
+test('filterStatusText: empty while inactive, regardless of count', () => {
+  assert.equal(filterStatusText(0, false), '');
+  assert.equal(filterStatusText(5, false), '');
+});
+
+test('filterStatusText: singular/plural while active, and a worded no-match state at zero', () => {
+  assert.equal(filterStatusText(0, true), 'No items match');
+  assert.equal(filterStatusText(1, true), '1 item matches');
+  assert.equal(filterStatusText(2, true), '2 items match');
+  assert.equal(filterStatusText(11, true), '11 items match');
+});
+
+test('filterStatusText: a malformed count degrades to zero, never NaN/negative', () => {
+  assert.equal(filterStatusText(Number.NaN, true), 'No items match');
+  assert.equal(filterStatusText(-3, true), 'No items match');
+  assert.equal(filterStatusText(undefined, true), 'No items match');
 });

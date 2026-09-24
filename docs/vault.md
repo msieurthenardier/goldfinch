@@ -255,7 +255,12 @@ business logic and no privileged APIs; it renders a model and runs the APG keybo
 surface, and the eval/observe tools exclude the internal session even for admin. So the
 menu-overlay sheet states (including the vault sheets) *are* axe-audited, but the
 `goldfinch://vault` page itself cannot be audited via `--target` — the settings-class a11y
-gap the mission explicitly accepted.
+gap the mission explicitly accepted. The page's item filter (Mission 22, Flight 1 — a
+non-secret display-only narrowing field in the "Vaults" section, matching only the
+non-secret metadata fields listed in `vault-item-schema.js`'s `SCHEMA[type].nonSecret`) is
+page-side chrome, not a sheet, so it inherits this same gap; its accessible-name/role/status
+contract and hidden-row-absent-from-AX-tree behavior are covered instead by the
+`vault-filter` behavior test and an operator screen-reader spot-check.
 
 ## The MCP automation surface
 

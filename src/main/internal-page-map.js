@@ -79,7 +79,10 @@ function createInternalPageMap({ baseDir, path }) {
       '/vault-browser-import-controller.js': rendererPage('vault-browser-import-controller.js'),
       // Flight 2 Leg 1 (DD4): the portable-bundle restore + export modal cluster, extracted
       // out of vault.js to pay down the M18 F3 line-budget debt.
-      '/vault-restore-controller.js': rendererPage('vault-restore-controller.js')
+      '/vault-restore-controller.js': rendererPage('vault-restore-controller.js'),
+      // Mission 22, Flight 1: the page-wide item filter — a controller module with no
+      // bridge/IPC access of its own (the vault-nav-controller.js precedent).
+      '/vault-filter-controller.js': rendererPage('vault-filter-controller.js')
     }
   };
 }
