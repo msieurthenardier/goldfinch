@@ -199,7 +199,7 @@ export function createVaultRestoreController(deps) {
         Promise.resolve(wholeProfile ? bridge.exportProfile(savePath) : bridge.exportVault(select.value, savePath))
           .then((res) => {
             if (res && res.locked) {
-              setNotice('The manager locked — export canceled. Unlock and try again.');
+              setNotice('The vault locked — export canceled. Unlock and try again.');
               handle.close();
               refresh();
               return;

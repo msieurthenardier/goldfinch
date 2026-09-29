@@ -201,6 +201,15 @@ export function createWelcomeController(deps) {
   // written, since the settings-changed broadcast that refreshes the cache
   // may not have landed yet; every other caller (show(), the
   // onSettingsChanged handler) passes no opts and gets the live cache.
+  // Squawk 0109: an empty Set clears the home page (writes null). render()
+  // blanks the status whenever home is unset, and the settings-changed
+  // broadcast may re-render after submitHome, so the confirmation is
+  // state-derived (homeClearedTab) rather than a one-shot textContent write.
+  const HOME_CLEARED_MESSAGE = 'Home page cleared — new tabs will open this welcome page.';
+  // Keyed to the welcome record where the Set happened (never factory-wide),
+  // and dropped when that record is left (hide()) or another is shown.
+  /** @type {any} */
+  let homeClearedTab = null;
   /** @param {any} tab @param {any} [opts] */
   function render(tab, opts = {}) {
     const showHome = !!(tab.welcome && tab.welcome.reasons.has('home'));
@@ -214,7 +223,8 @@ export function createWelcomeController(deps) {
       // this tab's own just-completed submit) must not clobber in-progress
       // input.
       if (document.activeElement !== homeInput) homeInput.value = home != null ? home : '';
-      homeStatus.textContent = home != null ? 'Saved — new tabs will open here.' : '';
+      homeStatus.textContent =
+        home != null ? 'Saved — new tabs will open here.' : homeClearedTab === tab ? HOME_CLEARED_MESSAGE : '';
     } else {
       homeInput.value = '';
       homeStatus.textContent = '';
@@ -278,12 +288,14 @@ export function createWelcomeController(deps) {
   // with the saved value and a confirmation line instead of auto-navigating.
   /** @param {any} tab */
   function show(tab) {
+    if (homeClearedTab !== tab) homeClearedTab = null;
     currentTab = tab;
     settle(tab);
   }
 
   function hide() {
     currentTab = null;
+    homeClearedTab = null;
     root.classList.add('hidden');
   }
 
@@ -294,9 +306,12 @@ export function createWelcomeController(deps) {
     // to `https://example.com` before the write, the same rule the address
     // bar already applies via toUrl — the store validator (isSafeTabUrl)
     // requires a scheme and stays the actual gate.
-    const value = normalizeHomePageInput(homeInput.value);
+    const normalized = normalizeHomePageInput(homeInput.value);
+    // Empty field = "no home page": the store's unset sentinel is null, never ''.
+    const value = normalized === '' ? null : normalized;
     const result = await welcomeSetPreference({ key: 'homePage', value });
     if (result && result.ok) {
+      homeClearedTab = value === null ? tab : null;
       // M16 F3 Leg 2, HAT item 6 (DD7 pivot): save and stay — the welcome
       // surface no longer navigates itself away on a successful Set; the
       // saved home page applies starting with the next new tab

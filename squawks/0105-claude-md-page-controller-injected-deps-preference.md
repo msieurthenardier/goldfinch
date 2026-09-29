@@ -1,10 +1,10 @@
 # Squawk 0105: CLAUDE.md should state the injected-deps preference for page controllers
 
-**Status**: open
+**Status**: completed
 **Type**: servicing
 **Severity**: routine
 **Reported**: 2026-09-23
-**Completed**: —
+**Completed**: 2026-09-29
 
 ## Report
 
@@ -27,13 +27,13 @@ injected deps. Doc-only. Retrofitting the two existing controllers is out of sco
   matcher is injected.
 
 ## Corrective Action
-*(written at completion)*
+Added one bullet to CLAUDE.md's `src/shared/` ESM modules section (before "Grep-AC convention"): page controllers under `src/renderer/pages/` take shared pure functions as injected deps (exemplar `vault-filter-controller.js`), since static flat-specifier imports are source-scan-testable only. The named "Vault page — controller decomposition" bullet no longer exists after squawk 0107's trim. No controllers retrofitted.
 
 ## Verification
-*(written at completion)*
+`npx prettier --check CLAUDE.md` and `npm run format:check` results both pass ("All matched files use Prettier code style!").
 
 ## Sign-Off
-*(written at completion)*
-**Reviewer**:
-**Verdict**:
-**Commit**:
+
+**Reviewer**: Reviewer agent (independent, batch review — turnaround 2026-09-29)
+**Verdict**: confirmed
+**Commit**: squawk: turnaround 2026-09-29 (branch `squawk/turnaround-2026-09-29`)

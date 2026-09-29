@@ -1,10 +1,10 @@
 # Squawk 0106: CLAUDE.md internal-page checklist omits the eslint module entry for a new page controller
 
-**Status**: open
+**Status**: completed
 **Type**: servicing
 **Severity**: routine
 **Reported**: 2026-09-23
-**Completed**: —
+**Completed**: 2026-09-29
 
 ## Report
 
@@ -23,13 +23,13 @@ the eslint entry to that checklist line. Doc-only.
   `vault-filter-controller.js` in the M22 F1 diff.
 
 ## Corrective Action
-*(written at completion)*
+Added the eslint requirement to CLAUDE.md's "New-shared-module checklist" bullet (the one checklist a new page-controller author follows; not duplicated in "Adding an internal page"). Verified mechanism first: `eslint.config.mjs`'s module-`sourceType` block lists each `src/renderer/pages/*.js` file explicitly (jars-*, settings, vault-*), whereas `chrome/**/*.js`, `renderer.js` and `menu-overlay.js` are covered by a glob/named entry.
 
 ## Verification
-*(written at completion)*
+Read `eslint.config.mjs` to confirm the explicit allowlist; `npm run format:check` — passes.
 
 ## Sign-Off
-*(written at completion)*
-**Reviewer**:
-**Verdict**:
-**Commit**:
+
+**Reviewer**: Reviewer agent (independent, batch review — turnaround 2026-09-29)
+**Verdict**: confirmed
+**Commit**: squawk: turnaround 2026-09-29 (branch `squawk/turnaround-2026-09-29`)

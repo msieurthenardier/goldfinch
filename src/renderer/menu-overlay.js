@@ -1233,7 +1233,7 @@ import {
       menuController.close(captureEntry);
     } else {
       capture.error.textContent =
-        res && res.reason === 'locked' ? 'The manager locked — unlock it and try again' : 'Couldn’t save the password';
+        res && res.reason === 'locked' ? 'The vault locked — unlock it and try again' : 'Couldn’t save the password';
     }
   }
 
@@ -1344,7 +1344,7 @@ import {
       report.sent = true; // suppress the trailing dismissed; main closes + opens recovery-show.
       menuController.close(vaultSetEntry);
     } else {
-      vaultSet.error.textContent = 'Couldn’t set up the manager. Please try again.';
+      vaultSet.error.textContent = 'Couldn’t set up the vault. Please try again.';
     }
   }
 
@@ -1579,15 +1579,15 @@ import {
     vaultStepupTarget = model && typeof model.target === 'string' ? model.target : undefined;
     if (vaultStepupMode === 'rotate-recovery') {
       vaultStepup.lede.textContent =
-        'Rotating your recovery key needs a fresh master-password confirmation, even while the manager is unlocked.';
+        'Rotating your recovery key needs a fresh master-password confirmation, even while the vault is unlocked.';
       vaultStepup.submit.textContent = 'Rotate recovery key';
     } else if (vaultStepupMode === 'rotate-admin') {
       vaultStepup.lede.textContent =
-        'Provisioning or rotating your admin key needs a fresh master-password confirmation, even while the manager is unlocked.';
+        'Provisioning or rotating your admin key needs a fresh master-password confirmation, even while the vault is unlocked.';
       vaultStepup.submit.textContent = 'Provision admin key';
     } else {
       vaultStepup.lede.textContent =
-        'Minting an access key needs a fresh master-password confirmation, even while the manager is unlocked.';
+        'Minting an access key needs a fresh master-password confirmation, even while the vault is unlocked.';
       vaultStepup.submit.textContent = 'Mint access key';
     }
   }

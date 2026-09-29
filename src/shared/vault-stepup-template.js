@@ -48,7 +48,7 @@ export function buildVaultStepupCard(document) {
   const lede = document.createElement('p');
   lede.className = 'vault-stepup-lede';
   lede.textContent =
-    'Minting an access key needs a fresh master-password confirmation, even while the manager is unlocked.';
+    'Minting an access key needs a fresh master-password confirmation, even while the vault is unlocked.';
   card.appendChild(lede);
 
   const label = document.createElement('label');
