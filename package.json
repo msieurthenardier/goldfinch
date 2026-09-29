@@ -3,6 +3,7 @@
   "version": "0.17.2",
   "description": "A Chromium-based browser with an expandable media panel for viewing, playing, and downloading site media.",
   "main": "src/main/main.js",
+  "desktopName": "goldfinch.desktop",
   "author": "msieurthenardier <msieurthenardier@gmail.com>",
   "license": "MIT",
   "scripts": {
@@ -58,14 +59,25 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "include": "build/installer.nsh"
     },
+    "protocols": [
+      {
+        "name": "Web",
+        "schemes": [
+          "http",
+          "https"
+        ]
+      }
+    ],
     "linux": {
       "target": [
         "AppImage",
         "deb"
       ],
       "category": "Network",
+      "syncDesktopName": true,
       "maintainer": "msieurthenardier <msieurthenardier@gmail.com>"
     }
   },

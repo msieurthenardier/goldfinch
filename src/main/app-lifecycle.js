@@ -45,6 +45,12 @@ function registerAppLifecycle({
   isInternalPageUrl,
   createWindow,
   registry,
+  // Sortie 01 (default browser): the pure launch-URL filters (src/shared/launch-urls.js,
+  // threaded from main.js — this module stays require-free of it) and the owner-routed
+  // boot-gated send used to deliver `open-external-urls`.
+  extractLaunchUrls,
+  filterLaunchUrls,
+  queueChromeSend,
   isMcpAutomationEnabled,
   shouldBindAutomation,
   shouldAutoMint,
@@ -186,6 +192,71 @@ function registerAppLifecycle({
     contents.on('will-redirect', guard);
   });
 
+  // Sortie 01 (default browser, DD3): ONE pending-URL buffer for every OS hand-off — cold
+  // argv, `second-instance` argv, macOS `open-url`. Main NEVER trusts the raw arg: every
+  // arrival re-validates through the shared filter (which also dedupes on the normalized
+  // form and caps at 20 across arrivals). Before the creation block below has run
+  // (`launchReady` false) an arrival only buffers — no registry access (there may be no
+  // record yet). After it, an arrival is delivered at once to the last-focused window.
+  // Logs name only the COUNT: a URL's query string can carry secrets.
+  let pendingLaunchUrls = filterLaunchUrls(extractLaunchUrls(argv));
+  let launchReady = false;
+
+  function raiseWindow(rec) {
+    // noteFocus is mandatory: WSLg's focus() emits no focus event.
+    const win = rec.win;
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+    registry.noteFocus(win.id);
+  }
+
+  function resolveLaunchTarget() {
+    const last = registry.getLastFocused();
+    if (last && !last.chromeRecoveryPaused) return last;
+    // queueChromeSend silently drops for a crash-paused chrome — fall back to any live one.
+    return registry.records().find((rec) => !rec.chromeRecoveryPaused) || null;
+  }
+
+  function deliverLaunchUrls(urls) {
+    let target;
+    if (registry.records().length === 0) {
+      // Resident-app zero-window state exists on darwin only; elsewhere it is reachable
+      // just mid-quit (window-all-closed), where a new window would fight the quit.
+      if (platform !== 'darwin') {
+        logger.warn?.(`[launch-urls] dropped ${urls.length} URL(s): no window`);
+        return;
+      }
+      target = createWindow({ noBootTab: true });
+    } else {
+      target = resolveLaunchTarget();
+      if (!target) {
+        logger.warn?.(`[launch-urls] dropped ${urls.length} URL(s): no eligible window`);
+        return;
+      }
+      raiseWindow(target);
+    }
+    queueChromeSend(target, () => ['open-external-urls', { urls }]);
+  }
+
+  function intakeLaunchUrls(candidates) {
+    const urls = filterLaunchUrls(candidates);
+    if (urls.length === 0) return;
+    if (!launchReady) {
+      pendingLaunchUrls = filterLaunchUrls([...pendingLaunchUrls, ...urls]);
+      return;
+    }
+    deliverLaunchUrls(urls);
+  }
+
+  // Top-level (before whenReady), beside 'login': a fast second launch can land before
+  // ready, and macOS emits open-url during will-finish-launching.
+  app.on('second-instance', (_event, argv2) => intakeLaunchUrls(extractLaunchUrls(argv2)));
+  app.on('open-url', (event, url) => {
+    event.preventDefault();
+    intakeLaunchUrls([url]);
+  });
+
   ipcMain.handle('window-boot-config', (event) => {
     const rec = registry.getWindowForChrome(event.sender);
     if (!rec) return { bootTab: true };
@@ -297,14 +368,28 @@ function registerAppLifecycle({
     internalSession.__goldfinchInternal = true;
     internalSession.protocol.handle('goldfinch', handleInternal);
 
+    // Sortie 01 (DD3): with launch URLs pending, the URL tab IS the boot tab — no stray
+    // home/welcome tab beside it. Peeked here (the one creation site); with no URLs the
+    // calls stay exactly as before (createWindow() takes no argument).
+    const hasLaunchUrls = pendingLaunchUrls.length > 0;
     const restoreSnapshot = settings.get('restoreSession') === true ? sessionStore.read() : null;
+    // The FIRST record created gets the buffered URLs: create() marks every new window
+    // last-focused, so after restoring N windows getLastFocused() would name the LAST.
+    let firstRec = null;
     if (restoreSnapshot) {
       for (const savedWindow of restoreSnapshot.windows) {
         const rec = createWindow({ noBootTab: true });
         rec.restoreTabs = savedWindow.tabs;
+        firstRec ??= rec;
       }
     } else {
-      createWindow();
+      firstRec = hasLaunchUrls ? createWindow({ noBootTab: true }) : createWindow();
+    }
+    launchReady = true;
+    if (pendingLaunchUrls.length > 0 && firstRec) {
+      const urls = pendingLaunchUrls;
+      pendingLaunchUrls = [];
+      queueChromeSend(firstRec, () => ['open-external-urls', { urls }]);
     }
 
     const devOverride = !app.isPackaged && isMcpAutomationEnabled(argv);

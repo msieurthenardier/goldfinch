@@ -17,6 +17,8 @@
     <!-- M16 F1 Leg 2 (DD7): the curated search-engine table — the single source
          the #appearance radio group below is rendered from (settings.js). -->
     <script src="search-engines.js" type="module"></script>
+    <!-- Sortie 01 leg 2: pure copy model for the Default browser row (settings.js). -->
+    <script src="default-browser-row-model.js" type="module"></script>
     <script src="settings.js" type="module"></script>
   </head>
   <body>
@@ -69,6 +71,15 @@
           Reopens the previous session's windows and tabs (addresses and cookie jars) on launch. Burner tabs are never
           restored. Takes effect on the next launch.
         </p>
+        <!-- Default browser (sortie 01 leg 2 / DD7): status rendered ONLY from the
+             state main returns (never optimistic); copy comes from
+             default-browser-row-model.js. Ids are stable. -->
+        <fieldset class="shields-group default-browser-group">
+          <legend>Default browser</legend>
+          <p id="default-browser-status" role="status"></p>
+          <p id="default-browser-failure" role="status"></p>
+          <button id="default-browser-make-default" class="settings-btn" type="button">Make default</button>
+        </fieldset>
         <!-- Bookmarks bar toggle (M15 F1 Leg 3, DD7): the restore-session checkbox's
              sibling — settingsSet('bookmarksBarEnabled', …) keeps every window's bar
              in sync via the settings-changed broadcast (window-controller.js's

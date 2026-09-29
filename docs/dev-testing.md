@@ -19,6 +19,14 @@ want a keyless run. It is dev-only and profile-isolated; there is no downside to
 `mcp-automation.md`'s rotation warning), so if you already have a working key stored in a
 client config, prefer relaunching without `DEV_MINT` (row above) over re-minting.
 
+**Single instance per profile.** Goldfinch takes Electron's single-instance lock keyed on
+`userData`, so a second `node scripts/dev-launch.mjs <https URL>` (or `npm run dev:automation`)
+on the SAME dev profile does not start a second app: it hands its `http(s)` URL args to the
+running instance (which opens them as tabs in the default jar and raises the window) and
+exits 0 — the loser mints no `DEV_MINT` key and touches no store. Relaunch recipes (stop then
+start) must therefore wait for the OLD PID to be fully gone before relaunching, or the new
+launch hands off to the dying instance and exits.
+
 `scripts/dev-launch.mjs` (behind `npm run dev:automation`) also decides the ozone platform:
 it passes `--ozone-platform=wayland` when a Wayland socket is reachable (X11 under WSLg
 swallows the first cross-window click-to-activate; decision logic in

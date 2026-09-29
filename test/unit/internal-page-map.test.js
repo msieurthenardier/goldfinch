@@ -13,6 +13,7 @@ test('createInternalPageMap returns the exact current host/path allowlist', () =
   assert.deepEqual(Object.keys(map.settings).sort(), [
     '/',
     '/audit-paging.js',
+    '/default-browser-row-model.js',
     '/safe-color.js',
     '/search-engines.js',
     '/settings.css',

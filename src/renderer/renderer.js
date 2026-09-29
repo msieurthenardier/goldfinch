@@ -31,6 +31,8 @@ import { SEARCH_ENGINES, buildSearchUrl, capPendingQuery, normalizeHomePageInput
 import { createChromeContext, escapeHtml } from './chrome/context.js';
 import { createDownloadsController } from './chrome/downloads-controller.js';
 import { createAuditHooks } from './chrome/audit-hooks.js';
+import { createAuditStates } from './chrome/audit-states.js'; // sortie 01: extracted crash/hang audit hooks
+import { createExternalUrlsController } from './chrome/external-urls-controller.js'; // sortie 01
 import { createSiteSecurityController } from './chrome/site-security-controller.js';
 import { createVaultController } from './chrome/vault-controller.js';
 import { createAuthChallengeController } from './chrome/auth-challenge-controller.js'; // Mission 21 F3 Leg 1
@@ -1209,6 +1211,11 @@ window.goldfinch.onOpenTab(({ url, openerPartition }) => {
   // deny-and-forward) — scriptOpened lets a later window.close() be honored (#119).
   createTab(url, jarsClient.inheritContainerFromPartition(openerPartition), { scriptOpened: true });
 });
+// Sortie 01: OS-handed URLs; live before the boot chain below so queued sends flush into it.
+const externalUrls = createExternalUrlsController({
+  onOpenExternalUrls: (cb) => window.goldfinch.onOpenExternalUrls(cb),
+  createTab
+});
 
 // ---------------------------------------------------------------------------
 // Web tab event subscriptions (module-level, route by wcId to the correct tab)
@@ -1412,53 +1419,42 @@ Promise.all([
         bootTab: true
       })
   )
-]).then(([url, engine, , , bootConfig]) => {
-  // Session restore (M09 F9 / DD4 / AC5; REWRITTEN M15 F1 DD10 Leg 1): CREATE each
-  // saved tab FRESH in its saved jar — never adopt; MINUS restoreHistory/insertAt
-  // (DD5); NEVER inheritContainerFromPartition (its default-jar fallback would
-  // silently re-home a deleted jar tab, DD4) — resolveRestoreContainer maps the
-  // saved jarId to a live jar, dropping (continue) an unresolvable one. Every create
-  // now passes background:true (DD10): no more relying on serial self-activation —
-  // the saved-active tab, or (Edge Case) the LAST created tab, activates once at the end.
-  if (bootConfig && Array.isArray(bootConfig.restoreTabs) && bootConfig.restoreTabs.length) {
-    let activeTab = null;
-    let lastTab = null;
-    for (const t of bootConfig.restoreTabs) {
-      const container = resolveRestoreContainer(t.jarId, jarsClient.containers);
-      if (!container) continue;
-      const tab = createTab(t.url, container, { trusted: false, background: true });
-      if (!tab) continue;
-      lastTab = tab;
-      if (t.active) activeTab = tab;
+])
+  .then(([url, engine, , , bootConfig]) => {
+    // Session restore (M09 F9 / DD4 / AC5; REWRITTEN M15 F1 DD10 Leg 1): CREATE each
+    // saved tab FRESH in its saved jar — never adopt; MINUS restoreHistory/insertAt
+    // (DD5); NEVER inheritContainerFromPartition (its default-jar fallback would
+    // silently re-home a deleted jar tab, DD4) — resolveRestoreContainer maps the
+    // saved jarId to a live jar, dropping (continue) an unresolvable one. Every create
+    // now passes background:true (DD10): no more relying on serial self-activation —
+    // the saved-active tab, or (Edge Case) the LAST created tab, activates once at the end.
+    if (bootConfig && Array.isArray(bootConfig.restoreTabs) && bootConfig.restoreTabs.length) {
+      let activeTab = null;
+      let lastTab = null;
+      for (const t of bootConfig.restoreTabs) {
+        const container = resolveRestoreContainer(t.jarId, jarsClient.containers);
+        if (!container) continue;
+        const tab = createTab(t.url, container, { trusted: false, background: true });
+        if (!tab) continue;
+        lastTab = tab;
+        if (t.active) activeTab = tab;
+      }
+      const toActivate = activeTab || lastTab;
+      if (toActivate) activateTab(toActivate.id);
+    } else if (!bootConfig || bootConfig.bootTab !== false) {
+      // M16 F2 Leg 1/2 (DD4/DD9/DD7): unset home page → welcome surface.
+      if (url == null) openWelcomeTab({ reasons: welcomeReasons(url, engine) });
+      else createTab(url);
     }
-    const toActivate = activeTab || lastTab;
-    if (toActivate) activateTab(toActivate.id);
-  } else if (!bootConfig || bootConfig.bootTab !== false) {
-    // M16 F2 Leg 1/2 (DD4/DD9/DD7): unset home page → welcome surface.
-    if (url == null) openWelcomeTab({ reasons: welcomeReasons(url, engine) });
-    else createTab(url);
-  }
-});
+  })
+  .finally(() => externalUrls.releaseBoot());
 
-// Mission 20 F3 Leg 2 (DD11 seam ruling): synthetic crash/hang records on the
-// active tab for the a11y audit's two new chrome states. HAT H2b: cleared by
-// the tab's next committed navigation (both controllers' onTabDidNavigate
-// hooks, wired above) or a real push — the audit visits each state fresh.
-function showCrashPanelForAudit() {
-  const tab = activeTab();
-  if (!tab || tab.wcId == null) return;
-  tab.crash = { reason: 'crashed', exitCode: 139, url: tab.url };
-  tab.loadFailure = null;
-  tab.hung = false;
-  loadFailureController.applyStripState(tab);
-  loadFailureController.show(tab);
-}
-function showHangNoticeForAudit() {
-  const tab = activeTab();
-  if (!tab || tab.wcId == null) return;
-  tab.hung = true;
-  hangNoticeController.project(tab);
-}
+// Sortie 01: crash/hang audit hooks live in chrome/audit-states.js (getters: TDZ).
+const { showCrashPanelForAudit, showHangNoticeForAudit } = createAuditStates({
+  activeTab,
+  getLoadFailureController: () => loadFailureController,
+  getHangNoticeController: () => hangNoticeController
+});
 
 // ---------------------------------------------------------------------------
 // Evaluate-reachable automation/dogfooding seam (M07 Flight 2 leg 5, FD-approved).

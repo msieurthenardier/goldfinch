@@ -40,3 +40,11 @@ download links go live.
   `node scripts/update-readme.mjs 0.11.1` (with no argument it uses the `package.json` version).
 - The workflow's build job syncs `package.json` from the tag with `--ignore-scripts`, so the
   `version` hook never runs in CI — it only regenerates the README during local release-prep.
+- The Windows installer now registers Goldfinch as a browser (`build/installer.nsh`: `GoldfinchHTML`
+  ProgID, `StartMenuInternet\Goldfinch` Capabilities, `RegisteredApplications`) so it appears under
+  Settings → Apps → Default apps; the Linux `.deb` ships a `goldfinch.desktop` with the http/https
+  `MimeType`. Updates re-run `customInstall` (idempotent) and skip the uninstall deletes
+  (`${isUpdated}`-guarded), so the operator's default survives an update. Upgrading **from** a
+  pre-include version runs that old uninstaller, which has no macro — expected. The Windows half is
+  accepted by the sortie's Windows HAT (leg 3), not from CI. `desktopName: goldfinch.desktop` also
+  changes the dev app_id/WM_CLASS (dev runs `electron .` against this `package.json`).

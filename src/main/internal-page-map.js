@@ -20,7 +20,9 @@ function createInternalPageMap({ baseDir, path }) {
       // M16 F1 Leg 2 (DD7): the settings page renders its search-engine radio
       // group from this single source table — no engine data is ever
       // duplicated in markup or page script.
-      '/search-engines.js': shared('search-engines.js')
+      '/search-engines.js': shared('search-engines.js'),
+      // Sortie 01 leg 2: pure copy model for the Default browser row.
+      '/default-browser-row-model.js': shared('default-browser-row-model.js')
     },
     // App-level downloads surface; save-path authority remains main-side.
     downloads: {
