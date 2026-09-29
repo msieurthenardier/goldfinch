@@ -1,6 +1,6 @@
 {
   "name": "goldfinch",
-  "version": "0.17.2",
+  "version": "0.18.0",
   "description": "A Chromium-based browser with an expandable media panel for viewing, playing, and downloading site media.",
   "main": "src/main/main.js",
   "desktopName": "goldfinch.desktop",
