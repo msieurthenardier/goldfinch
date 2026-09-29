@@ -18,10 +18,20 @@ This project stores Flight Control artifacts as markdown files in the repository
 │               ├── flight-debrief.md
 │               └── legs/
 │                   └── {NN}-{leg-slug}.md
+├── sorties/
+│   └── {NN}-{sortie-slug}/                 ← standalone flight, no parent mission
+│       ├── flight.md
+│       ├── flight-log.md
+│       ├── flight-briefing.md
+│       ├── flight-debrief.md
+│       └── legs/
+│           └── {NN}-{leg-slug}.md
 ├── maintenance/
 │   └── {YYYY-MM-DD}.md
 ├── squawks/
 │   └── {id}-{squawk-slug}.md
+├── service-reports/
+│   └── {id}-{report-slug}.md
 └── tests/
     └── behavior/
         ├── {slug}.md                       ← behavior-test spec (committed)
@@ -39,7 +49,9 @@ This project stores Flight Control artifacts as markdown files in the repository
 
 - **Slugs**: Lowercase, kebab-case, derived from title (e.g., "User Authentication" → `user-authentication`)
 - **Sequence numbers**: Missions, flights, and legs use two-digit prefixes (`01`, `02`, etc.) for ordering
+- **Sortie numbers**: Two-digit prefixes like missions (`01`, `02`, …), on their own project-wide sequence, widening past `99` as needed
 - **Squawk ids**: Monotonically increasing integers, project-wide, zero-padded to a minimum of four digits and widening past that as needed (`0001`, `0002`, … `9999`, `10000`, …). Unbounded by design — a long-lived project will pass any fixed width. Never reused, even after a squawk is completed or escalated.
+- **Service report ids**: Same scheme as squawk ids, on a separate sequence.
 
 ---
 
@@ -49,6 +61,8 @@ How flight work is named in version control. Skills read these — adjust them t
 
 - **Flight branch**: `flight/{number}-{slug}` — created at flight start (`git checkout -b flight/{number}-{slug}`)
 - **Commit subject**: `flight/{number}: {description}`, with a `Mission: {mission-number}` trailer
+- **Sortie branch**: `sortie/{number}-{slug}` — created at sortie execution start
+- **Sortie commit subject**: `sortie/{number}: {description}`
 - **Squawk branch**: `squawk/{id}-{slug}` for a single squawk; `squawk/turnaround-{YYYY-MM-DD}` when completing a batch of two or more
 - **Squawk commit subject**: `squawk/{id}: {description}` for a single squawk; `squawk: turnaround {YYYY-MM-DD}` for a batch, with a `Squawks: {id}, {id}` trailer listing every id completed
 
@@ -263,18 +277,49 @@ How to confirm each criterion is met:
 ---
 
 ## Post-Completion Checklist
+Completion steps — status transitions, flight-log update, checking off in the parent flight, and commit — are Flight Control protocol, driven by the execution workflow. Not repeated here.
+```
 
-**Complete ALL steps before signaling `[COMPLETE:leg]`:**
+---
 
-- [ ] All acceptance criteria verified
-- [ ] Tests passing
-- [ ] Update flight-log.md with leg progress entry
-- [ ] Set this leg's status to `completed` (in this file's header)
-- [ ] Check off this leg in flight.md
-- [ ] If final leg of flight:
-  - [ ] Update flight.md status to `landed`
-  - [ ] Check off flight in mission.md
-- [ ] Commit all changes together (code + artifacts)
+### Sortie
+
+| Property | Value |
+|----------|-------|
+| Location | `sorties/{NN}-{slug}/flight.md` |
+| Created | During sortie planning |
+| Updated | Until status changes to `in-flight` |
+| Managed by | `/mission-control:sortie` (planning), then the flight skills |
+
+A sortie is a **flight with no parent mission**: one self-contained outcome with one cluster of design decisions, fitting one flight. Its directory holds the same files as a flight's — flight log, briefing, debrief, and `legs/` — in the same formats. The sortie artifact uses the Flight format above, with the mission link and contributing criteria replaced by a short **charter** that carries what the mission would have: outcome, why now, success criteria, constraints. Wherever the flight briefing or flight debrief format refers to the mission, the charter stands in.
+
+**Format:**
+
+```markdown
+# Sortie: {Title}
+
+**Status**: planning | ready | in-flight | landed | completed | aborted
+
+## Charter
+
+### Outcome
+One sentence, in human terms: what is different for the user when this lands.
+
+### Why Now
+What prompted this work.
+
+### Success Criteria
+- [ ] Criterion 1 (observable, binary)
+- [ ] Criterion 2
+
+### Constraints
+Non-negotiable boundaries, if any.
+
+---
+
+## Pre-Flight
+{Continues exactly as the Flight format: Objective, Open Questions, Design Decisions,
+Prerequisites, Pre-Flight Checklist, In-Flight, Post-Flight.}
 ```
 
 ---
@@ -286,7 +331,7 @@ How to confirm each criterion is met:
 | Location | `squawks/{id}-{slug}.md` |
 | Created | When a small defect or routine servicing item is logged |
 | Updated | At completion, defer, or escalate time |
-| Managed by | `/squawk` |
+| Managed by | `/mission-control:squawk` |
 
 A squawk stands **beside** the mission → flight → leg hierarchy, not inside it: no parent, no debrief. It covers work too small to warrant a mission — a single defect or a single routine update, with no design decisions, a bounded blast radius, and a clear way to verify. Anything failing those conditions is escalated to a flight or mission rather than grown in place.
 
@@ -326,7 +371,71 @@ How the fix was confirmed — the command run, the test added, the observation m
 *(only for deferred or escalated squawks)*
 **Deferred**: {reason} — revisit when {trigger}
 **Escalated**: {which qualification criterion it failed and what was found} →
-[{Flight or Mission Title}]({path})
+[{Sortie, Flight, or Mission Title}]({path})
+```
+
+---
+
+### Service Report
+
+| Property | Value |
+|----------|-------|
+| Location | `service-reports/{id}-{slug}.md` |
+| Created | When a sweep reports a methodology trend upstream, or withholds one |
+| Updated | When upstream accepts, declines, or supersedes it |
+| Managed by | `/mission-control:service-report` |
+
+**Upstream reporting**: enabled
+
+*(Set to `enabled` or `disabled`. This gate fails closed: while it reads `unset`, or the line is
+missing, `/mission-control:service-report` stops and asks rather than assuming consent. Set it to
+`disabled` where posting to public repositories is not permitted. Per-report approval of the exact
+text still applies when it is `enabled` — this switch decides whether the channel exists at all.)*
+
+A service report carries one recurring Flight Control **methodology** trend back to the plugin as a GitHub issue. It is not about this project: a squawk records a defect in this codebase, a service report records a defect in the methodology every project shares. Created only when the operator runs `/mission-control:service-report`, which sweeps the accumulated debriefs for patterns — typically after several missions, on no cadence.
+
+The artifact is the local audit trail of exactly what left the project, and the evidence trail the next sweep reads to know this trend was already reported. It may reference local debriefs, flights, and missions; the submitted text never does.
+
+**Format:**
+
+```markdown
+# Service Report {id}: {Title}
+
+**Status**: draft | submitted | merged | withheld | accepted | declined | superseded
+**Reported**: {YYYY-MM-DD}
+**Occurrences**: {N} distinct occurrences across {M} missions *(or "below threshold — operator override")*
+**Span**: {YYYY-MM} to {YYYY-MM}
+**Plugin versions**: {first seen}–{latest seen}
+**Upstream**: {issue URL, or —}
+
+## Trend
+The pattern in methodology terms, and what it has cost across occurrences. A few lines.
+
+## Evidence
+*(local references; never submitted)*
+The debriefs, flights, and missions the observations came from.
+
+## Gate
+Which of the five qualification criteria were checked, and the outcome. Include the
+root-cause test that justified clustering these observations as one trend.
+
+## Prior Art
+What the search found: existing issues, PRs, or this project's earlier reports, and the
+classification — new | recurred on #{N} | variant of #{N} | duplicate of #{N} | already
+fixed upstream.
+
+## Redaction
+**Reviewer verdict**: clear
+**Approved by operator**: {YYYY-MM-DD}
+
+## Submitted
+*(the exact text sent upstream — title, then body, in a fenced block. Nothing else left the project.)*
+
+## Disposition
+*(once upstream responds)*
+**Accepted**: fixed in {version or PR}
+**Declined**: {reason given}
+**Superseded**: folded into #{N}
 ```
 
 ---
@@ -466,6 +575,7 @@ Chronological notes from work sessions.
 **Status**: {landed | aborted}
 **Duration**: {start} - {end}
 **Legs Completed**: {X of Y}
+**Plugin version**: {installed mission-control version}
 
 ## Outcome Assessment
 
@@ -498,6 +608,12 @@ Chronological notes from work sessions.
 ## Key Learnings
 {Insights for future flights}
 
+## Methodology Observations
+{Where Flight Control itself got in the way. Per observation: what the methodology did,
+what was expected instead, what it cost, and which skill and phase. Recorded, not judged —
+one flight cannot tell a defect from a bad afternoon. A later /mission-control:service-report
+sweep reads these across missions, and a vague entry is invisible to it.}
+
 ## Recommendations
 1. {Most impactful recommendation}
 2. {Second recommendation}
@@ -528,6 +644,7 @@ Chronological notes from work sessions.
 **Status**: {completed | aborted}
 **Duration**: {start} - {end}
 **Flights Completed**: {X of Y}
+**Plugin version**: {installed mission-control version}
 
 ## Outcome Assessment
 
@@ -554,7 +671,12 @@ Chronological notes from work sessions.
 {Insights to carry forward}
 
 ## Methodology Feedback
-{Improvements to Flight Control process itself}
+{Improvements to Flight Control process itself. Per finding: what happened, what it
+cost, which skill and phase, the plugin version in use, how many of this mission's
+flights it occurred in, and its destination — local fix, local lesson, or methodology
+observation. Observations are recorded here, not reported; a later
+/mission-control:service-report sweep reads them across missions. Note that findings
+here restate flight-debrief observations — the sweep counts the occurrence once.}
 
 ## Action Items
 - [ ] {Follow-up work}
