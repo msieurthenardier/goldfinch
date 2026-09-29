@@ -4,7 +4,7 @@
 
 ## Summary
 
-Sortie 01 chartered 2026-09-29 (issue #202). Design approved 2026-09-29 after two Architect reviews. In flight: legs 1–2 (autonomous) completed and reviewed; leg 3 (Windows HAT) pending.
+Sortie 01 chartered 2026-09-29 (issue #202). Design approved 2026-09-29 after two Architect reviews. **Landed 2026-09-29.** Legs 1–2 (autonomous) completed, reviewed, committed; leg 3 (Windows HAT) H0–H10 passed with two look-and-feel fixes. Behavior test `default-browser-handoff` 7/7. PR #239. Debrief pending (`/mission-control:flight-debrief sortie 01`).
 
 ---
 
@@ -127,3 +127,7 @@ Sortie 01 chartered 2026-09-29 (issue #202). Design approved 2026-09-29 after tw
 - **H8 PASS (confirms DD7)** — `reg query HKCU\Software\Classes\http\shell\open\command` → key not found, while Goldfinch IS the operator's default (H1). Electron's win32 `isDefaultProtocolClient` reads that key, so it would report false for a correctly-selected default → the row's "status unknown, hand off to Default apps" design stands; no change.
 - **H9 PASS** — re-running the rc.1 installer over the rc.1 install (this build's own `${isUpdated}`-guarded uninstaller) kept Goldfinch as the HTTP/HTTPS default; `start https://example.com/?hat=9` still opens in Goldfinch.
 - **H10 PASS** — "Anyone who uses this computer" install (HKLM via SHELL_CONTEXT) lists Goldfinch in Default apps; a real uninstall removes it. All HAT steps H0–H10 pass; H2-a spacing fix pending operator confirmation on the rc.2 build.
+- rc.2 (`v0.18.0-rc.2`, run 36644866323, all jobs success) re-check: separator/legend OK per operator; HAT finding H2-b (look-and-feel **FIX**, same single surface): the gap between the status line and the "Open Default apps" button is too tight. Operator ruling: verify in the dev instance, no new installer.
+- H2-b fix: added scoped `.default-browser-group > button { margin-top: 12px; }` in `src/renderer/pages/settings.css` (carried by the button so the empty zero-height failure line adds no phantom gap; status-to-button gap 0px to 12px), verified by before/after screenshots (`h2b-before.png` / `h2b-after.png`).
+- Out-of-scope findings logged as squawks (deferred, routine): **0110** vault `listItemsMeta` one-off flake; **0111** restored background tabs report `loadState: ok` before loading (`automation/tabs.js:61` default); **0112** crash-dump prune `logger.debug` prints in packaged builds. The `MODULE_TYPELESS_PACKAGE_JSON` warning FAILED the squawk gate (needs a design call: the CJS-by-design quartet in `src/shared/` blocks a plain `"type": "module"`) → recommended to the operator as a future sortie, not logged as a squawk.
+- Leg 3 → completed (all H0–H10 pass; H2-b verified by the operator in the dev instance). Docs verified: CLAUDE.md (lifecycle gotcha + Default browser entry + renderer budget), docs/dev-testing.md, docs/RELEASING.md, build/README.md updated during legs 1–2; HAT fixes were CSS-only. Sortie status → `landed`; PR #239 marked ready for review. Prereleases `v0.18.0-rc.1` / `rc.2` remain published (operator's call whether to delete). [COMPLETE:flight]

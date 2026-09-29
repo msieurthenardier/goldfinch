@@ -1,6 +1,6 @@
 # Sortie: Default Browser
 
-**Status**: in-flight
+**Status**: landed
 
 Tracks GitHub issue #202.
 
@@ -167,7 +167,7 @@ Docs: `CLAUDE.md` (a short gotcha: lock placement + loser `app.exit`; external U
 
 - [x] `01-launch-url-intake` — single-instance lock + loser exit, `extractLaunchUrls`, shared pending buffer for `second-instance`/`open-url`/cold argv, paused-record fallback, `open-external-urls` channel, new `chrome/external-urls-controller.js` with the boot-ready barrier (resolved in `finally`) plus a `renderer.js` extraction to stay within budget, window raise, cold `noBootTab`; unit pins; DD9 premise re-runs; behavior test `default-browser-handoff` run live
 - [x] `02-os-registration-and-settings` — `protocols`/`desktopName`/`syncDesktopName`, `build/installer.nsh` (install + update-safe uninstall), settings "Default browser" row + two internal handlers; unit pins; packaged Linux smoke
-- [ ] `03-hat-windows` — Guided HAT on Windows (both "only me" and "all users" installs): install → Default apps listing → the settings button's `ms-settings:defaultapps?registeredAppUser=Goldfinch` deep link lands on Goldfinch's page → what `isDefaultProtocolClient` reports after the pick → select → link from another app (warm and cold) → minimized-window restore → a URL containing spaces/`&` → settings row status → update install keeps the default; residuals recorded
+- [x] `03-hat-windows` — Guided HAT on Windows (both "only me" and "all users" installs): install → Default apps listing → the settings button's `ms-settings:defaultapps?registeredAppUser=Goldfinch` deep link lands on Goldfinch's page → what `isDefaultProtocolClient` reports after the pick → select → link from another app (warm and cold) → minimized-window restore → a URL containing spaces/`&` → settings row status → update install keeps the default; residuals recorded
 
 ---
 
@@ -175,10 +175,10 @@ Docs: `CLAUDE.md` (a short gotcha: lock placement + loser `app.exit`; external U
 
 ### Completion Checklist
 
-- [ ] All legs completed
+- [x] All legs completed
 - [ ] Code merged
-- [ ] Tests passing
-- [ ] Documentation updated
+- [x] Tests passing
+- [x] Documentation updated
 
 ### Verification
 

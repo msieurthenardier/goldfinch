@@ -301,6 +301,11 @@ main section p {
 .default-browser-group > legend + * {
   clear: both;
 }
+/* Space above the button (HAT H2-b). Carried by the button, not the status
+   lines, so the usually-empty zero-height failure line adds no phantom gap. */
+.default-browser-group > button {
+  margin-top: 12px;
+}
 
 /* Pill switch — mirrors .switch in src/renderer/styles.css exactly:
    34×18px track, border-radius 9px, OFF #7c7f8a + border, ON var(--accent).
