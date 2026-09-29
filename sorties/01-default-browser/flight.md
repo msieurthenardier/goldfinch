@@ -1,6 +1,6 @@
 # Sortie: Default Browser
 
-**Status**: landed
+**Status**: completed
 
 Tracks GitHub issue #202.
 

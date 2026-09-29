@@ -4,7 +4,7 @@
 
 ## Summary
 
-Sortie 01 chartered 2026-09-29 (issue #202). Design approved 2026-09-29 after two Architect reviews. **Landed 2026-09-29.** Legs 1–2 (autonomous) completed, reviewed, committed; leg 3 (Windows HAT) H0–H10 passed with two look-and-feel fixes. Behavior test `default-browser-handoff` 7/7. PR #239. Debrief pending (`/mission-control:flight-debrief sortie 01`).
+Sortie 01 chartered 2026-09-29 (issue #202). Design approved 2026-09-29 after two Architect reviews. **Landed 2026-09-29.** Legs 1–2 (autonomous) completed, reviewed, committed; leg 3 (Windows HAT) H0–H10 passed with two look-and-feel fixes. Behavior test `default-browser-handoff` 7/7. PR #239. Debriefed 2026-09-29 (`flight-debrief.md`); status `completed`.
 
 ---
 
@@ -131,3 +131,4 @@ Sortie 01 chartered 2026-09-29 (issue #202). Design approved 2026-09-29 after tw
 - H2-b fix: added scoped `.default-browser-group > button { margin-top: 12px; }` in `src/renderer/pages/settings.css` (carried by the button so the empty zero-height failure line adds no phantom gap; status-to-button gap 0px to 12px), verified by before/after screenshots (`h2b-before.png` / `h2b-after.png`).
 - Out-of-scope findings logged as squawks (deferred, routine): **0110** vault `listItemsMeta` one-off flake; **0111** restored background tabs report `loadState: ok` before loading (`automation/tabs.js:61` default); **0112** crash-dump prune `logger.debug` prints in packaged builds. The `MODULE_TYPELESS_PACKAGE_JSON` warning FAILED the squawk gate (needs a design call: the CJS-by-design quartet in `src/shared/` blocks a plain `"type": "module"`) → recommended to the operator as a future sortie, not logged as a squawk.
 - Leg 3 → completed (all H0–H10 pass; H2-b verified by the operator in the dev instance). Docs verified: CLAUDE.md (lifecycle gotcha + Default browser entry + renderer budget), docs/dev-testing.md, docs/RELEASING.md, build/README.md updated during legs 1–2; HAT fixes were CSS-only. Sortie status → `landed`; PR #239 marked ready for review. Prereleases `v0.18.0-rc.1` / `rc.2` remain published (operator's call whether to delete). [COMPLETE:flight]
+- Flight debrief written (Developer + Architect interviews; human interview skipped — log comprehensive). Debrief follow-ups logged as squawks 0113 (Windows HAT prerelease runbook) and 0114 (behavior-test liveness check). Prereleases `v0.18.0-rc.1`/`rc.2` deleted at operator request. Sortie → `completed`.
