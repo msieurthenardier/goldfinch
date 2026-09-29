@@ -162,24 +162,9 @@ async function copyText(text, messageEl) {
   // .then() runs — this local 'Saved' message deliberately overwrites the
   // broadcast-driven hint on the page that clicked; every OTHER open window
   // only sees the broadcast's reflect() (hint or blank, per DD6 symmetry).
-  saveBtn.addEventListener('click', () => {
-    // M16 F3 Leg 2, HAT item 5: normalize a bare domain (e.g. `example.com`)
-    // to `https://example.com` before the write, the same rule the address
-    // bar and the welcome surface's home-page field apply — the store
-    // validator (isSafeTabUrl) requires a scheme and stays the actual gate.
-    // This also trims (the field previously sent input.value raw) — an
-    // intended side effect of routing through the shared helper.
-    window.goldfinchInternal
-      .settingsSet('homePage', normalizeHomePageInput(input.value))
-      .then(() => {
-        status.textContent = 'Saved';
-      })
-      .catch((e) => {
-        status.textContent = 'Not saved: ' + (e && e.message ? e.message : 'invalid URL');
-      });
-  });
-
-  clearBtn.addEventListener('click', () => {
+  // Clear action, shared by the Clear button and an empty Save (squawk 0108):
+  // the store's unset sentinel is null, never '', so both write null.
+  const clearHome = () =>
     window.goldfinchInternal
       .settingsSet('homePage', null)
       .then(() => {
@@ -189,7 +174,31 @@ async function copyText(text, messageEl) {
       .catch((e) => {
         status.textContent = 'Not cleared: ' + (e && e.message ? e.message : 'error');
       });
+
+  saveBtn.addEventListener('click', () => {
+    // M16 F3 Leg 2, HAT item 5: normalize a bare domain (e.g. `example.com`)
+    // to `https://example.com` before the write, the same rule the address
+    // bar and the welcome surface's home-page field apply — the store
+    // validator (isSafeTabUrl) requires a scheme and stays the actual gate.
+    // This also trims (the field previously sent input.value raw) — an
+    // intended side effect of routing through the shared helper.
+    const normalized = normalizeHomePageInput(input.value);
+    // An empty field is "no home page": behave exactly like Clear.
+    if (normalized === '') {
+      clearHome();
+      return;
+    }
+    window.goldfinchInternal
+      .settingsSet('homePage', normalized)
+      .then(() => {
+        status.textContent = 'Saved';
+      })
+      .catch((e) => {
+        status.textContent = 'Not saved: ' + (e && e.message ? e.message : 'invalid URL');
+      });
   });
+
+  clearBtn.addEventListener('click', clearHome);
 
   // Keep the input + hint in sync when settings change from another surface
   // (the welcome surface's Set, another window's Settings page, or this

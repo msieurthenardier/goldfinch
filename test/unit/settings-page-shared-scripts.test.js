@@ -208,3 +208,21 @@ test('both Clear buttons carry settings-btn settings-btn--secondary, and setting
     "settings.css must give #home-page-clear an explicit margin-left (Save's gap is Save's own rule, not .settings-btn's)"
   );
 });
+
+// Squawk 0108: an empty Save on the home-page field must route through the
+// Clear action (writes null), never send '' to the store (validator throws).
+// Source-scan pin (no DOM harness exists for internal pages).
+test('settings home-page Save routes an empty normalized value to the Clear action', () => {
+  const src = fs.readFileSync(SETTINGS_JS, 'utf8');
+  const clearDef =
+    /const\s+clearHome\s*=\s*\(\)\s*=>\s*window\.goldfinchInternal\s*\.settingsSet\(\s*'homePage'\s*,\s*null\s*\)/;
+  assert.match(src, clearDef, 'clearHome writes homePage:null');
+  const saveGuard =
+    /const\s+normalized\s*=\s*normalizeHomePageInput\(\s*input\.value\s*\);\s*(?:\/\/[^\n]*\s*)*if\s*\(\s*normalized\s*===\s*''\s*\)\s*\{\s*clearHome\(\);\s*return;\s*\}/;
+  assert.match(src, saveGuard, 'Save calls clearHome() when normalized value is empty');
+  assert.match(src, /clearBtn\.addEventListener\(\s*'click'\s*,\s*clearHome\s*\)/);
+  // Mutation check: removing the guard must fail the pin.
+  const mutated = src.replace(saveGuard, '');
+  assert.notEqual(mutated, src, 'assertMutated: replace must change source');
+  assert.doesNotMatch(mutated, saveGuard);
+});

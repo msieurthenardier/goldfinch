@@ -50,7 +50,7 @@ export function buildVaultRecoverCard(document) {
   const lede = document.createElement('p');
   lede.className = 'vault-recover-lede';
   lede.textContent =
-    'Enter your recovery key to unlock the manager, then set a new master password. The recovery key stays valid.';
+    'Enter your recovery key to unlock the vault, then set a new master password. The recovery key stays valid.';
   card.appendChild(lede);
 
   const recoveryLabel = document.createElement('label');

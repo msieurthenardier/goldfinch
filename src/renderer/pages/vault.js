@@ -608,7 +608,7 @@ function init() {
    */
   function buildLockedBanner() {
     const banner = el('div', 'vault-locked-banner');
-    banner.appendChild(el('p', undefined, 'Unlock the manager to view and edit items.'));
+    banner.appendChild(el('p', undefined, 'Unlock the vault to view and edit items.'));
     // M12 F3 Leg 4: request the F2 chrome-owned unlock sheet (page → main → chrome). A
     // DISTINCT trigger from the guest-gesture unlock — no fill-picker continuation. The
     // page refreshes to unlocked off the vault-lock-state broadcast on success.
@@ -861,7 +861,7 @@ function init() {
     const h3 = el('h3', 'vault-section-title', entry.label);
     h3.id = headingId;
     section.appendChild(h3);
-    section.appendChild(el('p', 'vault-empty', 'Unlock the manager to view this vault’s items.'));
+    section.appendChild(el('p', 'vault-empty', 'Unlock to view this vault’s items.'));
     return section;
   }
 
@@ -909,7 +909,7 @@ function init() {
     const section = el('div', 'vault-subsection vault-autolock-section');
     const h3 = el('h3', 'vault-subsection-title', 'Auto-lock');
     section.appendChild(h3);
-    section.appendChild(el('p', 'vault-lede', 'Automatically lock the manager after a period of inactivity.'));
+    section.appendChild(el('p', 'vault-lede', 'Automatically lock your vaults after a period of inactivity.'));
 
     const row = el('div', 'vault-settings-row');
     const field = el('label', 'vault-settings-field');
