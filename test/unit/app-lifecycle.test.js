@@ -111,6 +111,7 @@ function makeHarness({
   const certErrorCalls = [];
   const chromeRecoveryCalls = [];
   const warnLog = [];
+  const debugLog = [];
   const pruneCrashDumpsCalls = [];
   const onChildProcessGoneCalls = [];
   const app = {
@@ -296,7 +297,11 @@ function makeHarness({
     env: {},
     platform,
     stdout: { write: () => {} },
-    logger: { error: (...args) => events.push(['error', ...args]), warn: (...args) => warnLog.push(args) }
+    logger: {
+      error: (...args) => events.push(['error', ...args]),
+      warn: (...args) => warnLog.push(args),
+      debug: (...args) => debugLog.push(args)
+    }
   });
   return {
     events,
@@ -331,6 +336,7 @@ function makeHarness({
     getHygieneMarker: () => hygieneMarker,
     chromeRecoveryCalls,
     pruneCrashDumpsCalls,
+    debugLog,
     onChildProcessGoneCalls
   };
 }
@@ -810,6 +816,16 @@ test('pruneCrashDumps is called at ready with app.getPath("crashDumps")', async 
   const h = makeHarness();
   await h.lifecycle.ready;
   assert.equal(h.pruneCrashDumpsCalls.length, 1);
+});
+
+test('crash-dump prune debug line is logged unpackaged, suppressed packaged (squawk 0112)', async () => {
+  const dev = makeHarness({ dev: true });
+  await dev.lifecycle.ready;
+  assert.deepEqual(dev.debugLog, [['[app-lifecycle] pruning crash dumps under', '/profile/crashDumps']]);
+  const packaged = makeHarness({ dev: false });
+  await packaged.lifecycle.ready;
+  assert.deepEqual(packaged.debugLog, []);
+  assert.equal(packaged.pruneCrashDumpsCalls.length, 1);
 });
 
 test("app.on('child-process-gone') routes to the injected onChildProcessGone", async () => {

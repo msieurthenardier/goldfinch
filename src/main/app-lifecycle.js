@@ -338,7 +338,11 @@ function registerAppLifecycle({
     // `Crashpad/` segment) — logged once at debug level so a live run can
     // confirm the resolved root without any page/profile content in it.
     const crashDumpsDir = app.getPath('crashDumps');
-    logger.debug?.('[app-lifecycle] pruning crash dumps under', crashDumpsDir);
+    // Squawk 0112: dev/unpackaged only — a packaged build must not print the
+    // local profile path to a console.
+    if (!app.isPackaged) {
+      logger.debug?.('[app-lifecycle] pruning crash dumps under', crashDumpsDir);
+    }
     pruneCrashDumps?.(crashDumpsDir);
 
     pruneAllJars();
