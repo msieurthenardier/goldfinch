@@ -4,6 +4,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { registerAppLifecycle } = require('../../src/main/app-lifecycle');
+const { extractLaunchUrls, filterLaunchUrls } = require('../../src/shared/launch-urls');
 
 // Mission 13 Flight 3 / Leg 3 (DD3, AC2/AC3): a minimal webContents double for the
 // web-contents-created catch-all tests — just enough EventEmitter + setWindowOpenHandler
@@ -40,14 +41,43 @@ function makeHarness({
   // suite) so these tests pin app-lifecycle.js's OWN orchestration: recovered
   // checked before restoreTabs, adopts sent directly before the queue flush,
   // the queue deduped, the zero-tabs fallback.
-  chromeRecoveryAdopts = []
+  chromeRecoveryAdopts = [],
+  // Sortie 01: the process argv handed to registerAppLifecycle (was hard-coded []).
+  argv = [],
+  // Sortie 01: opt in to a registry whose records() TRACKS created windows and whose
+  // create path seeds last-focused like the real window-registry create() — else the
+  // "first restored window gets the URLs" case would pass vacuously. Off by default so
+  // the pre-existing static one-record fake (before-quit tests) is unchanged.
+  trackRecords = false,
+  // Sortie 01: restoreSession ON while sessionStore.read() returns null (no snapshot).
+  restoreOnNullSnapshot = false
 } = {}) {
   const events = [];
   const appListeners = new Map();
   const handlers = new Map();
   const ipcListeners = new Map();
-  const settingsValues = { spellcheck: true, restoreSession: restore != null, automationEnabled };
-  const records = [{ win: { id: 1 } }];
+  const settingsValues = {
+    spellcheck: true,
+    restoreSession: restore != null || restoreOnNullSnapshot,
+    automationEnabled
+  };
+  const records = trackRecords ? [] : [{ win: { id: 1 } }];
+  let lastFocusedId = null;
+  const chromeSends = [];
+  const raiseLog = [];
+  const makeWin = (id) => ({
+    id,
+    minimized: false,
+    isMinimized() {
+      return this.minimized;
+    },
+    restore() {
+      this.minimized = false;
+      raiseLog.push(['restore', id]);
+    },
+    show: () => raiseLog.push(['show', id]),
+    focus: () => raiseLog.push(['focus', id])
+  });
   let bootRecord = null;
   const created = [];
   const downloadsManager = { listAll: () => [], flushInterrupted: () => events.push('flush-downloads') };
@@ -80,6 +110,7 @@ function makeHarness({
   // [webContents, url, error, certificate, callback, isMainFrame].
   const certErrorCalls = [];
   const chromeRecoveryCalls = [];
+  const warnLog = [];
   const pruneCrashDumpsCalls = [];
   const onChildProcessGoneCalls = [];
   const app = {
@@ -172,13 +203,29 @@ function makeHarness({
     isSafeTabUrl: (url) => typeof url === 'string' && (/^https?:\/\//.test(url) || url === 'about:blank'),
     isInternalPageUrl: (url) => typeof url === 'string' && url.startsWith('goldfinch://settings'),
     createWindow: (options) => {
-      const rec = { options, win: { id: created.length + 10 } };
+      const rec = { options, win: makeWin(created.length + 10), chromeRecoveryPaused: false };
       created.push(rec);
+      if (trackRecords) {
+        records.push(rec);
+        lastFocusedId = rec.win.id;
+      }
       events.push(`create-window:${options && options.noBootTab === true}`);
       return rec;
     },
+    extractLaunchUrls,
+    filterLaunchUrls,
+    queueChromeSend: (rec, build) => {
+      const [channel, payload] = build();
+      chromeSends.push({ rec, channel, payload });
+      raiseLog.push(['send', rec.win && rec.win.id]);
+    },
     registry: {
       records: () => records,
+      getLastFocused: () => records.find((r) => r.win.id === lastFocusedId) || records[0] || null,
+      noteFocus: (id) => {
+        raiseLog.push(['noteFocus', id]);
+        if (records.some((r) => r.win.id === id)) lastFocusedId = id;
+      },
       getWindowForChrome: () => bootRecord,
       isTabViewWcId: () => false,
       isChromeContents: () => false
@@ -244,15 +291,22 @@ function makeHarness({
     getDefaultJar: () => ({ id: 'personal', name: 'Personal', color: '#123456', partition: 'persist:personal' }),
     pruneCrashDumps: (dir) => pruneCrashDumpsCalls.push(dir),
     onChildProcessGone: (details) => onChildProcessGoneCalls.push(details),
-    getAllWindows: () => [],
-    argv: [],
+    getAllWindows: () => (trackRecords ? records.map((r) => r.win) : []),
+    argv,
     env: {},
     platform,
     stdout: { write: () => {} },
-    logger: { error: (...args) => events.push(['error', ...args]), warn: () => {} }
+    logger: { error: (...args) => events.push(['error', ...args]), warn: (...args) => warnLog.push(args) }
   });
   return {
     events,
+    chromeSends,
+    raiseLog,
+    warnLog,
+    records,
+    setLastFocused: (id) => {
+      lastFocusedId = id;
+    },
     appListeners,
     handlers,
     ipcListeners,
@@ -803,4 +857,182 @@ test('the non-guest web-contents-created catch-all deny + guard is byte-unchange
     src.includes(pinned),
     'the catch-all region changed — DD3 requires the non-guest deny to stay; the popup allow path belongs in guest-wiring only'
   );
+});
+
+// ---------------------------------------------------------------------------
+// Sortie 01 (default browser) — launch-URL intake: cold argv, second-instance,
+// open-url. Events emitted synchronously after makeHarness are PRE-ready; events
+// after `await lifecycle.ready` are post-ready.
+// ---------------------------------------------------------------------------
+
+const A = 'https://a.example/x?q=1';
+const B = 'https://b.example/';
+const openSends = (h) => h.chromeSends.filter((s) => s.channel === 'open-external-urls');
+const secondInstance = (h, ...urls) => h.appListeners.get('second-instance')({}, ['exe', ...urls]);
+
+test('cold argv: first record gets one open-external-urls send and noBootTab', async () => {
+  const h = makeHarness({ trackRecords: true, argv: ['exe', '--flag', A, B] });
+  await h.lifecycle.ready;
+  assert.deepEqual(h.created[0].options, { noBootTab: true });
+  assert.equal(openSends(h).length, 1);
+  assert.equal(openSends(h)[0].rec, h.created[0]);
+  assert.deepEqual(openSends(h)[0].payload, { urls: [A, B] });
+});
+
+test('cold argv + restore with TWO saved windows: the FIRST restored record gets the URLs', async () => {
+  const restore = { windows: [{ tabs: [{ url: 'https://one.test/' }] }, { tabs: [{ url: 'https://two.test/' }] }] };
+  const h = makeHarness({ trackRecords: true, restore, argv: ['exe', A] });
+  await h.lifecycle.ready;
+  assert.equal(h.created.length, 2);
+  assert.deepEqual(h.created[0].options, { noBootTab: true });
+  assert.deepEqual(h.created[1].options, { noBootTab: true });
+  assert.equal(openSends(h).length, 1);
+  assert.equal(openSends(h)[0].rec, h.created[0], 'not the last-created (last-focused) window');
+});
+
+test('pre-ready second-instance merges into the cold flush (deduped across argv + second-instance)', async () => {
+  const h = makeHarness({ trackRecords: true, argv: ['exe', A] });
+  secondInstance(h, A, B);
+  await h.lifecycle.ready;
+  assert.equal(openSends(h).length, 1);
+  assert.deepEqual(openSends(h)[0].payload, { urls: [A, B] });
+  assert.deepEqual(
+    h.raiseLog.filter((e) => e[0] !== 'send'),
+    [],
+    'pre-ready intake never touches the registry/window'
+  );
+});
+
+test('pre-ready open-url buffers, preventDefault()s, and merges', async () => {
+  const h = makeHarness({ trackRecords: true });
+  const ev = {
+    prevented: false,
+    preventDefault() {
+      this.prevented = true;
+    }
+  };
+  h.appListeners.get('open-url')(ev, A);
+  assert.equal(ev.prevented, true);
+  await h.lifecycle.ready;
+  assert.deepEqual(openSends(h)[0].payload, { urls: [A] });
+  assert.deepEqual(h.created[0].options, { noBootTab: true });
+});
+
+test('restore on + null snapshot + URLs: window is created noBootTab', async () => {
+  const h = makeHarness({ trackRecords: true, restoreOnNullSnapshot: true, argv: ['exe', A] });
+  await h.lifecycle.ready;
+  assert.deepEqual(h.created[0].options, { noBootTab: true });
+});
+
+test('no URLs: createWindow() is called with NO argument and nothing is sent', async () => {
+  const h = makeHarness({ trackRecords: true, argv: ['exe', '.', '--automation-dev', 'goldfinch://settings'] });
+  await h.lifecycle.ready;
+  assert.equal(h.created[0].options, undefined);
+  assert.equal(h.events.includes('create-window:undefined'), true);
+  assert.equal(h.chromeSends.length, 0);
+});
+
+test('pre-ready buffer caps at 20 total across three arrivals and dedupes', async () => {
+  const mk = (from, n) => Array.from({ length: n }, (_, i) => `https://h${from + i}.test/`);
+  const h = makeHarness({ trackRecords: true, argv: ['exe', ...mk(0, 10)] });
+  secondInstance(h, ...mk(5, 10)); // 5..14, overlaps 5..9
+  secondInstance(h, ...mk(15, 10)); // 15..24
+  await h.lifecycle.ready;
+  const urls = openSends(h)[0].payload.urls;
+  assert.equal(urls.length, 20);
+  assert.equal(new Set(urls).size, 20);
+});
+
+test('buffer is consumed once: a later flush-less ready sends nothing more', async () => {
+  const h = makeHarness({ trackRecords: true, argv: ['exe', A] });
+  await h.lifecycle.ready;
+  assert.equal(openSends(h).length, 1);
+  await flushMicrotasks();
+  assert.equal(openSends(h).length, 1);
+  h.appListeners.get('activate')();
+  assert.equal(openSends(h).length, 1);
+});
+
+test('second-instance with hostile-only argv: no send, window NOT raised', async () => {
+  const h = makeHarness({ trackRecords: true });
+  await h.lifecycle.ready;
+  secondInstance(h, 'goldfinch://settings', 'file:///etc/passwd', 'javascript:alert(1)', '--flag');
+  assert.equal(openSends(h).length, 0);
+  assert.deepEqual(h.raiseLog, []);
+});
+
+test('second-instance with a URL: raise (noteFocus) then send to last-focused', async () => {
+  const h = makeHarness({ trackRecords: true });
+  await h.lifecycle.ready;
+  h.created[0].win.minimized = true;
+  secondInstance(h, A);
+  assert.deepEqual(h.raiseLog, [
+    ['restore', 10],
+    ['show', 10],
+    ['focus', 10],
+    ['noteFocus', 10],
+    ['send', 10]
+  ]);
+  assert.deepEqual(openSends(h)[0].payload, { urls: [A] });
+});
+
+test('post-ready target is last-focused, with a paused-record fallback', async () => {
+  const restore = { windows: [{ tabs: [] }, { tabs: [] }] };
+  const h = makeHarness({ trackRecords: true, restore });
+  await h.lifecycle.ready;
+  const [r1, r2] = h.created;
+  h.setLastFocused(r2.win.id);
+  secondInstance(h, A);
+  assert.equal(openSends(h).at(-1).rec, r2);
+  r2.chromeRecoveryPaused = true;
+  secondInstance(h, B);
+  assert.equal(openSends(h).at(-1).rec, r1, 'paused last-focused falls back to first non-paused');
+  r1.chromeRecoveryPaused = true;
+  const before = openSends(h).length;
+  const raised = h.raiseLog.length;
+  secondInstance(h, 'https://c.example/');
+  assert.equal(openSends(h).length, before, 'all paused: dropped');
+  assert.equal(h.raiseLog.length, raised, 'all paused: not raised');
+  assert.equal(h.warnLog.length, 1);
+  assert.equal(JSON.stringify(h.warnLog).includes('c.example'), false, 'logs name only a count, never a URL');
+});
+
+test('post-ready open-url with windows present raises then sends', async () => {
+  const h = makeHarness({ trackRecords: true });
+  await h.lifecycle.ready;
+  const ev = { preventDefault() {} };
+  h.appListeners.get('open-url')(ev, A);
+  assert.deepEqual(
+    h.raiseLog.map((e) => e[0]),
+    ['show', 'focus', 'noteFocus', 'send']
+  );
+});
+
+test('darwin zero-window post-ready intake: exactly one createWindow({ noBootTab: true }) + send; activate adds no second', async () => {
+  const h = makeHarness({ trackRecords: true, platform: 'darwin' });
+  await h.lifecycle.ready;
+  h.records.length = 0; // every window closed; darwin stays resident
+  h.created.length = 0;
+  h.appListeners.get('open-url')({ preventDefault() {} }, A);
+  assert.equal(h.created.length, 1);
+  assert.deepEqual(h.created[0].options, { noBootTab: true });
+  assert.equal(openSends(h).at(-1).rec, h.created[0]);
+  h.appListeners.get('activate')();
+  assert.equal(h.created.length, 1, 'activate must not create a second window');
+  // second-instance takes the same path
+  h.records.length = 0;
+  h.created.length = 0;
+  secondInstance(h, B);
+  assert.equal(h.created.length, 1);
+});
+
+test('non-darwin zero-window post-ready intake: dropped and logged, no window created', async () => {
+  const h = makeHarness({ trackRecords: true, platform: 'linux' });
+  await h.lifecycle.ready;
+  h.records.length = 0;
+  const before = h.created.length;
+  secondInstance(h, A);
+  assert.equal(h.created.length, before);
+  assert.equal(openSends(h).length, 0);
+  assert.equal(h.warnLog.length, 1);
 });

@@ -11,6 +11,8 @@ import { activeLog, windowPage, reduceAudit, pageList, pageCount } from './audit
 import { isSafeColor } from './safe-color.js';
 // @ts-ignore — serving-path vs disk-path mismatch (see above)
 import { SEARCH_ENGINES, normalizeHomePageInput } from './search-engines.js';
+// @ts-ignore — serving-path vs disk-path mismatch (see above)
+import { defaultBrowserRowModel } from './default-browser-row-model.js';
 
 /**
  * settings.js — scroll-spy progressive enhancement.
@@ -454,6 +456,84 @@ async function copyText(text, messageEl) {
     if (all && typeof all.spellcheck === 'boolean') el.checked = all.spellcheck;
   });
   window.addEventListener('pagehide', () => window.goldfinchInternal.offSettingsChanged(h), { once: true });
+})();
+
+/* ---- default-browser controller (sortie 01 leg 2 / DD7) ---- */
+
+(function () {
+  // Default browser row (sortie 01 leg 2 / DD7). Renders from the RETURNED status
+  // only, through the pure row model. Patch-in-place (textContent / hidden /
+  // disabled) — never rebuilds the focused button. Refreshes are coalesced (one
+  // get-status in flight) and any response older than the latest issued request
+  // is dropped, including a get-status that resolves after a make-default.
+  if (!window.goldfinchInternal) return;
+  const statusEl = document.getElementById('default-browser-status');
+  const failureEl = document.getElementById('default-browser-failure');
+  const btn = /** @type {HTMLButtonElement|null} */ (document.getElementById('default-browser-make-default'));
+  if (!statusEl || !failureEl || !btn) return;
+
+  let status = null;
+  let lastResult = null;
+  let inFlight = false;
+  let issued = 0;
+  let refreshing = false;
+
+  function render() {
+    const m = defaultBrowserRowModel({ status, lastResult, inFlight });
+    if (statusEl.textContent !== m.text) statusEl.textContent = m.text;
+    if (failureEl.textContent !== m.failureText) failureEl.textContent = m.failureText;
+    failureEl.hidden = !m.failureText;
+    btn.hidden = m.buttonHidden;
+    btn.disabled = m.buttonDisabled;
+    if (btn.textContent !== m.buttonLabel) btn.textContent = m.buttonLabel;
+  }
+
+  function refresh() {
+    if (refreshing) return;
+    refreshing = true;
+    const mine = ++issued;
+    window.goldfinchInternal
+      .defaultBrowserGetStatus()
+      .then((s) => {
+        if (mine !== issued) return;
+        status = s;
+        // A fresh read that finds Goldfinch default supersedes a stale failure line.
+        if (s && s.isDefault === true) lastResult = null;
+        render();
+      })
+      .catch(() => {})
+      .finally(() => {
+        refreshing = false;
+      });
+  }
+
+  btn.addEventListener('click', () => {
+    if (inFlight) return;
+    inFlight = true;
+    const mine = ++issued;
+    render();
+    window.goldfinchInternal
+      .defaultBrowserMakeDefault()
+      .then((res) => {
+        if (mine !== issued) return;
+        lastResult = res;
+        if (res && res.status) status = res.status;
+      })
+      .catch(() => {
+        if (mine === issued) lastResult = { ok: false };
+      })
+      .finally(() => {
+        inFlight = false;
+        render();
+      });
+  });
+
+  render();
+  refresh();
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') refresh();
+  });
+  window.addEventListener('focus', refresh);
 })();
 
 /* ---- session-restore controller (M09 Flight 9 / DD7) ---- */

@@ -25,6 +25,6 @@
 // Test files must not require() each other (node --test executes a required file's own
 // tests), which is why this lives in test/helpers/ rather than in either suite.
 
-const RENDERER_LINE_BUDGET = 1550;
+const RENDERER_LINE_BUDGET = 1546;
 
 module.exports = { RENDERER_LINE_BUDGET };

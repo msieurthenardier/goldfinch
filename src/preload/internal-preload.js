@@ -178,6 +178,19 @@ if (INTERNAL_ORIGINS.has(location.origin)) {
     automationFindFreePort: () => ipcRenderer.invoke('automation:find-free-port'),
 
     /**
+     * Live default-browser status (zero-argument; the OS is the source of truth).
+     * @returns {Promise<{ supported: boolean, reason: (string|null), isDefault: (boolean|null), platform: string }>}
+     */
+    defaultBrowserGetStatus: () => ipcRenderer.invoke('default-browser:get-status'),
+
+    /**
+     * Perform the platform's make-default action (zero-argument; main decides the
+     * target). Resolves with the outcome and a fresh status.
+     * @returns {Promise<{ ok: boolean, status: { supported: boolean, reason: (string|null), isDefault: (boolean|null), platform: string } }>}
+     */
+    defaultBrowserMakeDefault: () => ipcRenderer.invoke('default-browser:make-default'),
+
+    /**
      * Write text to the system clipboard (fallback when navigator.clipboard is
      * blocked at runtime under contextIsolation + sandbox — DD4). Pass
      * `{ secret: true }` for a secret value (e.g. a vault password) so main

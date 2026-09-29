@@ -42,6 +42,7 @@ const { createHistoryRecorder } = require('./history-recorder');
 const { registerHistoryIpc } = require('./history-ipc');
 const { createFaviconFetcher } = require('./favicon-fetch');
 const { isSafeTabUrl, isInternalPageUrl } = require('../shared/url-safety');
+const { extractLaunchUrls, filterLaunchUrls } = require('../shared/launch-urls');
 const { devUserDataPath } = require('../shared/dev-profile');
 // Generate-in-picker (Mission 21, Flight 4, Leg 3 — generate-in-picker, AC13):
 // re-validated + regenerated HERE, never trusting the chrome's earlier canGenerate.
@@ -120,10 +121,11 @@ const { createCertTrust, keyFor } = require('./cert-trust');
 const { createCertObserver } = require('./cert-observer');
 const { summarizeCertificate } = require('./certificate-summary');
 const { createSessionRuntime } = require('./session-runtime');
-const { registerTabIpc, applyGuestVisibility, createSendOrQueue } = require('./register-tab-ipc');
+const { registerTabIpc, applyGuestVisibility, createSendOrQueue, queueChromeSend } = require('./register-tab-ipc');
 const { registerOverlayIpc } = require('./register-overlay-ipc');
 const { registerDownloadIpc } = require('./register-download-ipc');
 const { registerSettingsIpc } = require('./register-settings-ipc');
+const { createDefaultBrowser } = require('./default-browser');
 const { registerVaultIpc } = require('./register-vault-ipc');
 const { registerBrowserIpc } = require('./register-browser-ipc');
 const { registerAppLifecycle } = require('./app-lifecycle');
@@ -283,9 +285,24 @@ if (!app.isPackaged) {
   app.setPath('userData', devUserDataPath(app.getPath('userData')));
 }
 
+// Single-instance lock (sortie 01 / DD1). Electron keys the lock on the userData dir, so
+// it MUST sit after the dev redirect above (installed `goldfinch` and dev
+// `goldfinch-dev` coexist) and before the crash reporter, the crash log and
+// registerAppLifecycle (a loser must open no store, mint no key, write no snapshot).
+// The loser exits with app.exit(0) then process.exit(0): the quit path would still run the
+// whenReady chain (open the shared app.db, create a window, write a snapshot on
+// before-quit), and a top-level return is rejected by tsc under checkJs (TS1108). The
+// running instance receives our argv through its second-instance event.
+// Pinned by test/unit/single-instance-lock-order.test.js.
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.exit(0);
+  process.exit(0);
+}
+
 // Mission 20 Flight 3 Leg 3 (DD8): Chromium's own minidump collector, started
 // at module load (before app.whenReady()) so early crashes are caught too —
-// but PLACED IMMEDIATELY AFTER the dev-profile redirect above, never before
+// but PLACED AFTER the dev-profile redirect (and the single-instance lock) above, never before
 // it. Electron 44 has no `crashesDirectory` option; the dump database path is
 // resolved from `userData` at `start()` time, so a call placed any earlier
 // would write dev-launch dumps into the operator's REAL profile (squawk 0017
@@ -2637,7 +2654,14 @@ registerSettingsIpc({
   mintAdminKey,
   revokeAdminKey,
   getMcpServer: () => mcpServer,
-  adminEnabled: () => process.env.GOLDFINCH_AUTOMATION_ADMIN
+  adminEnabled: () => process.env.GOLDFINCH_AUTOMATION_ADMIN,
+  defaultBrowser: createDefaultBrowser({
+    app,
+    shell,
+    platform: process.platform,
+    env: process.env,
+    logger: console
+  })
 });
 
 // Vault management surface (M12 Flight 3, Leg 1 / DD2). registerInternalHandler-gated,
@@ -2678,6 +2702,9 @@ registerVaultIpc({
 registerAppLifecycle({
   app,
   ipcMain,
+  extractLaunchUrls,
+  filterLaunchUrls,
+  queueChromeSend,
   sessionRuntime,
   initProfileAndStores,
   profileStores: { appDb, shields, settings, jars, downloads, bookmarks: bookmarksStore },

@@ -17,3 +17,9 @@ The minimum to get a custom icon everywhere is just **`build/icon.png`** at 1024
 
 In-app UI logo (e.g. a start page / toolbar mark) is separate — put those under
 `src/renderer/assets/`.
+
+## Other build resources
+
+| File | Purpose | Notes |
+|------|---------|-------|
+| `build/installer.nsh` | Windows NSIS include | Wired via `build.nsis.include`. Registers Goldfinch as a browser (ProgID, `StartMenuInternet` Capabilities, `RegisteredApplications`) so it appears in Default apps. Additive only; the uninstall deletes are `${isUpdated}`-guarded so updates keep the operator's default. |

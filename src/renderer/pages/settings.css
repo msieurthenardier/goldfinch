@@ -284,6 +284,29 @@ main section p {
   padding-left: 0;
 }
 
+/* Default browser (sortie 01): same standalone-group divider + spacing as
+   .startup-toggle-group. A fieldset's own border-top would be cut by the visible
+   legend, so the divider rides the (floated, full-width, unpadded) legend and the
+   next sibling clears it — the legend then aligns with the content beneath. */
+.default-browser-group {
+  margin-top: 12px;
+}
+.default-browser-group > legend {
+  float: left;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 0 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.default-browser-group > legend + * {
+  clear: both;
+}
+/* Space above the button (HAT H2-b). Carried by the button, not the status
+   lines, so the usually-empty zero-height failure line adds no phantom gap. */
+.default-browser-group > button {
+  margin-top: 12px;
+}
+
 /* Pill switch — mirrors .switch in src/renderer/styles.css exactly:
    34×18px track, border-radius 9px, OFF #7c7f8a + border, ON var(--accent).
    Native <input type="checkbox"> kept for accessibility/behavior; appearance:none

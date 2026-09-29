@@ -244,6 +244,8 @@ interface GoldfinchBridge {
    * inheritFromPartition; `openerPartition` is undefined when the opener's
    * registry entry is already gone (closed before the popup IPC lands). */
   onOpenTab(cb: (payload: { url: string; openerPartition?: string }) => void): void;
+  /** Sortie 01: OS-handed http(s) URLs, pre-filtered by main; opened as untrusted default-jar tabs. */
+  onOpenExternalUrls(cb: (urls: string[]) => void): void;
   /** Fired by the main-side Ctrl+F before-input-event capture (SC4/DD2). No payload. */
   onOpenFind(cb: () => void): void;
 
@@ -652,6 +654,8 @@ interface GoldfinchInternalBridge {
     bound: boolean;
     error: string | null;
   }>;
+  defaultBrowserGetStatus(): Promise<DefaultBrowserStatus>;
+  defaultBrowserMakeDefault(): Promise<{ ok: boolean; status: DefaultBrowserStatus }>;
   automationSetPort(
     port: number
   ): Promise<{ enabled: boolean; host: string; port: number; bound: boolean; error: string | null }>;
@@ -990,3 +994,10 @@ declare const menuController: {
 
 /** Roving-tabindex helper (wrap math + tabIndex/focus). Injected by menu-controller.js. */
 declare function focusItem(items: HTMLElement[], i: number): void;
+
+interface DefaultBrowserStatus {
+  supported: boolean;
+  reason: string | null;
+  isDefault: boolean | null;
+  platform: string;
+}

@@ -305,6 +305,16 @@ const SEAM_COUNT = 41;
 // extraction precedent), buying the headroom the flight's later identity legs
 // need. Measured AFTER `npm run format` (this test's own split-array metric):
 // 1550. No slack banked beyond the landed value, per the leg's own AC8.
+// Sortie 01 (default-browser) Leg 1: LOWERED, 1550 → 1546 — the boot-barrier wiring for
+// OS-handed URLs (chrome/external-urls-controller.js) adds the two imports, the controller
+// construction (4 lines after Prettier) and the `.finally(...)` on the boot chain (Prettier
+// re-breaks the chain: `.then(...)` and `.finally(...)` become one indented member chain,
+// which re-indents the body but adds no lines beyond the `])` / `.then(` split), paid for
+// by extracting the two crash/hang audit hooks (showCrashPanelForAudit /
+// showHangNoticeForAudit, ~21 lines) verbatim into chrome/audit-states.js, re-published by
+// the same names at the seam tail (SEAM_COUNT unchanged). Measured AFTER `npm run format`
+// (this test's own split-array metric): 1546. Zero slack banked; the value lives in
+// test/helpers/renderer-line-budget.js.
 //
 // Squawk 0096: this number is now single-sourced in test/helpers/renderer-line-
 // budget.js (imported above as RENDERER_LINE_BUDGET) — vault-restore-workflow-

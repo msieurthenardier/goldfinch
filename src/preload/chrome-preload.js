@@ -214,6 +214,9 @@ contextBridge.exposeInMainWorld('goldfinch', {
   // the opener's partition from tabViews at popup time; the renderer resolves it
   // into a container decision via inheritFromPartition. Forward the object as-is.
   onOpenTab: (cb) => ipcRenderer.on('open-tab', (_e, payload) => cb(payload)),
+  // Sortie 01 (default browser): OS-handed http(s) URLs (cold argv / second-instance /
+  // open-url), already filtered main-side. Forward only the array.
+  onOpenExternalUrls: (cb) => ipcRenderer.on('open-external-urls', (_e, payload) => cb(payload && payload.urls)),
   // Fired by main's before-input-event Ctrl+F capture (DD2/SC4). No payload —
   // the renderer resolves the active tab via activeTab(). Mirrors onOpenTab.
   onOpenFind: (cb) => ipcRenderer.on('open-find', () => cb()),

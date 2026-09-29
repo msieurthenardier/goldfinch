@@ -81,7 +81,11 @@ function makeSettingsIpcHarness() {
     },
     revokeAdminKey: (store) => store.set('automationAdminKeyHash', ''),
     getMcpServer: () => null,
-    adminEnabled: () => true
+    adminEnabled: () => true,
+    defaultBrowser: {
+      getStatus: (...args) => ({ fake: 'status', args }),
+      makeDefault: async (...args) => ({ fake: 'made', args })
+    }
   });
 
   return {

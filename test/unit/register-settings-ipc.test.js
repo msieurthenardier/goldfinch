@@ -32,6 +32,8 @@ test('settings registrar preserves bare chrome reads and guarded internal mutati
     'automation:list-keys',
     'automation:set-port',
     'clipboard:write',
+    'default-browser:get-status',
+    'default-browser:make-default',
     'internal-settings-get',
     'internal-settings-set',
     'internal-shields-get',
@@ -254,4 +256,16 @@ test('clipboard:write: a later non-secret copy cancels a still-pending secret-cl
   await drain();
 
   assert.equal(h.clipboard.readText(), 'https://example.test/');
+});
+
+test('default-browser channels are internal handlers that ignore page arguments and never touch settings', async () => {
+  const h = makeSettingsIpcHarness();
+  assert.equal(h.bare.has('default-browser:get-status'), false);
+  assert.equal(h.bare.has('default-browser:make-default'), false);
+  const before = h.events.length;
+  const status = h.invokeInternal('default-browser:get-status', 'ms-settings:evil');
+  assert.deepEqual(status, { fake: 'status', args: [] });
+  const made = await h.invokeInternal('default-browser:make-default', 'ms-settings:evil', { x: 1 });
+  assert.deepEqual(made, { fake: 'made', args: [] });
+  assert.equal(h.events.length, before, 'no settings write / broadcast');
 });

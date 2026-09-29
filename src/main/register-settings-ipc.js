@@ -23,7 +23,8 @@ function registerSettingsIpc({
   mintAdminKey,
   revokeAdminKey,
   getMcpServer,
-  adminEnabled
+  adminEnabled,
+  defaultBrowser
 }) {
   const broadcastSettings = () => broadcast('settings-changed', settings.getAll());
 
@@ -75,6 +76,11 @@ function registerSettingsIpc({
     await rebindMcpServer();
     return currentAutomationStatus();
   });
+  // Default browser (sortie 01 leg 2 / DD7): OS state is the source of truth — no
+  // settings-store write, no settings-changed broadcast. Both handlers ignore every
+  // argument after _event; nothing page-supplied reaches the module.
+  registerInternalHandler(ipcMain, 'default-browser:get-status', () => defaultBrowser.getStatus());
+  registerInternalHandler(ipcMain, 'default-browser:make-default', () => defaultBrowser.makeDefault());
   registerInternalHandler(ipcMain, 'automation:find-free-port', async () => ({ port: await freePortInRange() }));
 
   // clipboard:write is the generic internal clipboard sink: the vault's secret Copy
