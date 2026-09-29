@@ -277,6 +277,17 @@ instructions beyond run-specific keys/ports.
   `tests/behavior/welcome-home-routing/runs/2026-08-26-02-29-57.md`
   (Orchestrator Notes: "Executor transcript loss (third occurrence in this
   project's runs)").
+- **Process liveness / absence checks**: when a step must prove a Goldfinch
+  process is gone (or that no second instance remains), check with
+  `ps -p <pid>` against the recorded electron main PID, or filter `ps`
+  output on the electron main binary path — never `grep` for the launcher
+  name (`dev-launch`), which matches the polling shell's own command line
+  and yields a false "second process" reading. This matters more since the
+  single-instance lock (Sortie 01): a relaunch against a still-dying
+  instance hands its args to it and exits, so a relaunch must first confirm
+  the old PID is fully gone — see
+  `tests/behavior/default-browser-handoff/runs/2026-09-29-21-01-11.md`
+  (Checkpoint 8 / Validator notes).
 - **Welcome tabs**: a welcome tab (viewless record, no web contents) is
   invisible to `enumerateTabs`, and `enumerateWindows` reports
   `activeTabWcId: null` for it — the tab strip must be read from chrome DOM,

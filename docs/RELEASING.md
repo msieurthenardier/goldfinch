@@ -29,6 +29,30 @@ can't, so it only ever failed. Regenerating the links at bump time keeps `main` 
 build workflow; the installers publish a minute or two later, at which point the just-written
 download links go live.
 
+## Windows HAT build (prerelease tag)
+
+WSL can't build the NSIS installer, and a manual `workflow_dispatch` run of `build.yml` is a
+build-only smoke check (`--publish never`, no artifact upload — see the workflow header for the
+storage-quota history): it proves compilation but yields no installer. To get one for a human
+acceptance test, push a strict-semver **prerelease** tag on the commit under test:
+
+```bash
+git tag -a vX.Y.Z-rc.N <commit> -m "Windows HAT build"
+git push origin vX.Y.Z-rc.N
+```
+
+Use the **next** release's version (minor for a feature) with `-rc.N`, and bump `N` for re-checks
+after HAT fixes. No version-bump commit is needed: the workflow's "Set version from tag" step syncs
+`package.json` from the tag, and a prerelease tag publishes a GitHub **prerelease** (not "latest")
+with all installers. Download `Goldfinch-Setup-…exe` from the release page. Afterwards clean up:
+
+```bash
+gh release delete vX.Y.Z-rc.N --yes --cleanup-tag
+git tag -d vX.Y.Z-rc.N
+```
+
+This is **outward-facing** — the prerelease is public — so only tag commits you're willing to publish.
+
 ## Notes
 
 - Pushing the release-prep commit straight to protected `main` relies on a **repo-admin
