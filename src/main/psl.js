@@ -21,9 +21,10 @@
 //   Snapshot: 2026-07-20 (file header VERSION 2026-07-20_19-17-05_UTC)
 //   License:  Mozilla Public License v2.0 (MPL-2.0) — bundling the .dat as a DATA
 //             asset (not an npm package) preserves goldfinch's zero-runtime-dep ethos.
-//   REFRESH:  the list drifts as registries change. Re-fetch periodically from the URL
-//             above (and ONLY that URL) and overwrite src/main/public_suffix_list.dat;
-//             the parser rebuilds its index (and re-reads the snapshot date) at module load.
+//   REFRESH:  the list drifts as registries change. Run `node scripts/update-psl.mjs` (fetches
+//             ONLY the URL above, validates, overwrites src/main/public_suffix_list.dat and
+//             the Snapshot line; never commits). The `preversion` hook refuses a release
+//             bump when the snapshot is over 90 days old. The parser rebuilds its index (and re-reads the snapshot date) at module load.
 //
 // STALENESS IS NOT PURELY FAIL-CLOSED (corrected, PR#112 finding 10). An UNLISTED suffix
 // resolves to null → exact fill (safe). BUT a NEW PRIVATE SUFFIX introduced beneath an

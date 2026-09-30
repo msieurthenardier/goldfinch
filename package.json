@@ -21,6 +21,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "a11y": "node scripts/a11y-audit.mjs",
+    "preversion": "node scripts/check-psl-fresh.mjs",
     "version": "node scripts/update-readme.mjs && git add README.md"
   },
   "engines": {
