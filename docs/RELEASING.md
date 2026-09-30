@@ -13,7 +13,18 @@ npm version patch -m "release-prep: bump to %s"   # or minor / major
 git push --follow-tags
 ```
 
-`npm version` does three things in one commit:
+`npm version` first runs the **`preversion` guard** (`scripts/check-psl-fresh.mjs`, offline): it
+refuses the bump (non-zero exit) when the vendored Public Suffix List snapshot
+(`src/main/public_suffix_list.dat`) is more than 90 days old. If it refuses:
+
+1. `node scripts/update-psl.mjs` (fetches only publicsuffix.org, validates, overwrites the `.dat`
+   and the `Snapshot:` line in `src/main/psl.js`; never commits),
+2. re-check `SUPPLEMENT_SUFFIX` in `src/main/trackers.js` (amazonaws.com, netlify.com, surge.sh,
+   glitch.me) against the new `.dat`,
+3. `npm test` (`psl.test.js` runs against the vendored `.dat`) and review the curated `TRACKERS` table,
+4. commit the refresh as its own reviewed change, then cut the release.
+
+Refresh proactively too if it has been a while. Then `npm version` does three things in one commit:
 
 1. bumps `package.json` + `package-lock.json`,
 2. runs the **`version` npm-lifecycle hook** → `scripts/update-readme.mjs` regenerates the

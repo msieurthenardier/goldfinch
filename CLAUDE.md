@@ -232,7 +232,7 @@ Both workflows are supply-chain hardened; preserve these invariants:
 
 ### Cutting a release (`build.yml`, on `v*` tag push)
 
-Tag-driven — full flow in `docs/RELEASING.md`. Short form: from green `main`, `npm version patch -m "release-prep: bump to %s"` (the `version` npm-lifecycle hook regenerates the README download links into the same commit — there is no post-release README job) then `git push --follow-tags`. Strict semver is enforced; a prerelease tag publishes as a GitHub prerelease. Rollback: `gh release delete vX.Y.Z --yes --cleanup-tag`, fix, re-tag. App icon: `build/icon.png`.
+Tag-driven — full flow in `docs/RELEASING.md`. Short form: from green `main`, `npm version patch -m "release-prep: bump to %s"` (the `version` npm-lifecycle hook regenerates the README download links into the same commit — there is no post-release README job; the `preversion` hook refuses the bump if the vendored PSL snapshot is >90 days old — fix with `node scripts/update-psl.mjs`, its own reviewed commit) then `git push --follow-tags`. Strict semver is enforced; a prerelease tag publishes as a GitHub prerelease. Rollback: `gh release delete vX.Y.Z --yes --cleanup-tag`, fix, re-tag. App icon: `build/icon.png`.
 
 ## Flight Operations
 
