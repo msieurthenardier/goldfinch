@@ -221,12 +221,14 @@ function createGuestWiring(deps) {
               // parity ruling — without it the guardFrameNav PDF carve-out is
               // dead code in popups). NO partition key: the popup's session is
               // automatically the opener's jar (spike-verified; partition
-              // overrides are silently ignored).
+              // overrides are silently ignored). autoplayPolicy mirrors the
+              // tab web branch (squawk 0118 / #168).
               preload: webPreloadPath,
               contextIsolation: false,
               sandbox: true,
               nodeIntegration: false,
-              plugins: true
+              plugins: true,
+              autoplayPolicy: 'document-user-activation-required'
             }
           }
         };
