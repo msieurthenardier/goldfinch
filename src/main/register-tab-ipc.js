@@ -223,7 +223,12 @@ function registerTabIpc(deps) {
         // viewer runs sandboxed in stock Chrome, so this preserves the mission-13
         // posture. The viewer's chrome-extension: subframe is admitted by the
         // frame-scoped, id-pinned carve-out in guest-wiring.js (guardFrameNav).
-        plugins: true
+        plugins: true,
+        // Squawk 0118 / #168: Chrome-desktop parity. An AudioContext created
+        // before document user activation starts `suspended`. Must be
+        // `document-user-activation-required`: Blink applies
+        // `user-gesture-required` to Web Audio only in cross-origin iframes.
+        autoplayPolicy: 'document-user-activation-required'
         // NO spellcheck key — the session-layer applier (applySpellcheck) owns the web toggle
       };
     }

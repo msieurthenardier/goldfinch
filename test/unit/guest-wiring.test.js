@@ -781,7 +781,8 @@ const EXPECTED_ALLOW = Object.freeze({
       contextIsolation: false,
       sandbox: true,
       nodeIntegration: false,
-      plugins: true
+      plugins: true,
+      autoplayPolicy: 'document-user-activation-required'
     }
   }
 });

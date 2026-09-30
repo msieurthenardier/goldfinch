@@ -471,6 +471,8 @@ test('tab-create preserves trusted/untrusted construction and wires before navig
   // NOT gain the key (deepEqual below is the structural pin; the explicit
   // assertion documents the invariant).
   assert.equal(h.views[0].opts.webPreferences.plugins, true);
+  // Squawk 0118 / #168: Chrome-desktop autoplay parity on web guests.
+  assert.equal(h.views[0].opts.webPreferences.autoplayPolicy, 'document-user-activation-required');
   assert.ok(h.log.findIndex((x) => x[0] === 'wire-tab') < h.log.findIndex((x) => x[0] === 'load'));
 
   await h.ipcMain.invoke('tab-create', source.chromeView.webContents, {
@@ -490,6 +492,11 @@ test('tab-create preserves trusted/untrusted construction and wires before navig
     'plugins' in h.views[1].opts.webPreferences,
     false,
     'internal branch webPreferences must not carry a plugins key (DD5 scopes the relaxation to web guests)'
+  );
+  assert.equal(
+    'autoplayPolicy' in h.views[1].opts.webPreferences,
+    false,
+    'internal branch webPreferences must not carry an autoplayPolicy key (squawk 0118 scopes it to web guests)'
   );
 });
 
