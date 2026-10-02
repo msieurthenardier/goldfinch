@@ -117,9 +117,18 @@ function setup(options = {}) {
   };
 }
 
+// Squawk 0119: the real Electron 44 default UA (Windows), as probed live.
+const ELECTRON_DEFAULT_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) goldfinch/0.18.2 Chrome/152.0.7977.130 Electron/44.4.4 Safari/537.36';
+const CHROME_SHAPED_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.7977.130 Safari/537.36';
+
 function fakeSession(log) {
   const handlers = {};
   const counts = { beforeRequest: 0, beforeSendHeaders: 0, headersReceived: 0 };
+  // Squawk 0119: UA writes are recorded OUTSIDE `log`/`counts` (both are
+  // asserted by exact shape elsewhere in this file).
+  const userAgentSets = [];
   const session = {
     storagePath: '/profile/Partitions/jar-a',
     cookies: new EventEmitter(),
@@ -150,9 +159,16 @@ function fakeSession(log) {
     setCertificateVerifyProc(fn) {
       handlers.certVerifyProc = fn;
       counts.certVerifyProc = (counts.certVerifyProc || 0) + 1;
+    },
+    // Squawk 0119: the UA strip site.
+    getUserAgent() {
+      return ELECTRON_DEFAULT_UA;
+    },
+    setUserAgent(userAgent) {
+      userAgentSets.push(userAgent);
     }
   };
-  return { session, handlers, counts };
+  return { session, handlers, counts, userAgentSets };
 }
 
 test('internal-session creation marks and refuses every web-session wiring', () => {
@@ -168,6 +184,47 @@ test('internal-session creation marks and refuses every web-session wiring', () 
   // observer — the early return above precedes the install site entirely.
   assert.equal(counts.certVerifyProc, undefined);
   assert.deepEqual(h.certObserverCalls, []);
+});
+
+// ---------------------------------------------------------------------------
+// Squawk 0119: every WEB session presents a Chrome-shaped UA (embedder tokens
+// stripped); the internal session is never touched.
+// ---------------------------------------------------------------------------
+
+test('squawk 0119: a web session gets setUserAgent with the embedder tokens stripped', () => {
+  const h = setup();
+  const { session, userAgentSets } = fakeSession(h.log);
+  h.runtime.onSessionCreated(session);
+  assert.deepEqual(userAgentSets, [CHROME_SHAPED_UA]);
+});
+
+test('squawk 0119: a web session with NO jar entry (Burner/default) still gets the stripped UA', () => {
+  const h = setup({ partition: null });
+  const { session, userAgentSets } = fakeSession(h.log);
+  h.runtime.onSessionCreated(session);
+  assert.deepEqual(userAgentSets, [CHROME_SHAPED_UA]);
+});
+
+test('squawk 0119: the internal session never has its UA set', () => {
+  const h = setup();
+  h.setCreatingInternal(true);
+  const { session, userAgentSets } = fakeSession(h.log);
+  h.runtime.onSessionCreated(session);
+  assert.deepEqual(userAgentSets, []);
+});
+
+test('squawk 0119: a throwing UA read is fail-soft and never skips the rest of the wiring', () => {
+  const h = setup();
+  const { session, counts, userAgentSets } = fakeSession(h.log);
+  session.getUserAgent = () => {
+    throw new Error('boom');
+  };
+  assert.doesNotThrow(() => h.runtime.onSessionCreated(session));
+  assert.deepEqual(userAgentSets, []);
+  assert.equal(session.__goldfinchShields, true);
+  assert.equal(counts.certVerifyProc, 1);
+  assert.ok(h.log.some((entry) => entry[0] === 'downloads'));
+  assert.ok(h.log.some((entry) => entry[0] === 'error' && entry[1] === '[user-agent] strip failed:'));
 });
 
 // ---------------------------------------------------------------------------
