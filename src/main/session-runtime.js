@@ -1,6 +1,8 @@
 // @ts-check
 'use strict';
 
+const { stripEmbedderTokens } = require('./user-agent');
+
 // Positive allowlist: only permissions listed here are granted; everything
 // else — including permission strings that don't exist yet — is denied by
 // default. Electron 43's setPermissionRequestHandler and
@@ -253,6 +255,17 @@ function createSessionRuntime(deps) {
     if (isCreatingInternalSession()) {
       session.__goldfinchInternal = true;
       return;
+    }
+
+    // Squawk 0119: every WEB session (Burner and the default session
+    // included — this sits before the jar-lookup early return) presents a
+    // Chrome-shaped UA, without Electron's `goldfinch/<ver>` and
+    // `Electron/<ver>` embedder tokens. Fail-soft: a UA failure must never
+    // skip the Shields/cert/download wiring below.
+    try {
+      session.setUserAgent(stripEmbedderTokens(session.getUserAgent()));
+    } catch (err) {
+      logger.error('[user-agent] strip failed:', err);
     }
 
     applyShields(session);
