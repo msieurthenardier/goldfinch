@@ -113,12 +113,12 @@ The +76 breaks down as leg 01 +38, leg 02 +30 and HAT-F1 +8. They come from chea
 5. **Harden `restartToApply`:** an in-flight latch, plus lock re-acquire if `relaunch`/`quit` throws. Then extract a generic relaunch service into `app-lifecycle.js` before a second consumer appears.
 
 ## Action Items
-- [ ] **Squawk candidates** (offered to the operator at debrief):
-  - restart latch and lock re-acquire;
-  - stale Leg 02 artifact sentence;
-  - CLAUDE.md unobservable-surfaces additions;
-  - web-compat triage recipe doc;
-  - the `MODULE_TYPELESS_PACKAGE_JSON` warning for `src/shared/password-generator.js`.
+- [x] **Squawks logged at debrief (operator-confirmed):**
+  - 0133 restart latch and lock re-acquire;
+  - 0134 CLAUDE.md unobservable-surfaces additions;
+  - 0135 web-compat triage recipe;
+  - 0136 stale Leg 02 sentence;
+  - 0137 `password-generator.js` module-type warning.
 - [ ] Open squawks from this flight: 0120–0132 (logged 2026-10-06).
 - [ ] Sortie or flight candidates, needing design:
   - an automated Electron-bump canary (Rec 4);

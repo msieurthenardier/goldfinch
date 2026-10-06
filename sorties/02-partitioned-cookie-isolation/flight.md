@@ -1,6 +1,6 @@
 # Sortie: Partitioned-cookie-aware third-party isolation
 
-**Status**: landed
+**Status**: completed
 
 ## Charter
 

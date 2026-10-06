@@ -221,3 +221,4 @@ Prints `third-party-cookies fixture listening on :::{fx}` (dual-stack; falls bac
   - **Defects:** 0126 "1 days", 0128 `.activity-kind` contrast, 0129 automation toggle on dev-flag, 0130 settings sub-toggle dim, 0131 Cookies card copy.
   - **Item 6 was not logged:** it failed squawk criterion 1 (not a defect). The Validator traced the jars-panel staleness to in-page cookie writes, which by design fire no `jar-data-changed`. A live-updating panel would be new behavior, so it is a sortie candidate if wanted.
   - ID 0119 is used by the UA-strip squawk on PR #244's branch.
+- 2026-10-06: **Debrief complete** (`flight-debrief.md`). Squawks 0133–0137 were logged from the debrief action items (operator-confirmed). **Sortie status: completed** (operator-confirmed).
