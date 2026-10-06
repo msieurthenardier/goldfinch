@@ -73,6 +73,10 @@ export function createJarsSections(deps) {
     { tag: 'path', attrs: { d: 'M16 16h5v5' } }
   ];
   const RETENTION_PRESETS = Object.freeze([7, 14, 30, 90, 180, 365]);
+  /** @param {number} days */
+  function retentionLabelFor(days) {
+    return `${days} ${days === 1 ? 'day' : 'days'}`;
+  }
   /**
    * @param {HTMLSelectElement} select
    * @param {number} days
@@ -82,7 +86,7 @@ export function createJarsSections(deps) {
     if (has) return;
     const opt = document.createElement('option');
     opt.value = String(days);
-    opt.textContent = `${days} days`;
+    opt.textContent = retentionLabelFor(days);
     select.appendChild(opt);
   }
   const DATA_STATUS_OK_TTL_MS = 4000;
@@ -265,7 +269,7 @@ export function createJarsSections(deps) {
     for (const preset of RETENTION_PRESETS) {
       const opt = document.createElement('option');
       opt.value = String(preset);
-      opt.textContent = `${preset} days`;
+      opt.textContent = retentionLabelFor(preset);
       retentionSelect.appendChild(opt);
     }
     const initialRetention = currentRowFor(row.id)?.retentionDays ?? 30;

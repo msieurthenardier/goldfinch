@@ -1,6 +1,6 @@
 # Squawk 0137: dev:automation warns MODULE_TYPELESS_PACKAGE_JSON for src/shared/password-generator.js
 
-**Status**: open
+**Status**: escalated
 **Type**: servicing
 **Severity**: routine
 **Reported**: 2026-10-06
@@ -23,3 +23,17 @@ Launch log: "(node:1044732) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type 
 **Reviewer**:
 **Verdict**:
 **Commit**:
+
+## Disposition
+**Escalated** (2026-10-06, turnaround): fails squawk criterion 2 (no design decisions).
+
+**Root cause:** main `require()`s the typeless-ESM `src/shared/password-policy.js` (`src/main/main.js:49`, `register-browser-ipc.js`), which statically imports `./password-generator.js`. On Node 22.22, the require-ESM path silently detects the first file, but the nested import is reparsed and warns. The same mechanism applies to `launch-urls.js` → `url-safety.js` (masked in real launches by load order), so this is not specific to one file. Reproduce: `node -e "require('./src/shared/password-policy.js')"`.
+
+**Options**, each a module-format layout decision:
+1. `src/shared/package.json` `{"type":"module"}`, with the CJS-by-design quartet renamed to `.cjs` (touches requires, `eslint.config.mjs` bindings, `internal-page-map.js`, tests and the CLAUDE.md quartet rule).
+2. Nest the CJS quartet under a `{"type":"commonjs"}` directory.
+3. Merge or twin the generator, which only hides this instance.
+4. Suppress the warning (not a fix; a global hook).
+
+The Developer recommends option 1. → **Sortie candidate:** "`src/shared/` module-type declaration". No code was changed.
+

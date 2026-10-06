@@ -15,7 +15,7 @@ import { LOAD_STATES, failedTabTitle } from '../../shared/load-failure.js';
  *   media: any[],
  *   selected: Set<string>,
  *   wcId: number | null,
- *   privacy: { net: any, fp: { canvas: number, webgl: number, audio: number }, permissions: any[], cookies: any },
+ *   privacy: { net: any, fp: { canvas: number, webgl: number, audio: number }, permissions: any[], cookies: any, reloadStale: boolean },
  *   container: { id: string, name: string, color: string, partition: string, burner?: boolean },
  *   btn?: HTMLElement,
  *   findOpen?: boolean,

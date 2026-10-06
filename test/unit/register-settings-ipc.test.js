@@ -358,3 +358,36 @@ test('restart-to-apply authority is main-side: page arguments are ignored', asyn
   });
   assert.deepEqual(h.calls, []);
 });
+
+// ---- Squawk 0133: in-flight latch + lock re-acquire on failure ----
+
+test('restart-to-apply: a second call while in flight is in-progress and never relaunches again', async () => {
+  const h = makeSettingsIpcHarness();
+  h.shieldsCfg.isolate = false;
+  assert.deepEqual(await h.invokeFrom('shields-restart-to-apply', h.chromeSender), { ok: true });
+  assert.equal(h.calls.length, 3);
+  assert.deepEqual(await h.invokeInternal('internal-shields-restart-to-apply'), { ok: false, reason: 'in-progress' });
+  assert.deepEqual(await h.invokeFrom('shields-restart-to-apply', h.chromeSender), {
+    ok: false,
+    reason: 'in-progress'
+  });
+  assert.deepEqual(names(h), ['releaseSingleInstanceLock', 'relaunch', 'quit'], 'no second release/relaunch/quit');
+});
+
+for (const which of ['relaunch', 'quit']) {
+  test(`restart-to-apply: ${which} throwing re-acquires the lock, clears the latch, and a retry can proceed`, async () => {
+    const h = makeSettingsIpcHarness();
+    h.shieldsCfg.isolate = false;
+    h.fail[which] = true;
+    assert.deepEqual(await h.invokeFrom('shields-restart-to-apply', h.chromeSender), {
+      ok: false,
+      reason: 'relaunch-failed'
+    });
+    assert.equal(names(h).at(-1), 'requestSingleInstanceLock');
+    assert.equal('GOLDFINCH_AUTOMATION_DEV_MINT' in h.env, false, 'DEV_MINT stays deleted');
+    h.fail[which] = false;
+    h.calls.length = 0;
+    assert.deepEqual(await h.invokeInternal('internal-shields-restart-to-apply'), { ok: true });
+    assert.deepEqual(names(h), ['releaseSingleInstanceLock', 'relaunch', 'quit']);
+  });
+}

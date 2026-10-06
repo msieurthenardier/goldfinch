@@ -138,14 +138,14 @@ function route(req, res, host, url) {
   if (p === '/health') return send(200, 'text/plain', 'ok');
 
   if (p === '/b/set-fp') {
-    setCookies.push(`b_fp=1; SameSite=None; Secure; ${MAX_AGE}`);
+    setCookies.push(`b_fp=1; SameSite=None; Secure; Path=/; ${MAX_AGE}`);
     return send(200, 'text/html', page('B set-fp', '<h1 id="who">B first-party cookie set</h1>'));
   }
   if (p === '/a/set-fp') {
     setCookies.push(
-      `a_none=1; SameSite=None; Secure; ${MAX_AGE}`,
-      `a_lax=1; SameSite=Lax; ${MAX_AGE}`,
-      `a_strict=1; SameSite=Strict; ${MAX_AGE}`
+      `a_none=1; SameSite=None; Secure; Path=/; ${MAX_AGE}`,
+      `a_lax=1; SameSite=Lax; Path=/; ${MAX_AGE}`,
+      `a_strict=1; SameSite=Strict; Path=/; ${MAX_AGE}`
     );
     return send(200, 'text/html', page('A set-fp', '<h1 id="who">A first-party cookies set</h1>'));
   }
@@ -160,7 +160,7 @@ function route(req, res, host, url) {
     const reportOnly = url.searchParams.has('report-only');
     const partOnly = url.searchParams.has('part-only');
     if (!reportOnly) {
-      if (!partOnly) setCookies.push(`b_3p_unpart=1; SameSite=None; Secure; ${MAX_AGE}`);
+      if (!partOnly) setCookies.push(`b_3p_unpart=1; SameSite=None; Secure; Path=/; ${MAX_AGE}`);
       setCookies.push(`__Host-b_part=1; Secure; Path=/; SameSite=None; Partitioned; ${MAX_AGE}`);
     }
     return send(200, 'text/html', page('B frame', '<p>claude-shaped B frame</p>', FRAME_SCRIPT));
@@ -189,28 +189,25 @@ function route(req, res, host, url) {
   return send(404, 'text/plain', 'not found');
 }
 
-const server = https.createServer(
-  { key: readCert('server-key.pem'), cert: readCert('server.pem') },
-  (req, res) => {
-    const host = (req.headers.host || '').replace(/:\d+$/, '');
-    const url = new URL(req.url || '/', 'https://fixture.invalid');
-    let setCookies = [];
-    try {
-      setCookies = route(req, res, host, url) || [];
-    } catch (err) {
-      res.writeHead(500).end('error');
-      console.error('serve: handler error', err);
-    }
-    appendLog({
-      ts: Date.now(),
-      host,
-      path: url.pathname,
-      search: url.search,
-      cookieNames: names(req.headers.cookie),
-      setCookieNames: setNames(setCookies)
-    });
+const server = https.createServer({ key: readCert('server-key.pem'), cert: readCert('server.pem') }, (req, res) => {
+  const host = (req.headers.host || '').replace(/:\d+$/, '');
+  const url = new URL(req.url || '/', 'https://fixture.invalid');
+  let setCookies = [];
+  try {
+    setCookies = route(req, res, host, url) || [];
+  } catch (err) {
+    res.writeHead(500).end('error');
+    console.error('serve: handler error', err);
   }
-);
+  appendLog({
+    ts: Date.now(),
+    host,
+    path: url.pathname,
+    search: url.search,
+    cookieNames: names(req.headers.cookie),
+    setCookieNames: setNames(setCookies)
+  });
+});
 
 server.on('error', (err) => {
   if (err.code === 'EAFNOSUPPORT' || err.code === 'EADDRNOTAVAIL') {
@@ -222,6 +219,8 @@ server.on('error', (err) => {
 });
 server.on('listening', () => {
   const a = server.address();
-  console.log(`third-party-cookies fixture listening on ${a.address}:${a.port} — A=${origin(A)} B=${origin(B)} C=${origin(C)}`);
+  console.log(
+    `third-party-cookies fixture listening on ${a.address}:${a.port} — A=${origin(A)} B=${origin(B)} C=${origin(C)}`
+  );
 });
 server.listen({ port, host: '::', ipv6Only: false });

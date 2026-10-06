@@ -84,6 +84,25 @@ Tiers: a jar key drives only its own jar's tabs; the admin key adds chrome/windo
 targeting and the app-level tools. Admin-tier scope and the still-refused-even-for-admin
 list: `mcp-automation.md` → *Dogfooding / dev key acquisition* and *Tool reference*.
 
+## Web-compat triage
+
+A site "doesn't work in Goldfinch" (blank embed, "browser isn't supported", login loop).
+Work this order; do not skip to a UA/engine theory.
+
+1. **Reproduce** in a signed-in dev profile (`npm run dev:automation`) on the branch build.
+2. **Pause Shields on the site.** If that fixes it, bisect by toggling each strategy one
+   at a time: block, strip, isolate (restart-to-apply; use Restart now), farble.
+3. **Capture the failing subframe's evidence**: Cookie sent, Set-Cookie received,
+   content-type, status, plus console output. The `--enable-logging` launch log's
+   CONSOLE lines include subframes; admin MCP `evaluate` reaches only the top frame.
+4. **Only then** consider UA, fingerprint or engine causes.
+
+**Rule:** a fix claiming to resolve a user-visible symptom needs a before/after check on
+the real failing site before the squawk/flight closes.
+
+Case: sortie 02 (claude.ai artifacts). Squawk 0119 shipped a UA fix for the "isn't
+supported" page; the real cause was Shields cookie isolation, visible at step 2.
+
 ## Internal-page dev loop
 
 Two facts that bite every iteration on internal `goldfinch://` page code (e.g.
@@ -147,8 +166,9 @@ axe-core audit (`scripts/a11y-audit.mjs`) against the RUNNING app over the MCP s
   (`#load-failure-view-cert`/`-advanced` included) right after the generic
   `load-failure` state. Absent `--tls-url=`, the audit prints a skip notice and exits
   on the chrome states' own result — never an apparatus failure for simply omitting it.
-- **Exclusions**: `goldfinch://settings` cannot be audited via `--target` (the eval tools
-  exclude the internal session even for admin); the find overlay is not audited here (its
+- **Exclusions**: `goldfinch://settings` can be audited via `--target=goldfinch://settings`
+  only under the ADMIN key (admin `evaluate` reaches internal guests; a jar key never sees the
+  internal session); the find overlay is not audited here (its
   a11y rests on the verbatim attribute carry-over + HAT keyboard pass).
 - **Exit codes** (squawk 0031): `0` clean (no new violations), `1` NEW violations found,
   `2` apparatus/setup failure (couldn't attach, target not found, missing key, etc. — the

@@ -1,10 +1,10 @@
 # Squawk 0134: CLAUDE.md unobservable-surfaces list misses three apparatus limits found in sortie 02
 
-**Status**: open
+**Status**: completed
 **Type**: servicing
 **Severity**: routine
 **Reported**: 2026-10-06
-**Completed**: —
+**Completed**: 2026-10-06
 
 ## Report
 CLAUDE.md's standing unobservable-surfaces list names only the menu-overlay sheet and the toast layer. Sortie 02 found three more. Add them so future specs don't author impossible steps:
@@ -18,13 +18,12 @@ Add a one-line spec-authoring rule: any step whose action targets one of these i
 `CLAUDE.md:183` "Standing unobservable-surfaces list"; sortie 02 flight log (Leg 01 AC10 entry); `tests/behavior/web-compat-oauth-popup/runs/2026-10-06-13-24-48.md` step 3; `tests/behavior/download-indicator/runs/2026-10-06-13-24-48.md`.
 
 ## Corrective Action
-*(written at completion)*
+Added three entries (cross-site OOPIF input, downloads popup sheet, Wayland popup/native-window placement) and a one-line spec-authoring rule to the standing unobservable-surfaces list in CLAUDE.md.
 
 ## Verification
-*(written at completion)*
+`npx prettier --write CLAUDE.md` and `npm run format:check` pass.
 
 ## Sign-Off
-*(written at completion)*
-**Reviewer**:
-**Verdict**:
-**Commit**:
+**Reviewer**: Reviewer agent (independent, diff-scoped batch review of the 2026-10-06 turnaround)
+**Verdict**: confirmed, no blocking issues (`npm test` x3 green, lint/typecheck/format:check/audit clean). Electron 44.5.0 and SDK 1.31.0 also live-verified by the third-party-cookie-isolation run 2026-10-06-18-13-21 (pass).
+**Commit**: the `squawk: turnaround 2026-10-06` commit on `squawk/turnaround-2026-10-06`

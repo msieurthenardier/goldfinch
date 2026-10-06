@@ -281,3 +281,18 @@ test('settings.js shields controller: patch-in-place notes, guarded restoreSessi
   // First Escape in the confirm state is consumed.
   assert.match(block, /confirm\.escape\(\)[\s\S]{0,80}stopPropagation/);
 });
+
+// Squawk 0130: master-off dims the Shields child rows via CSS only (rows stay operable; notes untouched).
+test('settings.css dims Shields child rows when #shield-enabled is unchecked, AA-safe, rows only', () => {
+  const css = fs.readFileSync(path.join(PAGES_DIR, 'settings.css'), 'utf8');
+  const m =
+    /\.shields-group:has\(#shield-enabled:not\(:checked\)\)\s+\.shield-row:not\(\.shield-parent\)\s*\{([^}]*)\}/.exec(
+      css
+    );
+  assert.ok(m, 'master-off dim rule present');
+  const op = /opacity:\s*([\d.]+)/.exec(m[1]);
+  assert.ok(op && Number(op[1]) >= 0.55, 'opacity keeps >=4.5:1 against --bg');
+  assert.ok(!/pointer-events/.test(m[1]), 'rows stay operable');
+  const html = fs.readFileSync(SETTINGS_HTML, 'utf8');
+  assert.ok(/id="shield-enabled"/.test(html) && !/id="shield-block"[^>]*disabled/.test(html));
+});
