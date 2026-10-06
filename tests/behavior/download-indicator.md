@@ -3,7 +3,7 @@
 **Slug**: `download-indicator`
 **Status**: active
 **Created**: 2026-07-19
-**Last Run**: 2026-07-19
+**Last Run**: 2026-10-06-13-24-48 (partial: 4 pass, steps 5–8 inconclusive because the downloads sheet is unobservable since 2026-07-24; 0 fail; see runs/2026-10-06-13-24-48.md)
 
 > **Activated by scripted live integration smoke (2026-07-19).** The admin-scoped MCP run exercised the
 > real download feed, chrome indicator, downloads sheet, downloads-page footer action, and a newly created

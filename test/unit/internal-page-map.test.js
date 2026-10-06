@@ -17,7 +17,8 @@ test('createInternalPageMap returns the exact current host/path allowlist', () =
     '/safe-color.js',
     '/search-engines.js',
     '/settings.css',
-    '/settings.js'
+    '/settings.js',
+    '/shields-isolation-model.js'
   ]);
   assert.deepEqual(Object.keys(map.downloads).sort(), ['/', '/downloads.css', '/downloads.js']);
   assert.deepEqual(Object.keys(map.jars).sort(), [

@@ -1,3 +1,5 @@
+import { createShieldsSection } from './shields-section.js';
+
 /** @typedef {any} Tab */
 
 /** @param {any} deps */
@@ -24,10 +26,11 @@ export function createPrivacyController(deps) {
   /* --------------------------------------------------------- privacy panel */
 
   function blankPrivacy() {
-    return { net: null, fp: { canvas: 0, webgl: 0, audio: 0 }, permissions: [], cookies: null };
+    return { net: null, fp: { canvas: 0, webgl: 0, audio: 0 }, permissions: [], cookies: null, reloadStale: false };
   }
 
   function closePrivacyPanel() {
+    shieldsSection.resetConfirm();
     els.privacyPanel.classList.add('collapsed');
     els.togglePrivacy.classList.remove('active');
     // Opening the media panel calls this directly, so sync aria-expanded here too
@@ -38,6 +41,7 @@ export function createPrivacyController(deps) {
   function togglePrivacy(force) {
     const collapsed = els.privacyPanel.classList.contains('collapsed');
     const show = force != null ? force : collapsed;
+    if (!show) shieldsSection.resetConfirm();
     els.privacyPanel.classList.toggle('collapsed', !show);
     els.togglePrivacy.classList.toggle('active', show);
     els.togglePrivacy.setAttribute('aria-expanded', String(show));
@@ -172,12 +176,52 @@ export function createPrivacyController(deps) {
   /* ---- Shields config (active protection toggles) ---- */
 
   let shieldsConfig = null;
+  // Process-constant startup decision (what is IN FORCE vs configured): fetched once at init,
+  // re-fetched only on document load (the staleness contract). null until it resolves — the
+  // section then falls back to the configured value.
+  let isolationState = /** @type {{ isolateEffective: boolean, operatorOverride: any } | null} */ (null);
+  // Restart-confirm copy input; default true. Guarded `!== undefined`, never truthiness.
+  let restoreSession = true;
+  const RELOAD_KEYS = ['enabled', 'block', 'strip', 'farble'];
+  const sortedKey = (/** @type {any} */ a) => JSON.stringify([...(Array.isArray(a) ? a : [])].sort());
+  /**
+   * The ONE assignment site for shieldsConfig. A change in a reload-affecting key (never isolate,
+   * which is restart-to-apply) marks every eligible web tab `privacy.reloadStale` (cleared when
+   * renderer.js replaces tab.privacy on navigation). A null previous config (boot) never marks;
+   * an identical re-arrival (local result + broadcast) is a no-op.
+   */
+  function applyShieldsConfig(/** @type {any} */ next) {
+    const prev = shieldsConfig;
+    if (prev && next) {
+      const changed =
+        RELOAD_KEYS.some((k) => prev[k] !== next[k]) || sortedKey(prev.pausedSites) !== sortedKey(next.pausedSites);
+      if (changed && ctx.tabs) {
+        for (const t of ctx.tabs.values()) {
+          if (isWebTab(t) && t.wcId != null && t.privacy) t.privacy.reloadStale = true;
+        }
+      }
+    }
+    shieldsConfig = next;
+  }
   window.goldfinch.shieldsGet().then((c) => {
-    shieldsConfig = c;
+    applyShieldsConfig(c);
     renderPrivacy();
   });
+  window.goldfinch
+    .shieldsIsolationState()
+    .then((st) => {
+      isolationState = st;
+      renderPrivacy();
+    })
+    .catch(() => {});
+  window.goldfinch.onSettingsChanged((all) => {
+    if (all && all.restoreSession !== undefined) {
+      restoreSession = all.restoreSession;
+      renderPrivacy();
+    }
+  });
   window.goldfinch.onShieldsChanged((c) => {
-    shieldsConfig = c;
+    applyShieldsConfig(c);
     renderPrivacy();
   });
 
@@ -316,7 +360,10 @@ export function createPrivacyController(deps) {
   // (settings-get: (_e, key) => key ? settings.get(key) : settings.getAll()).
   window.goldfinch
     .settingsGet()
-    .then(updateAutomationKeyState)
+    .then((all) => {
+      if (all && all.restoreSession !== undefined) restoreSession = all.restoreSession;
+      updateAutomationKeyState(all);
+    })
     .catch(() => {});
 
   function currentSite() {
@@ -331,7 +378,7 @@ export function createPrivacyController(deps) {
   }
 
   async function setShield(key, value) {
-    shieldsConfig = await window.goldfinch.shieldsSet({ [key]: value });
+    applyShieldsConfig(await window.goldfinch.shieldsSet({ [key]: value }));
     renderPrivacy();
   }
 
@@ -339,96 +386,54 @@ export function createPrivacyController(deps) {
     const site = currentSite();
     if (!site) return;
     const paused = shieldsConfig && shieldsConfig.pausedSites.includes(site);
-    shieldsConfig = await window.goldfinch.shieldsPause({ site, paused: !paused });
+    applyShieldsConfig(await window.goldfinch.shieldsPause({ site, paused: !paused }));
     renderPrivacy();
   }
 
-  const SHIELD_ROWS = [
-    ['block', 'Block trackers'],
-    ['strip', 'Strip tracking params'],
-    ['isolate', 'Isolate 3rd-party cookies'],
-    ['farble', 'Farble fingerprint']
-  ];
-
-  function pShields() {
-    const s = document.createElement('div');
-    s.className = 'privacy-section shields';
-    const cfg = shieldsConfig || {};
-    const site = currentSite();
-    const paused = cfg.pausedSites && cfg.pausedSites.includes(site);
-
-    const head = document.createElement('div');
-    head.className = 'shields-head';
-    head.innerHTML = '<div class="ps-title">Shields</div>';
-    head.appendChild(toggle(!!cfg.enabled, (v) => setShield('enabled', v), 'Shields'));
-    s.appendChild(head);
-
-    const net = (activeTab() && activeTab().privacy.net) || {};
-    // Counts are distinct DOMAINS so they line up with the lists below
-    // (block -> Trackers "N blocked", isolate/strip -> distinct domains affected).
-    const EFFECT = {
-      block: [(net.trackers && net.trackers.blocked) || 0, 'blocked'],
-      strip: [net.stripped, 'cleaned'],
-      isolate: [net.cookiesBlocked, 'isolated']
-    };
-
-    const dim = !cfg.enabled || paused;
-    for (const [key, label] of SHIELD_ROWS) {
-      const row = document.createElement('div');
-      row.className = 'shield-row' + (dim ? ' dim' : '');
-      const lbl = document.createElement('span');
-      lbl.className = 'shield-lbl';
-      lbl.textContent = label;
-      row.appendChild(lbl);
-      const eff = EFFECT[key];
-      if (cfg[key] && !dim && eff && eff[0]) {
-        const c = document.createElement('span');
-        c.className = 'shield-count';
-        c.textContent = `${eff[0]} ${eff[1]}`;
-        row.appendChild(c);
-      }
-      row.appendChild(toggle(!!cfg[key], (v) => setShield(key, v), label));
-      s.appendChild(row);
-    }
-
-    if (site) {
-      const pauseRow = document.createElement('div');
-      pauseRow.className = 'shield-row pause';
-      pauseRow.innerHTML = `<span>${paused ? 'Shields paused on' : 'Active on'} ${escapeHtml(site)}</span>`;
-      const btn = document.createElement('button');
-      btn.className = 'text-btn small';
-      btn.textContent = paused ? 'Resume here' : 'Pause on this site';
-      btn.addEventListener('click', toggleSitePause);
-      pauseRow.appendChild(btn);
-      s.appendChild(pauseRow);
-    }
-
-    // Network shields only affect NEW requests, so changes show after a reload.
-    const foot = document.createElement('div');
-    foot.className = 'shield-foot';
-    const reload = document.createElement('button');
-    reload.className = 'text-btn small';
-    reload.textContent = 'Reload to apply';
-    reload.addEventListener('click', () => {
+  // The persistent, patched-in-place Shields section (see shields-section.js). Created once;
+  // renderPrivacy keeps it as #privacy-body's first child and never rebuilds it.
+  const shieldsSection = createShieldsSection({
+    document,
+    onSetShield: (key, value) => setShield(key, value),
+    onTogglePause: () => toggleSitePause(),
+    onReload: () => {
       const t = activeTab();
       if (!t) return;
       // Internal tabs are excluded by disabled button state; only web tabs reach here.
-      if (isWebTab(t) && t.wcId != null) window.goldfinch.tabNavigate({ wcId: t.wcId, verb: 'reload', args: [] });
+      if (isWebTab(t) && t.wcId != null) {
+        window.goldfinch.tabNavigate({ wcId: t.wcId, verb: 'reload', args: [] });
+        if (t.privacy) t.privacy.reloadStale = false;
+        renderPrivacy();
+      }
+    },
+    // Restart now: the chrome channel is sender-validated and business-gated main-side; it
+    // takes no arguments. Not an MCP op (admin chrome `evaluate` can reach it, like appQuit).
+    onRestart: () => window.goldfinch.shieldsRestartToApply(),
+    onRestartFailed: (reason) =>
+      toast('Restart failed', reason === 'not-pending' ? 'No restart is needed.' : "Couldn't restart Goldfinch.")
+  });
+
+  function patchShields() {
+    const tab = activeTab();
+    const cfg = shieldsConfig || {};
+    const site = tab ? currentSite() : '';
+    const paused = !!(cfg.pausedSites && site && cfg.pausedSites.includes(site));
+    const net = (tab && tab.privacy.net) || {};
+    // Counts are distinct DOMAINS so they line up with the lists below
+    // (block -> Trackers "N blocked", isolate/strip -> distinct domains affected).
+    shieldsSection.patch({
+      cfg,
+      site,
+      paused,
+      effects: {
+        block: [(net.trackers && net.trackers.blocked) || 0, 'blocked'],
+        strip: [net.stripped, 'cleaned'],
+        isolate: [net.cookiesBlocked, 'isolated']
+      },
+      isolation: isolationState,
+      restoreSession,
+      reloadStale: !!(tab && isWebTab(tab) && tab.wcId != null && tab.privacy && tab.privacy.reloadStale === true)
     });
-    foot.appendChild(reload);
-    s.appendChild(foot);
-
-    return s;
-  }
-
-  function toggle(on, onChange, label) {
-    const t = document.createElement('button');
-    t.className = 'switch' + (on ? ' on' : '');
-    t.setAttribute('role', 'switch');
-    t.setAttribute('aria-checked', String(on));
-    if (label) t.setAttribute('aria-label', label);
-    t.addEventListener('click', () => onChange(!on));
-    return t;
   }
 
   function pJar() {
@@ -481,17 +486,29 @@ export function createPrivacyController(deps) {
     }
   }
 
+  let lastRenderedTabId = /** @type {any} */ (undefined);
   function renderPrivacy() {
     updatePrivacyBadge();
-    if (els.privacyPanel.classList.contains('collapsed')) return;
+    if (els.privacyPanel.classList.contains('collapsed')) {
+      shieldsSection.resetConfirm();
+      return;
+    }
     const tab = activeTab();
+    // A tab switch re-renders; the restart-confirm state must not survive it.
+    const tabId = tab ? tab.id : null;
+    if (tabId !== lastRenderedTabId) shieldsSection.resetConfirm();
+    lastRenderedTabId = tabId;
     const p = tab ? tab.privacy : null;
     const net = p && p.net;
     const body = els.privacyBody;
-    body.innerHTML = '';
-
-    // Shields controls
-    body.appendChild(pShields());
+    // Rebuild everything EXCEPT the persistent Shields node (patched in place so focus on its
+    // controls survives a network push). Focus loss in the other sections is pre-existing.
+    const shieldsNode = shieldsSection.node;
+    for (const child of Array.from(body.children)) {
+      if (child !== shieldsNode) body.removeChild(child);
+    }
+    if (shieldsNode.parentNode !== body) body.appendChild(shieldsNode);
+    patchShields();
 
     // Jar / identity
     body.appendChild(pJar());

@@ -129,6 +129,14 @@ if (INTERNAL_ORIGINS.has(location.origin)) {
      * @returns {Promise<object>}
      */
     shieldsGet: () => ipcRenderer.invoke('internal-shields-get'),
+    shieldsIsolationState: () => ipcRenderer.invoke('internal-shields-isolation-state'),
+
+    /**
+     * Restart Goldfinch to apply a pending cookie-isolation change. Takes no arguments; main
+     * re-checks that a restart is actually pending. Resolves `{ ok, reason? }` (the process exits on ok).
+     * @returns {Promise<{ ok: boolean, reason?: string }>}
+     */
+    shieldsRestartToApply: () => ipcRenderer.invoke('internal-shields-restart-to-apply'),
 
     /**
      * Write a partial Shields config patch. Resolves with the updated config;

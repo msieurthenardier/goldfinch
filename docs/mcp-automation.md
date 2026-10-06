@@ -717,6 +717,18 @@ refusal, mirroring `captureWindow`).
 > guard in `resolveContentsForJar`, defense-in-depth). Only admin sessions may discover or drive
 > the chrome.
 
+> **Not an MCP op: `shields-restart-to-apply` (sortie 02).** The privacy panel's / settings page's
+> **Restart now** relaunches the app so a changed third-party cookie isolation setting takes
+> effect. There is deliberately **no MCP tool** for it, and it is never admitted to a jar key.
+> An **admin** session can still reach it by evaluating `window.goldfinch.shieldsRestartToApply()`
+> in the chrome (`getChromeTarget` + `evaluate`) — the same reach as `appQuit()`; that is accepted.
+> The channel takes no arguments, refuses a non-chrome sender, and is business-gated main-side: with
+> nothing pending it returns `{ ok: false, reason: 'not-pending' }` and the process is untouched. On
+> pass it deletes `GOLDFINCH_AUTOMATION_DEV_MINT` from the live env (so the relaunched child does **not**
+> re-mint and your standing key keeps authenticating), releases the single-instance lock, relaunches
+> and quits. **After a relaunch the old MCP session is dead**: re-`initialize` against the same
+> `GOLDFINCH_MCP_PORT` with the **same** key (allow up to ~30 s for the new process to listen).
+
 ### History tools (1)
 
 `getHistory` reads recorded browsing-history visits for a jar (Mission 08 Flight 5) — a **custom,

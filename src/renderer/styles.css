@@ -2278,8 +2278,29 @@ a:focus-visible {
 }
 .shield-foot {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: 8px;
   margin-top: 8px;
+}
+/* Restart-to-apply copy (sortie 02 leg 2). Plain text, deliberately NOT in a live region.
+   --accent on --bg-2 is far above 4.5:1; sits outside .shield-row.dim so it never fades. */
+.shield-note {
+  font-size: 11px;
+  color: var(--accent);
+  padding: 0 0 4px;
+}
+.shield-foot-note {
+  flex: 1;
+  font-size: 11px;
+  color: var(--accent);
+}
+.shield-restart {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 4px 0;
 }
 .ps-item.status {
   display: flex;

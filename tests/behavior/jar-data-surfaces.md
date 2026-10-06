@@ -3,7 +3,7 @@
 **Slug**: `jar-data-surfaces`
 **Status**: active
 **Created**: 2026-07-17
-**Last Run**: 2026-07-17-23-48-56 (partial 6/7 — checkpoint 6 cookie clause: spec premise gap, amended; see runs/)
+**Last Run**: 2026-10-06-13-24-48 (pass, 7/7 judged, batched; sortie 02 AC12/DD8 re-run under native 3P cookie blocking; step 6 premise unreachable on a fresh profile; see runs/2026-10-06-13-24-48.md)
 
 > Drafted at M10 F2 flight design; **finalized at leg 3** against the leg-1 spike verdicts
 > (Spike A: cookie first-seen bookkeeping, DD4 VERDICT; Spike B: composite IndexedDB +

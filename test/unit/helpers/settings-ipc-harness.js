@@ -2,7 +2,7 @@
 
 const { registerSettingsIpc } = require('../../../src/main/register-settings-ipc');
 
-function makeSettingsIpcHarness() {
+function makeSettingsIpcHarness(overrides = {}) {
   const bare = new Map();
   const listeners = new Map();
   const internal = new Map();
@@ -48,15 +48,43 @@ function makeSettingsIpcHarness() {
     readText: () => clipboardValue
   };
 
+  const shieldsCfg = {
+    enabled: true,
+    block: true,
+    strip: true,
+    isolate: true,
+    farble: true,
+    pausedSites: [],
+    ...(overrides.shieldsCfg || {})
+  };
+  const chromeSender = { id: 'chrome-sender' };
+  const calls = [];
+  const app = {
+    releaseSingleInstanceLock: () => calls.push(['releaseSingleInstanceLock', { ...env }]),
+    relaunch: (opts) => calls.push(['relaunch', opts, { ...env }]),
+    quit: () => calls.push(['quit'])
+  };
+  const env = { GOLDFINCH_AUTOMATION_DEV_MINT: '1', GOLDFINCH_AUTOMATION_ADMIN: '1', ...(overrides.env || {}) };
+  const registry = {
+    getWindowForChrome: (sender) => (sender === chromeSender ? { id: 1 } : null)
+  };
+
   registerSettingsIpc({
+    app,
+    registry,
+    env,
     ipcMain,
     registerInternalHandler,
     settings,
     shields: {
-      get: () => ({ blockAds: true }),
+      // Realistic config (leg 02 business gate reads isolate/enabled through isolateConfigured).
+      get: () => shieldsCfg,
+      isolateConfigured: (cfg) => !!cfg.enabled && !!cfg.isolate,
       set: (patch) => ({ ...patch }),
       setPaused: (site, paused) => ({ site, paused })
     },
+    isolateEffective: overrides.isolateEffective ?? true,
+    operatorOverride: overrides.operatorOverride ?? null,
     broadcast: (channel, payload) => events.push(['broadcast', channel, payload]),
     applyAutomationEnabledChange: async (enabled) => events.push(['automation-enabled', enabled]),
     applySpellcheck: (session, enabled) => events.push(['spellcheck', session.id, enabled]),
@@ -97,6 +125,12 @@ function makeSettingsIpcHarness() {
     clipboard,
     defaultSessionReads: () => defaultSessionReads,
     invoke: (channel, ...args) => bare.get(channel)({}, ...args),
+    shieldsCfg,
+    env,
+    app,
+    calls,
+    chromeSender,
+    invokeFrom: (channel, sender, ...args) => bare.get(channel)({ sender }, ...args),
     invokeInternal: (channel, ...args) => internal.get(channel)({}, ...args),
     send: (channel, ...args) => listeners.get(channel)({}, ...args)
   };

@@ -3,7 +3,7 @@
 **Slug**: `web-compat-oauth-popup`
 **Status**: active
 **Created**: 2026-07-28
-**Last Run**: never
+**Last Run**: 2026-10-06-13-24-48 (pass, 8/8: step 3 floating-window clause confirmed by operator by eye; first run, batched; see runs/2026-10-06-13-24-48.md)
 **Cache:** cold
 
 ## Intent

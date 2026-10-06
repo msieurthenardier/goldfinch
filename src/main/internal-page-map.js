@@ -22,7 +22,9 @@ function createInternalPageMap({ baseDir, path }) {
       // duplicated in markup or page script.
       '/search-engines.js': shared('search-engines.js'),
       // Sortie 01 leg 2: pure copy model for the Default browser row.
-      '/default-browser-row-model.js': shared('default-browser-row-model.js')
+      '/default-browser-row-model.js': shared('default-browser-row-model.js'),
+      // Sortie 02 leg 2: pure model for the restart-to-apply Shields notes + Restart now.
+      '/shields-isolation-model.js': shared('shields-isolation-model.js')
     },
     // App-level downloads surface; save-path authority remains main-side.
     downloads: {

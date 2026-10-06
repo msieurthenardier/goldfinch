@@ -87,6 +87,7 @@ function setup(options = {}) {
       active: (kind) => kind === 'block' && !!options.blockTrackers,
       stripUrl: (url) => url
     },
+    isolateEffective: options.isolateEffective,
     chromeForTab: () => ({ send: (channel, payload) => chromeSends.push([channel, payload]) }),
     certObserver,
     schedule: (fn) => {
@@ -399,8 +400,9 @@ test('permission allowlist denies invented/future permissions and grants allowli
   ]);
 });
 
-test('Shields pipeline strips tracking URLs and isolates third-party request/response cookies', () => {
+test('Shields pipeline strips tracking URLs but no longer strips third-party request/response cookies (native isolation)', () => {
   const h = setup({
+    isolateEffective: true,
     shields: {
       active: (kind) => kind === 'strip' || kind === 'isolate',
       stripUrl: (url) => (url.includes('utm_source') ? 'https://tracker.test/a.js' : url)
@@ -441,7 +443,8 @@ test('Shields pipeline strips tracking URLs and isolates third-party request/res
       response = value;
     }
   );
-  assert.deepEqual(response, { requestHeaders: { Referer: 'https://site.test/' } });
+  // Sortie 02 DD3: Referer still trimmed; Cookie passes through (Chromium filters natively).
+  assert.deepEqual(response, { requestHeaders: { Cookie: 'sid=1', Referer: 'https://site.test/' } });
 
   handlers.headersReceived(
     {
@@ -454,7 +457,155 @@ test('Shields pipeline strips tracking URLs and isolates third-party request/res
       response = value;
     }
   );
-  assert.deepEqual(response, { responseHeaders: { Server: ['test'] } });
+  assert.deepEqual(response, { responseHeaders: { 'Set-Cookie': ['sid=2'], Server: ['test'] } });
+});
+
+// ---- Sortie 02 DD6 accounting ---------------------------------------------
+
+function accountingRig(options = {}) {
+  const h = setup({
+    isolateEffective: options.isolateEffective ?? true,
+    shields: options.shields || { active: () => true, stripUrl: (url) => url }
+  });
+  const { session, handlers } = fakeSession(h.log);
+  h.runtime.onSessionCreated(session);
+  handlers.beforeRequest({ webContentsId: 10, resourceType: 'mainFrame', url: 'https://site.test/' }, () => {});
+  function receive(details) {
+    let out;
+    const original = details.responseHeaders;
+    handlers.headersReceived(
+      { webContentsId: 10, resourceType: 'subFrame', url: 'https://tracker.test/f', ...details },
+      (v) => {
+        out = v;
+      }
+    );
+    return { out, original };
+  }
+  function blockedCount() {
+    h.flushPrivacy();
+    const push = h.chromeSends.filter((c) => c[0] === 'privacy-net').at(-1);
+    return push ? push[1].agg.cookiesBlocked : 0;
+  }
+  return { h, handlers, receive, blockedCount };
+}
+
+test('DD6: third-party subFrame with an unpartitioned Set-Cookie marks the domain (cookiesBlocked 1)', () => {
+  const r = accountingRig();
+  const headers = { 'Set-Cookie': ['a=1; Secure; SameSite=None'] };
+  const { out } = r.receive({ responseHeaders: headers });
+  assert.deepEqual(out, { responseHeaders: headers }, 'pass-through');
+  assert.equal(r.blockedCount(), 1);
+});
+
+test('DD6: only valid partitioned cookies, mainFrame, first-party, or isolateEffective=false do not mark', () => {
+  const part = accountingRig();
+  part.receive({ responseHeaders: { 'set-cookie': ['__Host-a=1; Secure; Path=/; Partitioned'] } });
+  assert.equal(part.blockedCount(), 0);
+
+  const main = accountingRig();
+  main.receive({ resourceType: 'mainFrame', responseHeaders: { 'Set-Cookie': ['a=1'] } });
+  assert.equal(main.blockedCount(), 0);
+
+  const fp = accountingRig();
+  fp.receive({ url: 'https://site.test/x', responseHeaders: { 'Set-Cookie': ['a=1'] } });
+  assert.equal(fp.blockedCount(), 0);
+
+  const off = accountingRig({ isolateEffective: false });
+  off.receive({ responseHeaders: { 'Set-Cookie': ['a=1'] } });
+  assert.equal(off.blockedCount(), 0);
+});
+
+test('DD6: a paused site (isolate not active) with isolateEffective still marks', () => {
+  const r = accountingRig({ shields: { active: () => false, stripUrl: (url) => url } });
+  r.receive({ responseHeaders: { 'Set-Cookie': ['a=1'] } });
+  assert.equal(r.blockedCount(), 1);
+});
+
+test('DD6 robustness: missing ids/aggregate/domain/headers never throw or mark; bare-string set-cookie normalizes', () => {
+  const r = accountingRig();
+  assert.doesNotThrow(() => r.receive({ webContentsId: undefined, responseHeaders: { 'Set-Cookie': ['a=1'] } }));
+  assert.doesNotThrow(() => r.receive({ webContentsId: 999, responseHeaders: { 'Set-Cookie': ['a=1'] } }));
+  assert.doesNotThrow(() => r.receive({ responseHeaders: undefined }));
+  assert.doesNotThrow(() => r.receive({ responseHeaders: { Server: ['x'] } }));
+  assert.doesNotThrow(() => r.receive({ responseHeaders: { 'Set-Cookie': [] } }));
+  assert.equal(r.blockedCount(), 0);
+
+  const h2 = setup({
+    isolateEffective: true,
+    classify: () => ({ thirdParty: true, domain: '', tracker: null })
+  });
+  const { session, handlers } = fakeSession(h2.log);
+  h2.runtime.onSessionCreated(session);
+  handlers.beforeRequest({ webContentsId: 10, resourceType: 'mainFrame', url: 'https://site.test/' }, () => {});
+  handlers.headersReceived(
+    { webContentsId: 10, resourceType: 'subFrame', url: 'https://x.test/', responseHeaders: { 'Set-Cookie': ['a=1'] } },
+    () => {}
+  );
+  h2.flushPrivacy();
+  assert.equal(
+    h2.chromeSends.filter((c) => c[0] === 'privacy-net').at(-1)?.[1].agg.cookiesBlocked ?? 0,
+    0,
+    'missing classification.domain does not mark'
+  );
+
+  const bare = accountingRig();
+  bare.receive({ responseHeaders: { 'Set-Cookie': 'a=1; Secure' } });
+  assert.equal(bare.blockedCount(), 1, 'a bare-string set-cookie is normalized');
+});
+
+test('DD6 pass-through: response headers are deepEqual-unchanged for third-party and first-party alike', () => {
+  const r = accountingRig();
+  for (const url of ['https://tracker.test/f', 'https://site.test/f']) {
+    const headers = { 'Set-Cookie': ['a=1', 'b=2; Partitioned; Secure'], Server: ['t'] };
+    const snapshot = structuredClone(headers);
+    const { out } = r.receive({ url, responseHeaders: headers });
+    assert.deepEqual(out.responseHeaders, snapshot);
+  }
+});
+
+// ---- Sortie 02 DD7 storage-access gating ----------------------------------
+
+const ALLOWLIST_SAMPLE = [
+  'fullscreen',
+  'clipboard-sanitized-write',
+  'pointerLock',
+  'mediaKeySystem',
+  'storage-access',
+  'top-level-storage-access',
+  'speaker-selection',
+  'window-management'
+];
+
+function permissionOutcome(isolateEffective) {
+  const h = setup({ isolateEffective });
+  const { session, handlers } = fakeSession(h.log);
+  h.runtime.onSessionCreated(session);
+  const out = {};
+  for (const p of ALLOWLIST_SAMPLE) {
+    let req;
+    handlers.permissionRequest({ id: 10 }, p, (v) => {
+      req = v;
+    });
+    out[p] = [req, handlers.permissionCheck(null, p)];
+  }
+  return { out, h };
+}
+
+test('DD7: isolateEffective denies storage-access permissions in both handlers; every other entry is still granted', () => {
+  const { out, h } = permissionOutcome(true);
+  for (const p of ALLOWLIST_SAMPLE) {
+    const expected = p === 'storage-access' || p === 'top-level-storage-access' ? false : true;
+    assert.deepEqual(out[p], [expected, expected], p);
+  }
+  assert.deepEqual(
+    h.chromeSends.find((c) => c[1].permission === 'storage-access'),
+    ['privacy-permission', { webContentsId: 10, permission: 'storage-access', granted: false }]
+  );
+});
+
+test('DD7: with isolateEffective false every allowlisted permission is granted (unchanged)', () => {
+  const { out } = permissionOutcome(false);
+  for (const p of ALLOWLIST_SAMPLE) assert.deepEqual(out[p], [true, true], p);
 });
 
 test('cookie changes insert first-seen, delete expiration, skip overwrite, and stop after DB close', () => {

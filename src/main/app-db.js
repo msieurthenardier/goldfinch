@@ -36,6 +36,10 @@ const fs = require('fs');
 const path = require('path');
 const { DatabaseSync } = require('node:sqlite');
 
+// Single-sourced SQL for reading one `documents` row (shared by the prepared
+// statement below and `peekDocumentReadOnly`).
+const SELECT_DOC_SQL = 'SELECT payload FROM documents WHERE store = ?1';
+
 // ---------------------------------------------------------------------------
 // Schema v1 (flight 10-1 DD3 — implement exactly)
 // ---------------------------------------------------------------------------
@@ -272,7 +276,7 @@ function attemptOpen(dbPath) {
 function prepareStatements() {
   const d = /** @type {import('node:sqlite').DatabaseSync} */ (db);
   statements = {
-    selectDoc: d.prepare('SELECT payload FROM documents WHERE store = ?1'),
+    selectDoc: d.prepare(SELECT_DOC_SQL),
     upsertDoc: d.prepare(
       'INSERT INTO documents (store, payload, updated_at) VALUES (?1, ?2, ?3) ' +
         'ON CONFLICT(store) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at'
@@ -631,8 +635,33 @@ function createBookmarksStore() {
 // Exports
 // ---------------------------------------------------------------------------
 
+/**
+ * Pre-ready, read-only peek at one `documents` row (sortie 02 DD2). Opens
+ * `<userDataPath>/app.db` with `{ readOnly: true }` — no create, no WAL
+ * pragma, no migration, no quarantine — reads the row, and closes. A missing
+ * file returns null WITHOUT creating anything. Open/read failures THROW (the
+ * caller decides). Note: a read-only open of a WAL db can leave empty
+ * `-wal`/`-shm` siblings, which the later read-write `open()` cleans up.
+ *
+ * @param {string} userDataPath
+ * @param {string} store
+ * @returns {string | null}
+ */
+function peekDocumentReadOnly(userDataPath, store) {
+  const file = path.join(userDataPath, FILE_NAME);
+  if (!fs.existsSync(file)) return null;
+  const handle = new DatabaseSync(file, { readOnly: true });
+  try {
+    const row = /** @type {any} */ (handle.prepare(SELECT_DOC_SQL).get(store));
+    return row ? row.payload : null;
+  } finally {
+    handle.close();
+  }
+}
+
 module.exports = {
   open,
+  peekDocumentReadOnly,
   close,
   isOpen,
   createDocumentStore,

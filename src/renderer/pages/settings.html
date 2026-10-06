@@ -19,6 +19,7 @@
     <script src="search-engines.js" type="module"></script>
     <!-- Sortie 01 leg 2: pure copy model for the Default browser row (settings.js). -->
     <script src="default-browser-row-model.js" type="module"></script>
+    <script src="shields-isolation-model.js" type="module"></script>
     <script src="settings.js" type="module"></script>
   </head>
   <body>
@@ -187,16 +188,25 @@
         <fieldset class="shields-group">
           <legend class="sr-only">Shields</legend>
           <label class="shield-row shield-parent"
-            ><span>Shields</span><input type="checkbox" id="shield-enabled"
+            ><span>Shields</span><input type="checkbox" id="shield-enabled" aria-describedby="shield-enabled-note"
           /></label>
           <label class="shield-row"><span>Block trackers</span><input type="checkbox" id="shield-block" /></label>
           <label class="shield-row"
             ><span>Strip tracking params</span><input type="checkbox" id="shield-strip"
           /></label>
           <label class="shield-row"
-            ><span>Isolate 3rd-party cookies</span><input type="checkbox" id="shield-isolate"
+            ><span>Isolate 3rd-party cookies</span
+            ><input type="checkbox" id="shield-isolate" aria-describedby="shield-isolate-note"
           /></label>
           <label class="shield-row"><span>Farble fingerprint</span><input type="checkbox" id="shield-farble" /></label>
+          <!-- Sortie 02 leg 2: restart-to-apply truth. Notes + the one Restart control sit AFTER the rows
+               (never inside a label); text is patched via textContent/hidden only. Ids are stable contracts. -->
+          <p id="shield-enabled-note" class="shield-note" hidden></p>
+          <p id="shield-isolate-note" class="shield-note" hidden></p>
+          <div class="shields-restart-group">
+            <button id="shields-restart" class="settings-btn" type="button" hidden>Restart now</button>
+            <p id="shields-restart-note" class="shield-note" hidden></p>
+          </div>
         </fieldset>
         <p>These are global Shields defaults, applied to every site.</p>
         <fieldset class="shields-group spellcheck-group">

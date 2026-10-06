@@ -31,7 +31,7 @@ const DEFAULTS = {
   enabled: true, // master switch
   block: true, // cancel requests to known trackers
   strip: true, // strip tracking params + trim Referer
-  isolate: true, // strip third-party Cookie / Set-Cookie
+  isolate: true, // native third-party cookie blocking (restart-to-apply)
   farble: true, // fingerprint noise + navigator spoofing (preload)
   pausedSites: [] // registrable domains where shields are off
 };
@@ -60,15 +60,26 @@ function normalizePausedSites(value) {
 // pausedSites shape-normalized. Shared by the row-read path and the legacy-
 // JSON migration path. NEVER throws — a deserialize failure repairs to
 // fresh defaults.
-/** @param {string} raw */
-function parseAndRepair(raw) {
+/**
+ * Pure normalizer (sortie 02 DD2): merge-over-DEFAULTS with pausedSites
+ * normalized. NEVER throws. Shared by the store (`parseAndRepair`) and the
+ * pre-ready startup reader (`shields-startup.js`) — one normalizer.
+ * @param {string} raw
+ * @param {(s: string) => any} [deserialize]
+ */
+function parseShieldsConfig(raw, deserialize = JSON.parse) {
   try {
-    const merged = { ...DEFAULTS, ...codec.deserialize(raw) };
+    const merged = { ...DEFAULTS, ...deserialize(raw) };
     merged.pausedSites = normalizePausedSites(merged.pausedSites);
     return merged;
   } catch {
     return { ...DEFAULTS };
   }
+}
+
+/** @param {string} raw */
+function parseAndRepair(raw) {
+  return parseShieldsConfig(raw, codec.deserialize);
 }
 
 /**
@@ -174,6 +185,13 @@ function active(strategy, site) {
   return config.enabled && config[strategy] && !isPaused(site);
 }
 
+// Is cookie isolation CONFIGURED (master on AND isolate on)? Truthiness
+// matches `active()` so a malformed stored value (e.g. "false") can't make
+// the startup decision and the live gates disagree (sortie 02 DD2).
+function isolateConfigured(cfg) {
+  return !!cfg.enabled && !!cfg.isolate;
+}
+
 // --- tracking parameter stripping ---------------------------------------
 
 const TRACKING_PARAMS = new Set([
@@ -238,4 +256,17 @@ function stripUrl(rawUrl) {
   }
 }
 
-module.exports = { DEFAULTS, load, save, get, set, isPaused, setPaused, active, stripUrl, isTrackingParam };
+module.exports = {
+  DEFAULTS,
+  parseShieldsConfig,
+  isolateConfigured,
+  load,
+  save,
+  get,
+  set,
+  isPaused,
+  setPaused,
+  active,
+  stripUrl,
+  isTrackingParam
+};
