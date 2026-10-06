@@ -3,7 +3,12 @@
 **Flight**: [Partitioned-cookie-aware third-party isolation](flight.md)
 
 ## Summary
-Ready (approved 2026-10-05). Charter agreed 2026-10-05; design approved after two Architect rounds.
+**Landed 2026-10-06.** All three legs are completed:
+- Leg 01: native cookie isolation.
+- Leg 02: panel/settings UX and Restart now.
+- Leg 03: operator HAT, 9/10 steps passed, step 9 skipped, plus one inline FEATURE fix (HAT-F1).
+
+All four charter criteria are met. Commits `31be656` and `ac56929`; PR #246.
 
 ---
 
@@ -174,3 +179,39 @@ Prints `third-party-cookies fixture listening on :::{fx}` (dual-stack; falls bac
   - **HAT-F1 (FEATURE):** the operator found "Reload to apply" confusing and chose "show only when needed". FD classified it as a FEATURE (new behavior/state), so it goes through a scoped design review before implementation, per the fix-vs-feature gate. Single surface. Design is in the leg 03 HAT Findings.
   - **HAT-F1 implemented (Developer):** `applyShieldsConfig` in `privacy-controller.js` (all four config-assignment sites), `reloadStale` on `blankPrivacy()`, a `reloadStale` input to `shields-section.js` `patch()` (button hidden by default, patched in place), and an immediate clear in `onReload`. `renderer.js` untouched. 8 new unit tests in `privacy-controller.test.js`; neuter-verified (isolate-only, boot resolve). Gates run; see the Developer report.
 - 2026-10-06: **HAT-F1 review: `[HANDOFF:confirmed]`** (independent Reviewer: 5824 tests pass, 0 fail; lint, typecheck and format clean; renderer.js untouched). Non-blocking: the `privacy` typedef in `tab-controller.js:18` doesn't list `reloadStale` (strict:false; squawk batch). Committing HAT-F1 mid-HAT; the operator's dev instance is relaunched to load it before step 4.
+- 2026-10-06: HAT **HAT-F1 live check PASS**: the reload button is hidden by default, appears after a Block-trackers toggle, and clears on click. **Step 4 PASS**: turning on from the panel showed "Turns on after restart", then Restart now → Restart Goldfinch relaunched with isolation in force again.
+- 2026-10-06: HAT **step 5 PASS**: master-off notes on both rows (the operator accepts the double note), master-on clears them, and pause shows "Applies browser-wide" on an undimmed isolation row.
+- 2026-10-06: HAT **step 6 PASS**: settings-page note and Restart now placement (below the rows) accepted by the operator ("it's fine"). The copy "Stays on until restart" / "Turns on after restart" is accepted in place of the DD4 draft wording.
+- 2026-10-06: HAT **step 7 PASS**: live focus retention: a focused Shields control kept focus on a busy page while panel updates streamed in (DD4 patch-in-place, now proven live as well as by unit AC3).
+- 2026-10-06: HAT step 6 follow-up: after step 6 the operator left isolate unticked (confirmed "forgot to tick it back on"). The relaunch correctly started with `isolateEffective:false` (startup logic behaved right). The FD re-enabled it and relaunched (with `--insecure-tls-fixtures` for step 8).
+- 2026-10-06: HAT **step 8 PASS: Storage Access live (DD7; Leg 01 AC10 closed).** On the fixture A embed with isolation in force, a trusted operator click on the unsandboxed frame's button returned `storageAccess:"rejected:NotAllowedError"`, `hasStorageAccess:false`, and the frame saw only partitioned cookies. The privacy panel shows **"Permissions: 1 requested, denied — storage-access"**, so a denied `storage-access` **does** reach `setPermissionRequestHandler` (the Leg 01 AC10 premise is answered: yes).
+- 2026-10-06: HAT **step 9 SKIPPED by the operator** (an optional extra cookie-heavy embed). The dev instance was relaunched normally (no `--insecure-tls-fixtures`) and the fixture stopped.
+- 2026-10-06: HAT **step 10 PASS: packaged AppImage Restart now (DD11 `APPIMAGE` execPath).**
+  - Built with `npx electron-builder --linux AppImage` (`dist/` is gitignored) and run in a scratch `XDG_CONFIG_HOME`.
+  - WSL has no FUSE, so it ran with `APPIMAGE_EXTRACT_AND_RUN=1`, which still sets `APPIMAGE`.
+  - The operator noted the Shields panel can't be opened from the welcome screen (by design: no web page). They used Settings → Privacy & Shields → untick → Restart now → Restart Goldfinch.
+  - Old PID 1045497 exited; the new process was launched by the AppImage file itself (`dist/Goldfinch-0.18.2.AppImage`, PID 1046850 → extracted binary 1046857). The AppImage relaunch path is proven.
+  - Test app closed and scratch profile deleted.
+- 2026-10-06: **Leg 03 HAT COMPLETE**: steps 1–8 and 10 pass, step 9 skipped by the operator, HAT-F1 implemented, reviewed and committed (`ac56929`).
+  - Operator rulings recorded: the double note when the master is off is accepted; the settings-page note placement is accepted; the "Stays on / Turns on after restart" copy is accepted.
+- 2026-10-06: **Charter criteria (all met):**
+  - (1) claude.ai artifacts render with Shields fully on: HAT step 1 (live, operator).
+  - (2) Unpartitioned 3P cookies are withheld on HTTP and `document.cookie`: behavior runs 2026-10-06-01-29-15 and 2026-10-06-15-24-26.
+  - (3) Accounting is truthful: spec step 8 and HAT step 2.
+  - (4) Unit tests plus behavior spec: present.
+- 2026-10-06: **Flight landed.** Flight status `landed`; PR #246 marked ready for review. Debrief next: `/mission-control:flight-debrief sortie 02`.
+- **Squawk batch to log** (out of scope, discovered in flight):
+  1. web-compat-pdf structural spec amendments;
+  2. download-indicator spec re-scope (sheet unobservable);
+  3. jar-data-surfaces spec amendments (aged-data premise, DD8 per-row delete);
+  4. web-compat-oauth-popup step 3 `[by-eye]` split;
+  5. 3P-cookies fixture `/a/set-fp` cookies `Path=/`;
+  6. `goldfinch://jars` panels stale after a no-op retention sweep (**defect**);
+  7. CLAUDE.md "cookie value never exposed" vs the e07e21a reveal (doc drift);
+  8. "1 days" plural;
+  9. stale a11y-audit comments about internal pages;
+  10. `.activity-kind` color contrast on settings (**a11y defect**);
+  11. "Enable automation surface" reads OFF on a dev-flag launch;
+  12. settings Shields sub-toggles not dimmed when the master is off;
+  13. privacy-panel Cookies card "N third-party" reads as leakage under isolation (copy);
+  14. the `tab-controller.js` privacy typedef lacks `reloadStale`.

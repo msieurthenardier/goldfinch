@@ -1,6 +1,6 @@
 # Leg: hat-claude-artifacts
 
-**Status**: ready
+**Status**: completed
 **Flight**: [Partitioned-cookie-aware third-party isolation](../flight.md)
 
 ## Objective

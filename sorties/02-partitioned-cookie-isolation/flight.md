@@ -1,6 +1,6 @@
 # Sortie: Partitioned-cookie-aware third-party isolation
 
-**Status**: in-flight
+**Status**: landed
 
 ## Charter
 
@@ -11,10 +11,10 @@ With Shields' third-party cookie isolation on, embedded cross-site apps that use
 Every claude.ai artifact shows "This browser isn't supported" in Goldfinch. Live-traced 2026-10-01: `applyShields` (`src/main/session-runtime.js`) deletes `Cookie` and drops `Set-Cookie` on the `*.frame.claudeusercontent.com` artifact frame because it is third-party to `claude.ai`; the frame's server then serves its app bundle as `text/plain` and the frame renders the notice. Isolation off → renders; on → fails. The frame's cookies (`__Host-frame-asset-*`, `__Host-frame-rt-*`) are already CHIPS-partitioned (`top_frame_site_key = https://claude.ai`), so they cannot track cross-site. The only workaround today is pausing all of Shields for the site. (Squawk 0119 / PR #244, the UA strip, was the initial wrong hypothesis.)
 
 ### Success Criteria
-- [ ] A claude.ai artifact renders with Shields fully on (isolation enabled, site not paused).
-- [ ] An unpartitioned third-party cookie still does not reach a cross-site frame or subresource — neither via HTTP headers nor via `document.cookie` (read or write) in a cross-site frame — proven by a fixture.
-- [ ] Privacy-panel isolation accounting stays truthful: a domain is counted as cookie-isolated only when something was actually withheld.
-- [ ] Unit tests pin the new rule, and a behavior spec covers the artifact-style case.
+- [x] A claude.ai artifact renders with Shields fully on (isolation enabled, site not paused).
+- [x] An unpartitioned third-party cookie still does not reach a cross-site frame or subresource — neither via HTTP headers nor via `document.cookie` (read or write) in a cross-site frame — proven by a fixture.
+- [x] Privacy-panel isolation accounting stays truthful: a domain is counted as cookie-isolated only when something was actually withheld.
+- [x] Unit tests pin the new rule, and a behavior spec covers the artifact-style case.
 
 ### Constraints
 - No weakening of isolation for unpartitioned cookies.
@@ -211,5 +211,5 @@ Standalone Electron 44.4.4 / Chromium 152 harness (scratch, re-runnable: `scratc
 *(see flight-log.md)*
 
 ## Post-Flight
-- [ ] Charter criteria checked
+- [x] Charter criteria checked (2026-10-06: all four met; see flight log)
 - [ ] Flight debrief: `/mission-control:flight-debrief sortie 02`
