@@ -3,7 +3,7 @@
 **Slug**: `third-party-cookie-isolation`
 **Status**: active
 **Created**: 2026-10-05
-**Last Run**: 2026-10-06-15-24-26 (pass, FULL: 14/14 judged, step 9 struck; both real-UI Restart now relaunches back in about 0.6 s on the same port with the same key; see runs/2026-10-06-15-24-26.md)
+**Last Run**: 2026-10-06-17-24-03 (pass, post-merge regression on `8fdbe89` with PR #244: 14/14 judged, step 9 struck, UA appendix pass; see runs/2026-10-06-17-24-03.md)
 
 ## Intent
 
