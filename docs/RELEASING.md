@@ -75,6 +75,12 @@ This is **outward-facing** — the prerelease is public — so only tag commits 
   `node scripts/update-readme.mjs 0.11.1` (with no argument it uses the `package.json` version).
 - The workflow's build job syncs `package.json` from the tag with `--ignore-scripts`, so the
   `version` hook never runs in CI — it only regenerates the README during local release-prep.
+- **Electron major bump** — re-run the `third-party-cookie-isolation` behavior spec
+  (`/mission-control:behavior-test third-party-cookie-isolation`) before releasing. Third-party
+  cookie isolation depends on Chromium's `ForceThirdPartyCookieBlockingEnabled` feature name; an
+  unknown `enable-features` name is silently ignored and header stripping no longer backs it up, so
+  a bump that drops the feature would make isolation fail open with no other signal. (Also re-run
+  the full store suite for `node:sqlite`.)
 - The Windows installer now registers Goldfinch as a browser (`build/installer.nsh`: `GoldfinchHTML`
   ProgID, `StartMenuInternet\Goldfinch` Capabilities, `RegisteredApplications`) so it appears under
   Settings → Apps → Default apps; the Linux `.deb` ships a `goldfinch.desktop` with the http/https

@@ -121,6 +121,8 @@ const { createCertTrust, keyFor } = require('./cert-trust');
 const { createCertObserver } = require('./cert-observer');
 const { summarizeCertificate } = require('./certificate-summary');
 const { createSessionRuntime } = require('./session-runtime');
+const { decideStartup } = require('./third-party-cookies');
+const { readStartupShieldsConfig } = require('./shields-startup');
 const { registerTabIpc, applyGuestVisibility, createSendOrQueue, queueChromeSend } = require('./register-tab-ipc');
 const { registerOverlayIpc } = require('./register-overlay-ipc');
 const { registerDownloadIpc } = require('./register-download-ipc');
@@ -299,6 +301,34 @@ if (!gotSingleInstanceLock) {
   app.exit(0);
   process.exit(0);
 }
+
+// Sortie 02 DD1/DD2: native third-party cookie isolation. Chromium's
+// ForceThirdPartyCookieBlockingEnabled feature must be on the command line BEFORE
+// app.ready (setting it later has no effect; it is process-wide and restart-to-apply),
+// but Shields loads inside whenReady, so the persisted config is peeked read-only here
+// (fail-closed: unreadable -> legacy shields.json -> DEFAULTS = isolation on). Placed
+// after the dev setPath('userData') redirect and the single-instance lock (a loser must
+// stay side-effect-free) and before crashReporter/registerAppLifecycle. This is the ONLY
+// appendSwitch('enable-features', ...) in src/main/** (it REPLACES any earlier value, so
+// the operator's own list is composed in). `isolateEffective` is the startup decision, a
+// process constant threaded to the session runtime, permission gates and the IPC channel.
+// Pinned by test/unit/third-party-cookie-startup-order.test.js.
+const startupShields = readStartupShieldsConfig({
+  userDataPath: app.getPath('userData'),
+  peek: appDb.peekDocumentReadOnly,
+  fs
+});
+const operatorEnableFeatures = app.commandLine.getSwitchValue('enable-features');
+const startupDecision = decideStartup({
+  configured: shields.isolateConfigured(startupShields),
+  enableFeatures: operatorEnableFeatures,
+  disableFeatures: app.commandLine.getSwitchValue('disable-features')
+});
+if (startupDecision.enableFeatures !== '' && startupDecision.enableFeatures !== operatorEnableFeatures) {
+  app.commandLine.appendSwitch('enable-features', startupDecision.enableFeatures);
+}
+const isolateEffective = startupDecision.isolateEffective;
+const isolateOperatorOverride = startupDecision.operatorOverride;
 
 // Mission 20 Flight 3 Leg 3 (DD8): Chromium's own minidump collector, started
 // at module load (before app.whenReady()) so early crashes are caught too —
@@ -2625,6 +2655,7 @@ const sessionRuntime = createSessionRuntime({
   hostnameOf,
   classify,
   shields,
+  isolateEffective,
   chromeForTab,
   schedule: setTimeout,
   // Mission 20 Flight 2 Leg 2 (DD6): installed on every web session's
@@ -2639,6 +2670,11 @@ registerSettingsIpc({
   registerInternalHandler,
   settings,
   shields,
+  isolateEffective,
+  operatorOverride: isolateOperatorOverride,
+  app,
+  registry,
+  env: process.env,
   broadcast: broadcastToChromeAndInternal,
   applyAutomationEnabledChange,
   applySpellcheck,

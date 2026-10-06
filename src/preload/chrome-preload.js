@@ -115,6 +115,8 @@ contextBridge.exposeInMainWorld('goldfinch', {
 
   // --- shields ---
   shieldsGet: () => ipcRenderer.invoke('shields-get'),
+  shieldsIsolationState: () => ipcRenderer.invoke('shields-isolation-state'),
+  shieldsRestartToApply: () => ipcRenderer.invoke('shields-restart-to-apply'),
   shieldsSet: (patch) => ipcRenderer.invoke('shields-set', patch),
   shieldsPause: (payload) => ipcRenderer.invoke('shields-pause', payload),
   onShieldsChanged: (cb) => ipcRenderer.on('shields-changed', (_e, cfg) => cb(cfg)),

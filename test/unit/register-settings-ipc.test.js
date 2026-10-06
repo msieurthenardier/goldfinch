@@ -18,7 +18,9 @@ test('settings registrar preserves bare chrome reads and guarded internal mutati
     'chrome-welcome-set',
     'settings-get',
     'shields-get',
+    'shields-isolation-state',
     'shields-pause',
+    'shields-restart-to-apply',
     'shields-set'
   ]);
   assert.deepEqual([...h.listeners.keys()], ['unpin-toolbar-item', 'toggle-bookmarks-bar']);
@@ -37,10 +39,29 @@ test('settings registrar preserves bare chrome reads and guarded internal mutati
     'internal-settings-get',
     'internal-settings-set',
     'internal-shields-get',
+    'internal-shields-isolation-state',
+    'internal-shields-restart-to-apply',
     'internal-shields-set'
   ]);
   assert.equal(h.bare.has('internal-settings-set'), false);
   assert.equal(h.internal.has('settings-get'), false);
+});
+
+test('shields isolation-state pair returns the read-only startup decision', async () => {
+  const h = makeSettingsIpcHarness({ isolateEffective: false, operatorOverride: 'disabled' });
+  assert.deepEqual(await h.bare.get('shields-isolation-state')({}), {
+    isolateEffective: false,
+    operatorOverride: 'disabled'
+  });
+  assert.deepEqual(await h.internal.get('internal-shields-isolation-state')({}), {
+    isolateEffective: false,
+    operatorOverride: 'disabled'
+  });
+  const on = makeSettingsIpcHarness();
+  assert.deepEqual(await on.bare.get('shields-isolation-state')({}), {
+    isolateEffective: true,
+    operatorOverride: null
+  });
 });
 
 test('settings writes broadcast before their live side effects', async () => {
@@ -268,4 +289,72 @@ test('default-browser channels are internal handlers that ignore page arguments 
   const made = await h.invokeInternal('default-browser:make-default', 'ms-settings:evil', { x: 1 });
   assert.deepEqual(made, { fake: 'made', args: [] });
   assert.equal(h.events.length, before, 'no settings write / broadcast');
+});
+
+// ---- Sortie 02 leg 2 / DD11: Restart now (state-changing, sender-validated, business-gated) ----
+
+const names = (h) => h.calls.map((c) => c[0]);
+
+test('restart-to-apply refuses non-chrome senders (internal-session, guest, empty) without relaunching', async () => {
+  const h = makeSettingsIpcHarness();
+  h.shieldsCfg.isolate = false; // pending, so ONLY the sender gate can stop it
+  for (const sender of [undefined, { id: 'internal-session-sender' }, { id: 'guest-sender' }]) {
+    const res = await h.invokeFrom('shields-restart-to-apply', sender);
+    assert.deepEqual(res, { ok: false, reason: 'refused' });
+  }
+  assert.deepEqual(h.calls, []);
+});
+
+test('both restart channels return not-pending and never relaunch/quit when nothing is pending', async () => {
+  const h = makeSettingsIpcHarness(); // configured on, in force on
+  assert.deepEqual(await h.invokeFrom('shields-restart-to-apply', h.chromeSender), {
+    ok: false,
+    reason: 'not-pending'
+  });
+  assert.deepEqual(await h.invokeInternal('internal-shields-restart-to-apply'), { ok: false, reason: 'not-pending' });
+  assert.deepEqual(h.calls, []);
+  assert.equal(h.env.GOLDFINCH_AUTOMATION_DEV_MINT, '1', 'env untouched on refusal');
+  // Operator --disable-features with config on: restart would change nothing, so no permanent hint.
+  const off = makeSettingsIpcHarness({ isolateEffective: false, operatorOverride: 'disabled' });
+  assert.deepEqual(await off.invokeInternal('internal-shields-restart-to-apply'), {
+    ok: false,
+    reason: 'not-pending'
+  });
+  assert.deepEqual(off.calls, []);
+});
+
+test('restart-to-apply, when pending: strip DEV_MINT -> release lock -> relaunch -> quit, in that order', async () => {
+  const h = makeSettingsIpcHarness();
+  h.shieldsCfg.isolate = false; // in force on, configured off
+  const res = await h.invokeFrom('shields-restart-to-apply', h.chromeSender);
+  assert.deepEqual(res, { ok: true });
+  assert.deepEqual(names(h), ['releaseSingleInstanceLock', 'relaunch', 'quit']);
+  const [release, relaunch] = h.calls;
+  // At the moment of release AND relaunch the live env no longer carries DEV_MINT; other keys untouched.
+  assert.equal('GOLDFINCH_AUTOMATION_DEV_MINT' in release[1], false);
+  assert.equal('GOLDFINCH_AUTOMATION_DEV_MINT' in relaunch[2], false);
+  assert.equal(relaunch[2].GOLDFINCH_AUTOMATION_ADMIN, '1');
+  assert.deepEqual(relaunch[1], {}, 'no APPIMAGE -> default options');
+  assert.equal('env' in relaunch[1], false);
+});
+
+test('restart-to-apply internal channel passes the same gate; APPIMAGE becomes execPath', async () => {
+  const h = makeSettingsIpcHarness({ env: { APPIMAGE: '/opt/Goldfinch.AppImage' } });
+  h.shieldsCfg.enabled = false; // master off while in force -> pending 'off'
+  assert.deepEqual(await h.invokeInternal('internal-shields-restart-to-apply'), { ok: true });
+  assert.deepEqual(names(h), ['releaseSingleInstanceLock', 'relaunch', 'quit']);
+  assert.deepEqual(h.calls[1][1], { execPath: '/opt/Goldfinch.AppImage' });
+  // Pending 'on': configured on, not in force.
+  const on = makeSettingsIpcHarness({ isolateEffective: false });
+  assert.deepEqual(await on.invokeInternal('internal-shields-restart-to-apply'), { ok: true });
+  assert.equal(on.calls.length, 3);
+});
+
+test('restart-to-apply authority is main-side: page arguments are ignored', async () => {
+  const h = makeSettingsIpcHarness();
+  assert.deepEqual(await h.invokeFrom('shields-restart-to-apply', h.chromeSender, { pending: true }), {
+    ok: false,
+    reason: 'not-pending'
+  });
+  assert.deepEqual(h.calls, []);
 });

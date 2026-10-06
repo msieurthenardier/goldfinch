@@ -1,5 +1,8 @@
 'use strict';
 
+const { effectiveAfterRestartFromConfigured } = require('./third-party-cookies');
+const { relaunchOptions } = require('./relaunch-options');
+
 // Electron-free registration for chrome-trusted settings reads and the guarded
 // goldfinch://settings mutation/automation surface.
 
@@ -8,6 +11,8 @@ function registerSettingsIpc({
   registerInternalHandler,
   settings,
   shields,
+  isolateEffective = false,
+  operatorOverride = null,
   broadcast,
   applyAutomationEnabledChange,
   applySpellcheck,
@@ -24,12 +29,48 @@ function registerSettingsIpc({
   revokeAdminKey,
   getMcpServer,
   adminEnabled,
-  defaultBrowser
+  defaultBrowser,
+  app,
+  registry,
+  env = process.env
 }) {
   const broadcastSettings = () => broadcast('settings-changed', settings.getAll());
 
   ipcMain.handle('settings-get', (_event, key) => (key ? settings.get(key) : settings.getAll()));
   ipcMain.handle('shields-get', () => shields.get());
+  // Sortie 02 DD4: read-only, non-secret, process-constant startup decision (bare: consumed
+  // by both the file:// chrome and the internal settings page). `operatorOverride` lets the UI
+  // compute restart-pending as "would a restart change anything".
+  const isolationState = () => ({ isolateEffective, operatorOverride });
+  ipcMain.handle('shields-isolation-state', isolationState);
+
+  // Sortie 02 DD11: Restart now. STATE-CHANGING (relaunches the process), so it is guarded:
+  // (chrome channel) sender identity via the window registry; (both) a main-side business gate
+  // that recomputes "would a restart change anything" from the CURRENT persisted config and the
+  // operator override — never from anything the page sends (no page arguments at all). On pass,
+  // ORDER IS LOAD-BEARING: strip DEV_MINT from the live env (a re-mint would replace the stored
+  // key hash and 401 standing MCP configs) -> release the single-instance lock (else the
+  // relaunched child can lose requestSingleInstanceLock() to the still-exiting parent and exit
+  // silently) -> relaunch -> the normal quit path (before-quit/will-quit run). There is
+  // deliberately NO MCP op for this; admin chrome `evaluate` can reach it, exactly like
+  // `appQuit` (accepted, documented in docs/mcp-automation.md).
+  function restartToApply() {
+    const configured = shields.isolateConfigured(shields.get());
+    if (effectiveAfterRestartFromConfigured(configured, operatorOverride) === isolateEffective) {
+      return { ok: false, reason: 'not-pending' };
+    }
+    delete env.GOLDFINCH_AUTOMATION_DEV_MINT;
+    app.releaseSingleInstanceLock();
+    app.relaunch(relaunchOptions({ env }));
+    app.quit();
+    return { ok: true };
+  }
+  ipcMain.handle('shields-restart-to-apply', (event) => {
+    if (!registry || !registry.getWindowForChrome(event && event.sender)) {
+      return { ok: false, reason: 'refused' };
+    }
+    return restartToApply();
+  });
   ipcMain.handle('shields-set', (_event, patch) => {
     const config = shields.set(patch || {});
     broadcast('shields-changed', config);
@@ -63,6 +104,8 @@ function registerSettingsIpc({
     return config;
   });
   registerInternalHandler(ipcMain, 'internal-shields-get', () => shields.get());
+  registerInternalHandler(ipcMain, 'internal-shields-isolation-state', isolationState);
+  registerInternalHandler(ipcMain, 'internal-shields-restart-to-apply', () => restartToApply());
   registerInternalHandler(ipcMain, 'internal-shields-set', (_event, patch) => {
     const config = shields.set(patch || {});
     broadcast('shields-changed', config);

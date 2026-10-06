@@ -226,3 +226,58 @@ test('settings home-page Save routes an empty normalized value to the Clear acti
   assert.notEqual(mutated, src, 'assertMutated: replace must change source');
   assert.doesNotMatch(mutated, saveGuard);
 });
+
+// ---- Sortie 02 leg 2 (AC6/AC7): restart-to-apply Shields notes + Restart now on the settings page ----
+
+test('the shields-isolation-model module has an exact route and a module tag (new-shared-module checklist)', () => {
+  const map = createInternalPageMap({ baseDir: MAIN_DIR, path }).settings;
+  assert.equal(map['/shields-isolation-model.js'], path.join(SHARED_DIR, 'shields-isolation-model.js'));
+  assert.ok(fs.existsSync(map['/shields-isolation-model.js']));
+  const tag = settingsScriptTags().find((t) => t.src === 'shields-isolation-model.js');
+  assert.ok(tag && tag.isModule, 'settings.html must load shields-isolation-model.js as type="module"');
+});
+
+test('settings.js imports the model with a flat specifier and a ts-ignore right before the from-line', () => {
+  const js = fs.readFileSync(SETTINGS_JS, 'utf8');
+  assert.match(
+    js,
+    /import\s*\{[^}]*isolationModel[^}]*restartControl[^}]*createRestartConfirm[^}]*\}\s*\/\/ @ts-ignore[^\n]*\n\s*from\s*'\.\/shields-isolation-model\.js';|createRestartConfirm,\s*COPY as ISOLATION_COPY\s*\/\/ @ts-ignore[^\n]*\n\} from '\.\/shields-isolation-model\.js';/
+  );
+});
+
+test('settings.html: Restart control and notes sit inside the fieldset after the rows, never in a label, linked by aria-describedby', () => {
+  const html = fs.readFileSync(SETTINGS_HTML, 'utf8');
+  for (const id of ['shield-enabled-note', 'shield-isolate-note', 'shields-restart', 'shields-restart-note']) {
+    assert.ok(new RegExp(`id="${id}"`).test(html), id + ' present (stable id contract)');
+  }
+  assert.match(html, /id="shield-enabled"[^>]*aria-describedby="shield-enabled-note"/);
+  assert.match(html, /id="shield-isolate"[^>]*aria-describedby="shield-isolate-note"/);
+  assert.match(html, /<button id="shields-restart"[^>]*type="button"/, 'a real <button>');
+  // No label contains any of the new elements.
+  for (const m of html.matchAll(/<label\b[\s\S]*?<\/label>/g)) {
+    assert.doesNotMatch(m[0], /id="(shields-restart|shield-(enabled|isolate)-note)/);
+  }
+  const fieldset = /<fieldset class="shields-group">[\s\S]*?<\/fieldset>/.exec(html)[0];
+  assert.ok(fieldset.indexOf('id="shields-restart"') > fieldset.indexOf('id="shield-farble"'), 'after the rows');
+  // No restart copy in a live region.
+  const notes = /<p id="shield-enabled-note"[\s\S]*?<\/fieldset>/.exec(fieldset)[0];
+  assert.doesNotMatch(notes, /aria-live|role="(status|alert)"/);
+});
+
+test('settings.js shields controller: patch-in-place notes, guarded restoreSession, pagehide cleanup, two-step confirm', () => {
+  const js = fs.readFileSync(SETTINGS_JS, 'utf8');
+  const start = js.indexOf('/* ---- shields controller ---- */');
+  const end = js.indexOf('/* ---- appearance pins controller ---- */');
+  assert.ok(start !== -1 && end > start);
+  const block = js.slice(start, end);
+  assert.match(block, /shieldsIsolationState\(\)/);
+  assert.match(block, /shieldsRestartToApply\(\)/);
+  assert.match(block, /createRestartConfirm\(/);
+  assert.match(block, /all\.restoreSession !== undefined/, 'guard is !== undefined, never truthiness');
+  assert.match(block, /offSettingsChanged\(hRestore\)/);
+  assert.match(block, /shieldsCfg = cfg/);
+  // Patch in place: no innerHTML / replaceChildren in the controller.
+  assert.doesNotMatch(block, /innerHTML|replaceChildren|insertAdjacentHTML/);
+  // First Escape in the confirm state is consumed.
+  assert.match(block, /confirm\.escape\(\)[\s\S]{0,80}stopPropagation/);
+});

@@ -20,6 +20,9 @@
 //   npm run a11y -- --rules=button-name,aria-valid-attr-value
 //   npm run a11y -- --tags=wcag2a,wcag2aa
 //   npm run a11y -- --url=http://127.0.0.1:8000/   # media fixture to load
+//   npm run a11y -- --restart-states              # ALSO audit the restart-pending and
+//                                                  # restart-confirm privacy-panel states
+//                                                  # (opt-in; mutates then restores isolate)
 //   npm run a11y -- --target=goldfinch://settings  # audit a guest <webview>
 //                                                  # target by URL substring
 //                                                  # instead of the chrome
@@ -91,6 +94,10 @@ const targetArg = argValue('--target');
 // cannot assume is running, so it is opt-in and skipped with a printed
 // notice when absent (never an apparatus failure).
 const tlsUrlArg = argValue('--tls-url');
+// Sortie 02 leg 2 (R2-3): --restart-states audits the privacy panel in the restart-pending and
+// restart-confirm states. Opt-in because it TEMPORARILY flips the live profile's isolate setting
+// (restored in a finally); the default sweep is unchanged.
+const restartStatesArg = process.argv.includes('--restart-states');
 
 // axe `runOnly` selector: rules take precedence over tags; omit for the full set.
 let runOnly = null;
@@ -476,6 +483,43 @@ async function main() {
       await evaluate(client, wcId, 'showHangNoticeForAudit()');
       await sleep(400);
       allViolations.push(...(await runAxe(client, wcId, axeSource, 'hung')));
+
+      // 5g) Restart-to-apply privacy-panel states (sortie 02 leg 2, R2-3). OPT-IN via
+      // --restart-states; runs LAST among the chrome states so a failure can't disturb the rest.
+      // Needs isolation IN FORCE (isolateEffective === true) so that switching the configured
+      // value off creates a genuine restart-pending state; skipped with a message otherwise.
+      // The mutation is wrapped in try/finally that restores isolate:true and closes the panel.
+      // The first activation of Restart now ONLY opens the confirm state (the second would
+      // relaunch the app) — this script never performs the second activation.
+      if (restartStatesArg) {
+        const st = await evaluate(client, wcId, 'window.goldfinch.shieldsIsolationState()');
+        if (!st || st.isolateEffective !== true) {
+          console.log(
+            '\na11y-audit: skipping --restart-states — isolateEffective is not true ' +
+              `(got ${JSON.stringify(st)}); launch with isolation in force (default Shields, no operator override).`
+          );
+        } else {
+          try {
+            await evaluate(client, wcId, `navigate(${JSON.stringify(fixtureUrl)})`);
+            await sleep(2500);
+            await evaluate(client, wcId, 'window.goldfinch.shieldsSet({ isolate: false }).then(() => true)');
+            await evaluate(client, wcId, 'togglePrivacy(true)');
+            await sleep(500);
+            allViolations.push(...(await runAxe(client, wcId, axeSource, 'privacy-panel-restart-pending')));
+
+            await evaluate(client, wcId, "document.getElementById('shields-restart').click()");
+            await sleep(300);
+            allViolations.push(...(await runAxe(client, wcId, axeSource, 'privacy-panel-restart-confirm')));
+          } finally {
+            try {
+              await evaluate(client, wcId, 'window.goldfinch.shieldsSet({ isolate: true }).then(() => true)');
+              await evaluate(client, wcId, 'togglePrivacy(false)');
+            } catch (e) {
+              console.error(`a11y-audit: WARNING — could not restore isolate:true / close the panel: ${e.message}`);
+            }
+          }
+        }
+      }
 
       // 6-10) Menu-overlay SHEET states — SKIPPED BY RULING, not run (squawk 0045).
       // Every popup menu renders in the transparent sheet WebContentsView. This

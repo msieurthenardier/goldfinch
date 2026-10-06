@@ -13,6 +13,13 @@ import { isSafeColor } from './safe-color.js';
 import { SEARCH_ENGINES, normalizeHomePageInput } from './search-engines.js';
 // @ts-ignore — serving-path vs disk-path mismatch (see above)
 import { defaultBrowserRowModel } from './default-browser-row-model.js';
+import {
+  isolationModel,
+  restartControl,
+  createRestartConfirm,
+  COPY as ISOLATION_COPY
+  // @ts-ignore — serving-path vs disk-path mismatch (see above)
+} from './shields-isolation-model.js';
 
 /**
  * settings.js — scroll-spy progressive enhancement.
@@ -351,8 +358,124 @@ async function copyText(text, messageEl) {
     }
   }
 
+  // Sortie 02 leg 2 (DD4/DD5/DD6): restart-to-apply truth. The model projects (config, what is
+  // IN FORCE, operator override) to the notes and the Restart now control. Everything below is
+  // patched in place with textContent/hidden — never rebuilt (the checkboxes keep focus).
+  /** @type {any} */
+  let shieldsCfg = null;
+  /** @type {any} */
+  let isolation = null;
+  let restoreSession = true;
+  let restartFailure = '';
+  const $ = (/** @type {string} */ id) => document.getElementById(id);
+  const restartBtn = /** @type {HTMLButtonElement|null} */ ($('shields-restart'));
+  const restartNote = $('shields-restart-note');
+
+  const confirm = createRestartConfirm({
+    onChange: () => renderIsolation(),
+    onInvoke: () => {
+      restartFailure = '';
+      Promise.resolve()
+        .then(() => window.goldfinchInternal.shieldsRestartToApply())
+        .then((res) => {
+          if (res && res.ok) return;
+          confirm.reset();
+          restartFailure = ISOLATION_COPY.restartFailed;
+          renderIsolation();
+        })
+        .catch(() => {
+          confirm.reset();
+          restartFailure = ISOLATION_COPY.restartFailed;
+          renderIsolation();
+        });
+    }
+  });
+
+  /** @param {string} id @param {string} text */
+  function setNote(id, text) {
+    const el = $(id);
+    if (!el) return;
+    el.textContent = text;
+    el.hidden = text === '';
+  }
+
+  function renderIsolation() {
+    if (!shieldsCfg || !isolation) return;
+    const m = isolationModel({
+      cfg: shieldsCfg,
+      isolateEffective: isolation.isolateEffective,
+      operatorOverride: isolation.operatorOverride,
+      paused: false
+    });
+    setNote('shield-enabled-note', m.masterNote ? m.copy[m.masterNote] : '');
+    setNote('shield-isolate-note', m.isolateRow.note ? m.copy[m.isolateRow.note] : '');
+    if (!m.restartPending) confirm.reset();
+    const ctl = restartControl({
+      restartPending: m.restartPending,
+      confirming: confirm.isConfirming(),
+      restoreSession
+    });
+    if (restartBtn) {
+      restartBtn.hidden = ctl.hidden;
+      restartBtn.textContent = ctl.label;
+      if (ctl.note !== '') restartBtn.setAttribute('aria-describedby', 'shields-restart-note');
+      else restartBtn.removeAttribute('aria-describedby');
+    }
+    // A failure line (after a revert) shows only while the control is visible and idle.
+    const text = ctl.note !== '' ? ctl.note : ctl.hidden ? '' : restartFailure;
+    if (restartNote) {
+      restartNote.textContent = text;
+      restartNote.hidden = text === '';
+    }
+  }
+
+  if (restartBtn) {
+    restartBtn.addEventListener('click', () => {
+      restartFailure = '';
+      confirm.activate();
+    });
+    restartBtn.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && confirm.escape()) {
+        e.stopPropagation();
+        e.preventDefault();
+      }
+    });
+    restartBtn.addEventListener('blur', () => {
+      if (confirm.isConfirming()) confirm.focusOut();
+    });
+  }
+
+  /** @param {object} cfg */
+  function applyShields(cfg) {
+    applyConfig(cfg);
+    shieldsCfg = cfg;
+    renderIsolation();
+  }
+
   // Populate checkboxes from the persisted shields config on load.
-  window.goldfinchInternal.shieldsGet().then(applyConfig);
+  window.goldfinchInternal.shieldsGet().then(applyShields);
+  window.goldfinchInternal
+    .shieldsIsolationState()
+    .then((st) => {
+      isolation = st;
+      renderIsolation();
+    })
+    .catch(() => {});
+  window.goldfinchInternal
+    .settingsGet('restoreSession')
+    .then((v) => {
+      if (v !== undefined) restoreSession = v;
+      renderIsolation();
+    })
+    .catch(() => {});
+  // Guard is `!== undefined`, never truthiness.
+  const hRestore = window.goldfinchInternal.onSettingsChanged((all) => {
+    if (all && all.restoreSession !== undefined) {
+      restoreSession = all.restoreSession;
+      renderIsolation();
+    }
+  });
+  window.addEventListener('pagehide', () => window.goldfinchInternal.offSettingsChanged(hRestore), { once: true });
 
   // Wire each checkbox's change event to write via the origin-locked bridge.
   for (const key of KEYS) {
@@ -366,7 +489,7 @@ async function copyText(text, messageEl) {
   // Re-sync when the panel (or another surface) fires shields-changed.
   // Capture the handle so we can remove this listener on pagehide (DD5: prevents accumulation
   // across reloads — pagehide fires in the OLD document context where handle + wrapper are valid).
-  const hShields = window.goldfinchInternal.onShieldsChanged(applyConfig);
+  const hShields = window.goldfinchInternal.onShieldsChanged(applyShields);
   window.addEventListener('pagehide', () => window.goldfinchInternal.offShieldsChanged(hShields), { once: true });
 })();
 

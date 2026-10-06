@@ -184,6 +184,8 @@ interface GoldfinchBridge {
 
   // --- shields ---
   shieldsGet(): Promise<any>;
+  shieldsIsolationState(): Promise<{ isolateEffective: boolean; operatorOverride: 'disabled' | 'enabled' | null }>;
+  shieldsRestartToApply(): Promise<{ ok: boolean; reason?: string }>;
   shieldsSet(patch: any): Promise<any>;
   shieldsPause(payload: any): Promise<any>;
   onShieldsChanged(cb: (cfg: any) => void): void;
@@ -644,6 +646,8 @@ interface GoldfinchInternalBridge {
   onSettingsChanged(cb: (all: any) => void): number;
   offSettingsChanged(h: number): void;
   shieldsGet(): Promise<any>;
+  shieldsIsolationState(): Promise<{ isolateEffective: boolean; operatorOverride: 'disabled' | 'enabled' | null }>;
+  shieldsRestartToApply(): Promise<{ ok: boolean; reason?: string }>;
   shieldsSet(patch: object): Promise<any>;
   onShieldsChanged(cb: (cfg: any) => void): number;
   offShieldsChanged(h: number): void;

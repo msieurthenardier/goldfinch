@@ -1,6 +1,8 @@
 // @ts-check
 'use strict';
 
+const { refusedThirdPartySetCookie } = require('./third-party-cookies');
+
 // Positive allowlist: only permissions listed here are granted; everything
 // else — including permission strings that don't exist yet — is denied by
 // default. Electron 43's setPermissionRequestHandler and
@@ -24,6 +26,11 @@ const ALLOWED_PERMISSIONS = new Set([
   'speaker-selection',
   'window-management'
 ]);
+
+// Storage Access API permissions: refused while native third-party cookie
+// isolation is in force (sortie 02 DD7) — granting would tell the page
+// "granted" while Chromium still blocks, so pages get an honest NotAllowedError.
+const STORAGE_ACCESS_PERMISSIONS = new Set(['storage-access', 'top-level-storage-access']);
 
 /**
  * Own all web-session behavior: spellcheck, the single shared Shields/privacy
@@ -49,6 +56,9 @@ function createSessionRuntime(deps) {
     hostnameOf,
     classify,
     shields,
+    // Sortie 02 DD1: the startup decision (process constant), default false so
+    // pre-existing callers/tests are unaffected unless they opt in.
+    isolateEffective = false,
     chromeForTab,
     schedule,
     // Mission 20 Flight 2 Leg 2 (DD6): the session-level certificate-
@@ -210,43 +220,47 @@ function createSessionRuntime(deps) {
           delete headers.Referer;
         }
       }
-      if (shields.active('isolate', firstParty) && details.resourceType !== 'mainFrame' && headers.Cookie) {
-        const classification = classify(details.url, firstParty);
-        if (classification.thirdParty) {
-          delete headers.Cookie;
-          const aggregate = privacyByTab.get(details.webContentsId);
-          if (aggregate && classification.domain) {
-            aggregate.cookieBlockedDomains[classification.domain] = 1;
-            schedulePrivacySend(details.webContentsId);
-          }
-        }
-      }
       callback({ requestHeaders: headers });
     });
 
     session.webRequest.onHeadersReceived((details, callback) => {
       const firstParty = tabFirstParty(details.webContentsId) || registrableDomain(hostnameOf(details.url));
       const headers = details.responseHeaders || {};
-      if (
-        shields.active('isolate', firstParty) &&
-        details.resourceType !== 'mainFrame' &&
-        classify(details.url, firstParty).thirdParty
-      ) {
-        for (const key of Object.keys(headers)) {
-          if (key.toLowerCase() === 'set-cookie') delete headers[key];
+      // Sortie 02 DD3/DD6: isolation is native now (Chromium refuses the cookie), so
+      // the response passes through UNMODIFIED; this only does the honest accounting.
+      // Independent of pause and of the configured state: Chromium refuses regardless.
+      if (isolateEffective && details.resourceType !== 'mainFrame') {
+        try {
+          const classification = classify(details.url, firstParty);
+          if (classification.thirdParty && classification.domain) {
+            const key = Object.keys(headers).find((k) => k.toLowerCase() === 'set-cookie');
+            const raw = key === undefined ? undefined : headers[key];
+            const lines = typeof raw === 'string' ? [raw] : raw;
+            if (Array.isArray(lines) && lines.length > 0 && refusedThirdPartySetCookie(lines)) {
+              const aggregate = privacyByTab.get(details.webContentsId);
+              if (aggregate) {
+                aggregate.cookieBlockedDomains[classification.domain] = 1;
+                schedulePrivacySend(details.webContentsId);
+              }
+            }
+          }
+        } catch {
+          // Privacy accounting must never break traffic.
         }
       }
       callback({ responseHeaders: headers });
     });
 
+    const permissionGranted = (/** @type {string} */ permission) =>
+      ALLOWED_PERMISSIONS.has(permission) && !(isolateEffective && STORAGE_ACCESS_PERMISSIONS.has(permission));
     session.setPermissionRequestHandler((webContents, permission, callback) => {
-      const granted = ALLOWED_PERMISSIONS.has(permission);
+      const granted = permissionGranted(permission);
       const webContentsId = webContents ? webContents.id : null;
       const chrome = webContentsId != null ? chromeForTab(webContentsId) : null;
       chrome?.send('privacy-permission', { webContentsId, permission, granted });
       callback(granted);
     });
-    session.setPermissionCheckHandler((_webContents, permission) => ALLOWED_PERMISSIONS.has(permission));
+    session.setPermissionCheckHandler((_webContents, permission) => permissionGranted(permission));
   }
 
   function onSessionCreated(session) {

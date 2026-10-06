@@ -121,6 +121,14 @@ axe-core audit (`scripts/a11y-audit.mjs`) against the RUNNING app over the MCP s
   synthetic crash/hang record on the active tab via the `showCrashPanelForAudit()` /
   `showHangNoticeForAudit()` evaluate-seam hooks — no real process signal needed — and
   audit the load-failure panel's crash branch and the `#hang-notice` bar respectively.
+- **Restart-to-apply states (`--restart-states`, sortie 02 leg 2)**: opt-in, runs LAST. With
+  isolation in force (`shieldsIsolationState().isolateEffective === true`; otherwise skipped with a
+  message) it sets `isolate:false`, opens the privacy panel and audits
+  `privacy-panel-restart-pending`, then activates `#shields-restart` once and audits
+  `privacy-panel-restart-confirm` (the script never performs the second, relaunching activation).
+  A `finally` restores `isolate:true` and closes the panel. The default sweep is unchanged.
+  Invocation: `npm run a11y -- --restart-states` (add `--tags=wcag2a,wcag2aa,wcag21a,wcag21aa`
+  for the conformance-only view).
 - **Gate**: violations are diffed against the curated `ACCEPTED` allowlist baked into the
   script — only NEW `(rule id, node-selector)` findings fail. Tag convention:
   `--tags=wcag2a,wcag2aa,wcag21a,wcag21aa` (axe's full default set adds non-conformance
