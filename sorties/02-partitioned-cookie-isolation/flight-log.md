@@ -215,3 +215,9 @@ Prints `third-party-cookies fixture listening on :::{fx}` (dual-stack; falls bac
   12. settings Shields sub-toggles not dimmed when the master is off;
   13. privacy-panel Cookies card "N third-party" reads as leakage under isolation (copy);
   14. the `tab-controller.js` privacy typedef lacks `reloadStale`.
+- 2026-10-06: **Squawk batch logged (open, routine): 0120–0132**, 13 items.
+  - **Spec and fixture servicing:** 0120 web-compat-pdf, 0121 download-indicator, 0122 jar-data-surfaces, 0123 oauth-popup `[by-eye]`, 0124 3P fixture `Path=/`.
+  - **Docs and tooling servicing:** 0125 CLAUDE.md cookie-value drift, 0127 a11y-audit stale comments, 0132 `reloadStale` typedef.
+  - **Defects:** 0126 "1 days", 0128 `.activity-kind` contrast, 0129 automation toggle on dev-flag, 0130 settings sub-toggle dim, 0131 Cookies card copy.
+  - **Item 6 was not logged:** it failed squawk criterion 1 (not a defect). The Validator traced the jars-panel staleness to in-page cookie writes, which by design fire no `jar-data-changed`. A live-updating panel would be new behavior, so it is a sortie candidate if wanted.
+  - ID 0119 is used by the UA-strip squawk on PR #244's branch.
