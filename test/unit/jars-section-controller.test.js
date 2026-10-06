@@ -301,3 +301,64 @@ test('every REAL JAR_DATA_CLASSES id has a non-"undefined" confirm-dialog copy A
   assert.equal(clearDataCalls.length, JAR_DATA_CLASSES.length, 'every class was actually confirmed and dispatched');
   controller.destroy();
 });
+
+test('retention select pluralizes day/days (1 day, not "1 days")', async () => {
+  const { createJarsSections } = await import(moduleUrl);
+  const document = createDocument();
+  const sectionsEl = document.createElement('main');
+  const bridge = {
+    historyCount: async () => ({ ok: true, count: 0 }),
+    jarsCookiesList: async () => ({ ok: true, cookies: [] }),
+    jarsSiteDataList: async () => ({ ok: true, origins: [] }),
+    jarsRename: async () => ({}),
+    jarsSetDefault: async () => true,
+    jarsSetRetention: async () => ({ ok: true }),
+    jarsClearData: async () => ({ ok: true }),
+    jarsWipe: async () => ({ ok: true }),
+    jarsRemove: async () => ({ ok: true })
+  };
+  const createJarTabs = () => ({
+    build() {
+      return { tabsWrap: document.createElement('div'), tabRefs: new Map() };
+    },
+    selectTab() {}
+  });
+  const noopPanel = () => ({ onExpanded() {}, onHistoryChanged() {}, onActivated() {}, refresh() {}, destroy() {} });
+  const containers = [
+    { id: 'one', name: 'One', color: '#123456', retentionDays: 1 },
+    { id: 'two', name: 'Two', color: '#123456', retentionDays: 2 }
+  ];
+  const controller = createJarsSections({
+    window: { setTimeout },
+    document,
+    Node: Element,
+    bridge,
+    sectionsEl,
+    newBtn: document.createElement('button'),
+    isSafeColor: () => true,
+    PALETTE: ['#123456'],
+    JAR_PANELS: [],
+    panelForDataClass: () => null,
+    JAR_DATA_CLASSES: [],
+    createHistoryPanel: noopPanel,
+    createCookiesPanel: noopPanel,
+    createSiteDataPanel: noopPanel,
+    createJarTabs,
+    createConfirmModal: () => ({ captureTrigger() {}, update() {} }),
+    getContainers: () => containers,
+    getUi: () => ({ mode: null, rowId: null, action: null, draft: null }),
+    setUi() {},
+    setPageError() {},
+    clearPageError() {},
+    requestRender() {}
+  });
+  controller.render(
+    containers.map((c) => ({ id: c.id, name: c.name, color: c.color, isDefault: false, isBurner: false }))
+  );
+  await tick();
+  const labels = (id) => Array.from(controller.getSectionRefs(id).retentionSelect.options).map((o) => o.textContent);
+  assert.ok(labels('one').includes('1 day'), `expected "1 day" in ${labels('one')}`);
+  assert.ok(labels('two').includes('2 days'), `expected "2 days" in ${labels('two')}`);
+  assert.ok(labels('one').includes('7 days'));
+  for (const l of [...labels('one'), ...labels('two')]) assert.ok(!/^1 days$/.test(l), l);
+});

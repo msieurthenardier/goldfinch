@@ -62,10 +62,10 @@
 // (CLAUDE.md § MCP automation, M15 F3), so axe can never be injected into one; the
 // script prints a notice listing the skipped labels instead of treating that refusal
 // as an apparatus failure. NOTE: `goldfinch://settings`
-// is the INTERNAL session and the eval tool refuses it even for admin, so it
-// CANNOT be audited via `evaluate` (the old CDP path could) — see the
-// findGuestTarget note. The default chrome sweep — what this gate gates on —
-// never depended on a settings-guest run.
+// is the INTERNAL session. It IS auditable via `--target=goldfinch://settings` under
+// the ADMIN key (admin's engine runs allowInternal, so `evaluate` reaches internal
+// guests); a JAR key cannot — jar keys never see the internal session. The default
+// chrome sweep — what this gate gates on — never depended on a settings-guest run.
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -261,11 +261,10 @@ async function getChromeWcId(client) {
 // fixture navigate and drives none of the chrome's state functions (a guest has
 // no togglePanel/togglePrivacy/openLightbox).
 //
-// CAVEAT (internal-session exclusion): the eval tool ALWAYS excludes the internal
-// `goldfinch://settings` session (even for admin), so `--target=goldfinch://settings`
-// cannot be audited via `evaluate` — the old CDP path could. enumerateTabs also
-// omits the internal tab for jar keys; a settings-guest a11y audit via the eval
-// tool is out of reach by design. The default chrome sweep never depended on it.
+// NOTE (internal session): with the ADMIN key, `--target=goldfinch://settings` works
+// (admin enumerateTabs lists the internal tab and `evaluate` reaches it via
+// allowInternal). With a JAR key the internal session is invisible and unreachable,
+// so an internal-page target cannot be found; use the admin key for those.
 async function getGuestWcId(client, substring) {
   const { value: tabs, isError } = await callTool(client, 'enumerateTabs', {});
   if (isError || !Array.isArray(tabs)) {
@@ -275,8 +274,8 @@ async function getGuestWcId(client, substring) {
   if (!tab || typeof tab.wcId !== 'number') {
     fail(
       `no guest tab with a url containing "${substring}" found via enumerateTabs — is it loaded? ` +
-        '(the internal goldfinch://settings session is excluded from the eval tool even for admin; ' +
-        'see the getGuestWcId note.)'
+        '(internal goldfinch:// pages are visible only under the ADMIN key — a jar key never sees the ' +
+        'internal session; see the getGuestWcId note.)'
     );
   }
   return tab.wcId;

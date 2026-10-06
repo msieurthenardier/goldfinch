@@ -3,7 +3,7 @@
 **Slug**: `third-party-cookie-isolation`
 **Status**: active
 **Created**: 2026-10-05
-**Last Run**: 2026-10-06-17-24-03 (pass, post-merge regression on `8fdbe89` with PR #244: 14/14 judged, step 9 struck, UA appendix pass; see runs/2026-10-06-17-24-03.md)
+**Last Run**: 2026-10-06-18-13-21 (pass, squawk turnaround on Electron 44.5.0 + SDK 1.31.0: 14/14 judged, step 9 struck, Version appendix pass; see runs/2026-10-06-18-13-21.md)
 
 ## Intent
 
@@ -50,7 +50,7 @@ Unit tests can't cover this. The behavior lives in Chromium's network-service co
 
 - **Log-matching rules (load-bearing).**
   - `/b/frame` assertions match a log entry on `path` plus `search`, within the step's own `ts` window.
-  - `/b/sa-frame` and `/favicon.ico` lines are never cookie evidence. Favicons are fetched main-side and never carry jar cookies.
+  - `/b/sa-frame` and `/favicon.ico` lines are never cookie evidence. Favicons are fetched main-side through the owning jar's session, so since squawk 0124 (fixture cookies `Path=/`) they DO carry first-party jar cookies — which says nothing about third-party isolation.
   - **Never restart the fixture mid-run**: `serve.mjs` truncates its log on start.
 - **Session restore replays every open tab** within about 0.5 s of each relaunch, often before the MCP listener is up, including `/b/set-fp` and the C embed. After a relaunch, judge only the fresh tab's entries, timestamped after its `openTab`.
 - **Restart attestation (steps 13–15), a hard gate on every restart.** After the confirm click, in order: (1) the **old PID exits** (`ps -p`); (2) a **new PID is alive and listening on `{port}`** within a **bounded wait of up to 30 s** (poll `ss`; it proves the single-instance lock hand-off: if the relaunched child loses the lock and exits, that is a **fail** and gets recorded); (3) the Executor **re-attaches** with a fresh `initialize`/connect (the old MCP session died with the process) using the **same** `adminKey`, which must authenticate (no re-mint); (4) `window.goldfinch.shieldsIsolationState().isolateEffective` **flipped**. Track the new PID as "this run's PID" from then on. wcIds are reused by session restore, so they are **not** a relaunch signal.

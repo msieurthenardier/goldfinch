@@ -59,10 +59,21 @@ function makeSettingsIpcHarness(overrides = {}) {
   };
   const chromeSender = { id: 'chrome-sender' };
   const calls = [];
+  const fail = { relaunch: false, quit: false };
   const app = {
     releaseSingleInstanceLock: () => calls.push(['releaseSingleInstanceLock', { ...env }]),
-    relaunch: (opts) => calls.push(['relaunch', opts, { ...env }]),
-    quit: () => calls.push(['quit'])
+    relaunch: (ro) => {
+      calls.push(['relaunch', ro, { ...env }]);
+      if (fail.relaunch) throw new Error('relaunch boom');
+    },
+    requestSingleInstanceLock: () => {
+      calls.push(['requestSingleInstanceLock']);
+      return true;
+    },
+    quit: () => {
+      calls.push(['quit']);
+      if (fail.quit) throw new Error('quit boom');
+    }
   };
   const env = { GOLDFINCH_AUTOMATION_DEV_MINT: '1', GOLDFINCH_AUTOMATION_ADMIN: '1', ...(overrides.env || {}) };
   const registry = {
@@ -129,6 +140,7 @@ function makeSettingsIpcHarness(overrides = {}) {
     env,
     app,
     calls,
+    fail,
     chromeSender,
     invokeFrom: (channel, sender, ...args) => bare.get(channel)({ sender }, ...args),
     invokeInternal: (channel, ...args) => internal.get(channel)({}, ...args),

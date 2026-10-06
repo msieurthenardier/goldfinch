@@ -545,7 +545,12 @@ export function createPrivacyController(deps) {
 
     // Cookies + storage
     const ck = p && p.cookies;
-    const cSec = pSection('Cookies', '', ck ? `${ck.first} first-party · ${ck.third} third-party` : 'Loading…', '');
+    const cSec = pSection(
+      'Cookies',
+      '',
+      ck ? `Stored: ${ck.first} first-party · ${ck.third} third-party` : 'Loading…',
+      ''
+    );
     const cBtns = document.createElement('div');
     cBtns.className = 'privacy-buttons';
     cBtns.appendChild(pButton('Clear third-party', () => clearCookies('third')));

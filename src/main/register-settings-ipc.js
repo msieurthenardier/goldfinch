@@ -54,15 +54,31 @@ function registerSettingsIpc({
   // silently) -> relaunch -> the normal quit path (before-quit/will-quit run). There is
   // deliberately NO MCP op for this; admin chrome `evaluate` can reach it, exactly like
   // `appQuit` (accepted, documented in docs/mcp-automation.md).
+  // Squawk 0133: `restarting` latches once a restart passes the gate (either channel), so a
+  // second activation can't relaunch twice; a throw after the lock release re-acquires it and
+  // clears the latch (the deleted DEV_MINT is deliberately NOT restored — no key rotation).
+  let restarting = false;
   function restartToApply() {
+    if (restarting) return { ok: false, reason: 'in-progress' };
     const configured = shields.isolateConfigured(shields.get());
     if (effectiveAfterRestartFromConfigured(configured, operatorOverride) === isolateEffective) {
       return { ok: false, reason: 'not-pending' };
     }
+    restarting = true;
     delete env.GOLDFINCH_AUTOMATION_DEV_MINT;
-    app.releaseSingleInstanceLock();
-    app.relaunch(relaunchOptions({ env }));
-    app.quit();
+    try {
+      app.releaseSingleInstanceLock();
+      app.relaunch(relaunchOptions({ env }));
+      app.quit();
+    } catch {
+      try {
+        app.requestSingleInstanceLock();
+      } catch {
+        // best effort
+      }
+      restarting = false;
+      return { ok: false, reason: 'relaunch-failed' };
+    }
     return { ok: true };
   }
   ipcMain.handle('shields-restart-to-apply', (event) => {

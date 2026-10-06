@@ -1,6 +1,6 @@
 # Squawk 0129: Settings 'Enable automation surface' reads OFF while force-bound by --automation-dev
 
-**Status**: open
+**Status**: escalated
 **Type**: defect
 **Severity**: routine
 **Reported**: 2026-10-06
@@ -23,3 +23,11 @@ On a dev launch (`npm run dev:automation`, which force-binds the MCP surface via
 **Reviewer**:
 **Verdict**:
 **Commit**:
+
+## Disposition
+**Escalated** (2026-10-06, turnaround): fails squawk criterion 3 (bounded blast radius, no shared-interface change). The internal settings page learns automation state only from `automationGetStatus()` (`{enabled, host, port, bound, error}`, built by `currentAutomationStatus()` in `src/main/main.js` and served by `automation:get-status` in `src/main/register-settings-ipc.js`). The dev force-bind flag (`devEnableOverride`, `src/main/main.js`) is module-private and never exposed.
+
+A correct fix adds a `forced` field to that payload, which is a main↔internal-page contract change touching the `.d.ts` and the register tests. Inferring it (`bound && !automationEnabled`) is racy during a user flip-off.
+
+→ **Sortie candidate (small):** "Expose dev force-bind in automation status; render the toggle checked and disabled with a 'Forced on by the dev launch' note". No code was changed.
+

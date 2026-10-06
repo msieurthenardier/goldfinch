@@ -204,6 +204,14 @@ main section p {
   padding-left: 14px;
 }
 
+/* Master Shields off: dim the child rows like the privacy panel's .shield-row.dim, but stay operable
+   (no disabled state). Keyed off the live checkbox, so it needs no JS. Opacity is 0.65, not the
+   panel's 0.4: --fg composited at 0.4 on --bg is ~3.3:1 (fails AA); at 0.65 it is ~6.4:1. Rows only,
+   so the restart notes (p.shield-note) are unaffected. */
+.shields-group:has(#shield-enabled:not(:checked)) .shield-row:not(.shield-parent) {
+  opacity: 0.65;
+}
+
 /* Restart-to-apply notes + the Restart now control (sortie 02 leg 2). --accent on --bg is >10:1.
    Notes live inside the fieldset AFTER the rows, never inside a label. */
 .shield-note {
@@ -708,7 +716,7 @@ main section p {
   letter-spacing: 0.04em;
 }
 .activity-session.admin .activity-kind {
-  color: #a371f7;
+  color: #b69cf7; /* lightened from #a371f7 (4.27:1) to clear AA 4.5:1 on --bg-2 */
   border-color: #a371f7;
 }
 .activity-name {

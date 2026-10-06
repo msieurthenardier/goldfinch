@@ -39,7 +39,7 @@ all three hosts); launch the app with `--insecure-tls-fixtures`
 | `/b/pixel` | 1x1 GIF |
 | `/b/api` | JSON `{ok:true}`; echoes `Access-Control-Allow-Origin` + `Allow-Credentials` for the request `Origin` |
 
-Every cookie carries `Max-Age=3600`. Embedders render the relayed reports,
+Every cookie carries `Max-Age=3600`; every `Set-Cookie` header carries `Path=/` (the `document.cookie` writes in `/b/frame` use the default path). Embedders render the relayed reports,
 merged, as JSON into `<pre id="frame-report" data-ready="0|1">` and mirror them in
 `window.frameReport`. The embedder lays out the sandboxed frame (400x80) above
 the sa-frame (400x80); locate the button by `captureScreenshot` and click by
