@@ -137,7 +137,7 @@ export function createShieldsSection(deps) {
   foot.dataset.shield = 'foot';
   const footNote = make('span', 'shield-foot-note hidden');
   footNote.textContent = COPY.footer;
-  const reloadBtn = make('button', 'text-btn small');
+  const reloadBtn = make('button', 'text-btn small hidden');
   reloadBtn.textContent = 'Reload to apply';
   reloadBtn.addEventListener('click', () => onReload());
   foot.appendChild(footNote);
@@ -194,7 +194,7 @@ export function createShieldsSection(deps) {
   /**
    * Patch the node in place from the latest inputs. Never creates or removes children.
    * @param {{ cfg?: any, site?: string, paused?: boolean, effects?: Record<string, [number, string]>,
-   *   isolation?: { isolateEffective: boolean, operatorOverride: any } | null, restoreSession?: boolean }} state
+   *   isolation?: { isolateEffective: boolean, operatorOverride: any } | null, restoreSession?: boolean, reloadStale?: boolean }} state
    */
   function patch(state) {
     const cfg = (state && state.cfg) || {};
@@ -238,6 +238,7 @@ export function createShieldsSection(deps) {
     lastRestartPending = model.restartPending;
     if (!lastRestartPending) confirm.reset();
     setHidden(footNote, !lastRestartPending);
+    setHidden(reloadBtn, !(state && state.reloadStale));
     paintRestart();
   }
 

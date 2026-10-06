@@ -166,3 +166,11 @@ Prints `third-party-cookies fixture listening on :::{fx}` (dual-stack; falls bac
   - live Storage Access rests on unit tests and is carried to the Leg 03 HAT.
 
   Legs 01 and 02 marked `completed`; committing.
+- 2026-10-06: Flight committed `31be656`; draft PR #246. Leg 03 HAT designed (interactive; no Developer/Reviewer cycle). Lightweight design: 10 operator steps carrying every HAT-agenda item from Legs 01–02.
+- 2026-10-06: **Leg 03 HAT progress.**
+  - **Step 1 PASS:** real claude.ai artifacts (including an image-heavy one) render with isolation on. That is charter criterion 1, live.
+  - **Step 2 PASS:** no isolate count on an artifact tab. Operator observation: the Cookies card reading "16 first-party · 35 third-party" under active isolation looks alarming. It is the stored-cookie list (incl. partition copies, DD8), not leakage. **Follow-up squawk candidate:** relabel it ("stored").
+  - **Step 3 PASS:** panel turn-off → Restart now → Restart Goldfinch relaunched the signed-in profile, with tabs and sign-in kept; post-state `isolateEffective:false`.
+  - **HAT-F1 (FEATURE):** the operator found "Reload to apply" confusing and chose "show only when needed". FD classified it as a FEATURE (new behavior/state), so it goes through a scoped design review before implementation, per the fix-vs-feature gate. Single surface. Design is in the leg 03 HAT Findings.
+  - **HAT-F1 implemented (Developer):** `applyShieldsConfig` in `privacy-controller.js` (all four config-assignment sites), `reloadStale` on `blankPrivacy()`, a `reloadStale` input to `shields-section.js` `patch()` (button hidden by default, patched in place), and an immediate clear in `onReload`. `renderer.js` untouched. 8 new unit tests in `privacy-controller.test.js`; neuter-verified (isolate-only, boot resolve). Gates run; see the Developer report.
+- 2026-10-06: **HAT-F1 review: `[HANDOFF:confirmed]`** (independent Reviewer: 5824 tests pass, 0 fail; lint, typecheck and format clean; renderer.js untouched). Non-blocking: the `privacy` typedef in `tab-controller.js:18` doesn't list `reloadStale` (strict:false; squawk batch). Committing HAT-F1 mid-HAT; the operator's dev instance is relaunched to load it before step 4.

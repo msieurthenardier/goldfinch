@@ -26,7 +26,7 @@ export function createPrivacyController(deps) {
   /* --------------------------------------------------------- privacy panel */
 
   function blankPrivacy() {
-    return { net: null, fp: { canvas: 0, webgl: 0, audio: 0 }, permissions: [], cookies: null };
+    return { net: null, fp: { canvas: 0, webgl: 0, audio: 0 }, permissions: [], cookies: null, reloadStale: false };
   }
 
   function closePrivacyPanel() {
@@ -182,8 +182,29 @@ export function createPrivacyController(deps) {
   let isolationState = /** @type {{ isolateEffective: boolean, operatorOverride: any } | null} */ (null);
   // Restart-confirm copy input; default true. Guarded `!== undefined`, never truthiness.
   let restoreSession = true;
+  const RELOAD_KEYS = ['enabled', 'block', 'strip', 'farble'];
+  const sortedKey = (/** @type {any} */ a) => JSON.stringify([...(Array.isArray(a) ? a : [])].sort());
+  /**
+   * The ONE assignment site for shieldsConfig. A change in a reload-affecting key (never isolate,
+   * which is restart-to-apply) marks every eligible web tab `privacy.reloadStale` (cleared when
+   * renderer.js replaces tab.privacy on navigation). A null previous config (boot) never marks;
+   * an identical re-arrival (local result + broadcast) is a no-op.
+   */
+  function applyShieldsConfig(/** @type {any} */ next) {
+    const prev = shieldsConfig;
+    if (prev && next) {
+      const changed =
+        RELOAD_KEYS.some((k) => prev[k] !== next[k]) || sortedKey(prev.pausedSites) !== sortedKey(next.pausedSites);
+      if (changed && ctx.tabs) {
+        for (const t of ctx.tabs.values()) {
+          if (isWebTab(t) && t.wcId != null && t.privacy) t.privacy.reloadStale = true;
+        }
+      }
+    }
+    shieldsConfig = next;
+  }
   window.goldfinch.shieldsGet().then((c) => {
-    shieldsConfig = c;
+    applyShieldsConfig(c);
     renderPrivacy();
   });
   window.goldfinch
@@ -200,7 +221,7 @@ export function createPrivacyController(deps) {
     }
   });
   window.goldfinch.onShieldsChanged((c) => {
-    shieldsConfig = c;
+    applyShieldsConfig(c);
     renderPrivacy();
   });
 
@@ -357,7 +378,7 @@ export function createPrivacyController(deps) {
   }
 
   async function setShield(key, value) {
-    shieldsConfig = await window.goldfinch.shieldsSet({ [key]: value });
+    applyShieldsConfig(await window.goldfinch.shieldsSet({ [key]: value }));
     renderPrivacy();
   }
 
@@ -365,7 +386,7 @@ export function createPrivacyController(deps) {
     const site = currentSite();
     if (!site) return;
     const paused = shieldsConfig && shieldsConfig.pausedSites.includes(site);
-    shieldsConfig = await window.goldfinch.shieldsPause({ site, paused: !paused });
+    applyShieldsConfig(await window.goldfinch.shieldsPause({ site, paused: !paused }));
     renderPrivacy();
   }
 
@@ -379,7 +400,11 @@ export function createPrivacyController(deps) {
       const t = activeTab();
       if (!t) return;
       // Internal tabs are excluded by disabled button state; only web tabs reach here.
-      if (isWebTab(t) && t.wcId != null) window.goldfinch.tabNavigate({ wcId: t.wcId, verb: 'reload', args: [] });
+      if (isWebTab(t) && t.wcId != null) {
+        window.goldfinch.tabNavigate({ wcId: t.wcId, verb: 'reload', args: [] });
+        if (t.privacy) t.privacy.reloadStale = false;
+        renderPrivacy();
+      }
     },
     // Restart now: the chrome channel is sender-validated and business-gated main-side; it
     // takes no arguments. Not an MCP op (admin chrome `evaluate` can reach it, like appQuit).
@@ -406,7 +431,8 @@ export function createPrivacyController(deps) {
         isolate: [net.cookiesBlocked, 'isolated']
       },
       isolation: isolationState,
-      restoreSession
+      restoreSession,
+      reloadStale: !!(tab && isWebTab(tab) && tab.wcId != null && tab.privacy && tab.privacy.reloadStale === true)
     });
   }
 

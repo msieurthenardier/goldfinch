@@ -135,7 +135,7 @@ function harness() {
   els.privacyPanel.classList.add('collapsed');
   const document = doc;
   document.createElement = (tag) => new El(doc, tag);
-  const ctx = { activeTabId: 'a' };
+  const ctx = { activeTabId: 'a', tabs: new Map() };
   const calls = [];
   const toasts = [];
   const callbacks = {};
@@ -211,10 +211,14 @@ function harness() {
       net: { firstParty: 'example.test', trackers: { count: 3, blocked: 3 }, stripped: 0, cookiesBlocked: 0 },
       fp: {},
       permissions: [],
-      cookies: []
+      cookies: [],
+      reloadStale: false
     }
   };
   const tabB = { ...tabA, id: 'b', wcId: 20, container: { ...tabA.container, id: 'jar-b', partition: 'persist:b' } };
+  tabB.privacy = { ...tabA.privacy };
+  ctx.tabs.set('a', tabA);
+  ctx.tabs.set('b', tabB);
   const state = { active: tabA, models: [] };
   const deps = {
     window,
@@ -664,4 +668,114 @@ test('nothing pending: the restart control stays hidden and the confirm cannot l
   h.callbacks.shields({ ...h.baseShields, isolate: true }); // pending cleared
   assert.equal(q('[data-shield="restart"]').classList.contains('hidden'), true);
   assert.equal(q('#shields-restart').textContent, 'Restart now');
+});
+
+// ---- HAT-F1: "Reload to apply" shows only while the active web tab is stale ----
+
+const reloadBtnOf = (q) => q('[data-shield="foot"]').children.find((c) => c.textContent === 'Reload to apply');
+const isShown = (el) => !el.classList.contains('hidden');
+
+test('HAT-F1 reload button is hidden at boot and the boot resolve does not mark', async () => {
+  const h = harness();
+  const { q } = await openPanel(h);
+  assert.equal(isShown(reloadBtnOf(q)), false);
+  assert.equal(h.tabA.privacy.reloadStale, false);
+  assert.equal(h.tabB.privacy.reloadStale, false);
+});
+
+test('HAT-F1 a block toggle (panel path) marks every web tab, shows the button, and Reload clears it immediately', async () => {
+  const h = harness();
+  const { q, controller } = await openPanel(h);
+  const btn = reloadBtnOf(q);
+  await controller.setShield('block', false);
+  assert.equal(h.tabA.privacy.reloadStale, true);
+  assert.equal(h.tabB.privacy.reloadStale, true, 'global change marks non-active tabs too');
+  assert.equal(isShown(btn), true);
+  assert.equal(reloadBtnOf(q), btn, 'patched in place, same node');
+  btn.dispatch('click');
+  assert.equal(h.tabA.privacy.reloadStale, false);
+  assert.equal(isShown(btn), false);
+  assert.equal(h.tabB.privacy.reloadStale, true, 'other tab stays stale until it reloads');
+  assert.deepEqual(h.calls.filter(([n]) => n === 'navigate').length, 1);
+});
+
+test('HAT-F1 the shields-changed broadcast path marks, and an identical re-broadcast does not re-mark', async () => {
+  const h = harness();
+  const { q } = await openPanel(h);
+  h.callbacks.shields({ ...h.baseShields, strip: false });
+  assert.equal(h.tabA.privacy.reloadStale, true);
+  assert.equal(isShown(reloadBtnOf(q)), true);
+  h.tabA.privacy.reloadStale = false;
+  h.callbacks.shields({ ...h.baseShields, strip: false });
+  assert.equal(h.tabA.privacy.reloadStale, false, 'second identical arrival is a no-op');
+});
+
+test('HAT-F1 an isolate-only change does not mark (setShield and broadcast)', async () => {
+  const h = harness();
+  const { q, controller } = await openPanel(h);
+  await controller.setShield('isolate', false);
+  assert.equal(h.tabA.privacy.reloadStale, false);
+  h.callbacks.shields({ ...h.baseShields, isolate: false });
+  assert.equal(h.tabA.privacy.reloadStale, false);
+  assert.equal(h.tabB.privacy.reloadStale, false);
+  assert.equal(isShown(reloadBtnOf(q)), false);
+});
+
+test('HAT-F1 pausedSites: a fresh-but-equal array does not mark; a real change does', async () => {
+  const h = harness();
+  h.ext.cfg = { ...h.baseShields, pausedSites: ['x.test', 'y.test'] };
+  const { controller } = await openPanel(h);
+  h.callbacks.shields({ ...h.baseShields, pausedSites: ['y.test', 'x.test'] });
+  assert.equal(h.tabA.privacy.reloadStale, false);
+  await controller.toggleSitePause();
+  assert.equal(h.tabA.privacy.reloadStale, true);
+});
+
+test('HAT-F1 internal, welcome (viewless) tabs are never marked; a later-opened tab is not stale', async () => {
+  const h = harness();
+  const { controller } = await openPanel(h);
+  const internal = { id: 'i', wcId: 30, internal: true, privacy: { reloadStale: false } };
+  const welcome = { id: 'w', wcId: null, internal: false, privacy: { reloadStale: false } };
+  h.ctx.tabs.set('i', internal);
+  h.ctx.tabs.set('w', welcome);
+  await controller.setShield('farble', false);
+  assert.equal(internal.privacy.reloadStale, false);
+  assert.equal(welcome.privacy.reloadStale, false);
+  const later = { id: 'l', wcId: 40, internal: false, privacy: controller.blankPrivacy() };
+  h.ctx.tabs.set('l', later);
+  assert.equal(later.privacy.reloadStale, false);
+});
+
+test('HAT-F1 replacing tab.privacy (navigation) clears the flag; internal active tab never shows the button', async () => {
+  const h = harness();
+  const { q, controller } = await openPanel(h);
+  await controller.setShield('block', false);
+  h.tabA.privacy = controller.blankPrivacy();
+  controller.renderPrivacy();
+  assert.equal(isShown(reloadBtnOf(q)), false);
+  h.tabB.privacy.reloadStale = true;
+  h.state.active = {
+    id: 'i',
+    wcId: 30,
+    internal: true,
+    url: 'goldfinch://settings',
+    privacy: { ...h.tabA.privacy, reloadStale: true }
+  };
+  controller.renderPrivacy();
+  assert.equal(isShown(reloadBtnOf(q)), false);
+});
+
+test('HAT-F1 a change while the panel is collapsed shows the button on open; a non-active mark shows on switch', async () => {
+  const h = harness();
+  const { q, controller } = await openPanel(h);
+  controller.togglePrivacy(false);
+  await controller.setShield('enabled', false);
+  controller.togglePrivacy(true);
+  assert.equal(isShown(reloadBtnOf(q)), true);
+  h.tabA.privacy.reloadStale = false;
+  h.state.active = h.tabB;
+  h.ctx.activeTabId = 'b';
+  h.tabB.privacy = { ...h.tabB.privacy, net: { ...fullNet }, cookies: fullCookies };
+  controller.renderPrivacy();
+  assert.equal(isShown(reloadBtnOf(q)), true, 'tab B was marked while inactive');
 });
