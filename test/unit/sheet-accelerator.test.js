@@ -84,13 +84,34 @@ test('meta works as the modifier wherever control does (mac chords)', () => {
 });
 
 // M09 F4 Leg 2 (DD2 step 1): 'T' is pulled OUT of this negative loop — Ctrl+Shift+T
-// now retires its reservation and matches (see the dedicated test below). W/L/M/R
+// now retires its reservation and matches (see the dedicated test below).
+// Sortie 03 DD1 likewise pulls 'R' out (Ctrl+Shift+R -> hard-reload). W/L/M
 // stay in the loop; keydownToAction matches those lowercase-only, so the union
 // must not widen them.
-test('uppercase W/L/M/R (shifted chords) do NOT match — mirrors keydownToAction case discipline', () => {
-  for (const key of ['W', 'L', 'M', 'R']) {
+test('uppercase W/L/M (shifted chords) do NOT match — mirrors keydownToAction case discipline', () => {
+  for (const key of ['W', 'L', 'M']) {
     assert.equal(ctrl(key, { shift: true }), null, `Ctrl+Shift+${key} must not match`);
   }
+});
+
+// Sortie 03 DD1/DD2: hard-reload, mirrored in lockstep with keydown-action.js.
+test('Ctrl+Shift+R / Ctrl+Shift+r / Meta+Shift+R -> chrome hard-reload, no autoRepeatGuard (Sortie 03 DD1)', () => {
+  const hr = { scope: 'chrome', action: 'hard-reload' };
+  assert.deepEqual(ctrl('R', { shift: true }), hr);
+  assert.deepEqual(ctrl('r', { shift: true }), hr);
+  assert.deepEqual(k('R', { meta: true, shift: true }), hr);
+});
+
+test('F5 family -> chrome reload / hard-reload, NO modifier required, Alt variants null (Sortie 03 DD2)', () => {
+  const hr = { scope: 'chrome', action: 'hard-reload' };
+  assert.deepEqual(k('F5'), { scope: 'chrome', action: 'reload' });
+  assert.deepEqual(k('F5', { shift: true }), hr);
+  assert.deepEqual(k('F5', { control: true }), hr);
+  assert.deepEqual(k('F5', { meta: true }), hr);
+  assert.deepEqual(k('F5', { control: true, shift: true }), hr);
+  assert.equal(k('F5', { alt: true }), null);
+  assert.equal(k('F5', { alt: true, control: true }), null);
+  assert.equal(k('F5', { alt: true, shift: true }), null);
 });
 
 test('Ctrl+Shift+T / Ctrl+Shift+t -> chrome reopen-closed-tab (M09 F4 DD2 — retires the reservation)', () => {
@@ -129,8 +150,13 @@ test('unshifted Ctrl+B does NOT match — only the shifted chord is assigned', (
 });
 
 // ---------------------------------------------------------------------------
-// APG-key exclusions (by construction: control||meta required except F12)
+// APG-key exclusions (by construction: control||meta required except F12 and F5)
 // ---------------------------------------------------------------------------
+
+test('F5 is the second modifier-less exemption beside F12 (neither is an APG key)', () => {
+  assert.notEqual(k('F12'), null);
+  assert.notEqual(k('F5'), null);
+});
 
 test('unmodified APG keys stay with the sheet page (null)', () => {
   for (const key of ['ArrowDown', 'ArrowUp', 'Home', 'End', 'Enter', ' ', 'Escape', 'Tab']) {

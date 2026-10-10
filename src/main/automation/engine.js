@@ -241,7 +241,8 @@ function createEngine(
     navigate: (/** @type {number} */ wcId, /** @type {string} */ url) => nav.navigate(wcId, url, deps()),
     goBack: (/** @type {number} */ wcId) => nav.goBack(wcId, deps()),
     goForward: (/** @type {number} */ wcId) => nav.goForward(wcId, deps()),
-    reload: (/** @type {number} */ wcId) => nav.reload(wcId, deps()),
+    reload: (/** @type {number} */ wcId, /** @type {{ ignoreCache?: boolean } | undefined} */ opts) =>
+      nav.reload(wcId, deps(), opts),
     click: (/** @type {number} */ wcId, /** @type {number} */ x, /** @type {number} */ y, /** @type {any} */ opts) =>
       input.click(wcId, x, y, deps(), opts),
     typeText: (/** @type {number} */ wcId, /** @type {string} */ text) => input.typeText(wcId, text, deps()),

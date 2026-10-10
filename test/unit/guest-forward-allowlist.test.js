@@ -27,6 +27,7 @@ const WEB_FORWARDABLE = [
   'toggle-panel',
   'toggle-privacy',
   'reload',
+  'hard-reload',
   'reopen-closed-tab'
 ];
 
@@ -71,7 +72,14 @@ test('internal guest: new-window is forwardable (M09 F6 DD5 — app-level like n
   assert.equal(isChromeActionForwardable('new-window', 'internal'), true);
 });
 
-const INTERNAL_NOT_FORWARDABLE = ['focus-address', 'toggle-panel', 'toggle-privacy', 'reload', ...WEB_MAIN_SIDE];
+const INTERNAL_NOT_FORWARDABLE = [
+  'focus-address',
+  'toggle-panel',
+  'toggle-privacy',
+  'reload',
+  'hard-reload',
+  ...WEB_MAIN_SIDE
+];
 
 for (const action of INTERNAL_NOT_FORWARDABLE) {
   test(`internal guest: '${action}' is NOT forwardable (conservative allowlist — extend explicitly later)`, () => {
@@ -245,6 +253,7 @@ const NOT_REPEAT_SAFE = [
   'toggle-panel',
   'toggle-privacy',
   'reload',
+  'hard-reload',
   'reopen-closed-tab'
 ];
 
@@ -261,4 +270,21 @@ test('isRepeatSafeAction never throws on null/undefined/empty/non-string', () =>
     assert.equal(isRepeatSafeAction(''), false);
     assert.equal(isRepeatSafeAction(42), false);
   });
+});
+
+// Sortie 03 AC3: the end-to-end classify -> allowlist pipeline for hard-reload
+// and plain F5 (web forwards, internal does not).
+test('pipeline: Ctrl+Shift+R classifies hard-reload; forwarded on web, NOT on internal (Sortie 03)', () => {
+  const action = keydownToAction({ key: 'R', ctrl: true, meta: false, shift: true, lightboxOpen: false });
+  assert.equal(action, 'hard-reload');
+  assert.equal(isChromeActionForwardable(action, 'web'), true);
+  assert.equal(isChromeActionForwardable(action, 'internal'), false);
+  assert.equal(isRepeatSafeAction(action), false);
+});
+
+test('pipeline: unmodified F5 classifies reload; forwarded on web, NOT on internal (Sortie 03)', () => {
+  const action = keydownToAction({ key: 'F5', ctrl: false, meta: false, shift: false, lightboxOpen: false });
+  assert.equal(action, 'reload');
+  assert.equal(isChromeActionForwardable(action, 'web'), true);
+  assert.equal(isChromeActionForwardable(action, 'internal'), false);
 });

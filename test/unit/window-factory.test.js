@@ -461,3 +461,26 @@ test('absent releaseVaultHoldsForWindow dep is tolerated at window close (option
   const rec = h.factory.createWindow();
   assert.doesNotThrow(() => rec.win.emit('close'));
 });
+
+// Sortie 03 AC4 (optional real-sheet pin): a sheet keyDown Ctrl+Shift+R, run
+// through the REAL sheetAcceleratorAction, forwards chrome-shortcut-action
+// { action: 'hard-reload' } to the owning chrome exactly once.
+test('sheet keyDown Ctrl+Shift+R sends chrome-shortcut-action hard-reload once to the owning chrome (Sortie 03)', () => {
+  const { sheetAcceleratorAction } = require('../../src/shared/sheet-accelerator');
+  const h = createHarness({ sheetAcceleratorAction });
+  h.factory.createWindow();
+  const sheet = h.managerDeps.sheet.createSheetView();
+  let prevented = 0;
+  const event = { preventDefault: () => (prevented += 1) };
+  h.chromeSends.length = 0;
+  sheet.webContents.emit('before-input-event', event, {
+    type: 'keyDown',
+    key: 'R',
+    control: true,
+    meta: false,
+    shift: true,
+    alt: false
+  });
+  assert.equal(prevented, 1);
+  assert.deepEqual(h.chromeSends, [['chrome-shortcut-action', { action: 'hard-reload' }]]);
+});

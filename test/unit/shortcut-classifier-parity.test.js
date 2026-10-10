@@ -67,7 +67,13 @@ const CHROME_SCOPE_CASES = [
   // This leg's additions (DD5).
   { chord: { key: 'd', ctrl: true }, action: 'bookmark-page' },
   { chord: { key: 'B', ctrl: true, shift: true }, action: 'toggle-bookmarks-bar' },
-  { chord: { key: 'b', ctrl: true, shift: true }, action: 'toggle-bookmarks-bar' }
+  { chord: { key: 'b', ctrl: true, shift: true }, action: 'toggle-bookmarks-bar' },
+  // Sortie 03 DD1/DD2: hard-reload and the F5 family (F5 is modifier-less on both).
+  { chord: { key: 'R', ctrl: true, shift: true }, action: 'hard-reload' },
+  { chord: { key: 'r', ctrl: true, shift: true }, action: 'hard-reload' },
+  { chord: { key: 'F5' }, action: 'reload' },
+  { chord: { key: 'F5', shift: true }, action: 'hard-reload' },
+  { chord: { key: 'F5', ctrl: true }, action: 'hard-reload' }
 ];
 
 for (const { chord, action } of CHROME_SCOPE_CASES) {
@@ -128,7 +134,8 @@ const NULL_ON_BOTH = [
   { key: 'b', ctrl: true }, // unshifted Ctrl+B — unassigned (only Ctrl+Shift+B is)
   { key: 'B', ctrl: true }, // capital B, no shift flag — same unassigned chord
   { key: 'D', ctrl: true, shift: true, alt: true }, // near-miss noise: an unassigned Alt combo
-  { key: '7', ctrl: true, alt: true } // AltGr digit guard (pre-existing, re-verified here)
+  { key: '7', ctrl: true, alt: true }, // AltGr digit guard (pre-existing, re-verified here)
+  { key: 'F5', alt: true } // Sortie 03 DD2: Alt+F5 falls through on both sides (F6 !alt parity)
 ];
 
 for (const chord of NULL_ON_BOTH) {

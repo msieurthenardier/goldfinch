@@ -88,6 +88,9 @@ class FakeContents extends EventEmitter {
   reload() {
     this.log.push(['reload', this.id]);
   }
+  reloadIgnoringCache() {
+    this.log.push(['reload-ignoring-cache', this.id]);
+  }
   stop() {
     this.log.push(['stop', this.id]);
   }
@@ -1935,6 +1938,58 @@ test('reload calls wc.reload() as before when history is non-empty (no regressio
     h.log.filter((x) => x[0] === 'load' || x[0] === 'reload'),
     [['reload', 101]]
   );
+});
+
+// Sortie 03 DD4: the reloadIgnoringCache verb.
+const hardLog = (h) => h.log.filter((x) => x[0] === 'load' || x[0] === 'reload' || x[0] === 'reload-ignoring-cache');
+
+test('Sortie 03 DD4: reloadIgnoringCache calls wc.reloadIgnoringCache() once and never wc.reload()', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  h.addTab(record, 101);
+  h.log.length = 0;
+  h.ipcMain.send('tab-navigate', record.chromeView.webContents, { wcId: 101, verb: 'reloadIgnoringCache', args: [] });
+  assert.deepEqual(hardLog(h), [['reload-ignoring-cache', 101]]);
+});
+
+test('Sortie 03 DD4: reloadIgnoringCache with empty history falls back to loadURL(effectiveUrl(entry))', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  const tab = h.addTab(record, 101);
+  tab.webContents._historyLength = 0;
+  tab.webContents.url = 'https://crashed-before-commit.test/';
+  record.tabViews.get(101).lastRequestedUrl = 'https://crashed-before-commit.test/';
+  h.log.length = 0;
+  h.ipcMain.send('tab-navigate', record.chromeView.webContents, { wcId: 101, verb: 'reloadIgnoringCache' });
+  assert.deepEqual(hardLog(h), [['load', 101, 'https://crashed-before-commit.test/']]);
+});
+
+test('Sortie 03 DD4: reloadIgnoringCache ignores args (no loadURL to a supplied URL)', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  h.addTab(record, 101);
+  h.log.length = 0;
+  h.ipcMain.send('tab-navigate', record.chromeView.webContents, {
+    wcId: 101,
+    verb: 'reloadIgnoringCache',
+    args: ['https://evil.example']
+  });
+  assert.deepEqual(hardLog(h), [['reload-ignoring-cache', 101]]);
+});
+
+test('Sortie 03 DD4: reloadIgnoringCache is a no-op for a destroyed wc or a non-owning sender', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  const other = h.makeRecord(2);
+  const tab = h.addTab(record, 101);
+  h.log.length = 0;
+  h.ipcMain.send('tab-navigate', other.chromeView.webContents, { wcId: 101, verb: 'reloadIgnoringCache' });
+  assert.deepEqual(hardLog(h), [], "a foreign chrome cannot drive another window's tab");
+  tab.webContents.destroyed = true;
+  h.ipcMain.send('tab-navigate', record.chromeView.webContents, { wcId: 101, verb: 'reloadIgnoringCache' });
+  assert.deepEqual(hardLog(h), []);
+  h.ipcMain.send('tab-navigate', record.chromeView.webContents, { wcId: 999, verb: 'reloadIgnoringCache' });
+  assert.deepEqual(hardLog(h), []);
 });
 
 // ---------------------------------------------------------------------------

@@ -95,7 +95,7 @@ function imageResult(b64) {
 // ---------------------------------------------------------------------------
 
 const PRESS_KEY_NAMES =
-  'Tab, Enter, Escape, Space, ArrowRight, ArrowLeft, ArrowDown, ArrowUp, Home, End, Delete, Backspace, ShiftTab';
+  'Tab, Enter, Escape, Space, ArrowRight, ArrowLeft, ArrowDown, ArrowUp, Home, End, Delete, Backspace, F5, F6, ShiftTab';
 
 /**
  * Tool def shape. `call` is the named→positional seam (internal; never leaked by listTools).
@@ -212,13 +212,17 @@ const DRIVE_TOOLS = [
   },
   {
     name: 'reload',
-    description: 'Reload the tab identified by wcId.',
+    description: 'Reload the tab identified by wcId. Pass ignoreCache: true to bypass the HTTP cache (a hard reload).',
     inputSchema: {
       type: 'object',
-      properties: { wcId: { type: 'integer', description: 'webContents id of the target tab' } },
+      properties: {
+        wcId: { type: 'integer', description: 'webContents id of the target tab' },
+        ignoreCache: { type: 'boolean', description: 'optional; true bypasses the HTTP cache (hard reload)' }
+      },
       required: ['wcId']
     },
-    call: (engine, { wcId }) => engine.reload(wcId)
+    call: (engine, { wcId, ignoreCache }) =>
+      ignoreCache === true ? engine.reload(wcId, { ignoreCache: true }) : engine.reload(wcId)
   },
   {
     name: 'getZoom',

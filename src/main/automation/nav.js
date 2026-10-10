@@ -110,14 +110,15 @@ function goForward(wcId, deps) {
  *
  * @param {number} wcId
  * @param {{ fromId: (id: number) => any, chromeContents?: any, allowInternal?: boolean }} deps
+ * @param {{ ignoreCache?: boolean }} [opts]  `ignoreCache === true` (strictly) bypasses the HTTP cache
  * @returns {void}
  */
-function reload(wcId, deps) {
+function reload(wcId, deps, opts) {
   const wc = resolveContents(wcId, deps);
   if (isInternalContents(wc)) {
     throw new Error('automation: reload — internal-session excluded');
   }
-  return wc.reload();
+  return opts && opts.ignoreCache === true ? wc.reloadIgnoringCache() : wc.reload();
 }
 
 module.exports = { navigate, goBack, goForward, reload };

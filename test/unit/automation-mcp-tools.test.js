@@ -367,10 +367,22 @@ test('enumerateTabs invokes engine.enumerateTabs() with no args', async () => {
 test('single-wcId ops map to engine.op(wcId)', async () => {
   const { engine, calls } = makeFakeEngine({ returns: { closeTab: true, activateTab: true } });
   const reg = buildToolRegistry(() => engine);
-  for (const name of ['closeTab', 'activateTab', 'goBack', 'goForward', 'reload']) {
+  for (const name of ['closeTab', 'activateTab', 'goBack', 'goForward']) {
     await reg.callTool(name, { wcId: 42 });
     assert.deepEqual(calls[name][0], [42], name);
   }
+});
+
+// Sortie 03 DD6: `reload` left the shared [42] loop above — it takes an optional
+// ignoreCache and forwards it ONLY when it is strictly boolean true.
+test('reload maps to engine.reload(wcId) unless ignoreCache === true, then engine.reload(wcId, { ignoreCache: true })', async () => {
+  const { engine, calls } = makeFakeEngine();
+  const reg = buildToolRegistry(() => engine);
+  await reg.callTool('reload', { wcId: 42 });
+  await reg.callTool('reload', { wcId: 42, ignoreCache: false });
+  await reg.callTool('reload', { wcId: 42, ignoreCache: 'true' });
+  await reg.callTool('reload', { wcId: 42, ignoreCache: true });
+  assert.deepEqual(calls.reload, [[42], [42], [42], [42, { ignoreCache: true }]]);
 });
 
 test('openTab (no jarId) maps to engine.openTab(url, undefined); typeText to engine.typeText(wcId, text); pressKey to engine.pressKey(wcId, name)', async () => {
@@ -1080,6 +1092,16 @@ function declaresOptional(schema, prop, type) {
   if (props[prop].type !== type) return false;
   return !(schema.required ?? []).includes(prop);
 }
+
+test('Sortie 03 DD6: reload declares ignoreCache as an optional boolean; wcId stays the only required field; pressKey names list F5 and F6', () => {
+  const reg = buildToolRegistry(() => makeFakeEngine().engine);
+  const byName = new Map(reg.listTools().map((t) => [t.name, t]));
+  assert.equal(declaresOptional(byName.get('reload').inputSchema, 'ignoreCache', 'boolean'), true);
+  assert.deepEqual(byName.get('reload').inputSchema.required, ['wcId']);
+  const pk = byName.get('pressKey');
+  assert.match(pk.description, /\bF5\b/);
+  assert.match(pk.description, /\bF6\b/);
+});
 
 test('DD9: the windowId param is pinned FIELD BY FIELD on captureWindow and getChromeTarget — with a positive control', () => {
   const reg = buildToolRegistry(() => makeFakeEngine().engine);

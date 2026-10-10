@@ -16,12 +16,15 @@
  * Gating, mirroring the live handler:
  *   - F12 is decided BEFORE the modifier gate (it carries no modifier). It
  *     defers while a lightbox is open.
+ *   - F5 (Sortie 03 DD1/DD2) is also decided BEFORE the modifier gate, gated on
+ *     !alt: unmodified F5 -> 'reload'; Shift/Ctrl/Meta+F5 -> 'hard-reload'.
+ *     NOT lightbox-gated (reload never is).
  *   - mod = ctrl || meta; with no modifier (and key !== 'F12'), nothing matches.
  *   - Zoom (=/+/-/0) and find (f/F) defer while a lightbox is open.
  *   - Tab-cycle (Ctrl+Tab/Ctrl+Shift+Tab, Ctrl+PageDown/Ctrl+PageUp) and
  *     tab-jump (Ctrl+1..9) are NOT lightbox-deferred — tab switching must
  *     always work, matching the new-tab/close-tab precedent (M09 F3, DD1).
- *   - The rest of the chain (t/w/l/m/j, Shift+P, Shift+T, Ctrl+Shift+I, r) is NOT
+ *   - The rest of the chain (t/w/l/m/j, Shift+P, Shift+T, Shift+R, Ctrl+Shift+I, r) is NOT
  *     lightbox-gated — EXCEPT Ctrl+Shift+I (devtools), which IS lightbox-guarded
  *     in the live handler, matching the F12 devtools entry point. Ctrl+J
  *     (downloads) is app-level like new-tab, so it is NOT lightbox-gated.
@@ -50,7 +53,7 @@
  * }} descriptor
  * @returns {'devtools' | 'zoom-in' | 'zoom-out' | 'zoom-reset' | 'find'
  *   | 'new-tab' | 'close-tab' | 'new-window' | 'focus-address' | 'toggle-panel'
- *   | 'toggle-privacy' | 'reload' | 'downloads'
+ *   | 'toggle-privacy' | 'reload' | 'hard-reload' | 'downloads'
  *   | 'tab-next' | 'tab-prev'
  *   | 'tab-jump-1' | 'tab-jump-2' | 'tab-jump-3' | 'tab-jump-4' | 'tab-jump-5'
  *   | 'tab-jump-6' | 'tab-jump-7' | 'tab-jump-8' | 'tab-jump-last'
@@ -78,6 +81,13 @@ export function keydownToAction({ key, ctrl, meta, shift, lightboxOpen, alt = fa
   // BOTH sides of the boundary, matching the guest-side crossViewNavAction's
   // identical gate.
   if (key === 'F6' && !ctrl && !meta && !alt) return shift ? 'focus-chrome' : 'focus-content';
+
+  // F5 family (Sortie 03 DD1/DD2) — decided BEFORE the modifier gate, beside
+  // F12/F6, because unmodified F5 carries no modifier. Plain F5 reloads;
+  // Shift+F5, Ctrl+F5, Meta+F5 (and Ctrl+Shift+F5) hard-reload (Chrome's set).
+  // Gated on !alt like F6 so Alt+F5 falls through as a no-op.
+  // LOCKSTEP PIN: sheet-accelerator.js hand-mirrors this branch.
+  if (key === 'F5' && !alt) return shift || ctrl || meta ? 'hard-reload' : 'reload';
 
   const mod = ctrl || meta;
   if (!mod) return null;
@@ -121,6 +131,12 @@ export function keydownToAction({ key, ctrl, meta, shift, lightboxOpen, alt = fa
   // LOCKSTEP PIN: sheet-accelerator.js hand-mirrors this classifier — this
   // addition lands in both files in the same change.
   if (shift && (key === 'B' || key === 'b')) return 'toggle-bookmarks-bar';
+
+  // Ctrl+Shift+R -> hard-reload (Sortie 03 DD1). Matches both cases (capslock-
+  // with-shift parity, same as the T/B/P/I chords); sits in the shifted chain
+  // BEFORE the unshifted lowercase-only `r` -> reload below. NOT lightbox-gated.
+  // LOCKSTEP PIN: sheet-accelerator.js hand-mirrors this classifier.
+  if (shift && (key === 'R' || key === 'r')) return 'hard-reload';
 
   // The rest of the chain (NOT lightbox-gated, except Ctrl+Shift+I below).
   if (key === 't') return 'new-tab';

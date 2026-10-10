@@ -136,6 +136,7 @@ test('every shortcut action maps to its existing tab, window, panel, and navigat
     'toggle-panel',
     'toggle-privacy',
     'reload',
+    'hard-reload',
     'downloads',
     'tab-next',
     'tab-prev',
@@ -165,6 +166,67 @@ test('every shortcut action maps to its existing tab, window, panel, and navigat
   assert.ok(h.calls.includes('new-tab'));
   assert.ok(!h.calls.some((item) => Array.isArray(item) && item[0] === 'create'));
   assert.equal(controller.dispatchChromeAction('unknown'), false);
+});
+
+// ---------------------------------------------------------------------------
+// Sortie 03 DD1-DD3: hard-reload dispatch + its real entry points
+// ---------------------------------------------------------------------------
+const { keydownToAction: realKeydownToAction } = require('../../src/shared/keydown-action');
+
+const keyEvent = (over, onPrevent) => ({
+  key: '',
+  ctrlKey: false,
+  metaKey: false,
+  shiftKey: false,
+  altKey: false,
+  preventDefault: onPrevent,
+  ...over
+});
+
+test("hard-reload sends tabNavigate verb 'reloadIgnoringCache' for an active web tab; 'reload' unchanged (Sortie 03 DD3)", async () => {
+  const h = harness();
+  const controller = await create(h);
+  assert.equal(controller.dispatchChromeAction('hard-reload'), true);
+  assert.deepEqual(h.calls, [['reload', { wcId: 22, verb: 'reloadIgnoringCache', args: [] }]]);
+  h.calls.length = 0;
+  assert.equal(controller.dispatchChromeAction('reload'), true);
+  assert.deepEqual(h.calls, [['reload', { wcId: 22, verb: 'reload', args: [] }]]);
+});
+
+test('hard-reload sends nothing for an internal tab, a welcome (null wcId) tab or no active tab, and still returns true (Sortie 03)', async () => {
+  const h = harness();
+  const controller = await create(h);
+  for (const t of [{ ...h.tab, internal: true }, { ...h.tab, wcId: null }, null]) {
+    h.state.active = t;
+    assert.equal(controller.dispatchChromeAction('hard-reload'), true);
+  }
+  assert.deepEqual(h.calls, []);
+});
+
+test('chrome DOM keydown Ctrl+Shift+R and F5 reach tabNavigate and preventDefault (Sortie 03 AC4)', async () => {
+  const h = harness();
+  h.deps.keydownToAction = realKeydownToAction;
+  await create(h);
+  let prevented = 0;
+  const onPrevent = () => {
+    prevented += 1;
+  };
+  h.listeners.keydown(keyEvent({ key: 'R', ctrlKey: true, shiftKey: true }, onPrevent));
+  assert.deepEqual(h.calls.at(-1), ['reload', { wcId: 22, verb: 'reloadIgnoringCache', args: [] }]);
+  assert.equal(prevented, 1);
+  h.listeners.keydown(keyEvent({ key: 'F5' }, onPrevent));
+  assert.deepEqual(h.calls.at(-1), ['reload', { wcId: 22, verb: 'reload', args: [] }]);
+  assert.equal(prevented, 2);
+  h.listeners.keydown(keyEvent({ key: 'F5', shiftKey: true }, onPrevent));
+  assert.deepEqual(h.calls.at(-1), ['reload', { wcId: 22, verb: 'reloadIgnoringCache', args: [] }]);
+  assert.equal(h.calls.length, 3);
+});
+
+test("forwarded action { action: 'hard-reload' } (guest/sheet path) sends reloadIgnoringCache (Sortie 03 AC4)", async () => {
+  const h = harness();
+  await create(h);
+  h.forwarded.fn({ action: 'hard-reload' });
+  assert.deepEqual(h.calls, [['reload', { wcId: 22, verb: 'reloadIgnoringCache', args: [] }]]);
 });
 
 test('toggle-bookmarks-bar (Ctrl+Shift+B) calls the main-side toggle channel exactly', async () => {
