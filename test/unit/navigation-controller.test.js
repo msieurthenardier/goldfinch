@@ -250,6 +250,31 @@ test('URL conversion and navigation preserve internal-tab refusal and web-tab ca
   assert.deepEqual(h.state.calls.pop(), ['navigate', { wcId: 9, verb: 'loadURL', args: ['https://example.test/'] }]);
 });
 
+// Sortie 03 DD5: the #reload button — Shift+click hard-reloads, but only while
+// it shows the reload glyph; the stop glyph always stops.
+test('#reload click: plain -> reload, Shift+click -> reloadIgnoringCache, stop glyph wins, internal inert (Sortie 03 DD5)', async () => {
+  const h = harness();
+  await create(h);
+  const click = h.els.reload.listeners.get('click');
+  h.state.active = { id: 'web', internal: false, wcId: 9 };
+  h.els.reload.textContent = '⟳';
+  click({ shiftKey: false });
+  assert.deepEqual(h.state.calls.pop(), ['navigate', { wcId: 9, verb: 'reload', args: [] }]);
+  click({ shiftKey: true });
+  assert.deepEqual(h.state.calls.pop(), ['navigate', { wcId: 9, verb: 'reloadIgnoringCache', args: [] }]);
+  h.els.reload.textContent = '✕';
+  click({ shiftKey: false });
+  assert.deepEqual(h.state.calls.pop(), ['navigate', { wcId: 9, verb: 'stop', args: [] }]);
+  click({ shiftKey: true });
+  assert.deepEqual(h.state.calls.pop(), ['navigate', { wcId: 9, verb: 'stop', args: [] }]);
+  h.state.calls.length = 0;
+  h.state.active = { id: 'internal', internal: true, wcId: 1 };
+  h.els.reload.textContent = '⟳';
+  click({ shiftKey: true });
+  click({ shiftKey: false });
+  assert.deepEqual(h.state.calls, []);
+});
+
 // M16 F2 Leg 1 (DD2): a viewless welcome record's first navigation attaches a
 // view via attachView, whatever the entry point — never the ordinary
 // tabNavigate IPC (there is no wcId to send it to).

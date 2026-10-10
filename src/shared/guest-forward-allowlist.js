@@ -16,7 +16,9 @@
 // goal, FD ruling: an accelerator that works under chrome focus works
 // identically under guest focus). Resolved-at-design-review enumeration:
 // keydownToAction's 12 outputs minus the 6 main-side-handled ones leaves exactly
-// {new-tab, close-tab, focus-address, toggle-panel, toggle-privacy, reload}.
+// {new-tab, close-tab, focus-address, toggle-panel, toggle-privacy, reload};
+// Sortie 03 adds hard-reload (Ctrl+Shift+R / Shift+F5 / Ctrl+F5) to the web set
+// only — NOT repeat-safe (not `tab-` prefixed) and NOT internal-forwardable.
 //
 // INTERNAL guests forward a conservative, EXPLICITLY enumerated subset: new-tab
 // and close-tab only (FD ruling — conservative on purpose; extend one action at
@@ -76,6 +78,7 @@ const WEB_CHROME_ACTIONS = new Set([
   'toggle-panel',
   'toggle-privacy',
   'reload',
+  'hard-reload',
   'reopen-closed-tab',
   'bookmark-page',
   'toggle-bookmarks-bar',

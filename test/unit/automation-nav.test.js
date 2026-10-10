@@ -45,6 +45,10 @@ function makeGuestWc(id) {
     reloadCalled: false,
     reload() {
       this.reloadCalled = true;
+    },
+    hardReloadCalled: false,
+    reloadIgnoringCache() {
+      this.hardReloadCalled = true;
     }
   };
   return wc;
@@ -79,6 +83,10 @@ function makeInternalWc(id) {
     reloadCalled: false,
     reload() {
       this.reloadCalled = true;
+    },
+    hardReloadCalled: false,
+    reloadIgnoringCache() {
+      this.hardReloadCalled = true;
     }
   };
   return wc;
@@ -324,6 +332,32 @@ test('reload: valid guest wcId → wc.reload() called once', () => {
   const deps = { fromId: (id) => (id === 10 ? wc : null), chromeContents: null };
   reload(10, deps);
   assert.equal(wc.reloadCalled, true);
+});
+
+test('reload: opts.ignoreCache === true → wc.reloadIgnoringCache(), never wc.reload() (Sortie 03 DD6)', () => {
+  const wc = makeGuestWc(10);
+  const deps = { fromId: (id) => (id === 10 ? wc : null), chromeContents: null };
+  reload(10, deps, { ignoreCache: true });
+  assert.equal(wc.hardReloadCalled, true);
+  assert.equal(wc.reloadCalled, false);
+});
+
+test('reload: absent / {} / false / "true" / 1 ignoreCache → plain wc.reload() (strict boolean true only)', () => {
+  for (const opts of [undefined, {}, { ignoreCache: false }, { ignoreCache: 'true' }, { ignoreCache: 1 }]) {
+    const wc = makeGuestWc(10);
+    const deps = { fromId: (id) => (id === 10 ? wc : null), chromeContents: null };
+    reload(10, deps, opts);
+    assert.equal(wc.reloadCalled, true, JSON.stringify(opts));
+    assert.equal(wc.hardReloadCalled, false, JSON.stringify(opts));
+  }
+});
+
+test('reload: internal-session guard throws before either call, even with ignoreCache:true', () => {
+  const internalWc = makeInternalWc(99);
+  const deps = { fromId: (id) => (id === 99 ? internalWc : null), chromeContents: null, allowInternal: true };
+  assert.throws(() => reload(99, deps, { ignoreCache: true }), /internal-session excluded/);
+  assert.equal(internalWc.reloadCalled, false);
+  assert.equal(internalWc.hardReloadCalled, false);
 });
 
 test('reload: internal-session wcId → throws internal-session', () => {

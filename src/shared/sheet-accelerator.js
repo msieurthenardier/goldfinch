@@ -23,7 +23,8 @@
  *   chrome-class (the chrome keydownToAction set, src/shared/keydown-action.js):
  *     Ctrl+T new-tab, Ctrl+W close-tab, Ctrl+N new-window (M09 F6 DD5 —
  *     autoRepeatGuard: windows are heavier than tabs, review L1), Ctrl+L
- *     focus-address, Ctrl+M toggle-panel, Ctrl+R reload, Ctrl+Shift+P
+ *     focus-address, Ctrl+M toggle-panel, Ctrl+R reload, Ctrl+Shift+R hard-reload (Sortie 03), F5 reload,
+ *     Shift+F5/Ctrl+F5 hard-reload, Ctrl+Shift+P
  *     toggle-privacy, Ctrl+Tab/Ctrl+Shift+Tab tab-next/tab-prev,
  *     Ctrl+PageDown/Ctrl+PageUp tab-next/tab-prev, Ctrl+1..8/Ctrl+9
  *     tab-jump-1..8/tab-jump-last (M09 F3 Leg 1), Ctrl+Shift+T reopen-closed-tab
@@ -37,18 +38,20 @@
  *
  * Unmodified Arrow/Home/End/Enter/Space/Escape/Tab stay with the sheet page (the
  * APG menu contract wins inside the menu): every mapping below requires
- * control||meta EXCEPT F12 — APG keys are excluded by construction.
+ * control||meta EXCEPT F12 and F5 (neither is an APG key) — APG keys are
+ * excluded by construction.
  *
  * Overlap resolution (union semantics): Shift disambiguates the P/I/T chords —
  * Ctrl+Shift+P → toggle-privacy (chrome), Ctrl+Shift+I → devtools (guest),
- * Ctrl+Shift+T → reopen-closed-tab (chrome, M09 F4); unshifted Ctrl+P → print,
+ * Ctrl+Shift+T → reopen-closed-tab (chrome, M09 F4), Ctrl+Shift+R → hard-reload (chrome,
+ * Sortie 03); unshifted Ctrl+P → print,
  * unshifted Ctrl+T → new-tab. `=` matches shift-tolerantly (US-layout
  * Ctrl+Shift+= → zoom-in), mirroring the guest branch's `'=' || '+'` match.
  *
  * Case discipline mirrors the source handlers exactly: t/w/l/m/r match lowercase
  * only (the chrome handler never matched their shifted forms) when UNSHIFTED;
- * f/F, j/J, p/P, i/I, and (M09 F4) T/t match both cases where their source
- * branches do.
+ * f/F, j/J, p/P, i/I, and (M09 F4) T/t and (Sortie 03) shifted R/r match both
+ * cases where their source branches do.
  *
  * `alt` (M09 F3, threaded in lockstep with keydown-action.js's own i18n ruling)
  * defaults to `false` and gates ONLY the digit tab-jump branch, for the same
@@ -60,7 +63,7 @@
  * @returns {{ scope: 'guest' | 'chrome',
  *   action: 'devtools' | 'zoom-in' | 'zoom-out' | 'zoom-reset' | 'print' | 'find'
  *     | 'downloads' | 'new-tab' | 'close-tab' | 'new-window' | 'focus-address'
- *     | 'toggle-panel' | 'reload' | 'toggle-privacy'
+ *     | 'toggle-panel' | 'reload' | 'hard-reload' | 'toggle-privacy'
  *     | 'tab-next' | 'tab-prev'
  *     | 'tab-jump-1' | 'tab-jump-2' | 'tab-jump-3' | 'tab-jump-4' | 'tab-jump-5'
  *     | 'tab-jump-6' | 'tab-jump-7' | 'tab-jump-8' | 'tab-jump-last'
@@ -72,7 +75,15 @@ export function sheetAcceleratorAction({ key, control, meta, shift, alt = false 
   // F12 — the sole modifier-less accelerator (guest devtools branch).
   if (key === 'F12') return { scope: 'guest', action: 'devtools', autoRepeatGuard: true };
 
-  if (!(control || meta)) return null; // APG keys excluded by construction
+  // F5 (Sortie 03) — second modifier-less accelerator, LOCKSTEP with
+  // keydown-action.js (same !alt gate, same shift||ctrl||meta -> hard-reload).
+  // F5 is not an APG key, so the exemption is safe. No autoRepeatGuard: parity
+  // with the reload mapping.
+  if (key === 'F5' && !alt) {
+    return { scope: 'chrome', action: shift || control || meta ? 'hard-reload' : 'reload' };
+  }
+
+  if (!(control || meta)) return null; // APG keys excluded by construction (F12 and F5 exempt above)
 
   // Shift-disambiguated chords FIRST (Ctrl+Shift+I devtools / Ctrl+Shift+P privacy /
   // Ctrl+Shift+T reopen-closed-tab, M09 F4 DD2), before the unshifted p/P print or
@@ -83,6 +94,9 @@ export function sheetAcceleratorAction({ key, control, meta, shift, alt = false 
   // toggle-bookmarks-bar (M15 F1 DD5) — LOCKSTEP with keydown-action.js's own
   // Ctrl+Shift+B addition (the hand-mirror rule), same shifted-chain placement.
   if (shift && (key === 'B' || key === 'b')) return { scope: 'chrome', action: 'toggle-bookmarks-bar' };
+
+  // hard-reload (Sortie 03 DD1) — LOCKSTEP with keydown-action.js's Ctrl+Shift+R.
+  if (shift && (key === 'R' || key === 'r')) return { scope: 'chrome', action: 'hard-reload' };
 
   // Guest-class (mirrors the guest before-input-event branch bodies).
   if (key === '=' || key === '+') return { scope: 'guest', action: 'zoom-in' };

@@ -254,7 +254,8 @@ drive and observe tabs. It is exposed in no released build — see
 | `Ctrl+L`        | Focus address bar   |
 | `Ctrl+M`        | Toggle media panel  |
 | `Ctrl+Shift+P`  | Toggle privacy panel|
-| `Ctrl+R`        | Reload              |
+| `Ctrl+R`, `F5`  | Reload              |
+| `Ctrl+Shift+R`, `Shift+F5`, `Ctrl+F5` | Hard reload (bypass cache) |
 | `Ctrl +`        | Zoom in (page content) |
 | `Ctrl -`        | Zoom out (page content) |
 | `Ctrl 0`        | Reset zoom (100%)   |

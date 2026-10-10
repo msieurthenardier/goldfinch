@@ -57,7 +57,7 @@ export function createShortcutController(deps) {
    * preventDefault only on `true`, preserving the original conditional-
    * preventDefault semantics exactly: the internal-tab / null-wcId guarded branches
    * (devtools/zoom/find) returned WITHOUT preventDefault on a guard hit → false
-   * here; reload and downloads preventDefault-ed BEFORE their tab guards → always
+   * here; reload, hard-reload and downloads preventDefault-ed BEFORE their tab guards → always
    * true here; the rest always preventDefault-ed → always true.
    *
    * @param {string} action  a keydownToAction / sheet-accelerator chrome-class action
@@ -136,13 +136,18 @@ export function createShortcutController(deps) {
       case 'toggle-privacy':
         togglePrivacy();
         return true;
+      case 'hard-reload':
       case 'reload': {
         // preventDefault preceded the tab guard in the original handler — handled
         // (true) even when there is no / an internal active tab.
         const t = activeTab();
         // Internal tabs: reload keyboard shortcut is a no-op (internal pages are static).
         if (t && isWebTab(t) && t.wcId != null)
-          window.goldfinch.tabNavigate({ wcId: t.wcId, verb: 'reload', args: [] });
+          window.goldfinch.tabNavigate({
+            wcId: t.wcId,
+            verb: action === 'hard-reload' ? 'reloadIgnoringCache' : 'reload',
+            args: []
+          });
         return true;
       }
       // Downloads (Ctrl+J) — chrome-focused fallback (the page-focused case is captured main-side
@@ -245,7 +250,7 @@ export function createShortcutController(deps) {
     // keydownToAction (../shared/keydown-action.js, imported at the top of this
     // file, same route as isSafeTabUrl). It reproduces the live gating exactly: F12 before the
     // modifier gate, mod = ctrl||meta, zoom/find/F12/Ctrl+Shift+I lightbox-deferred,
-    // the t/w/l/m/Shift+P/r chain not lightbox-gated, Ctrl+Shift+I vs Shift+P by key
+    // the t/w/l/m/Shift+P/r/Shift+R chain not lightbox-gated, Ctrl+Shift+I vs Shift+P by key
     // letter. The IMPURE dispatch lives in dispatchChromeAction above (extracted,
     // M05 F8 Leg 2) — preventDefault fires only when it reports handled, preserving
     // the conditional-preventDefault of the guarded branches bit-for-bit.

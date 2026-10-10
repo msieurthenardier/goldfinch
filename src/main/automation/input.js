@@ -37,7 +37,9 @@ const KEY_MAP = {
   // entry (same shape as every other named key above) — without it,
   // pressKey(C, 'F6') throws "automation: unknown key" and the behavior
   // spec's F6 apparatus has nothing to drive.
-  F6: 'F6'
+  F6: 'F6',
+  // Sortie 03: reload / hard-reload (Shift/Ctrl+F5) key — same single-named-key shape as F6.
+  F5: 'F5'
 };
 
 // Canonical Electron modifier vocabulary. Electron `^42` sendInputEvent accepts

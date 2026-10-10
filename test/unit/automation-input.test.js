@@ -142,6 +142,10 @@ test('keyEvents: F6 → keyCode "F6" (M17 F1 L1, DD1/6b — KEY_MAP entry, not t
   assert.equal(keyEvents('F6')[0].keyCode, 'F6');
 });
 
+test('keyEvents: F5 → keyCode "F5" (Sortie 03 DD6 — KEY_MAP entry, F6 precedent)', () => {
+  assert.equal(keyEvents('F5')[0].keyCode, 'F5');
+});
+
 test('keyEvents: ShiftTab → keyCode "Tab", modifiers ["shift"] (both keyDown and keyUp)', () => {
   const evs = keyEvents('ShiftTab');
   assert.equal(evs.length, 2);

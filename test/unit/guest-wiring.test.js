@@ -7,6 +7,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { createGuestWiring, qualifiesAsPopupRequest } = require('../../src/main/guest-wiring');
 const { createPopupRegistry } = require('../../src/main/popup-registry');
+const { keydownToAction: realKeydownToAction } = require('../../src/shared/keydown-action');
+const {
+  isChromeActionForwardable: realIsForwardable,
+  isRepeatSafeAction: realIsRepeatSafe
+} = require('../../src/shared/guest-forward-allowlist');
 
 function deferred() {
   let resolve;
@@ -66,7 +71,7 @@ class FakeContents extends EventEmitter {
   }
 }
 
-function setup({ vaultHuman } = {}) {
+function setup({ vaultHuman, realShortcutPipeline } = {}) {
   const sends = [];
   const calls = [];
   // Mission 20 Flight 1 (AC3): a THIRD, independent log — additive only, so no
@@ -148,10 +153,14 @@ function setup({ vaultHuman } = {}) {
     },
     keydownToAction: (input) => {
       calls.push('classify-chrome');
+      // Sortie 03 AC3: `realShortcutPipeline` swaps in the REAL classifier +
+      // allowlist so the hard-reload forward is pinned end to end.
+      if (realShortcutPipeline) return realKeydownToAction(input);
       return input.key === 't' ? 'new-tab' : null;
     },
-    isChromeActionForwardable: (action) => action === 'new-tab',
-    isRepeatSafeAction: () => false,
+    isChromeActionForwardable: (action, kind) =>
+      realShortcutPipeline ? realIsForwardable(action, kind) : action === 'new-tab',
+    isRepeatSafeAction: (action) => (realShortcutPipeline ? realIsRepeatSafe(action) : false),
     isInternalPageUrl: (url) => url.startsWith('goldfinch://settings'),
     isSafeTabUrl: (url) => url.startsWith('https://'),
     toggleDevTools: (wc) => calls.push(['devtools', wc.id]),
@@ -446,6 +455,53 @@ test('cross-view shortcut classification runs before generalized forwarding for 
   internal.emit('before-input-event', internalEvent, { type: 'keyDown', key: 't', control: true });
   assert.deepEqual(h.calls, ['classify-cross-view', 'classify-chrome']);
   assert.deepEqual(h.sends.at(-1), ['chrome-shortcut-action', { action: 'new-tab' }]);
+});
+
+// Sortie 03 AC3: hard-reload through the REAL classifier + allowlist.
+test('web guest Ctrl+Shift+R is preventDefaulted and sent as hard-reload exactly once (Sortie 03)', () => {
+  const h = setup({ realShortcutPipeline: true });
+  const web = new FakeContents(60, false);
+  h.wiring.wireGuestContents(web);
+  const event = inputEvent();
+  web.emit('before-input-event', event, { type: 'keyDown', key: 'R', control: true, shift: true });
+  assert.equal(event.prevented, true);
+  assert.deepEqual(h.sends, [['chrome-shortcut-action', { action: 'hard-reload' }]]);
+});
+
+test('web guest auto-repeat Ctrl+Shift+R is preventDefaulted but NOT sent (Sortie 03)', () => {
+  const h = setup({ realShortcutPipeline: true });
+  const web = new FakeContents(61, false);
+  h.wiring.wireGuestContents(web);
+  const event = inputEvent();
+  web.emit('before-input-event', event, {
+    type: 'keyDown',
+    key: 'R',
+    control: true,
+    shift: true,
+    isAutoRepeat: true
+  });
+  assert.equal(event.prevented, true);
+  assert.deepEqual(h.sends, []);
+});
+
+test('internal guest Ctrl+Shift+R is neither preventDefaulted nor sent (Sortie 03)', () => {
+  const h = setup({ realShortcutPipeline: true });
+  const internal = new FakeContents(62, true);
+  h.wiring.wireGuestContents(internal);
+  const event = inputEvent();
+  internal.emit('before-input-event', event, { type: 'keyDown', key: 'R', control: true, shift: true });
+  assert.equal(event.prevented, false);
+  assert.deepEqual(h.sends, []);
+});
+
+test('web guest unmodified F5 is sent as reload (Sortie 03 DD2)', () => {
+  const h = setup({ realShortcutPipeline: true });
+  const web = new FakeContents(63, false);
+  h.wiring.wireGuestContents(web);
+  const event = inputEvent();
+  web.emit('before-input-event', event, { type: 'keyDown', key: 'F5' });
+  assert.equal(event.prevented, true);
+  assert.deepEqual(h.sends, [['chrome-shortcut-action', { action: 'reload' }]]);
 });
 
 // ---------------------------------------------------------------------------

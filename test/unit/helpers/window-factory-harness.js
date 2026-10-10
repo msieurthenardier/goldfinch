@@ -244,7 +244,9 @@ function createHarness(options = {}) {
     // (optional-chained in production). Tests pass a recording/modeling fake
     // built over the REAL refcounted holder (vault/autolock-suppression.js).
     releaseVaultHoldsForWindow: options.releaseVaultHoldsForWindow,
-    sheetAcceleratorAction: () => null,
+    // Sortie 03: a test may inject the REAL sheetAcceleratorAction to pin the sheet
+    // keyDown path end to end; the default stays inert.
+    sheetAcceleratorAction: options.sheetAcceleratorAction || (() => null),
     isInternalContents: () => false,
     isGuestActionAllowed: () => true,
     toggleDevTools: () => {},

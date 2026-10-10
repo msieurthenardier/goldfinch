@@ -463,13 +463,19 @@ export function createNavigationController(deps) {
       window.goldfinch.tabNavigate({ wcId: t.wcId, verb: 'goForward', args: [] });
     }
   });
-  els.reload.addEventListener('click', () => {
+  els.reload.addEventListener('click', (e) => {
     const t = activeTab();
     if (!t) return;
     // Internal tabs: reload button is not wired (no navigation history to stop/reload).
     if (isWebTab(t) && t.wcId != null) {
       if (els.reload.textContent === '✕') window.goldfinch.tabNavigate({ wcId: t.wcId, verb: 'stop', args: [] });
-      else window.goldfinch.tabNavigate({ wcId: t.wcId, verb: 'reload', args: [] });
+      else
+        window.goldfinch.tabNavigate({
+          wcId: t.wcId,
+          // Sortie 03 DD5: Shift+click bypasses the HTTP cache (stop wins while loading).
+          verb: e.shiftKey ? 'reloadIgnoringCache' : 'reload',
+          args: []
+        });
     }
   });
   els.newTab.addEventListener('click', () => openNewTab()); // M16 F2 Leg 1 (DD4)

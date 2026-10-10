@@ -1126,6 +1126,17 @@ function registerTabIpc(deps) {
       } else {
         wc.reload();
       }
+    } else if (verb === 'reloadIgnoringCache') {
+      // Sortie 03 DD4: hard reload — mirrors `reload` (incl. the empty-history
+      // loadURL fallback) but bypasses the HTTP cache. Reads no `args`.
+      const entry = owner.tabViews.get(wcId);
+      if (entry && wc.navigationHistory.length() === 0) {
+        wc.loadURL(effectiveUrl(entry)).catch((err) => {
+          logger.warn('[tab-navigate] hard-reload loadURL rejected:', err && (err.code || err.message || err));
+        });
+      } else {
+        wc.reloadIgnoringCache();
+      }
     } else if (verb === 'stop') {
       wc.stop();
     } else if (verb === 'goBack') {

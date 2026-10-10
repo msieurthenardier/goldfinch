@@ -156,6 +156,36 @@ test('Ctrl+r -> reload', () => {
   assert.equal(keydownToAction(desc({ key: 'r', ctrl: true })), 'reload');
 });
 
+// Sortie 03 DD1/DD2: hard-reload chords and the F5 family, with the lightbox
+// both closed and open (reload is never lightbox-gated).
+for (const lightboxOpen of [false, true]) {
+  const sfx = lightboxOpen ? ' (lightbox open)' : '';
+  test(`hard-reload chords -> 'hard-reload'${sfx} (Sortie 03 DD1/DD2)`, () => {
+    const chords = [
+      { key: 'R', ctrl: true, shift: true },
+      { key: 'r', ctrl: true, shift: true },
+      { key: 'R', meta: true, shift: true },
+      { key: 'F5', shift: true },
+      { key: 'F5', ctrl: true },
+      { key: 'F5', meta: true },
+      { key: 'F5', ctrl: true, shift: true }
+    ];
+    for (const c of chords) {
+      assert.equal(keydownToAction(desc({ ...c, lightboxOpen })), 'hard-reload', JSON.stringify(c));
+    }
+  });
+  test(`Ctrl+r and unmodified F5 -> 'reload'${sfx} (Sortie 03 DD2)`, () => {
+    assert.equal(keydownToAction(desc({ key: 'r', ctrl: true, lightboxOpen })), 'reload');
+    assert.equal(keydownToAction(desc({ key: 'F5', lightboxOpen })), 'reload');
+  });
+}
+
+test('Alt+F5 / Ctrl+Alt+F5 / Shift+Alt+F5 -> null (Sortie 03 DD2, F6 !alt parity)', () => {
+  assert.equal(keydownToAction(desc({ key: 'F5', alt: true })), null);
+  assert.equal(keydownToAction(desc({ key: 'F5', ctrl: true, alt: true })), null);
+  assert.equal(keydownToAction(desc({ key: 'F5', shift: true, alt: true })), null);
+});
+
 test('Ctrl+J (capital) -> downloads', () => {
   assert.equal(keydownToAction(desc({ key: 'J', ctrl: true })), 'downloads');
 });
