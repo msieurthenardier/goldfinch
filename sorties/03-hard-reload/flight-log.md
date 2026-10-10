@@ -3,7 +3,7 @@
 **Flight**: [Hard Reload](flight.md)
 
 ## Summary
-Planned and executed 2026-10-10. One leg (`hard-reload`), landed and reviewed; behavior test `hard-reload` passed 14/14 (including 11 physical operator trials). Sortie status `landed`; the debrief (`/mission-control:flight-debrief sortie 03`) moves it to `completed`.
+Planned, executed and debriefed 2026-10-10. One leg (`hard-reload`), reviewed and committed (`c7d8840`, PR #251). Behavior test `hard-reload` passed 14/14, including 11 physical operator trials. Sortie `completed`.
 
 ---
 
@@ -86,3 +86,4 @@ Planned and executed 2026-10-10. One leg (`hard-reload`), landed and reviewed; b
   - The spec was promoted to `active` and its row-15 table break fixed.
 - Flight review (Reviewer, cycle 1): **[HANDOFF:confirmed]**, no blocking issues. The Reviewer re-ran the gates: `npm test` 5885 tests (5881 pass, 0 fail, 4 todo); typecheck, lint and format:check clean; `renderer.js` untouched. Two non-blocking nits, both already documented: no post-plain-reload `transferSize` sample in the smoke test (covered by the formal run), and held Ctrl+Shift+R repeating under chrome focus (DD3 parity).
 - Leg 01 marked `completed`; commit next.
+- 2026-10-10 debrief (`/mission-control:flight-debrief sortie 03`): Developer and Architect interviews done; human interview skipped (the operator was present for the whole run, and the log is complete). Debrief at `flight-debrief.md`. Squawks **0142** (`PRESS_KEY_NAMES`/`KEY_MAP` drift) and **0143** (shared reload fallback helper) logged and deferred. Sortie marked `completed` at the operator's confirmation. No maintenance nudge: missions 20–22 completed after the last maintenance report (2026-08-27).

@@ -1,6 +1,6 @@
 # Sortie: Hard Reload
 
-**Status**: landed
+**Status**: completed
 
 ## Charter
 
@@ -157,7 +157,7 @@ One leg carries the whole slice.
 
 ### Completion Checklist
 - [x] All legs completed
-- [ ] Code merged
+- [ ] Code merged (PR #251 open; operator merges after this debrief)
 - [x] Tests passing
 - [x] Documentation updated
 
