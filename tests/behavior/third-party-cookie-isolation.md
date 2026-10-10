@@ -3,7 +3,7 @@
 **Slug**: `third-party-cookie-isolation`
 **Status**: active
 **Created**: 2026-10-05
-**Last Run**: 2026-10-06-18-13-21 (pass, squawk turnaround on Electron 44.5.0 + SDK 1.31.0: 14/14 judged, step 9 struck, Version appendix pass; see runs/2026-10-06-18-13-21.md)
+**Last Run**: 2026-10-10-22-00-00 (pass, squawk 0144 on Electron 44.5.1 + SDK 1.32.1: 14/14 judged, step 9 struck, Version appendix pass; see runs/2026-10-10-22-00-00.md)
 
 ## Intent
 
@@ -53,7 +53,7 @@ Unit tests can't cover this. The behavior lives in Chromium's network-service co
   - `/b/sa-frame` and `/favicon.ico` lines are never cookie evidence. Favicons are fetched main-side through the owning jar's session, so since squawk 0124 (fixture cookies `Path=/`) they DO carry first-party jar cookies — which says nothing about third-party isolation.
   - **Never restart the fixture mid-run**: `serve.mjs` truncates its log on start.
 - **Session restore replays every open tab** within about 0.5 s of each relaunch, often before the MCP listener is up, including `/b/set-fp` and the C embed. After a relaunch, judge only the fresh tab's entries, timestamped after its `openTab`.
-- **Restart attestation (steps 13–15), a hard gate on every restart.** After the confirm click, in order: (1) the **old PID exits** (`ps -p`); (2) a **new PID is alive and listening on `{port}`** within a **bounded wait of up to 30 s** (poll `ss`; it proves the single-instance lock hand-off: if the relaunched child loses the lock and exits, that is a **fail** and gets recorded); (3) the Executor **re-attaches** with a fresh `initialize`/connect (the old MCP session died with the process) using the **same** `adminKey`, which must authenticate (no re-mint); (4) `window.goldfinch.shieldsIsolationState().isolateEffective` **flipped**. Track the new PID as "this run's PID" from then on. wcIds are reused by session restore, so they are **not** a relaunch signal.
+- **Restart attestation (steps 13–15), a hard gate on every restart.** After the confirm click, in order: (1) the **old PID exits** (`ps -p`); (2) a **new PID is alive and listening on `{port}`** within a **bounded wait of up to 30 s** (poll `ss`; it proves the single-instance lock hand-off: if the relaunched child loses the lock and exits, that is a **fail** and gets recorded); (3) the Executor **re-attaches** with a fresh `initialize`/connect (the old MCP session died with the process) using the **same** `adminKey`, which must authenticate (no re-mint); (4) `window.goldfinch.shieldsIsolationState().isolateEffective` **flipped**. Track the new PID as "this run's PID" from then on. wcIds are reused by session restore, so they are **not** a relaunch signal. **Confirm timeout (run 2026-10-10-22-00-00):** the Restart confirm reverts to `Restart now` after about 6 s (`CONFIRM_TIMEOUT_MS`). Do both clicks in one script, within about 5 s, re-reading the rect immediately before the confirm. A button that reads `Restart now` at confirm time means the click only re-arms; it is not a restart. On the settings page, `scrollIntoView` is smooth, so let it settle before reading a rect.
 - **Pending state is read, never inferred.** Before any restart, assert `isolateEffective` (via `shieldsIsolationState()`) and the panel copy agree with the step's stated state.
 - **Panel row lookup:** use `[data-shield="isolate"]`. Never `:has(.shield-count)` (every row now carries a count element, hidden when empty).
 
