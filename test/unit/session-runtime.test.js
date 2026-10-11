@@ -1,6 +1,8 @@
 'use strict';
 
 const { EventEmitter } = require('node:events');
+const fs = require('node:fs');
+const path = require('node:path');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { createSessionRuntime } = require('../../src/main/session-runtime');
@@ -118,11 +120,9 @@ function setup(options = {}) {
   };
 }
 
-// Squawk 0119: the real Electron 44 default UA (Windows), as probed live.
+// The real Electron 44 default UA (Windows), as probed live.
 const ELECTRON_DEFAULT_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) goldfinch/0.18.2 Chrome/152.0.7977.130 Electron/44.4.4 Safari/537.36';
-const CHROME_SHAPED_UA =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.7977.130 Safari/537.36';
 
 function fakeSession(log) {
   const handlers = {};
@@ -161,7 +161,7 @@ function fakeSession(log) {
       handlers.certVerifyProc = fn;
       counts.certVerifyProc = (counts.certVerifyProc || 0) + 1;
     },
-    // Squawk 0119: the UA strip site.
+    // Squawk 0145: recorded so the no-setUserAgent pin is meaningful.
     getUserAgent() {
       return ELECTRON_DEFAULT_UA;
     },
@@ -188,25 +188,27 @@ test('internal-session creation marks and refuses every web-session wiring', () 
 });
 
 // ---------------------------------------------------------------------------
-// Squawk 0119: every WEB session presents a Chrome-shaped UA (embedder tokens
-// stripped); the internal session is never touched.
+// Squawk 0145 (reverts 0119): web sessions send Electron's DEFAULT UA. A UA
+// claiming plain Chrome on the Electron runtime fails Cloudflare's managed
+// challenge consistency checks (infinite "Verify you are human" loop), so
+// onSessionCreated must never call setUserAgent on any session.
 // ---------------------------------------------------------------------------
 
-test('squawk 0119: a web session gets setUserAgent with the embedder tokens stripped', () => {
+test('squawk 0145: a web jar session never gets setUserAgent', () => {
   const h = setup();
   const { session, userAgentSets } = fakeSession(h.log);
   h.runtime.onSessionCreated(session);
-  assert.deepEqual(userAgentSets, [CHROME_SHAPED_UA]);
+  assert.deepEqual(userAgentSets, []);
 });
 
-test('squawk 0119: a web session with NO jar entry (Burner/default) still gets the stripped UA', () => {
+test('squawk 0145: a no-jar (Burner/default) session never gets setUserAgent', () => {
   const h = setup({ partition: null });
   const { session, userAgentSets } = fakeSession(h.log);
   h.runtime.onSessionCreated(session);
-  assert.deepEqual(userAgentSets, [CHROME_SHAPED_UA]);
+  assert.deepEqual(userAgentSets, []);
 });
 
-test('squawk 0119: the internal session never has its UA set', () => {
+test('squawk 0145: the internal session never gets setUserAgent', () => {
   const h = setup();
   h.setCreatingInternal(true);
   const { session, userAgentSets } = fakeSession(h.log);
@@ -214,18 +216,19 @@ test('squawk 0119: the internal session never has its UA set', () => {
   assert.deepEqual(userAgentSets, []);
 });
 
-test('squawk 0119: a throwing UA read is fail-soft and never skips the rest of the wiring', () => {
-  const h = setup();
-  const { session, counts, userAgentSets } = fakeSession(h.log);
-  session.getUserAgent = () => {
-    throw new Error('boom');
-  };
-  assert.doesNotThrow(() => h.runtime.onSessionCreated(session));
-  assert.deepEqual(userAgentSets, []);
-  assert.equal(session.__goldfinchShields, true);
-  assert.equal(counts.certVerifyProc, 1);
-  assert.ok(h.log.some((entry) => entry[0] === 'downloads'));
-  assert.ok(h.log.some((entry) => entry[0] === 'error' && entry[1] === '[user-agent] strip failed:'));
+test('squawk 0145: no src/main file contains a setUserAgent( call', () => {
+  const root = path.join(__dirname, '..', '..', 'src', 'main');
+  const files = [];
+  (function walk(dir) {
+    for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, ent.name);
+      if (ent.isDirectory()) walk(full);
+      else if (ent.name.endsWith('.js')) files.push(full);
+    }
+  })(root);
+  assert.ok(files.length > 10, 'src/main scan must not be vacuous');
+  const hits = files.filter((f) => /setUserAgent\s*\(/.test(fs.readFileSync(f, 'utf8')));
+  assert.deepEqual(hits, []);
 });
 
 // ---------------------------------------------------------------------------
