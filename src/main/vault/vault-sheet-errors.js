@@ -124,6 +124,15 @@ const VAULT_RESTORE_COMMIT_CONFIG = { VaultBusyError: 'busy', VaultStateError: '
 /** @type {VaultSheetErrorConfig} */
 const VAULT_BROWSER_IMPORT_COMMIT_CONFIG = { VaultBusyError: 'busy', VaultStateError: 'state' };
 
+// internal-vault-item-copy (Sortie 04 Leg 1 / DD7): 'busy' is the re-key gate (copyItem is a
+// GATED op); 'state' covers every caller/stale-target refusal (unknown or burner jar, same
+// vault, missing item, bad resolution/matchId, singleton guard). VaultLockedError is NOT
+// admitted — the handler hand-maps it to `{ locked: true }` before this ladder runs. Its own
+// named config (never a reuse of the browser-import one) so a future width change to either
+// delegate can never silently widen the other.
+/** @type {VaultSheetErrorConfig} */
+const VAULT_ITEM_COPY_CONFIG = { VaultBusyError: 'busy', VaultStateError: 'state' };
+
 // vaultUnlock (main.js:1757): the ONLY delegate with a bare-boolean IPC surface (never
 // changed by this leg — AC pins it) — a wrong password maps to bare `false`, not
 // `{ok:false}`. Any other error propagates (the handler still zeroizes in its finally).
@@ -185,6 +194,7 @@ module.exports = {
   VAULT_IMPORT_PREVIEW_CONFIG,
   VAULT_RESTORE_COMMIT_CONFIG,
   VAULT_BROWSER_IMPORT_COMMIT_CONFIG,
+  VAULT_ITEM_COPY_CONFIG,
   VAULT_UNLOCK_CONFIG,
   VAULT_MINT_ACCESS_KEY_CONFIG,
   VAULT_COMPROMISE_ROTATE_CONFIG,

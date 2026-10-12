@@ -150,15 +150,27 @@ test('AC10: the vault route gained exactly two entries (jar-page-model.js, vault
     assert.ok(vaultBody.includes(entry), `Mission 22 Flight 1 entry present: ${entry}`);
   }
 
+  // Sortie 04 (post-dates this leg): the row-action modals' controller module — one further
+  // entry, same accounting discipline.
+  const sortie04 = ["'/vault-item-actions-controller.js': rendererPage('vault-item-actions-controller.js')"];
+  for (const entry of sortie04) {
+    assert.ok(vaultBody.includes(entry), `Sortie 04 entry present: ${entry}`);
+  }
+
   // No other route (settings/downloads/jars) changed in this leg — a coarse sanity that
   // the vault route's entry count is EXACTLY preExisting + added + the later HAT fix + the
   // later restore-controller extraction + the later filter-controller extraction.
   const entryLines = vaultBody.split('\n').filter((l) => l.includes(': rendererPage(') || l.includes(': shared('));
   assert.equal(
     entryLines.length,
-    preExisting.length + added.length + legThreeHatFix.length + flight2Leg1.length + mission22Flight1.length,
+    preExisting.length +
+      added.length +
+      legThreeHatFix.length +
+      flight2Leg1.length +
+      mission22Flight1.length +
+      sortie04.length,
     'vault route entry count matches this leg’s two additions plus the Leg 3 HAT-fix burner.js route, ' +
-      'the Flight 2 Leg 1 restore-controller route, and the Mission 22 Flight 1 filter-controller route'
+      'the Flight 2 Leg 1 restore-controller route, the Mission 22 Flight 1 filter-controller route, and the Sortie 04 item-actions-controller route'
   );
 });
 

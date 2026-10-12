@@ -69,6 +69,9 @@ const { metadataOf, secretFieldsFor } = require('../../shared/vault-item-schema'
 // their own module so they stay unit-testable without a live store instance.
 const { identityProfileOf } = require('./identity-profile');
 
+// Sortie 04 DD2/DD3: the pure cross-vault copy planner `copyItem` consumes.
+const { planCopy, allowedFor } = require('./copy-plan');
+
 // Fill matcher (M12 F4 Leg 4 / DD5) — exact-origin by default, optionally widened to
 // the registrable domain for `matchMode:'registrable-domain'` items behind the
 // fail-closed PSL matcher. reachableLoginItems passes `widen` through per call.
@@ -3246,6 +3249,170 @@ class VaultStore {
     }
 
     return { results, written: true };
+  }
+
+  /**
+   * Copy one item from a vault into another (Sortie 04 DD1-DD6). Reads both
+   * vaults ONCE, plans with the pure `planCopy`, and writes the DESTINATION at
+   * most once; the source is never written. Two-call protocol: a call with no
+   * `resolution` either lands a collision-free copy or answers `needs-resolution`
+   * (non-secret match metadata + the `allowed` set); the commit call carries the
+   * operator's `resolution` and the `matchId` they were shown, and is re-planned
+   * against the CURRENT destination (DD3 evaluation order — a stale commit
+   * answers `needs-resolution` again and writes nothing). See `_copyItem`.
+   * @param {string} sourceTarget  `'global'` or a persistent jar id.
+   * @param {string} itemId
+   * @param {string} destTarget  `'global'` or a persistent jar id.
+   * @param {{ resolution?: 'skip' | 'replace' | 'keep-both', matchId?: string }} [opts]
+   * @returns {{ outcome: 'copied'|'replaced'|'kept-both'|'skipped'|'already-present'|'needs-resolution', title?: string, match?: { id: any, type: string, title: any, username?: any }, allowed?: string[] }}
+   */
+  copyItem(sourceTarget, itemId, destTarget, opts = {}) {
+    // GATED (Sortie 04 DD1) — the THIRTEENTH gated op
+    // (test/unit/vault-rekey-gate.test.js). Fully synchronous — entry-check +
+    // drain suffice; see saveItem.
+    const releaseOp = this._enterGatedOp();
+    try {
+      return this._copyItem(sourceTarget, itemId, destTarget, opts);
+    } finally {
+      releaseOp();
+    }
+  }
+
+  /**
+   * @param {string} sourceTarget
+   * @param {string} itemId
+   * @param {string} destTarget
+   * @param {{ resolution?: 'skip' | 'replace' | 'keep-both', matchId?: string }} opts
+   * @returns {ReturnType<VaultStore['copyItem']>}
+   */
+  _copyItem(sourceTarget, itemId, destTarget, opts) {
+    // (1) Pure input-shape check FIRST — a caller error needs no unlock state, and
+    // fires even when the plan would turn out `new` (DD3).
+    const resolution = opts ? opts.resolution : undefined;
+    const matchId = opts ? opts.matchId : undefined;
+    if (typeof sourceTarget !== 'string' || typeof itemId !== 'string' || typeof destTarget !== 'string') {
+      throw new VaultStateError('vault-store: copyItem requires string source, item id and destination');
+    }
+    if (resolution !== undefined && resolution !== 'skip' && resolution !== 'replace' && resolution !== 'keep-both') {
+      throw new VaultStateError('vault-store: copyItem resolution must be skip|replace|keep-both');
+    }
+    if (resolution !== undefined && (typeof matchId !== 'string' || matchId.length === 0)) {
+      throw new VaultStateError('vault-store: copyItem requires matchId with a resolution');
+    }
+    // (2) manager must be unlocked.
+    const mrk = this._requireMrk();
+    // (3) allowlist-resolve BOTH targets — burner/unknown refused, no file created.
+    const sourceId = this._resolveTarget(sourceTarget);
+    const destId = this._resolveTarget(destTarget);
+    // (4) same-vault copy refused.
+    if (sourceId === destId) {
+      throw new VaultStateError('vault-store: copyItem source and destination must differ');
+    }
+    // (5) idle-timer touch.
+    this._touch();
+
+    // (6) source read + item lookup. A source with no file has no item (the lazy
+    // path is destination-only).
+    const sourceDoc = this._readVault(sourceId);
+    if (sourceDoc === null) throw new VaultStateError('vault-store: copyItem source vault has no items');
+    const sourceKey = this._vaultKeyFromDoc(sourceId, sourceDoc);
+    const sourceItems = /** @type {any[]} */ (vc.decryptItems(sourceDoc.items, sourceKey));
+    const source = sourceItems.find((it) => it && it.id === itemId);
+    if (!source) throw new VaultStateError('vault-store: copyItem item not found');
+    if (!ITEM_TYPES.has(source.type)) {
+      throw new VaultStateError(`vault-store: copyItem cannot copy an item of type "${source.type}"`);
+    }
+
+    // (7) destination read ONCE (absent -> lazy, empty).
+    const destDoc = this._readVault(destId);
+    /** @type {any[]} */
+    let destItems = [];
+    /** @type {Buffer | null} */
+    let destKey = null;
+    if (destDoc !== null) {
+      destKey = this._vaultKeyFromDoc(destId, destDoc);
+      destItems = /** @type {any[]} */ (vc.decryptItems(destDoc.items, destKey));
+    }
+
+    // (8) plan.
+    const plan = planCopy(source, destItems);
+
+    // (9) act per DD3's evaluation order.
+    if (plan.kind === 'identical') return { outcome: 'already-present' };
+
+    /** @param {any} p */
+    const askAnswer = (p) => {
+      const meta = metadataOf(destItems.find((d) => d.id === p.matchIds[0]));
+      /** @type {{ id: any, type: string, title: any, username?: any }} */
+      const match = { id: meta.id, type: meta.type, title: meta.title };
+      if (meta.type === 'login') match.username = meta.username;
+      return { outcome: /** @type {const} */ ('needs-resolution'), match, allowed: allowedFor(p, source) };
+    };
+
+    if (resolution === undefined) {
+      if (plan.kind === 'match') return askAnswer(plan);
+    } else if (resolution === 'skip') {
+      return { outcome: 'skipped' };
+    } else if (plan.kind === 'match') {
+      const allowed = allowedFor(plan, source);
+      if (matchId !== plan.matchIds[0] || !allowed.includes(resolution)) return askAnswer(plan);
+    }
+
+    // Build the single write: `copied` (plan new), `kept-both`, or `replaced`.
+    /** @type {any[]} */
+    const finalItems = destItems.slice();
+    /** @type {any} */
+    let written;
+    /** @type {ReturnType<VaultStore['copyItem']>} */
+    let reply;
+    if (plan.kind === 'match' && resolution === 'replace') {
+      // DD4: keep the destination's id + createdAt, everything else from the source.
+      const idx = finalItems.findIndex((d) => d.id === plan.matchIds[0]);
+      written = this._normalizeItem({ ...source, id: finalItems[idx].id }, finalItems[idx].createdAt);
+      finalItems[idx] = written;
+      reply = { outcome: 'replaced' };
+    } else {
+      // DD6: id/createdAt/updatedAt DELETED — _normalizeItem keeps a non-empty id/createdAt.
+      const input = { ...source };
+      delete input.id;
+      delete input.createdAt;
+      delete input.updatedAt;
+      if (plan.kind === 'match') {
+        // DD5: keep-both.
+        input.title = `${source.title || '(untitled)'} (copy)`;
+        reply = { outcome: 'kept-both', title: input.title };
+      } else {
+        reply = { outcome: 'copied' };
+      }
+      written = this._normalizeItem(input, undefined);
+      finalItems.push(written);
+    }
+
+    // One identity profile per vault: refuse (no write) if the written identity is
+    // not the profile that would survive.
+    if (written.type === 'identity') {
+      const { profile } = identityProfileOf(finalItems);
+      // A replace must land under the id it displaces (the existing profile's);
+      // anything else would leave two identities or orphan the displaced one.
+      const displacedId = plan.kind === 'match' && resolution === 'replace' ? plan.matchIds[0] : undefined;
+      if ((displacedId !== undefined && written.id !== displacedId) || (profile && profile.id !== written.id)) {
+        throw new VaultStateError('vault-store: only one identity item is allowed per vault');
+      }
+    }
+
+    // (10) Exactly ONE write.
+    if (destDoc === null) {
+      const freshKey = vc.newVaultKey();
+      this._writeVaultForKey(destId, freshKey, mrk, finalItems);
+      this.vaultKeys.set(destId, freshKey);
+    } else {
+      this._writeVault(destId, {
+        kdf: destDoc.kdf,
+        envelopes: destDoc.envelopes,
+        items: vc.encryptItems(finalItems, /** @type {Buffer} */ (destKey))
+      });
+    }
+    return reply;
   }
 
   /**

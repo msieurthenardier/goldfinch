@@ -5,7 +5,8 @@ import {
   compromiseCardRows,
   vaultNavEntries,
   itemMatchesFilter,
-  filterStatusText
+  filterStatusText,
+  copyDestinationOptions
   // @ts-ignore — serving-path vs disk-path mismatch
 } from './vault-page-model.js';
 import {
@@ -32,6 +33,8 @@ import { createVaultBrowserImport } from './vault-browser-import-controller.js';
 import { createVaultRestoreController } from './vault-restore-controller.js';
 // @ts-ignore — serving-path vs disk-path mismatch
 import { createVaultFilter } from './vault-filter-controller.js';
+// @ts-ignore — serving-path vs disk-path mismatch
+import { createItemActionsController } from './vault-item-actions-controller.js';
 
 /**
  * vault.js — the goldfinch://vault internal page controller (M12 Flight 3).
@@ -136,6 +139,22 @@ function init() {
     }
   });
 
+  // Row-action modals (delete / revoke confirms moved here + Copy-to, Sortie 04 DD8). Getters over
+  // the reassigned lets; `getRenderEpoch` reads render()'s counter lazily (defined below).
+  const itemActions = createItemActionsController({
+    document,
+    bridge,
+    dom: { el, iconButton, openModal, appendOption },
+    copyDestinationOptions,
+    getJarRows: () => jarRows,
+    getJarVaultPresence: () => jarVaultPresence,
+    getRenderEpoch: () => renderEpoch,
+    refresh,
+    setNotice: (text) => {
+      pendingNotice = text;
+    }
+  });
+
   /**
    * Create an element with a className and text set via textContent (never
    * innerHTML — see the SECURITY note above).
@@ -185,6 +204,12 @@ function init() {
     copy: [
       'M9 9h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V11a2 2 0 0 1 2-2z',
       'M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'
+    ],
+    // Arrow into a folder — the row's Copy-to… action (distinct from the clipboard `copy` glyph).
+    'copy-to': [
+      'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
+      'M8 13h8',
+      'M13 10l3 3-3 3'
     ],
     // Open-folder — the file-uploader row's "browse" affordance (M12 F5 HAT tail): opens the
     // native dialog (pickImportFile / pickSavePath) and populates the path field.
@@ -421,6 +446,8 @@ function init() {
    * @type {string|null}
    */
   let pendingNotice = null;
+  // Bumped by every render(); the Copy-to flow compares it to drop a reply for a modal render() closed.
+  let renderEpoch = 0;
 
   /**
    * Open the single page-level modal. `body` is the caller-built content (selects, file-pick
@@ -1358,93 +1385,13 @@ function init() {
           'trash',
           `Revoke access key ${k.keyId}`,
           () => {
-            openRevokeConfirm({ vaultId, keyId: k.keyId, refreshKeys });
+            itemActions.openRevokeConfirm({ vaultId, keyId: k.keyId, refreshKeys });
           },
           { danger: true }
         )
       );
       list.appendChild(li);
     }
-  }
-
-  /**
-   * The delete-item confirm modal (DD-C: reuse openModal, a message body + a danger submit). The
-   * per-row Delete opens this DIRECTLY (no editor open at the time — no modal nesting). Only on
-   * confirm does it call vaultItemDelete; a { locked } race closes the modal + refreshes.
-   * @param {{ vaultId: string, itemId: string, title: string }} args
-   */
-  function openDeleteConfirm({ vaultId, itemId, title }) {
-    const body = el('div', 'vault-modal-form');
-    const msg = el('p', 'vault-confirm-message');
-    msg.appendChild(document.createTextNode('Permanently delete '));
-    msg.appendChild(el('strong', 'vault-confirm-name', title)); // attacker-influenced → textContent
-    msg.appendChild(document.createTextNode('? This can’t be undone.'));
-    body.appendChild(msg);
-
-    const handle = openModal({
-      title: 'Delete item',
-      body,
-      submitLabel: 'Delete',
-      submitEnabled: true,
-      danger: true,
-      onSubmit: () => {
-        handle.setSubmitEnabled(false);
-        Promise.resolve(bridge.vaultItemDelete({ vaultId, itemId }))
-          .then((res) => {
-            if (!res || res.locked) {
-              handle.close();
-              refresh();
-              return;
-            }
-            handle.close();
-            refresh();
-          })
-          .catch(() => {
-            handle.setStatus('Could not delete the item.');
-            handle.setSubmitEnabled(true);
-          });
-      }
-    });
-  }
-
-  /**
-   * The revoke-access-key confirm modal (DD-B). Same shape as the delete confirm: a naming
-   * message + a danger "Revoke" submit; on confirm calls vaultAccessKeyRevoke and re-fetches the
-   * list (a { locked } race refreshes the page).
-   * @param {{ vaultId: string, keyId: string, refreshKeys: () => void }} args
-   */
-  function openRevokeConfirm({ vaultId, keyId, refreshKeys }) {
-    const body = el('div', 'vault-modal-form');
-    const msg = el('p', 'vault-confirm-message');
-    msg.appendChild(document.createTextNode('Revoke access key '));
-    msg.appendChild(el('strong', 'vault-confirm-name', keyId));
-    msg.appendChild(document.createTextNode('? Any automation using it will stop working.'));
-    body.appendChild(msg);
-
-    const handle = openModal({
-      title: 'Revoke access key',
-      body,
-      submitLabel: 'Revoke',
-      submitEnabled: true,
-      danger: true,
-      onSubmit: () => {
-        handle.setSubmitEnabled(false);
-        Promise.resolve(bridge.vaultAccessKeyRevoke({ vaultId, keyId }))
-          .then((res) => {
-            if (!res || res.locked) {
-              handle.close();
-              refresh();
-              return;
-            }
-            handle.close();
-            refreshKeys();
-          })
-          .catch(() => {
-            handle.setStatus('Could not revoke the access key.');
-            handle.setSubmitEnabled(true);
-          });
-      }
-    });
   }
 
   /**
@@ -1503,20 +1450,24 @@ function init() {
       }
       li.appendChild(info);
 
-      // Row actions: Edit + Delete sit together with NO divider (CSS). Edit opens the edit
-      // modal; Delete opens a confirm modal (delete moved OFF the editor).
+      // Row actions: Edit, Copy to…, Delete sit together with NO divider (CSS). Edit opens the edit
+      // modal; Copy to… the two-step copy modal; Delete a confirm modal (delete moved OFF the editor).
       const actions = el('div', 'vault-item-actions');
       actions.appendChild(
         iconButton('edit', `Edit ${meta.title || 'item'}`, () => {
           openEditor({ vaultId, meta, type: meta.type });
         })
       );
+      const copyBtn = iconButton('copy-to', `Copy ${meta.title || 'item'} to another vault`, () => {
+        itemActions.openCopyTo({ vaultId, meta, invoker: copyBtn });
+      });
+      actions.appendChild(copyBtn);
       actions.appendChild(
         iconButton(
           'trash',
           `Delete ${meta.title || 'item'}`,
           () => {
-            openDeleteConfirm({ vaultId, itemId: meta.id, title: meta.title || '(untitled)' });
+            itemActions.openDeleteConfirm({ vaultId, itemId: meta.id, title: meta.title || '(untitled)' });
           },
           { danger: true }
         )
@@ -2011,6 +1962,7 @@ function init() {
    * @param {{ setUp?: unknown, unlocked?: unknown, vaults?: unknown }} state
    */
   function render(state) {
+    renderEpoch++;
     // DD6 (design-review HIGH): drain the editor-cleanup registry BEFORE closeActivePageModal()
     // below, while any open editor modal is STILL attached — this zeroes its secret inputs (the
     // registered wipe) and stops its TOTP poll on the idle-lock re-render path (openModal's own

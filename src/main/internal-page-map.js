@@ -86,7 +86,10 @@ function createInternalPageMap({ baseDir, path }) {
       '/vault-restore-controller.js': rendererPage('vault-restore-controller.js'),
       // Mission 22, Flight 1: the page-wide item filter — a controller module with no
       // bridge/IPC access of its own (the vault-nav-controller.js precedent).
-      '/vault-filter-controller.js': rendererPage('vault-filter-controller.js')
+      '/vault-filter-controller.js': rendererPage('vault-filter-controller.js'),
+      // Sortie 04: the row-action modals (delete / revoke confirms + Copy-to…) — an injected-deps
+      // controller with no static src/shared import, so it needs no shared route of its own.
+      '/vault-item-actions-controller.js': rendererPage('vault-item-actions-controller.js')
     }
   };
 }

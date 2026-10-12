@@ -376,6 +376,20 @@ function browserImportDestinationOptions(jars, presenceById, globalPresence) {
 }
 
 /**
+ * The Copy-to modal's destination options (Sortie 04 / DD8): the browser-import destination
+ * list (Global + every persistent jar, same "— N secrets" / "no secrets yet" labels) minus the
+ * item's own source vault. Never throws on malformed input.
+ * @param {Array<{ id?: unknown, name?: unknown }>} [jars]
+ * @param {Record<string, { hasVault?: unknown, count?: unknown }>} [presenceById]
+ * @param {{ hasVault?: unknown, count?: unknown }} [globalPresence]
+ * @param {string} [sourceVaultId]
+ * @returns {Array<{ vaultId: string, label: string }>}
+ */
+function copyDestinationOptions(jars, presenceById, globalPresence, sourceVaultId) {
+  return browserImportDestinationOptions(jars, presenceById, globalPresence).filter((o) => o.vaultId !== sourceVaultId);
+}
+
+/**
  * Build the browser-CSV-import pick/destination modal's skip-reason display lines (M19
  * F1 Leg 2 / DD8, DD11) — one fixed label per adapter reason code, never row content.
  * `non-web-origin` names the captured scheme; an unrecognized code echoes the raw
@@ -520,6 +534,7 @@ export {
   restoreDestinationOptions,
   restoreOutcomeLines,
   browserImportDestinationOptions,
+  copyDestinationOptions,
   browserImportSkipLines,
   browserImportOutcomeLines,
   SETTINGS_ID,

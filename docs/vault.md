@@ -483,6 +483,9 @@ canonical accessor, `identityProfileOf(items)` (`src/main/vault/identity-profile
 `items.find(it => it.type === 'identity')`, which would silently pick whichever item sorts first
 and hide a duplicate instead of surfacing one via the accessor's `extra` return.
 
+The cross-vault **copy** op is a fourth reader of the same accessor: an identity copy matches the
+destination's first profile and offers only Replace (see *Copying an item to another vault*).
+
 **Bundle import is now tolerant of unknown item types, and REPORTS them.** A new sibling to the
 existing (unchanged, still strict) `validateImportedItems`, `partitionImportedItems` drops any
 item whose `type` isn't recognized and records its type name in a deduplicated `skippedTypes`
@@ -920,6 +923,58 @@ asserts no tool matches `/import|csv|chrome|browser/i`, excluding the pre-existi
 `getChromeTarget`), and `src/main/automation/**` contains zero references to the flow
 module or its four IPC channel names — the same structural, at-every-tier refusal the
 DD13 discussion above describes for the confirm gate.
+
+### Copying an item to another vault
+
+`VaultStore.copyItem(sourceTarget, itemId, destTarget, { resolution?, matchId? })` copies one item
+(any type) from a vault into another persistent jar's vault or Global (Sortie 04). The page sends
+only ids plus the operator's resolution over `internal-vault-item-copy`; the op runs entirely
+main-side, so no secret field ever reaches the vault page. It is the **thirteenth gated op**
+(`_enterGatedOp`, released in `finally`; `vault-rekey-gate.test.js` pins it), reads source and
+destination once each, and writes the **destination at most once** (the source is never written).
+A destination jar with no `.gfvault` is created lazily with a fresh vault key (any stale
+`vaultKeys` entry is replaced, exactly as `saveItem` does). Same-vault, burner and unknown targets
+are refused with no file created.
+
+**Match rule** (`src/main/vault/copy-plan.js`, pure `planCopy`; same item type only): login =
+canonical origin + username; card = the digits of the number (non-empty); note = trimmed,
+case-sensitive title; identity = the destination's first profile (`identityProfileOf`). Opaque
+origins (`chrome://`, `file:`, `data:`) and non-URL origins **never match**, on either side. An
+**identical** match (every schema field equal, `matchMode` absent == `exact`) writes nothing and
+answers `already-present`.
+
+**Two-call protocol.** A call with no `resolution` either lands a collision-free copy (`copied`) or
+answers `needs-resolution` with the first match's non-secret metadata (`{ id, type, title }`, plus
+`username` for logins, built from `metadataOf`) and the `allowed` set: one match =
+`skip`/`replace`/`keep-both`; several matches = `skip`/`keep-both`; identity = `replace` only. The
+commit call carries the `resolution` and the `matchId` the operator was shown, and is **re-planned**
+against the CURRENT destination in a fixed order: identical -> `already-present`; `skip` ->
+`skipped` (never writes); plan `new` -> `copied`; otherwise a commit is **stale** when `matchId`
+is not the current first match or the resolution is not in the current `allowed` set, and answers
+a fresh `needs-resolution` with no write. No cell overwrites an item the operator was not shown.
+The full outcome table is pinned cell by cell in `test/unit/vault-copy-item.test.js`.
+
+**Resolutions.** *Replace* keeps the destination item's `id` and `createdAt` and takes every other
+field wholesale from the source (the full-replace contract); for an identity it targets the first
+profile and leaves any extra identities untouched, so the one-identity rule holds. *Keep both*
+adds a new item titled `"<title> (copy)"` (`(untitled)` when empty). A plain copy and Keep both
+always get a **fresh id and createdAt** — the source id is never reused in another vault.
+
+**Boundaries.** Replies are `{ ok: true, outcome, ... }`, `{ ok: false, reason: 'busy'|'state' }`
+(`VAULT_ITEM_COPY_CONFIG`) or `{ locked: true }`. No broadcast is sent: another window showing the
+destination is stale until its next refresh, as after save/delete. No MCP tool can start a copy
+(`vault-copy-boundary.test.js`: zero references under `src/main/automation/`, tool count 35); an
+admin-tier `evaluate` on the vault page can reach `goldfinchInternal.vaultItemCopy`, exactly as it
+already reaches `vaultItemSave`/`vaultItemDelete` — accepted.
+
+**Page UI.** Each typed item row on `goldfinch://vault` has Edit, Copy to…, Delete (unknown-type rows
+have no Copy to…). The flow lives in `src/renderer/pages/vault-item-actions-controller.js` (injected
+deps; it also owns the delete and revoke-access-key confirms): step 1 picks a destination
+(`copyDestinationOptions` = the browser-import destination list minus the source vault), and a
+`needs-resolution` reply opens step 2, a radio group over exactly the reply's `allowed` set. Only
+`match.title`, `match.username`, the kept-both `title` and destination labels are ever rendered, all
+via `textContent`. A render epoch (`renderEpoch`, bumped by `render()`) makes a reply that resolves
+after a lock/refresh open no modal, though a landed write still shows its page notice.
 
 ## Rotation & recovery
 
