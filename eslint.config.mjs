@@ -249,6 +249,10 @@ export default [
       // the same real-ES-module shape (its `export function createVaultFilter` needs
       // sourceType: module even though it carries no static import of its own).
       'src/renderer/pages/vault-filter-controller.js',
+      // vault-item-actions-controller.js (Sortie 04) owns the row-action modals (delete / revoke
+      // confirms + Copy-to…) — the same real-ES-module shape (`export function` needs
+      // sourceType: module).
+      'src/renderer/pages/vault-item-actions-controller.js',
       'src/renderer/menu-overlay.js'
     ],
     languageOptions: { sourceType: 'module' }

@@ -363,7 +363,12 @@ const BOOKMARKS_BAR_LINE_BUDGET = 1100;
 // measured landed count — a deliberate departure from this pin's own "landed + buffer"
 // history above (no banked slack this leg; a future leg that needs more room bumps this
 // explicitly, named, same discipline as every other named bump on this pin).
-const VAULT_PAGE_LINE_BUDGET = 2153;
+//
+// LOWERED (Sortie 04 / leg 2): the delete-confirm and revoke-access-key-confirm modals moved
+// into vault-item-actions-controller.js (DD8) alongside the new Copy-to flow, and the page
+// gained only its wiring (controller construction, `renderEpoch`, the `copy-to` icon, the row
+// button). Landed at 2105 lines (2152 before), set to EXACTLY that count — no banked slack.
+const VAULT_PAGE_LINE_BUDGET = 2105;
 
 // vault-restore-controller.js line budget (squawk 0069): the file (M19 F2 Leg 1
 // extraction target, the restore/export modal cluster pulled out of vault.js —

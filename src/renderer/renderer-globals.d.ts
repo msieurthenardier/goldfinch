@@ -782,6 +782,26 @@ interface GoldfinchInternalBridge {
   }): Promise<{ item?: VaultItemMeta; locked?: boolean }>;
   /** Delete an item by id — { deleted } (false on missing id) or { locked }. */
   vaultItemDelete(payload: { vaultId: string; itemId: string }): Promise<{ deleted?: boolean; locked?: boolean }>;
+  /** Copy an item into another vault (Sortie 04) — main-side; only ids + the operator's
+   * resolution/matchId cross. A collision answers `needs-resolution` with NON-SECRET
+   * `match` metadata and the `allowed` resolutions. `{ locked }` when locked. */
+  vaultItemCopy(payload: {
+    sourceVaultId: string;
+    itemId: string;
+    destVaultId: string;
+    resolution?: 'skip' | 'replace' | 'keep-both';
+    matchId?: string;
+  }): Promise<
+    | {
+        ok: true;
+        outcome: 'copied' | 'replaced' | 'kept-both' | 'skipped' | 'already-present' | 'needs-resolution';
+        title?: string;
+        match?: { id: string; type: string; title: string | null; username?: string | null };
+        allowed?: Array<'skip' | 'replace' | 'keep-both'>;
+      }
+    | { ok: false; reason: 'busy' | 'state' }
+    | { locked: true }
+  >;
   /** Live TOTP code (M12 F3 Leg 3 / DD4): the current code + seconds-remaining
    * computed in main — NEVER the seed. { code, secondsRemaining }, { code: null }
    * (no totp), or { locked }. */

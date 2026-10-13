@@ -49,6 +49,7 @@ test('createInternalPageMap returns the exact current host/path allowlist', () =
     '/vault-browser-import-controller.js',
     '/vault-editor-model.js',
     '/vault-filter-controller.js',
+    '/vault-item-actions-controller.js',
     '/vault-nav-controller.js',
     '/vault-page-model.js',
     '/vault-restore-controller.js',
@@ -81,6 +82,11 @@ test('createInternalPageMap returns the exact current host/path allowlist', () =
   );
   // Mission 22, Flight 1: the page-wide item filter's own controller module.
   assert.equal(map.vault['/vault-filter-controller.js'], '/app/src/main/../renderer/pages/vault-filter-controller.js');
+  // Sortie 04: the row-action modals' controller module.
+  assert.equal(
+    map.vault['/vault-item-actions-controller.js'],
+    '/app/src/main/../renderer/pages/vault-item-actions-controller.js'
+  );
 });
 
 test('the existing resolver serves exact map entries and rejects traversal/wrong paths', () => {

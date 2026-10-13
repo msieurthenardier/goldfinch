@@ -1087,6 +1087,36 @@ body:has(.vault-modal-backdrop) {
   color: var(--fg);
   word-break: break-word;
 }
+/* Copy-to collision step (Sortie 04): a native radio group in a fieldset. A bare UA fieldset
+   brings a border / padding / min-width quirk on the dark theme, so reset it; the legend reads
+   like .vault-field-label and each radio row is a flex row. */
+.vault-copy-choice {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.vault-copy-choice legend {
+  display: block;
+  padding: 0;
+  font-size: 12px;
+  color: var(--fg-dim);
+  margin-bottom: 4px;
+}
+.vault-copy-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--fg);
+  font-size: 14px;
+  line-height: 1.4;
+}
+.vault-copy-option input {
+  margin: 3px 0 0;
+}
 .vault-modal-form .vault-settings-field {
   align-items: baseline;
 }

@@ -97,16 +97,18 @@ const CRUD_CHANNELS = [
   'internal-vault-list',
   'internal-vault-reveal',
   'internal-vault-item-save',
-  'internal-vault-item-delete'
+  'internal-vault-item-delete',
+  'internal-vault-item-copy'
 ];
 const ACCESSKEY_CHANNELS = ['internal-vault-accesskey-list', 'internal-vault-accesskey-revoke'];
 
-test('registerVaultIpc registers the state read + the vault-presence probe + the four item CRUD channels + live-totp + the two access-key channels + the global lock', () => {
+test('registerVaultIpc registers the state read + the vault-presence probe + the five item CRUD channels (incl. copy) + live-totp + the two access-key channels + the global lock', () => {
   const ipcMain = wire();
   assert.deepEqual(Object.keys(ipcMain._handlers).sort(), [
     'internal-vault-accesskey-list',
     'internal-vault-accesskey-revoke',
     'internal-vault-has',
+    'internal-vault-item-copy',
     'internal-vault-item-delete',
     'internal-vault-item-save',
     'internal-vault-list',
@@ -392,6 +394,15 @@ test('a LOCKED store surfaces every CRUD channel as structured { locked: true } 
     assert.deepEqual(ipcMain.invoke('internal-vault-item-delete', ev, { vaultId: 'global', itemId: 'x' }), {
       locked: true
     });
+    // internal-vault-item-copy is ASYNC (hand-mapped, not catchLocked): a resolved value, never a rejection.
+    assert.deepEqual(
+      await ipcMain.invoke('internal-vault-item-copy', ev, {
+        sourceVaultId: 'work',
+        itemId: 'x',
+        destVaultId: 'personal'
+      }),
+      { locked: true }
+    );
   } finally {
     rm(dir);
   }
@@ -854,4 +865,111 @@ test('internal-vault-pick-save-path runs the save-location picker ONLY and retur
   const res = await ipcMain.invoke('internal-vault-pick-save-path', vaultEvent(), 'global');
   assert.deepEqual(res, { path: '/picked/vault-global.gfvaultbundle' });
   assert.deepEqual(picks, ['global'], 'the target is forwarded to seed the default filename');
+});
+
+/* ------------------------------------------------- internal-vault-item-copy (Sortie 04) */
+
+const COPY_LOGIN = {
+  id: 'src1',
+  type: 'login',
+  title: 'Site',
+  origin: 'https://example.com',
+  username: 'alice',
+  password: 'cq9-pw',
+  notes: 'cq9-notes'
+};
+
+test('internal-vault-item-copy: real store round-trip — lazy destination -> copied; collision -> needs-resolution -> replace -> replaced', async () => {
+  const { dir, store, ipcMain } = await realHarness();
+  try {
+    store.saveItem('work', COPY_LOGIN);
+    const ev = vaultEvent();
+    const base = { sourceVaultId: 'work', itemId: 'src1', destVaultId: 'personal' };
+
+    assert.equal(store.hasVault('personal'), false);
+    const first = await ipcMain.invoke('internal-vault-item-copy', ev, base);
+    assert.deepEqual(first, { ok: true, outcome: 'copied' });
+    assert.equal(store.listItems('personal')[0].password, 'cq9-pw');
+
+    // Change the source so the destination copy is a differing match.
+    store.saveItem('work', { ...COPY_LOGIN, password: 'cq9-new' });
+    const ask = await ipcMain.invoke('internal-vault-item-copy', ev, base);
+    assert.equal(ask.ok, true);
+    assert.equal(ask.outcome, 'needs-resolution');
+    assert.deepEqual(ask.allowed, ['skip', 'replace', 'keep-both']);
+    assert.equal(JSON.stringify(ask).includes('cq9'), false, 'no secret in the ask reply');
+    assert.equal(store.listItems('personal')[0].password, 'cq9-pw', 'ask wrote nothing');
+
+    const commit = await ipcMain.invoke('internal-vault-item-copy', ev, {
+      ...base,
+      resolution: 'replace',
+      matchId: ask.match.id
+    });
+    assert.deepEqual(commit, { ok: true, outcome: 'replaced' });
+    assert.equal(store.listItems('personal').length, 1);
+    assert.equal(store.listItems('personal')[0].password, 'cq9-new');
+  } finally {
+    rm(dir);
+  }
+});
+
+test('internal-vault-item-copy: a STALE commit through the handler answers needs-resolution with no write', async () => {
+  const { dir, store, ipcMain } = await realHarness();
+  try {
+    store.saveItem('work', COPY_LOGIN);
+    store.saveItem('personal', { ...COPY_LOGIN, id: 'dA', password: 'x' });
+    const ev = vaultEvent();
+    const base = { sourceVaultId: 'work', itemId: 'src1', destVaultId: 'personal' };
+    const ask = await ipcMain.invoke('internal-vault-item-copy', ev, base);
+    assert.equal(ask.match.id, 'dA');
+    store.deleteItem('personal', 'dA');
+    store.saveItem('personal', { ...COPY_LOGIN, id: 'dB', password: 'y' });
+    const before = fs.readFileSync(path.join(dir, 'vaults', 'personal.gfvault'));
+    const res = await ipcMain.invoke('internal-vault-item-copy', ev, { ...base, resolution: 'replace', matchId: 'dA' });
+    assert.equal(res.ok, true);
+    assert.equal(res.outcome, 'needs-resolution');
+    assert.equal(res.match.id, 'dB');
+    assert.ok(fs.readFileSync(path.join(dir, 'vaults', 'personal.gfvault')).equals(before), 'no write');
+  } finally {
+    rm(dir);
+  }
+});
+
+test('internal-vault-item-copy: VaultBusyError -> { ok:false, reason:busy }; VaultStateError -> { ok:false, reason:state }; Locked -> { locked:true } (resolved)', async () => {
+  const { dir, store, ipcMain } = await realHarness();
+  try {
+    store.saveItem('work', COPY_LOGIN);
+    const ev = vaultEvent();
+    const base = { sourceVaultId: 'work', itemId: 'src1', destVaultId: 'personal' };
+
+    const release = await store._acquireRekeyGate();
+    assert.deepEqual(await ipcMain.invoke('internal-vault-item-copy', ev, base), { ok: false, reason: 'busy' });
+    release();
+
+    assert.deepEqual(await ipcMain.invoke('internal-vault-item-copy', ev, { ...base, destVaultId: 'work' }), {
+      ok: false,
+      reason: 'state'
+    });
+    assert.deepEqual(await ipcMain.invoke('internal-vault-item-copy', ev, undefined), { ok: false, reason: 'state' });
+
+    store.lockNow();
+    assert.deepEqual(await ipcMain.invoke('internal-vault-item-copy', ev, base), { locked: true });
+  } finally {
+    rm(dir);
+  }
+});
+
+test('internal-vault-item-copy: an unmapped error rethrows unchanged', async () => {
+  const boom = new Error('boom');
+  const ipcMain = wire({
+    store: {
+      copyItem: () => {
+        throw boom;
+      }
+    }
+  });
+  await assert.rejects(
+    ipcMain.invoke('internal-vault-item-copy', vaultEvent(), { sourceVaultId: 'a' }),
+    (e) => e === boom
+  );
 });

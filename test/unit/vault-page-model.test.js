@@ -15,6 +15,7 @@ const {
   restoreDestinationOptions,
   restoreOutcomeLines,
   browserImportDestinationOptions,
+  copyDestinationOptions,
   browserImportSkipLines,
   browserImportOutcomeLines,
   SETTINGS_ID,
@@ -746,4 +747,29 @@ test('filterStatusText: a malformed count degrades to zero, never NaN/negative',
   assert.equal(filterStatusText(Number.NaN, true), 'No items match');
   assert.equal(filterStatusText(-3, true), 'No items match');
   assert.equal(filterStatusText(undefined, true), 'No items match');
+});
+
+// ── copyDestinationOptions (Sortie 04 / DD8) ────────────────────────────────
+
+test('copyDestinationOptions: source Global → only jars; source a jar → Global + the other jars', () => {
+  const jars = [
+    { id: 'work', name: 'Work' },
+    { id: 'home', name: 'Home' }
+  ];
+  const presence = { work: { hasVault: true, count: 2 } };
+  const g = { hasVault: true, count: 3 };
+  assert.deepEqual(copyDestinationOptions(jars, presence, g, 'global'), [
+    { vaultId: 'work', label: 'Work — 2 secrets' },
+    { vaultId: 'home', label: 'Home — no secrets yet' }
+  ]);
+  assert.deepEqual(copyDestinationOptions(jars, presence, g, 'work'), [
+    { vaultId: 'global', label: 'Global — 3 secrets' },
+    { vaultId: 'home', label: 'Home — no secrets yet' }
+  ]);
+});
+
+test('copyDestinationOptions: empty jars + source Global → []; malformed input never throws', () => {
+  assert.deepEqual(copyDestinationOptions([], {}, { hasVault: false }, 'global'), []);
+  assert.doesNotThrow(() => copyDestinationOptions(null, null, null, undefined));
+  assert.doesNotThrow(() => copyDestinationOptions('x', 5, 'y', 3));
 });

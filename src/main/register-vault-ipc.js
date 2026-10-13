@@ -11,6 +11,7 @@
 const { GLOBAL_ID } = require('../shared/reserved-ids');
 const { metadataOf } = require('../shared/vault-item-schema');
 const { VaultLockedError } = require('./vault/vault-store');
+const { mapVaultSheetError, VAULT_ITEM_COPY_CONFIG } = require('./vault/vault-sheet-errors');
 const { parseOtpauth, totp, normalizeTotpField, totpSecondsRemaining } = require('./vault/vault-crypto');
 
 // The manager-wide global vault's display label (the store keys it by GLOBAL_ID).
@@ -274,6 +275,26 @@ function registerVaultIpc({
       return { deleted: getVaultStore().deleteItem(vaultId, itemId) };
     })
   );
+
+  // Copy an item into another vault (Sortie 04 DD1/DD3/DD7). Fully MAIN-SIDE: the page sends only
+  // ids plus the operator's resolution/matchId; the store plans + writes the destination at most
+  // once and answers an outcome (a collision answers `needs-resolution` with NON-SECRET match
+  // metadata only). Async, so catchLocked's sync try/catch can't wrap it — VaultLockedError is
+  // hand-mapped to `{ locked: true }` (the internal-vault-export precedent); busy/state ride as
+  // reasons via VAULT_ITEM_COPY_CONFIG; any other error rethrows unchanged. No broadcast (a second
+  // window is stale until its next refresh, exactly as after save/delete). No MCP surface.
+  registerInternalHandler(ipcMain, 'internal-vault-item-copy', async (_event, payload) => {
+    const { sourceVaultId, itemId, destVaultId, resolution, matchId } = payload || {};
+    try {
+      const result = getVaultStore().copyItem(sourceVaultId, itemId, destVaultId, { resolution, matchId });
+      return { ok: true, ...result };
+    } catch (err) {
+      if (err instanceof VaultLockedError) return { locked: true };
+      const mapped = mapVaultSheetError(err, VAULT_ITEM_COPY_CONFIG);
+      if (mapped === null) throw err;
+      return mapped;
+    }
+  });
 
   // Access-key management (M12 F3 Leg 5, flight DD5 / mission durable-grant step-up).
   // These are the vault-store `access` ENVELOPES (mintAccessKey/revokeAccessKey), NOT

@@ -7,9 +7,10 @@
 // preview writes nothing, but must not let an operator START a multi-step
 // import while a compromise rotation is rewriting the profile; then to
 // TWELVE by M19 F1 Leg 1, which added `importLogins`: a CSV import must not
-// begin mid-rotation): the re-key gate (`_rekeyInProgress`), the in-flight
+// begin mid-rotation; then to THIRTEEN by Sortie 04 Leg 1, which added
+// `copyItem`): the re-key gate (`_rekeyInProgress`), the in-flight
 // counter + drain (`_acquireRekeyGate`), the entry-check `VaultBusyError` on
-// all TWELVE gated ops, and the SECOND WALL inside the write sinks
+// all THIRTEEN gated ops, and the SECOND WALL inside the write sinks
 // (`_writeVault` / `_writeManager`) that stops a mutator which awaited past
 // its entry check from persisting a pre-rotation document.
 //
@@ -92,19 +93,19 @@ async function setUpStore(dir) {
 }
 
 // ---------------------------------------------------------------------------
-// Entry wall — all TWELVE gated ops refuse while the gate is up (AC3; M18 F3
+// Entry wall — all THIRTEEN gated ops refuse while the gate is up (AC3; M18 F3
 // Leg 2 / DD10 ruling 8 added exportProfile + restoreProfile; M18 F3 Leg 3
-// added previewRestoreBundle; M19 F1 Leg 1 added importLogins)
+// added previewRestoreBundle; M19 F1 Leg 1 added importLogins; Sortie 04 Leg 1 added copyItem)
 // ---------------------------------------------------------------------------
 
-test('all twelve gated ops throw VaultBusyError at entry while the gate is up, and work again after release', async () => {
+test('all thirteen gated ops throw VaultBusyError at entry while the gate is up, and work again after release', async () => {
   const dir = tmpDir();
   try {
     const store = await setUpStore(dir);
     const release = await withTimeout(store._acquireRekeyGate(), 'acquire on an idle store');
 
     const busy = (e) => e instanceof vs.VaultBusyError;
-    // The seven synchronous mutating/read ops...
+    // The nine synchronous mutating/read ops...
     assert.throws(() => store.saveItem('work', loginItem()), busy, 'saveItem');
     assert.throws(() => store.deleteItem('work', 'seed'), busy, 'deleteItem');
     assert.throws(
@@ -120,6 +121,11 @@ test('all twelve gated ops throw VaultBusyError at entry while the gate is up, a
       () => store.importLogins('work', [loginCandidate()], { mode: 'merge' }),
       busy,
       'importLogins (a CSV import must not begin mid-rotation)'
+    );
+    assert.throws(
+      () => store.copyItem('global', 'x', 'work', {}),
+      busy,
+      'copyItem (a cross-vault copy must not begin mid-rotation)'
     );
     // ...and the three async ones reject before any await/validation.
     await assert.rejects(store.mintAccessKey('work', { masterPassword: MASTER }), busy, 'mintAccessKey');

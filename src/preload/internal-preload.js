@@ -638,6 +638,16 @@ if (INTERNAL_ORIGINS.has(location.origin)) {
      */
     vaultItemDelete: (payload) => ipcRenderer.invoke('internal-vault-item-delete', payload),
 
+    /**
+     * Copy an item into another vault (Sortie 04). Main-side: only ids and the operator's
+     * resolution/matchId cross; no secret does. Resolves { ok: true, outcome, ... } (a
+     * collision answers outcome 'needs-resolution' with non-secret `match` + `allowed`),
+     * { ok: false, reason: 'busy'|'state' }, or { locked: true }.
+     * @param {{ sourceVaultId: string, itemId: string, destVaultId: string, resolution?: 'skip'|'replace'|'keep-both', matchId?: string }} payload
+     * @returns {Promise<any>}
+     */
+    vaultItemCopy: (payload) => ipcRenderer.invoke('internal-vault-item-copy', payload),
+
     // Live TOTP code (M12 Flight 3, Leg 3 / DD4). The seed stays in main — this
     // resolves the current code + seconds-remaining ONLY (never the seed). { code: null }
     // when the item has no totp; { locked: true } when the store is locked. The page
