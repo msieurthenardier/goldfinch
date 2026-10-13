@@ -1,10 +1,10 @@
 # Squawk 0147: Copy-to flow parses the destination name out of its option label
 
-**Status**: in-progress
+**Status**: completed
 **Type**: servicing
 **Severity**: routine
 **Reported**: 2026-10-13
-**Completed**: —
+**Completed**: 2026-10-13
 
 ## Report
 The Copy-to controller recovers a destination's display name ("Work") by cutting its option label ("Work — 3 secrets") at the last " — ". A jar whose name contains " — " still cuts at the right place, but a future label format change would silently break every copy notice and step-2 title. The name should come from data, not from string surgery.
@@ -21,3 +21,8 @@ Fix: have `copyDestinationOptions` return `{ vaultId, name, label }`, and have t
 
 ## Verification
 Full `npm test`, typecheck, lint and format:check green. `vault-page-model.test.js` asserts `name` for Global, jars, and a jar name containing " — ". `vault-item-actions-controller.test.js` notice and step-2 title assertions still pass, plus one case with a " — " jar name.
+
+## Sign-Off
+**Reviewer**: Reviewer agent (Sonnet), batch review of squawks 0146–0148; [HANDOFF:confirmed] (one non-blocking nit on 0146's test temp-dir cleanup, fixed and re-reviewed: [HANDOFF:confirmed])
+**Verdict**: confirmed
+**Commit**: `e43472e` (squawk/turnaround-2026-10-13)

@@ -1,10 +1,10 @@
 # Squawk 0148: CLAUDE.md lacks the Sortie 04 invariants and the dev-mode apparatus rule
 
-**Status**: in-progress
+**Status**: completed
 **Type**: servicing
 **Severity**: routine
 **Reported**: 2026-10-13
-**Completed**: —
+**Completed**: 2026-10-13
 
 ## Report
 Sortie 04 established invariants and apparatus facts that live only in its debrief and `docs/vault.md`. Add short CLAUDE.md entries (and no other code changes) for:
@@ -25,3 +25,8 @@ Folded the four notes into CLAUDE.md (Commands dev:automation bullet, MCP automa
 
 ## Verification
 Read-through: each bullet is present in its CLAUDE.md section. `npm run format:check` is clean.
+
+## Sign-Off
+**Reviewer**: Reviewer agent (Sonnet), batch review of squawks 0146–0148; [HANDOFF:confirmed] (one non-blocking nit on 0146's test temp-dir cleanup, fixed and re-reviewed: [HANDOFF:confirmed])
+**Verdict**: confirmed
+**Commit**: `e43472e` (squawk/turnaround-2026-10-13)

@@ -1,10 +1,10 @@
 # Squawk 0146: Browser-import destination picker silently defaults to Global
 
-**Status**: in-progress
+**Status**: completed
 **Type**: defect
 **Severity**: routine
 **Reported**: 2026-10-13
-**Completed**: —
+**Completed**: 2026-10-13
 
 ## Report
 The vault page's "Import from a browser…" destination modal pre-selects Global. If the operator presses Import without choosing, the CSV lands in a vault they never chose. The native confirm names the destination, so this is not silent data loss, but it is the same unsafe default Sortie 04 removed from the copy picker (HAT fix F3).
@@ -21,3 +21,8 @@ Fix: start the select on a disabled `Choose a vault…` placeholder (value `''`)
 
 ## Verification
 Added `test/unit/vault-browser-import-controller.test.js` (4 tests: placeholder selected + Import disabled, enable/disable on change + no-op submit, mode row hidden on placeholder, zero-candidate stays disabled). Commands: `timeout 300 npm test` (all green incl. `vault-browser-import-invariants.test.js`), `npm run typecheck`, `npm run lint`, `npm run format:check` — all pass. The test loads the shipped controller with only its flat `./vault-page-model.js` specifier rewritten to the shared file (temp copy). The test removes its temp dir in an `after()` hook (no `gf-bimport-*` left in /tmp).
+
+## Sign-Off
+**Reviewer**: Reviewer agent (Sonnet), batch review of squawks 0146–0148; [HANDOFF:confirmed] (one non-blocking nit on 0146's test temp-dir cleanup, fixed and re-reviewed: [HANDOFF:confirmed])
+**Verdict**: confirmed
+**Commit**: `e43472e` (squawk/turnaround-2026-10-13)
