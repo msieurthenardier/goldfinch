@@ -153,7 +153,8 @@ export function createVaultBrowserImport(deps) {
 
   /**
    * The destination modal (DD9, DD13): a summary block (candidate count + skip
-   * breakdown), a destination `<select>` (Global preselected), and a Replace/Merge
+   * breakdown), a destination `<select>` (starts on a disabled
+   * `Choose a vault…` placeholder — no default; Import enabled only once one is chosen), and a Replace/Merge
    * `<select>` shown only when the selected destination's presence snapshot reports
    * >= 1 item (display-only — `mode` always rides the commit, defaulting to 'merge').
    * Commit awaits a main-side NATIVE confirm (DD13) before any write.
@@ -208,8 +209,14 @@ export function createVaultBrowserImport(deps) {
     destField.appendChild(el('span', 'vault-field-label', 'Import into'));
     const destSelect = /** @type {HTMLSelectElement} */ (el('select', 'vault-settings-select'));
     destSelect.setAttribute('aria-label', 'Import destination');
+    // No default destination (squawk 0146, mirrors the Sortie 04 copy picker): a disabled,
+    // selected placeholder; Import stays disabled until the operator picks a real vault.
+    appendOption(destSelect, '', 'Choose a vault…');
+    const placeholderOption = /** @type {HTMLOptionElement} */ (destSelect.children[0]);
+    placeholderOption.disabled = true;
+    placeholderOption.selected = true;
+    destSelect.value = '';
     for (const o of options) appendOption(destSelect, o.vaultId, o.label);
-    destSelect.value = 'global';
     destField.appendChild(destSelect);
     body.appendChild(destField);
 
@@ -229,14 +236,14 @@ export function createVaultBrowserImport(deps) {
       modeField.hidden = !hasItems;
     }
     updateModeVisibility();
-    destSelect.addEventListener('change', updateModeVisibility);
 
     const handle = openModal({
       title: 'Import passwords',
       body,
       submitLabel: 'Import',
-      submitEnabled: n > 0,
+      submitEnabled: false, // enabled by the destination `change` once a real vault is chosen
       onSubmit: () => {
+        if (destSelect.value === '') return; // placeholder is not a destination
         handle.setSubmitEnabled(false);
         handle.setStatus('Importing…');
         // mode ALWAYS rides the commit — 'merge' is the literal default for an
@@ -275,6 +282,11 @@ export function createVaultBrowserImport(deps) {
         Promise.resolve(bridge.browserImportCancel(record.handle)).catch(() => {});
         heldRecord = null;
       }
+    });
+
+    destSelect.addEventListener('change', () => {
+      updateModeVisibility();
+      handle.setSubmitEnabled(n > 0 && destSelect.value !== '');
     });
   }
 

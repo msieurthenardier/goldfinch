@@ -759,13 +759,23 @@ test('copyDestinationOptions: source Global → only jars; source a jar → Glob
   const presence = { work: { hasVault: true, count: 2 } };
   const g = { hasVault: true, count: 3 };
   assert.deepEqual(copyDestinationOptions(jars, presence, g, 'global'), [
-    { vaultId: 'work', label: 'Work — 2 secrets' },
-    { vaultId: 'home', label: 'Home — no secrets yet' }
+    { vaultId: 'work', name: 'Work', label: 'Work — 2 secrets' },
+    { vaultId: 'home', name: 'Home', label: 'Home — no secrets yet' }
   ]);
   assert.deepEqual(copyDestinationOptions(jars, presence, g, 'work'), [
-    { vaultId: 'global', label: 'Global — 3 secrets' },
-    { vaultId: 'home', label: 'Home — no secrets yet' }
+    { vaultId: 'global', name: 'Global', label: 'Global — 3 secrets' },
+    { vaultId: 'home', name: 'Home', label: 'Home — no secrets yet' }
   ]);
+});
+
+test('copyDestinationOptions: name comes from the jar row, even when it contains " — "', () => {
+  const jars = [{ id: 'j1', name: 'A — B' }, { id: 'j2' }];
+  const out = copyDestinationOptions(jars, {}, {}, 'none');
+  assert.deepEqual(
+    out.map((o) => o.name),
+    ['Global', 'A — B', 'j2']
+  );
+  assert.equal(out[1].label, 'A — B — no secrets yet');
 });
 
 test('copyDestinationOptions: empty jars + source Global → []; malformed input never throws', () => {

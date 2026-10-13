@@ -63,7 +63,7 @@ const RESOLUTION_ORDER = ['skip', 'replace', 'keep-both'];
  *     openModal: (opts: any) => { close: () => void, setSubmitEnabled: (on: boolean) => void, setStatus: (text: string) => void },
  *     appendOption: (select: any, value: string, text: string) => void
  *   },
- *   copyDestinationOptions: (jars: any, presence: any, globalPresence: any, sourceVaultId: string) => Array<{ vaultId: string, label: string }>,
+ *   copyDestinationOptions: (jars: any, presence: any, globalPresence: any, sourceVaultId: string) => Array<{ vaultId: string, name: string, label: string }>,
  *   getJarRows: () => any[],
  *   getJarVaultPresence: () => Record<string, any>,
  *   getRenderEpoch: () => number,
@@ -152,12 +152,6 @@ export function createItemActionsController(deps) {
 
   /** @param {unknown} title @returns {string} */
   const titleOf = (title) => (typeof title === 'string' && title ? title : COPY_TEXT.untitled);
-
-  /** The destination's display name: the label text before its " — N secrets" suffix. */
-  const destName = (/** @type {string} */ label) => {
-    const i = label.lastIndexOf(' — ');
-    return i === -1 ? label : label.slice(0, i);
-  };
 
   /**
    * The ONE copy call site (both steps). `epoch` is the render epoch of the modal that sent it:
@@ -353,7 +347,7 @@ export function createItemActionsController(deps) {
             if (!chosen) return;
             handle.setSubmitEnabled(false);
             submitCopy({ sourceVaultId: vaultId, itemId: meta.id, destVaultId }, epoch, handle, {
-              destName: destName(chosen.label),
+              destName: chosen.name,
               vaultId,
               meta,
               invoker

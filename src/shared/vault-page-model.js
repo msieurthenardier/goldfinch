@@ -383,10 +383,24 @@ function browserImportDestinationOptions(jars, presenceById, globalPresence) {
  * @param {Record<string, { hasVault?: unknown, count?: unknown }>} [presenceById]
  * @param {{ hasVault?: unknown, count?: unknown }} [globalPresence]
  * @param {string} [sourceVaultId]
- * @returns {Array<{ vaultId: string, label: string }>}
+ * @returns {Array<{ vaultId: string, name: string, label: string }>}  `name` is the destination's
+ *   bare display name (Global → "Global"; a jar → its row name, id fallback as in the label), taken
+ *   from data — never parsed back out of `label`.
  */
 function copyDestinationOptions(jars, presenceById, globalPresence, sourceVaultId) {
-  return browserImportDestinationOptions(jars, presenceById, globalPresence).filter((o) => o.vaultId !== sourceVaultId);
+  /** @type {Map<string, string>} */
+  const names = new Map();
+  for (const j of Array.isArray(jars) ? jars : []) {
+    if (!j || typeof j !== 'object' || typeof j.id !== 'string' || !j.id) continue;
+    names.set(j.id, typeof j.name === 'string' && j.name ? j.name : j.id);
+  }
+  return browserImportDestinationOptions(jars, presenceById, globalPresence)
+    .filter((o) => o.vaultId !== sourceVaultId)
+    .map((o) => ({
+      vaultId: o.vaultId,
+      name: o.vaultId === 'global' ? 'Global' : (names.get(o.vaultId) ?? o.vaultId),
+      label: o.label
+    }));
 }
 
 /**
