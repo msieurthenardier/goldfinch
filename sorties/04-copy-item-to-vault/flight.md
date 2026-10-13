@@ -1,6 +1,6 @@
 # Sortie: Copy a Vault Item to Another Vault
 
-**Status**: landed
+**Status**: completed
 
 ## Charter
 
@@ -11,10 +11,10 @@ From the vault page, the operator can copy any item into another vault (any pers
 The same login is often needed in more than one jar (for example, one account used from two containers). Today the only way to get it into a second vault is to re-enter it by hand.
 
 ### Success Criteria
-- [ ] Every item row has a "Copy to…" action. It lists every vault except the item's own (other persistent jars and Global). The copy keeps every field (password, TOTP, notes, match mode, card and identity secrets), and the source item is untouched. Copying into a jar that has no vault yet creates one.
-- [ ] If the destination already has a matching item, nothing is written until the operator picks **Skip / Replace / Keep both**. A match means: login → same origin + username; card → same number; note → same title; identity → any existing identity. If the match is identical, nothing is written and the operator is told it is already there. For an identity only **Replace / Cancel** is offered, because a vault holds one identity.
-- [ ] No secret field value (password, TOTP, notes, card number/CVV/expiry, identity secrets, note body) reaches the vault page DOM during a copy. The page sends only ids and the chosen resolution, the copy runs main-side, and the collision step shows only non-secret metadata (type, title, username) — the same fields item rows already show.
-- [ ] No MCP tool can start a copy. A copy attempted while locked or during a rotation writes nothing and shows a visible error.
+- [x] Every item row has a "Copy to…" action. It lists every vault except the item's own (other persistent jars and Global). The copy keeps every field (password, TOTP, notes, match mode, card and identity secrets), and the source item is untouched. Copying into a jar that has no vault yet creates one.
+- [x] If the destination already has a matching item, nothing is written until the operator picks **Skip / Replace / Keep both**. A match means: login → same origin + username; card → same number; note → same title; identity → any existing identity. If the match is identical, nothing is written and the operator is told it is already there. For an identity only **Replace / Cancel** is offered, because a vault holds one identity.
+- [x] No secret field value (password, TOTP, notes, card number/CVV/expiry, identity secrets, note body) reaches the vault page DOM during a copy. The page sends only ids and the chosen resolution, the copy runs main-side, and the collision step shows only non-secret metadata (type, title, username) — the same fields item rows already show.
+- [x] No MCP tool can start a copy. A copy attempted while locked or during a rotation writes nothing and shows a visible error.
 
 ### Constraints
 - Keeps existing vault rules intact: one identity per vault on every write path, the rotation lock that blocks writes mid-rotation (`_enterGatedOp`), the full-replace save contract, and loading vault files loudly.

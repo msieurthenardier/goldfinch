@@ -82,3 +82,4 @@ Planned 2026-10-12; executed 2026-10-12/13. Legs 1–2 committed (`9bd9bb7`, PR 
 
 ### Flight Director Notes (landing)
 - 2026-10-13: Leg 3 completed; all legs completed; flight → `landed`. Committing the HAT fixes + run log + artifacts as one commit on the sortie branch; PR #255 → ready for review. Debrief next: `/mission-control:flight-debrief sortie 04`.
+- 2026-10-13: Debrief written (`flight-debrief.md`); charter criteria 4/4 met; squawks 0146–0148 logged (routine, open). Operator: dev mode is a standing preference. Sortie → **completed**.
