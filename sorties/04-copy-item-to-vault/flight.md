@@ -1,6 +1,6 @@
 # Sortie: Copy a Vault Item to Another Vault
 
-**Status**: in-flight
+**Status**: landed
 
 ## Charter
 
@@ -129,8 +129,8 @@ Add a "Copy to…" action to every typed item row on the `goldfinch://vault` pag
 **DD11 — Behavior-test apparatus**: spec `vault-copy-item`, hybrid witnessed like `vault-filter`. **Apparatus launch (operator ruling 2026-10-12): Goldfinch dev mode, not the registered `goldfinch-dev` MCP server.** Launch `GOLDFINCH_AUTOMATION_ADMIN=1 GOLDFINCH_AUTOMATION_DEV_MINT=1 npm run dev:automation` (WSLg: append `-- --disable-gpu --ozone-platform=x11` if needed), capture the one `AUTOMATION_DEV_MINT {"key":…,"adminKey":…}` stdout line, export `GOLDFINCH_MCP_ADMIN_KEY=<adminKey>`, and drive the app through env-key scripts on `scripts/lib/mcp-client.mjs` → `connectAutomation()` (the script-harness consumer model in `docs/dev-testing.md` → *Key capture* / *Attaching a consumer*), re-capturing the key on every launch. The dev profile is isolated from the installed app's, so the vault under test is the DEV profile's vault (set up once there with a throwaway master password) — never the operator's real vault. **Act**: admin-tier MCP `click`/`evaluate` on the `goldfinch://vault` tab (item rows, modal controls); unlock is an operator step (the `vault-unlock` sheet is not automatable). **Observe**: `readDom`/`readAxTree` on the vault tab for rows, modal text, notices and the "no secret in the DOM" check (search the serialized DOM for seeded marker values); destination contents read by re-listing via `evaluate` → `goldfinchInternal.vaultList(destId)` (metadata only). Secret-field equality is checked by an `evaluate` script that calls `vaultReveal` for the source and destination items and returns only a boolean or a SHA-256 digest per field (`crypto.subtle`), so no secret value reaches the agent transcript or run log. Seeded values are throwaway `cq9marker` markers regardless. The stale-commit rule (DD3) cannot be produced through the UI, so one step drives it by calling `vaultItemCopy` directly via `evaluate` with a stale `matchId`. Premise to verify at planning: admin `click` lands on internal-page controls (vault-filter's run did this).
 
 ### Prerequisites
-- [ ] Dev mode launchable with `GOLDFINCH_AUTOMATION_ADMIN=1 GOLDFINCH_AUTOMATION_DEV_MINT=1 npm run dev:automation`, the `AUTOMATION_DEV_MINT` admin key captured, and a `connectAutomation()` script attaching (DD11). Used by leg 2's smoke step and the behavior test; the registered `goldfinch-dev` MCP server is NOT the apparatus (operator ruling 2026-10-12), so its connection failure in this planning session is not a blocker. Re-verify the dev-mode attach at the start of leg 2.
-- [ ] Dev profile's vault set up (throwaway master password) with two persistent jars, one with no vault file yet (behavior spec preconditions)
+- [x] Dev mode launchable with `GOLDFINCH_AUTOMATION_ADMIN=1 GOLDFINCH_AUTOMATION_DEV_MINT=1 npm run dev:automation`, the `AUTOMATION_DEV_MINT` admin key captured, and a `connectAutomation()` script attaching (DD11). Used by leg 2's smoke step and the behavior test; the registered `goldfinch-dev` MCP server is NOT the apparatus (operator ruling 2026-10-12), so its connection failure in this planning session is not a blocker. Re-verify the dev-mode attach at the start of leg 2.
+- [x] Dev profile's vault set up (throwaway master password) with two persistent jars, one with no vault file yet (behavior spec preconditions)
 - [x] `VAULT_PAGE_LINE_BUDGET` at 2153 / `vault.js` 2152 lines (recon 2026-10-12) — leg 2 extracts
 - [x] Gated-op hand list at twelve (`vault-rekey-gate.test.js`)
 - [x] MCP tool count 35 (`automation-mcp-server.test.js:39`)
@@ -138,7 +138,7 @@ Add a "Copy to…" action to every typed item row on the `goldfinch://vault` pag
 ### Pre-Flight Checklist
 - [x] All open questions resolved
 - [x] Design decisions documented
-- [ ] Prerequisites verified (dev-mode attach re-verified at leg 2 start)
+- [x] Prerequisites verified (dev-mode attach verified at leg 3 start)
 - [x] Validation approach defined
 - [x] Legs defined
 
@@ -152,8 +152,8 @@ Leg 1 builds and pins the main-side contract (planner, store op, channel, preloa
 ### Checkpoints
 - [x] `copyItem` lands every outcome branch with exactly-one-or-zero writes, including lazy destination creation and the stale-commit rule
 - [x] Channel registered, reason-mapped, pinned in the channel-set and boundary tests
-- [ ] Copy-to modal flow working on the real page; `vault.js` at or under its prior line count
-- [ ] Behavior test `vault-copy-item` passes; HAT accepted
+- [x] Copy-to modal flow working on the real page; `vault.js` at or under its prior line count
+- [x] Behavior test `vault-copy-item` passes; HAT accepted
 
 ### Adaptation Criteria
 
@@ -170,17 +170,17 @@ Leg 1 builds and pins the main-side contract (planner, store op, channel, preloa
 
 - [x] `copy-item-store-and-ipc` — `copy-plan.js` (`planCopy`), `VaultStore.copyItem` (13th gated op), `internal-vault-item-copy` + `VAULT_ITEM_COPY_CONFIG`, preload + d.ts, unit tests (planner matrix per type; every DD3 branch through the stateful store incl. lazy destination, stale commit, identity singleton, burner/same-vault/locked/busy refusals, unknown-field carry, zero-write cases, opaque-origin and multi-identity rows, id/createdAt freshness, stale `vaultKeys`), a composition test with the real store on disk + the real `registerVaultIpc` handler (lazy destination, collision, commit), channel-set/CRUD-list/rekey-gate (sync group, "thirteen")/boundary pins, `docs/vault.md` "Copying an item to another vault" under Portability
 - [x] `copy-to-ui` — `vault-item-actions-controller.js` (delete-confirm moved + copy-to flow), `copyDestinationOptions` in `vault-page-model.js`, `copy-to` icon, row wiring, page-map/eslint/invariant-count updates, `VAULT_PAGE_LINE_BUDGET` retargeted down, controller + model unit tests (mock DOM), shared-mechanism non-regression ACs (DD9), render-epoch and focus-across-steps tests, a live smoke test exercising every existing apparatus primitive (census, windows, capture, readDom/readAxTree, evaluate) against the new page state, behavior spec `vault-copy-item` finalized against the shipped DOM
-- [ ] `hat-and-alignment` *(optional)* — guided HAT on the real app: copy each item type, each collision choice, identity Replace/Cancel, copy into a jar with no vault yet, lock mid-modal, a second window open on the destination
+- [x] `hat-and-alignment` *(optional)* — guided HAT on the real app: copy each item type, each collision choice, identity Replace/Cancel, copy into a jar with no vault yet, lock mid-modal, a second window open on the destination
 
 ---
 
 ## Post-Flight
 
 ### Completion Checklist
-- [ ] All legs completed
+- [x] All legs completed
 - [ ] Code merged
-- [ ] Tests passing (`npm test`, `npm run typecheck`, `npm run lint`, `npm run format:check`)
-- [ ] Documentation updated (`docs/vault.md`; CLAUDE.md vault section gains a one-line pointer if the op adds an invariant worth carrying)
+- [x] Tests passing (`npm test`, `npm run typecheck`, `npm run lint`, `npm run format:check`)
+- [x] Documentation updated (`docs/vault.md`; CLAUDE.md vault section gains a one-line pointer if the op adds an invariant worth carrying)
 
 ### Verification
 - Unit: the leg-1 and leg-2 suites named above.

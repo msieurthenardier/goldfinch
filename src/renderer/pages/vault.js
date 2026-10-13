@@ -1985,12 +1985,12 @@ function init() {
     root.dataset.mode = view.mode;
 
     // A pending page notice (e.g. an export that raced an idle auto-lock → { locked }): show it once
-    // at the top of #vault-root, then clear it so it does not persist across later renders.
+    // at the top of #vault-root (scrolled into view), then clear it so it does not persist across later renders.
     if (pendingNotice) {
       const notice = el('div', 'vault-page-notice');
       notice.appendChild(el('span', undefined, pendingNotice)).setAttribute('role', 'status');
       notice.appendChild(iconButton('close', 'Dismiss', () => notice.remove()));
-      root.appendChild(notice);
+      root.appendChild(notice).scrollIntoView?.({ block: 'start' });
       pendingNotice = null;
     }
 

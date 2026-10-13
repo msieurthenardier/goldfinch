@@ -18,7 +18,9 @@ export const COPY_TEXT = Object.freeze({
   step2Title: (/** @type {string} */ dest) => `Already in ${dest}`,
   step2Message: (/** @type {string} */ title, /** @type {string|null} */ username) =>
     username ? `The destination already has “${title}” (${username}).` : `The destination already has “${title}”.`,
-  step2Identity: 'The destination already has an identity profile. A vault holds only one.',
+  step2Identity: (/** @type {string} */ dest, /** @type {string} */ title) =>
+    `${dest} already has an identity profile, “${title}”. A vault holds only one.`,
+  destPlaceholder: 'Choose a vault…',
   choiceLegend: 'What should happen?',
   choiceSkip: 'Skip — do not copy this item',
   choiceReplace: 'Replace — the existing item’s fields will be overwritten',
@@ -245,7 +247,7 @@ export function createItemActionsController(deps) {
         'p',
         'vault-confirm-message',
         identity
-          ? COPY_TEXT.step2Identity
+          ? COPY_TEXT.step2Identity(ctx.destName, titleOf(match.title))
           : COPY_TEXT.step2Message(
               titleOf(match.title),
               match.type === 'login' && typeof match.username === 'string' && match.username ? match.username : null
@@ -328,6 +330,10 @@ export function createItemActionsController(deps) {
           field.appendChild(el('span', 'vault-field-label', COPY_TEXT.destLabel));
           select = el('select', 'vault-settings-select');
           select.setAttribute('aria-label', COPY_TEXT.destAria);
+          appendOption(select, '', COPY_TEXT.destPlaceholder);
+          select.children[0].disabled = true;
+          select.children[0].selected = true;
+          select.value = '';
           for (const o of options) appendOption(select, o.vaultId, o.label);
           field.appendChild(select);
           body.appendChild(field);
@@ -339,7 +345,7 @@ export function createItemActionsController(deps) {
           title: COPY_TEXT.step1Title(titleOf(meta && meta.title)),
           body,
           submitLabel: COPY_TEXT.submitStep1,
-          submitEnabled: options.length > 0,
+          submitEnabled: false,
           onSubmit: () => {
             if (!select) return;
             const destVaultId = select.value;
@@ -354,6 +360,7 @@ export function createItemActionsController(deps) {
             });
           }
         });
+        if (select) select.addEventListener('change', () => handle.setSubmitEnabled(select.value !== ''));
       });
   }
 

@@ -974,7 +974,11 @@ deps; it also owns the delete and revoke-access-key confirms): step 1 picks a de
 `needs-resolution` reply opens step 2, a radio group over exactly the reply's `allowed` set. Only
 `match.title`, `match.username`, the kept-both `title` and destination labels are ever rendered, all
 via `textContent`. A render epoch (`renderEpoch`, bumped by `render()`) makes a reply that resolves
-after a lock/refresh open no modal, though a landed write still shows its page notice.
+after a lock/refresh open no modal, though a landed write still shows its page notice. Step 1 starts
+on a disabled `Choose a vault…` placeholder with Copy disabled until a real destination is chosen (no
+copy can land in a vault the operator didn't pick); the identity collision step names the existing
+profile's title; and `render()` scrolls a pending page notice into view, so a copy made from a
+scrolled-down row still shows its outcome (Sortie 04 HAT fixes).
 
 ## Rotation & recovery
 

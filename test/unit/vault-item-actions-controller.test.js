@@ -186,6 +186,12 @@ async function openStep1(h, { vaultId = 'global', meta = META, invoker } = {}) {
   return h.last();
 }
 const select1 = (m) => find(m.opts.body, (n) => n.tagName === 'SELECT')[0];
+/** Pick a destination the way the operator does: set the value, fire change. */
+const choose = (m, value) => {
+  const sel = select1(m);
+  sel.value = value;
+  sel.dispatch('change');
+};
 
 // ── delete / revoke confirm parity ───────────────────────────────────────────
 
@@ -268,26 +274,47 @@ test('openRevokeConfirm: success → close + refreshKeys (not refresh); {locked}
 
 // ── step 1 ───────────────────────────────────────────────────────────────────
 
-test('step 1: title, labelled select excludes the source vault, first option selected, submit "Copy"', async () => {
+test('step 1: title, labelled select excludes the source vault, starts on a disabled placeholder, submit "Copy"', async () => {
   const h = await harness();
   const m = await openStep1(h);
   assert.equal(m.opts.title, h.COPY_TEXT.step1Title('Bank'));
   assert.equal(m.opts.submitLabel, h.COPY_TEXT.submitStep1);
-  assert.equal(m.opts.submitEnabled, true);
+  assert.equal(m.opts.submitEnabled, false);
   const sel = select1(m);
   assert.equal(sel.getAttribute('aria-label'), h.COPY_TEXT.destAria);
   assert.deepEqual(
     sel.children.map((o) => [o.value, o.textContent]),
-    [['work', 'Work — 2 secrets']]
+    [
+      ['', h.COPY_TEXT.destPlaceholder],
+      ['work', 'Work — 2 secrets']
+    ]
   );
-  assert.equal(sel.value, 'work');
+  assert.equal(h.COPY_TEXT.destPlaceholder, 'Choose a vault…');
+  assert.equal(sel.value, '');
+  assert.equal(sel.children[0].disabled, true);
+  assert.equal(sel.children[0].selected, true);
 
   const h2 = await harness();
   const m2 = await openStep1(h2, { vaultId: 'work' });
   assert.deepEqual(
-    select1(m2).children.map((o) => [o.value, o.textContent]),
+    select1(m2)
+      .children.slice(1)
+      .map((o) => [o.value, o.textContent]),
     [['global', 'Global — 3 secrets']]
   );
+});
+
+test('step 1: choosing a destination enables Copy; going back to the placeholder disables it', async () => {
+  const h = await harness();
+  const m = await openStep1(h);
+  assert.equal(m.submitEnabled, false);
+  choose(m, 'work');
+  assert.equal(m.submitEnabled, true);
+  choose(m, '');
+  assert.equal(m.submitEnabled, false);
+  m.opts.onSubmit(); // placeholder value is not a destination: no-op
+  await h.flush();
+  assert.deepEqual(h.calls.copy, []);
 });
 
 test('step 1: a null title renders "(untitled)"; the title is set through textContent only', async () => {
@@ -314,12 +341,13 @@ test('step 1: a failing vaultState read degrades global presence to "no secrets 
     }
   });
   const m = await openStep1(h, { vaultId: 'work' });
-  assert.equal(select1(m).children[0].textContent, 'Global — no secrets yet');
+  assert.equal(select1(m).children[1].textContent, 'Global — no secrets yet');
 });
 
 test('step 1 submit sends ids only and disables submit until the reply lands', async () => {
   const h = await harness({ replies: [{ ok: true, outcome: 'copied' }] });
   const m = await openStep1(h);
+  choose(m, 'work');
   m.opts.onSubmit();
   assert.equal(m.submitEnabled, false);
   await h.flush();
@@ -339,6 +367,7 @@ test('terminal outcomes: close, then notice, then refresh — with the exact tex
   for (const [reply, text] of cases) {
     const h = await harness({ replies: [reply] });
     const m = await openStep1(h);
+    choose(m, 'work');
     m.opts.onSubmit();
     await h.flush();
     assert.deepEqual(h.log, ['close', `notice:${text}`, 'refresh'], reply.outcome);
@@ -355,6 +384,7 @@ const MATCH = { id: 'm1', type: 'login', title: 'Bank', username: 'ann' };
 
 async function toStep2(h, { invoker } = {}) {
   const m1 = await openStep1(h, { invoker });
+  choose(m1, 'work');
   m1.opts.onSubmit();
   await h.flush();
   return h.last();
@@ -409,9 +439,21 @@ test('step 2 (identity): a single pre-selected Replace option with identity copy
   assert.equal(rs[0].value, 'replace');
   assert.equal(rs[0].checked, true);
   const text = allText(m.opts.body);
+  assert.ok(text.includes(h.COPY_TEXT.step2Identity('Work', 'Me')));
+  assert.equal(
+    h.COPY_TEXT.step2Identity('Work', 'Me'),
+    'Work already has an identity profile, “Me”. A vault holds only one.'
+  );
   assert.ok(text.includes(h.COPY_TEXT.choiceReplaceIdentity));
   assert.equal(h.COPY_TEXT.choiceReplaceIdentity, 'Replace the existing identity profile');
   assert.equal(m.opts.submitLabel, h.COPY_TEXT.submitStep2Identity);
+});
+
+test('step 2 (identity, null title): falls back to "(untitled)"', async () => {
+  const match = { id: 'p1', type: 'identity', title: null };
+  const h = await harness({ replies: [{ ok: true, outcome: 'needs-resolution', match, allowed: ['replace'] }] });
+  const m = await toStep2(h);
+  assert.ok(allText(m.opts.body).includes('Work already has an identity profile, “(untitled)”.'));
 });
 
 test('step 2 (null match title): renders "(untitled)"', async () => {
@@ -497,6 +539,7 @@ test('errors keep the modal open with the reason text and re-enable submit', asy
   for (const [reply, text] of cases) {
     const h = await harness({ replies: [reply] });
     const m = await openStep1(h);
+    choose(m, 'work');
     m.opts.onSubmit();
     await h.flush();
     assert.equal(m.status, text);
@@ -512,6 +555,7 @@ test('errors keep the modal open with the reason text and re-enable submit', asy
 test('{locked} → close + refresh with no notice', async () => {
   const h = await harness({ replies: [{ locked: true }] });
   const m = await openStep1(h);
+  choose(m, 'work');
   m.opts.onSubmit();
   await h.flush();
   assert.deepEqual(h.log, ['close', 'refresh']);
@@ -534,6 +578,7 @@ test('render epoch: moved between invoke and resolve → only a WRITTEN outcome 
     const epoch = { n: 0 };
     const h = await harness({ replies: [reply], epoch });
     const m = await openStep1(h);
+    choose(m, 'work');
     m.opts.onSubmit();
     epoch.n++; // a render() landed while the invoke was in flight
     await h.flush();
@@ -637,4 +682,12 @@ test('vault.js source: row actions are Edit, Copy to, Delete in order; old modal
   );
   assert.match(VAULT_JS, /function render\(state\) \{\s*renderEpoch\+\+;/);
   assert.match(VAULT_JS, /getRenderEpoch: \(\) => renderEpoch/);
+});
+
+test('vault.js source: the pending notice is scrolled into view (neuter-verified)', () => {
+  const re = /root\.appendChild\(notice\)\s*\.scrollIntoView/;
+  assert.match(VAULT_JS, re);
+  const mutated = VAULT_JS.replace(/(root\.appendChild\(notice\))\s*\.scrollIntoView/, '$1.focus');
+  assert.notEqual(mutated, VAULT_JS, 'assertMutated: the neuter must change the source');
+  assert.ok(!re.test(mutated), 'pin goes red without the scroll');
 });
