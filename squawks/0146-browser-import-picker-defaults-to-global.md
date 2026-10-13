@@ -1,6 +1,6 @@
 # Squawk 0146: Browser-import destination picker silently defaults to Global
 
-**Status**: open
+**Status**: in-progress
 **Type**: defect
 **Severity**: routine
 **Reported**: 2026-10-13
@@ -17,7 +17,7 @@ Fix: start the select on a disabled `Choose a vault…` placeholder (value `''`)
 - Source: Sortie 04 debrief, Recommendation 3 (`sorties/04-copy-item-to-vault/flight-debrief.md`).
 
 ## Corrective Action
-*(written at completion)*
+`renderDestinationModal` (`src/renderer/pages/vault-browser-import-controller.js`) now prepends a disabled+selected `Choose a vault…` placeholder (value `''`) instead of `destSelect.value = 'global'`, opens the modal with `submitEnabled: false`, and a `change` listener attached after the handle exists calls `updateModeVisibility()` and `handle.setSubmitEnabled(n > 0 && destSelect.value !== '')`. `onSubmit` no-ops on `''` defensively. `updateModeVisibility` already hides the Replace/Merge row for an unknown id (`''`). Mirrors the Sortie 04 copy picker. `docs/vault.md` Browser import section updated.
 
 ## Verification
-Controller-level tests covering: the placeholder is selected, Import is disabled until a choice is made, and the mode row stays hidden while the placeholder is selected. The browser-import invariant scans must still pass.
+Added `test/unit/vault-browser-import-controller.test.js` (4 tests: placeholder selected + Import disabled, enable/disable on change + no-op submit, mode row hidden on placeholder, zero-candidate stays disabled). Commands: `timeout 300 npm test` (all green incl. `vault-browser-import-invariants.test.js`), `npm run typecheck`, `npm run lint`, `npm run format:check` — all pass. The test loads the shipped controller with only its flat `./vault-page-model.js` specifier rewritten to the shared file (temp copy). The test removes its temp dir in an `after()` hook (no `gf-bimport-*` left in /tmp).

@@ -391,6 +391,16 @@ async function toStep2(h, { invoker } = {}) {
 }
 const radios = (m) => find(m.opts.body, (n) => n.tagName === 'INPUT' && n.type === 'radio');
 
+test('dash in a jar name: notice and step-2 title use the full name', async () => {
+  const jars = [{ id: 'work', name: 'Work — Home' }];
+  const h = await harness({ jars, replies: [{ ok: true, outcome: 'copied' }] });
+  const m = await openStep1(h);
+  choose(m, 'work');
+  m.opts.onSubmit();
+  await h.flush();
+  assert.ok(h.log.includes(`notice:${h.COPY_TEXT.copied('Work — Home')}`));
+});
+
 test('step 2 (one match): title, message, 3 radios skip/replace/keep-both, Skip checked', async () => {
   const h = await harness({
     replies: [{ ok: true, outcome: 'needs-resolution', match: MATCH, allowed: ['skip', 'replace', 'keep-both'] }]

@@ -1,6 +1,6 @@
 # Squawk 0147: Copy-to flow parses the destination name out of its option label
 
-**Status**: open
+**Status**: in-progress
 **Type**: servicing
 **Severity**: routine
 **Reported**: 2026-10-13
@@ -17,7 +17,7 @@ Fix: have `copyDestinationOptions` return `{ vaultId, name, label }`, and have t
 - Source: Sortie 04 debrief (Architect review, Recommendation 4).
 
 ## Corrective Action
-*(written at completion)*
+`copyDestinationOptions` now returns `{ vaultId, name, label }`; `name` is built from the jar rows (Global → "Global"; id fallback matching the label) alongside the unchanged `browserImportDestinationOptions`/`restoreDestinationOptions`. The controller's `destName` label-parsing helper is removed and it reads `chosen.name`.
 
 ## Verification
-`vault-page-model.test.js` asserts `name` for Global, jars, and a jar name containing " — ". `vault-item-actions-controller.test.js` notice and step-2 title assertions still pass, plus one case with a " — " jar name.
+Full `npm test`, typecheck, lint and format:check green. `vault-page-model.test.js` asserts `name` for Global, jars, and a jar name containing " — ". `vault-item-actions-controller.test.js` notice and step-2 title assertions still pass, plus one case with a " — " jar name.

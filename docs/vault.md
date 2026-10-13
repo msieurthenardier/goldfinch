@@ -867,7 +867,8 @@ Chrome's (M19 F2 DD1), so it passes the same detector unchanged. Accepted rows a
 degenerate rows (a federated/no-password entry, a non-web `android://` origin, a
 malformed row, an over-length field) accounted for as a skip reason — never silently
 dropped, never fatal to the whole import. The operator then picks a destination (Global
-or any persistent jar) and, for a non-empty destination, Replace or Merge — the same
+or any persistent jar; the picker starts on a disabled `Choose a vault…` placeholder with
+Import disabled — there is no default destination, squawk 0146) and, for a non-empty destination, Replace or Merge — the same
 choice restore's mapping modal offers, reusing `restoreDestinationOptions`
 (`src/shared/vault-page-model.js`) for the jar-row half.
 

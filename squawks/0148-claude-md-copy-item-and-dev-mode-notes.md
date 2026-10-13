@@ -1,6 +1,6 @@
 # Squawk 0148: CLAUDE.md lacks the Sortie 04 invariants and the dev-mode apparatus rule
 
-**Status**: open
+**Status**: in-progress
 **Type**: servicing
 **Severity**: routine
 **Reported**: 2026-10-13
@@ -21,7 +21,7 @@ Respect the file's density. Fold each item into its existing section rather than
 - `src/main/automation/mcp-tools.js` `evaluate` `inputSchema.required: ['wcId', 'expression']`.
 
 ## Corrective Action
-*(written at completion)*
+Folded the four notes into CLAUDE.md (Commands dev:automation bullet, MCP automation, Password vault, planning rules). Checked against code: `mcp-tools.js` evaluate requires `expression`; `nav.js` reload throws `internal-session excluded`; `vault-store.js` `_copyItem` stale commit re-answers `needs-resolution`, skip returns early; `renderEpoch` in `vault.js`.
 
 ## Verification
 Read-through: each bullet is present in its CLAUDE.md section. `npm run format:check` is clean.
