@@ -286,7 +286,7 @@ test('settings.js shields controller: patch-in-place notes, guarded restoreSessi
 test('settings.css dims Shields child rows when #shield-enabled is unchecked, AA-safe, rows only', () => {
   const css = fs.readFileSync(path.join(PAGES_DIR, 'settings.css'), 'utf8');
   const m =
-    /\.shields-group:has\(#shield-enabled:not\(:checked\)\)\s+\.shield-row:not\(\.shield-parent\)\s*\{([^}]*)\}/.exec(
+    /\.shields-group:has\(#shield-enabled:not\(:checked\)\)\s+\.shield-row:not\(\.shield-parent\)(?::not\(\.isolate-enforced\))?\s*\{([^}]*)\}/.exec(
       css
     );
   assert.ok(m, 'master-off dim rule present');

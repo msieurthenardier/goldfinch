@@ -100,20 +100,32 @@ test('squawk 0035: an unlisted TLD fails closed to the whole hostname (registrab
   assert.notEqual(hostA, hostB);
 });
 
-// Squawk 0035 review fix (BLOCKING): four old MULTI_SUFFIX platform entries
-// (amazonaws.com, netlify.com, surge.sh, glitch.me) sit under a real ICANN
+// Squawk 0035 review fix (BLOCKING): old MULTI_SUFFIX platform entries
+// (amazonaws.com, netlify.com, glitch.me) sit under a real ICANN
 // TLD with no matching PSL PRIVATE-section rule, so registrableDomainSafe()
 // resolves them via the bare TLD alone — a non-null but WRONG split that
 // drops the tenant label. SUPPLEMENT_SUFFIX restores the old curated split
-// for exactly these four.
+// for exactly these. (surge.sh left the set in squawk 0153 — see below.)
 test('squawk 0035 review fix: two tenants under each supplemented suffix are different sites', () => {
-  for (const suffix of ['amazonaws.com', 'netlify.com', 'surge.sh', 'glitch.me']) {
+  for (const suffix of ['amazonaws.com', 'netlify.com', 'glitch.me']) {
     const a = registrableDomain(`tenant-a.${suffix}`);
     const b = registrableDomain(`tenant-b.${suffix}`);
     assert.equal(a, `tenant-a.${suffix}`, `${suffix}: tenant-a should keep its label`);
     assert.equal(b, `tenant-b.${suffix}`, `${suffix}: tenant-b should keep its label`);
     assert.notEqual(a, b, `${suffix}: distinct tenants must not collapse`);
   }
+});
+
+// Squawk 0153: surge.sh gained a native PSL PRIVATE rule (snapshot
+// 2026-10-20), so it is no longer supplemented; the PSL alone keeps tenants.
+test('squawk 0153: surge.sh tenants resolve via the PSL natively and stay distinct', () => {
+  const a = registrableDomain('tenant-a.surge.sh');
+  const b = registrableDomain('tenant-b.surge.sh');
+  assert.equal(a, 'tenant-a.surge.sh');
+  assert.equal(b, 'tenant-b.surge.sh');
+  assert.notEqual(a, b);
+  assert.equal(registrableDomain('deep.tenant-a.surge.sh'), 'tenant-a.surge.sh');
+  assert.equal(registrableDomain('surge.sh'), 'surge.sh');
 });
 
 test('squawk 0035 review fix classify: tenants under a supplemented suffix are third-party to each other', () => {
@@ -134,7 +146,6 @@ test('squawk 0035 review fix: a suffix that IS in the PSL still resolves via the
 test('squawk 0035 review fix: bare supplement suffix host (no tenant label) is unaffected', () => {
   assert.equal(registrableDomain('amazonaws.com'), 'amazonaws.com');
   assert.equal(registrableDomain('netlify.com'), 'netlify.com');
-  assert.equal(registrableDomain('surge.sh'), 'surge.sh');
   assert.equal(registrableDomain('glitch.me'), 'glitch.me');
 });
 
