@@ -18,7 +18,7 @@
 //
 // DATA SOURCE (vendored, redistributable):
 //   URL:      https://publicsuffix.org/list/public_suffix_list.dat
-//   Snapshot: 2026-07-20 (file header VERSION 2026-07-20_19-17-05_UTC)
+//   Snapshot: 2026-10-20 (file header VERSION 2026-10-20_08-40-56_UTC)
 //   License:  Mozilla Public License v2.0 (MPL-2.0) — bundling the .dat as a DATA
 //             asset (not an npm package) preserves goldfinch's zero-runtime-dep ethos.
 //   REFRESH:  the list drifts as registries change. Run `node scripts/update-psl.mjs` (fetches
