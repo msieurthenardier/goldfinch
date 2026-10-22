@@ -409,6 +409,8 @@ async function copyText(text, messageEl) {
     });
     setNote('shield-enabled-note', m.masterNote ? m.copy[m.masterNote] : '');
     setNote('shield-isolate-note', m.isolateRow.note ? m.copy[m.isolateRow.note] : '');
+    const isolateRowEl = $('shield-isolate') && $('shield-isolate').closest('.shield-row');
+    if (isolateRowEl) isolateRowEl.classList.toggle('isolate-enforced', !m.isolateRow.dim);
     if (!m.restartPending) confirm.reset();
     const ctl = restartControl({
       restartPending: m.restartPending,

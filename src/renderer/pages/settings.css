@@ -207,8 +207,9 @@ main section p {
 /* Master Shields off: dim the child rows like the privacy panel's .shield-row.dim, but stay operable
    (no disabled state). Keyed off the live checkbox, so it needs no JS. Opacity is 0.65, not the
    panel's 0.4: --fg composited at 0.4 on --bg is ~3.3:1 (fails AA); at 0.65 it is ~6.4:1. Rows only,
-   so the restart notes (p.shield-note) are unaffected. */
-.shields-group:has(#shield-enabled:not(:checked)) .shield-row:not(.shield-parent) {
+   so the restart notes (p.shield-note) are unaffected. The Isolate row is exempt while isolation is
+   in force (DD6: dim = not in force; settings.js toggles .isolate-enforced from the shared model). */
+.shields-group:has(#shield-enabled:not(:checked)) .shield-row:not(.shield-parent):not(.isolate-enforced) {
   opacity: 0.65;
 }
 

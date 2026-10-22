@@ -33,7 +33,8 @@ const { registrableDomainSafe } = require('./psl');
 // tenant-a.netlify.com -> netlify.com) — re-opening the exact cross-tenant
 // merge this squawk fixes, for those four. SUPPLEMENT_SUFFIX below restores
 // the old curated split for exactly this confirmed-absent set; see its
-// comment for the check and the PSL-wins condition.
+// comment for the check and the PSL-wins condition. (surge.sh has since
+// gained a native PSL rule and left the set — squawk 0153.)
 
 // IP literals are already their full identity — label-slicing them yields
 // bogus domains (e.g. "192.168.1.10" → "1.10") that collide across hosts.
@@ -45,20 +46,20 @@ function isIpLiteral(hostname) {
   return false;
 }
 
-// Curated supplement to the PSL, NOT a replacement for it. Checked 2026-08-27
-// against the vendored public_suffix_list.dat (snapshot 2026-07-20): these
-// are exactly the pre-squawk-0035 MULTI_SUFFIX entries confirmed absent from
-// the .dat's PRIVATE section (verified by calling registrableDomainSafe on a
+// Curated supplement to the PSL, NOT a replacement for it. Checked 2026-10-22
+// against the vendored public_suffix_list.dat (snapshot 2026-10-20): these
+// are the pre-squawk-0035 MULTI_SUFFIX entries confirmed absent from the
+// .dat's PRIVATE section (verified by calling registrableDomainSafe on a
 // synthetic tenant host for every old MULTI_SUFFIX entry and diffing against
 // the expected split — the other entries, e.g. github.io, s3.amazonaws.com,
 // vercel.app, all resolve correctly via the PSL alone). Each of these sits
-// under a real ICANN TLD (.com, .sh, .me), so PSL doesn't fail closed for
-// them — it returns the bare TLD-level split, silently merging tenants. If
-// the .dat later gains a matching PRIVATE-section rule, PSL's own answer will
-// stop being the bare suffix (see the `safe === suffix` guard in
-// registrableDomain below) and this supplement stops firing on its own —
-// PSL always wins once it has a more specific answer.
-const SUPPLEMENT_SUFFIX = new Set(['amazonaws.com', 'netlify.com', 'surge.sh', 'glitch.me']);
+// under a real ICANN TLD (.com, .me), so PSL doesn't fail closed for them —
+// it returns the bare TLD-level split, silently merging tenants. surge.sh was
+// dropped from this set once the .dat gained a native PRIVATE rule for it
+// (squawk 0153): that is the "PSL wins" case — PSL's own answer stops being
+// the bare suffix (see the `safe === suffix` guard in registrableDomain
+// below), so a supplement entry stops firing on its own and is dead config.
+const SUPPLEMENT_SUFFIX = new Set(['amazonaws.com', 'netlify.com', 'glitch.me']);
 
 function registrableDomain(hostname) {
   if (!hostname) return '';
