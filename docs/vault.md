@@ -1169,7 +1169,7 @@ no plaintext key and adding no fourth recovery route.
 **The admin key — break-glass / multi-vault.** The X25519 admin key is the intended path for
 opening every vault at once (multi-vault automation, operator break-glass). Handing the admin
 private key over an automation tool argument is the supported admin-automation unlock, though
-the Settings UI recommends against embedding it in config. It is also the only per-op route
+the Automation page recommends against embedding it in config. It is also the only per-op route
 that reaches jar vaults created after setup.
 
 **Burner / internal exclusion.** Burner jars and the internal `goldfinch://` session are

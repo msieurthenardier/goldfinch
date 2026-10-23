@@ -1,4 +1,4 @@
-# Behavior Test: Settings Activity viewer — render, paginate, freeze-on-page-back
+# Behavior Test: Automation page Activity viewer — render, paginate, freeze-on-page-back
 
 **Slug**: `settings-activity-viewer`
 **Status**: draft
@@ -6,7 +6,7 @@
 **Last Run**: 2026-06-17-17-23-30 — [run log](./settings-activity-viewer/runs/2026-06-17-17-23-30.md) (**partial** — serve-seam render guard Step 1 PASS (viewer not blank); pager/freeze Steps 2-8 carried, apparatus-limited)
 
 ## Intent
-Verify that the `goldfinch://settings` **Automation → Activity** viewer correctly **renders** the audit
+Verify that the `goldfinch://automation` page's **Activity** viewer correctly **renders** the audit
 log inside the privileged internal guest and **paginates** it with the conventional numbered control
 (`‹ 1 2 3 … ›`), honoring the F7 freshness contract: **page 1 is live** (re-renders as new entries
 arrive) while **page 2+ is frozen** at the moment it was opened (older entries do not slide mid-read),
@@ -48,8 +48,8 @@ seam had no live regression guard.
   the F7 implementation shipped numbered pagination and the size is an implementation detail that may
   change.
 - **The build includes F7's audit paging** — `src/shared/audit-paging.js` registered in
-  `INTERNAL_PAGES`, the numbered pager DOM in `settings.html`, and the `reduceAudit` freeze state
-  machine wired into the `settings.js` activity-viewer IIFE.
+  `INTERNAL_PAGES`, the numbered pager DOM in `automation.html`, and the `reduceAudit` freeze state
+  machine wired into the `automation.js` activity-viewer IIFE.
 
 ## Observables Required
 - mcp (admin MCP tools — `readDom(guestWcId)` for the rendered `#automation-activity-log` + the numbered
@@ -62,7 +62,7 @@ seam had no live regression guard.
 
 | # | Actions | Expected Results |
 |---|---------|------------------|
-| 1 | **Active-precondition probe + serve-seam guard.** Connect the admin MCP client; `tools/list`; `getChromeTarget()`. Open Settings (`openTab('goldfinch://settings', null, {trusted:true})` or kebab→Settings); `enumerateTabs` → record `guestWcId`. `readDom(guestWcId)` and confirm the `#automation` section AND a non-empty Activity viewer container (`#automation-activity-log`) render. | `tools/list` returns the expected tool set incl. `getChromeTarget`; `getChromeTarget()` returns a numeric chrome `wcId`. The settings guest is enumerable. The Activity viewer container **renders with content** (not blank) — i.e. `audit-paging.js` was **served** via `INTERNAL_PAGES` (no 404/blank — the exact F7-HAT regression). If the viewer is empty/blank with no entries despite a live admin session, **FAIL** (serve-seam regression). |
+| 1 | **Active-precondition probe + serve-seam guard.** Connect the admin MCP client; `tools/list`; `getChromeTarget()`. Open the Automation page (`evaluate` on the chrome target (`getChromeTarget` wcId): `createTab('goldfinch://automation', null, { trusted: true })` (the chrome seam; the kebab click itself is [by-eye]/HAT)); `enumerateTabs` → record `guestWcId`. `readDom(guestWcId)` and confirm the `#activity` section AND a non-empty Activity viewer container (`#automation-activity-log`) render. | `tools/list` returns the expected tool set incl. `getChromeTarget`; `getChromeTarget()` returns a numeric chrome `wcId`. The automation guest is enumerable. The Activity viewer container **renders with content** (not blank) — i.e. `audit-paging.js` was **served** via `INTERNAL_PAGES` (no 404/blank — the exact F7-HAT regression). If the viewer is empty/blank with no entries despite a live admin session, **FAIL** (serve-seam regression). |
 | 2 | (Setup — generate entries) Issue benign reads (repeated `readDom(guestWcId)` / `readAxTree(guestWcId)`) until the audit ring holds **more than one page** of entries. Re-open / re-render the viewer. Read the pager DOM via `readDom(guestWcId)`; record `{pageSize}` (entries shown on page 1) and `{pageCount}` (highest page number in the control). | (Setup row — no judgment.) A numbered pager appears once entries exceed one page. |
 | 3 | Read the page-1 entry rows + the numbered pager control via `readDom(guestWcId)`. | Page 1 shows the **newest** entries (most-recent-first), at most `{pageSize}` rows. The pager renders the **conventional numbered form** (`‹ 1 2 3 … ›`): a prev control, contiguous page numbers (with ellipsis when `{pageCount}` is large), a next control, and a marked **current page = 1**. `[a11y]` |
 | 4 | **Page-1 liveness.** With page 1 shown, issue one more benign read (generates a new newest entry). Re-read the page-1 rows via `readDom(guestWcId)`. | Page 1 **re-renders live** — the brand-new entry appears at the top of page 1 (page 1 tracks the live ring; broadcasts re-render it). |

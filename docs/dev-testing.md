@@ -9,7 +9,7 @@ consumer contract (endpoint, auth model, tool reference, refusal semantics) live
 
 | Command | Profile | Automation surface | Keys |
 | --- | --- | --- | --- |
-| `npm start` | production `userData` | binds only on the Settings `automationEnabled` toggle (human-only) | Settings → Keys UI |
+| `npm start` | production `userData` | binds only on the `automationEnabled` toggle on the Automation page (human-only) | Automation page (⋯ menu → Automation) → Keys |
 | `npm run dev:automation` | dev (`…/goldfinch-dev`, isolated) | force-bound (`--automation-dev`, `!app.isPackaged`-gated) | none minted — every request is rejected unless a previously minted dev key is supplied; admin-tier ops refused without an admin key |
 | `GOLDFINCH_AUTOMATION_ADMIN=1 GOLDFINCH_AUTOMATION_DEV_MINT=1 npm run dev:automation` | dev | force-bound | jar + admin keys minted at startup, printed once — **replaces** the prior jar/admin hash, so any config or env var still holding an older key starts 401ing |
 
@@ -117,7 +117,7 @@ Two facts that bite every iteration on internal `goldfinch://` page code (e.g.
   `mcp-automation.md`). To (re)open an internal page from automation, drive the chrome
   target instead: `evaluate` the dogfooding seam on the chrome wcId (`getChromeTarget`,
   admin tier) — `createTab('goldfinch://vault', null, { trusted: true })`, the same idiom
-  the chrome itself uses to open `goldfinch://settings`.
+  the chrome itself uses to open `goldfinch://settings` (or `goldfinch://automation`).
 
 ## a11y audit (`npm run a11y`)
 
@@ -166,8 +166,8 @@ axe-core audit (`scripts/a11y-audit.mjs`) against the RUNNING app over the MCP s
   (`#load-failure-view-cert`/`-advanced` included) right after the generic
   `load-failure` state. Absent `--tls-url=`, the audit prints a skip notice and exits
   on the chrome states' own result — never an apparatus failure for simply omitting it.
-- **Exclusions**: `goldfinch://settings` can be audited via `--target=goldfinch://settings`
-  only under the ADMIN key (admin `evaluate` reaches internal guests; a jar key never sees the
+- **Exclusions**: `goldfinch://settings` and `goldfinch://automation` can be audited via
+  `--target=goldfinch://settings` / `--target=goldfinch://automation` only under the ADMIN key (admin `evaluate` reaches internal guests; a jar key never sees the
   internal session); the find overlay is not audited here (its
   a11y rests on the verbatim attribute carry-over + HAT keyboard pass).
 - **Exit codes** (squawk 0031): `0` clean (no new violations), `1` NEW violations found,

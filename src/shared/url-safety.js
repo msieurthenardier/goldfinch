@@ -81,7 +81,7 @@ export function isSafePosterUrl(url) {
  * 3 F3). Add a host here when adding an internal page; never relax a web gate to
  * reach the scheme.
  */
-const INTERNAL_HOSTS = new Set(['settings', 'downloads', 'jars', 'vault']);
+const INTERNAL_HOSTS = new Set(['settings', 'downloads', 'jars', 'vault', 'automation']);
 
 /**
  * isInternalPageUrl(url)
@@ -90,6 +90,7 @@ const INTERNAL_HOSTS = new Set(['settings', 'downloads', 'jars', 'vault']);
  *   - goldfinch://settings   (with or without a trailing slash)
  *   - goldfinch://downloads  (with or without a trailing slash)
  *   - goldfinch://jars       (with or without a trailing slash)
+ *   - goldfinch://vault and goldfinch://automation (same shape)
  *
  * Used ONLY by the trusted branch of createTab (provenance is the call site —
  * the flag is never inferred from the URL). Mirrors leg-2's main-process root-path

@@ -28,7 +28,7 @@ scope property — none of which a unit test can observe.
   seeded with a Login item for the fixture origin, the test jar's carrying a TOTP secret),
   mints a per-jar **vault access key** per jar, and provisions the automation **transport
   keys** (a per-jar key + an admin key) directly into settings with `automationEnabled`
-  on — so no settings-UI minting step is needed. It emits all run secrets to stdout once.
+  on — so no Automation-page minting step is needed. It emits all run secrets to stdout once.
 - Goldfinch is launched against that profile with the automation surface enabled
   (`npm run dev:automation`), loopback MCP on port 49707.
 - The operator has exported, from the builder's emitted JSON: the test jar's **per-jar**

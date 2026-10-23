@@ -217,6 +217,28 @@ describe("case 'kebab'", () => {
   });
 });
 
+// Sortie 05 (AC5b): the dispatch link, end to end through the REAL kebab action table.
+describe("case 'kebab' with the real createChromePageActions().kebabActions", () => {
+  test("'automation' opens goldfinch://automation as a trusted tab via createTab", async () => {
+    const { createChromePageActions } = await import('../../src/renderer/chrome/overlay-menus.js');
+    const created = [];
+    const pageActions = createChromePageActions({
+      window: { goldfinch: {} },
+      tabs: new Map(),
+      createTab: (...args) => created.push(args),
+      activateTab: () => {},
+      activeTab: () => null,
+      isInternalTab: () => false,
+      isInternalPageUrl: () => false,
+      deriveSiteInfo: () => ({}),
+      openNewTab: () => {}
+    });
+    const h = setup({ KEBAB_ACTIONS: pageActions.kebabActions });
+    h.overlay.dispatchActivation({ menuType: 'kebab', id: 'automation' });
+    assert.deepEqual(created, [['goldfinch://automation', null, { trusted: true }]]);
+  });
+});
+
 // ---------------------------------------------------------------------------
 describe("case 'container'", () => {
   test("'action:new-container' opens the new-container dialog", () => {

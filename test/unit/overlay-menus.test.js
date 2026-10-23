@@ -299,12 +299,12 @@ test('menu models and chrome-to-sheet anchor conversion retain exact shapes', as
   // The menuitem ids, in order — separators carry no id and are filtered out here.
   assert.deepEqual(
     kebab.filter((item) => item.id).map((item) => item.id),
-    ['new-window', 'settings', 'downloads', 'jars', 'vault', 'print', 'exit']
+    ['new-window', 'settings', 'downloads', 'jars', 'automation', 'vault', 'print', 'exit']
   );
-  // Two separators divide the menu into three bands: after New window and after Passwords.
+  // Two separators divide the menu into three bands: after New window and after Vault.
   assert.deepEqual(
     kebab.map((item) => (item.type === 'separator' ? 'sep' : item.id)),
-    ['new-window', 'sep', 'settings', 'downloads', 'jars', 'vault', 'sep', 'print', 'exit']
+    ['new-window', 'sep', 'settings', 'downloads', 'jars', 'automation', 'vault', 'sep', 'print', 'exit']
   );
   const webviews = { left: 100, top: 40 };
   const trigger = { left: 90, right: 250 };
@@ -365,4 +365,81 @@ test('open rides measureSlot() as slotBounds; absent measurer leaves the payload
     onClosed: () => {}
   }).open('kebab', [{ id: 'settings' }], { alignRight: 5, y: 0 }, 0);
   assert.equal('slotBounds' in withoutMeasure[0], false);
+});
+
+// ---------------------------------------------------------------------------
+// Kebab actions (sortie 05): the action table lives in createChromePageActions.
+// ---------------------------------------------------------------------------
+
+async function kebabHarness({ active = null } = {}) {
+  const { createChromePageActions } = await import('../../src/renderer/chrome/overlay-menus.js');
+  const h = pageActionsHarness();
+  h.window.goldfinch.windowCreate = () => h.calls.push(['windowCreate']);
+  h.window.goldfinch.appQuit = () => h.calls.push(['appQuit']);
+  h.window.goldfinch.print = (payload) => h.calls.push(['print', payload]);
+  const actions = createChromePageActions({
+    ...h,
+    activeTab: () => active,
+    isInternalPageUrl: () => false,
+    deriveSiteInfo: () => ({}),
+    openNewTab: () => {}
+  });
+  return { h, actions };
+}
+
+test('kebabActions: keys match every non-separator buildKebabModel id (drift guard)', async () => {
+  const { buildKebabModel } = await import('../../src/renderer/chrome/overlay-menus.js');
+  const { actions } = await kebabHarness();
+  const ids = buildKebabModel()
+    .filter((item) => item.type !== 'separator')
+    .map((item) => item.id)
+    .sort();
+  assert.ok(ids.length > 0);
+  assert.deepEqual(Object.keys(actions.kebabActions).sort(), ids);
+  for (const id of ids) assert.equal(typeof actions.kebabActions[id], 'function', id);
+});
+
+test('buildKebabModel: Automation sits directly above Vault, labelled Automation', async () => {
+  const { buildKebabModel } = await import('../../src/renderer/chrome/overlay-menus.js');
+  const model = buildKebabModel();
+  const i = model.findIndex((item) => item.id === 'automation');
+  assert.ok(i > 0);
+  assert.equal(model[i].label, 'Automation');
+  assert.equal(model[i + 1].id, 'vault');
+});
+
+for (const [id, url] of [
+  ['settings', 'goldfinch://settings'],
+  ['downloads', 'goldfinch://downloads'],
+  ['jars', 'goldfinch://jars'],
+  ['automation', 'goldfinch://automation'],
+  ['vault', 'goldfinch://vault']
+]) {
+  test(`kebabActions.${id}: opens ${url} as a trusted tab`, async () => {
+    const { h, actions } = await kebabHarness();
+    actions.kebabActions[id]();
+    assert.deepEqual(h.calls, [['createTab', url, null, { trusted: true }]]);
+  });
+}
+
+test('kebabActions.print: prints the active web tab', async () => {
+  const { h, actions } = await kebabHarness({ active: { id: 'w', wcId: 7, trusted: false } });
+  actions.kebabActions.print();
+  assert.deepEqual(h.calls, [['print', { webContentsId: 7 }]]);
+});
+
+test('kebabActions.print: no-ops on an internal tab and on a viewless tab', async () => {
+  let r = await kebabHarness({ active: { id: 'i', wcId: 9, trusted: true } });
+  r.actions.kebabActions.print();
+  assert.deepEqual(r.h.calls, []);
+  r = await kebabHarness({ active: { id: 'v', wcId: null, trusted: false } });
+  r.actions.kebabActions.print();
+  assert.deepEqual(r.h.calls, []);
+});
+
+test('kebabActions.new-window / exit call the window.goldfinch bridge', async () => {
+  const { h, actions } = await kebabHarness();
+  actions.kebabActions['new-window']();
+  actions.kebabActions.exit();
+  assert.deepEqual(h.calls, [['windowCreate'], ['appQuit']]);
 });

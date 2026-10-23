@@ -52,6 +52,11 @@ test('isTrustedInternalSender: wrong origin (https://evil.test) + true → false
   assert.equal(isTrustedInternalSender('https://evil.test', true), false);
 });
 
+test('isTrustedInternalSender: goldfinch://automation + true → true (sortie 05)', () => {
+  assert.equal(isTrustedInternalSender('goldfinch://automation', true), true);
+  assert.equal(isTrustedInternalSender('goldfinch://automation', false), false);
+});
+
 test('isTrustedInternalSender: wrong host (goldfinch://other) + true → false', () => {
   assert.equal(isTrustedInternalSender('goldfinch://other', true), false);
 });

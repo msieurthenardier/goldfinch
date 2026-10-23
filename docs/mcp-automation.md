@@ -6,8 +6,8 @@ scroll / keypress) and **observe** (screenshot / window capture / DOM read / acc
 the browser's tabs over a loopback HTTP transport.
 
 > **Status: shipped, off by default.** The automation surface is part of the installed Goldfinch.
-> It is **bound by the Settings `automationEnabled` toggle** — a human flips it on under
-> `goldfinch://settings` → **Automation**, and nothing binds or is reachable until they do. The
+> It is **bound by the `automationEnabled` toggle on the Automation page** — a human flips it on at
+> `goldfinch://automation` (⋯ menu → **Automation**), and nothing binds or is reachable until they do. The
 > surface stays **opt-in, per-jar-key authenticated, loopback-only, and Origin/Host-guarded**
 > regardless. (`--automation-dev` remains a dev-only convenience that force-binds an unpackaged dev
 > run — a complete no-op on a packaged build; see Launch.)
@@ -35,11 +35,11 @@ that documents it in full; the summary below is the authority phrasing from the 
 
 | Guarantee | Detail |
 |---|---|
-| **Off by default / opt-in** | Nothing binds until a human flips the `automationEnabled` toggle on in Settings. There is no programmatic enable path. See *Settings controls* and *Authentication*. |
+| **Off by default / opt-in** | Nothing binds until a human flips the `automationEnabled` toggle on the Automation page. There is no programmatic enable path. See *Automation page controls* and *Authentication*. |
 | **Per-jar key-gated** | Every request must present `Authorization: Bearer <key>`. Keys are per-jar (a key authorises only its own jar's tabs) and shown once at mint. A separate **admin tier** is available when `GOLDFINCH_AUTOMATION_ADMIN` is set in the environment and an admin key has been minted. See *Authentication*. |
 | **Loopback-only bind** | The server binds `127.0.0.1` only — never `0.0.0.0` or `::`. See *Endpoint*. |
 | **Inject-then-run / no-persistence pairing** | `injectScript` makes no persistence guarantee across subsequent `evaluate` calls; pair them immediately in sequence. See *Eval tools*. |
-| **Internal-session (`goldfinch://settings`) gated by tier** | Non-admin (jar) keys are refused the internal session on every op, at the resolver. The admin tier — a high-bar, deliberately-enabled, loopback-bound, key-gated tier (`GOLDFINCH_AUTOMATION_ADMIN` + a minted admin key + the Settings toggle) that CAN be enabled on a packaged build — reaches internal guests on every op, including both eval tools and both DevTools tools. The master-password secret sheet is refused for all tiers, admin included. See the security-invariant blocks under *Eval tools* and *DevTools tools*. |
+| **Internal-session (`goldfinch://settings`, `goldfinch://automation`, …) gated by tier** | Non-admin (jar) keys are refused the internal session on every op, at the resolver. The admin tier — a high-bar, deliberately-enabled, loopback-bound, key-gated tier (`GOLDFINCH_AUTOMATION_ADMIN` + a minted admin key + the Automation-page toggle) that CAN be enabled on a packaged build — reaches internal guests on every op, including both eval tools and both DevTools tools. The master-password secret sheet is refused for all tiers, admin included. See the security-invariant blocks under *Eval tools* and *DevTools tools*. |
 | **Result / refusal error contract** | `openTab null` and `readAxTree debugger-unavailable` are normal results, not errors. Only a genuine engine throw sets `isError: true`. See *Result and refusal semantics*. |
 
 **Reach boundary.** Goldfinch binds `127.0.0.1` only. Reaching that loopback from the consumer's
@@ -57,17 +57,17 @@ e.g. the host-gateway IP on Linux Docker, or host network mode.
 
 **Steps:**
 
-1. **Enable the automation surface first.** In the running Goldfinch, open `goldfinch://settings` →
-   **Automation** and turn on the **Enable automation surface** toggle. The server binds immediately.
+1. **Enable the automation surface first.** In the running Goldfinch, open `goldfinch://automation`
+   (⋯ menu → **Automation**) and turn on the **Enable automation surface** toggle. The server binds immediately.
    The live address appears in the address field below the toggle — copy it from there (see
-   *Settings controls*). **The Keys mint button is disabled while the toggle is off** — you must
+   *Automation page controls*). **The Keys mint button is disabled while the toggle is off** — you must
    flip the toggle before minting a key.
 
 2. **Choose your target jar.** Each key authorises one jar's tabs. The dev auto-mint (below)
    follows the live default flag — the legacy `default` jar on a profile migrated from a
    pre-v2 install until the operator moves it, `Personal` on a fresh install (a fresh install
    seeds **Personal** + **Work**). To mint by hand instead, in the **Keys** section of the
-   Automation settings, select the jar you want to automate and mint a key. The plaintext is
+   Automation page, select the jar you want to automate and mint a key. The plaintext is
    shown once — copy it immediately (see *Authentication*).
 
 3. **Add a `.mcp.json` entry in your MCP client's config.** Add the following entry to **your own**
@@ -78,7 +78,7 @@ e.g. the host-gateway IP on Linux Docker, or host network mode.
    "goldfinch": { "type": "http", "url": "http://127.0.0.1:49707/mcp" }
    ```
 
-   Substitute the live port shown in Settings (see *`.mcp.json` registration*). The entry is inert
+   Substitute the live port shown on the Automation page (see *`.mcp.json` registration*). The entry is inert
    until the surface is enabled and the app is running.
 
 4. **Run your client with the key.** Pass the minted per-jar key to your client via the
@@ -94,8 +94,8 @@ e.g. the host-gateway IP on Linux Docker, or host network mode.
 
 ## Launch
 
-**Production (the installed binary).** The MCP server binds on the **Settings `automationEnabled`
-toggle**. Open `goldfinch://settings` → **Automation** and turn the toggle on; the server starts
+**Production (the installed binary).** The MCP server binds on the **`automationEnabled`
+toggle** on the Automation page. Open `goldfinch://automation` (⋯ menu → **Automation**) and turn the toggle on; the server starts
 immediately (no relaunch). The toggle is the **sole bind gate** — it governs both the launch-time
 bind (the persisted value is read at startup) and the live bind (flipping it on/off starts/stops the
 running server). Off is the safe default. Enablement is **human-only**: there is no programmatic
@@ -192,7 +192,7 @@ configured.
 |---|---|
 | Default URL | `http://127.0.0.1:49707/mcp` |
 | Bind | `127.0.0.1` only (never `0.0.0.0` / `::`) |
-| Production port | the `automationPort` setting (default `49707`), with **free-fallback** if it is taken — the **bound** port is surfaced live in Settings |
+| Production port | the `automationPort` setting (default `49707`), with **free-fallback** if it is taken — the **bound** port is surfaced live on the Automation page |
 | Port override (dev only) | `GOLDFINCH_MCP_PORT` (honored only on an unpackaged build; **ignored on a packaged binary**) — a dev env pin binds **exactly-or-fails-loudly** (no fallback) |
 | Transport | MCP Streamable HTTP, stateful (per-connection session id) |
 
@@ -219,9 +219,9 @@ A standard MCP SDK client over loopback satisfies this by default. If you see a 
 almost certainly behind a proxy or header-rewriter that injected a non-loopback `Host`/`Origin`
 or rewrote the peer address — fix the consumer's headers, not the server.
 
-## Settings controls (Flight 5)
+## Automation page controls (Flight 5)
 
-The surface is configured from `goldfinch://settings` under **Automation**. All controls are local
+The surface is configured from `goldfinch://automation` (⋯ menu → **Automation**; it lived under Settings before sortie 05). All controls are local
 GUI surface — they never expose a key plaintext beyond its one-time mint reveal.
 
 - **Enable automation surface** — an off-by-default opt-in checkbox (`automationEnabled`). This
@@ -343,7 +343,7 @@ A request's key resolves to an **identity** — a `jarId` or the literal `admin`
 
 - **The admin identity bypasses jar-scoping — admin's TWO relaxations (M05 F8 DD8).** An
   `admin`-resolved connection enumerates **every** jar's guest tabs **and** every open tab in
-  the internal session (`goldfinch://settings`, `goldfinch://downloads`, `goldfinch://jars`),
+  the internal session (`goldfinch://settings`, `goldfinch://downloads`, `goldfinch://jars`, `goldfinch://vault`, `goldfinch://automation`),
   can drive/observe any of them, and may call `captureWindow`,
   `getChromeTarget`, and `downloadsList`. `allowInternal` is **no longer the sole** admin
   relaxation — the resolver grants admin exactly two:
@@ -426,7 +426,7 @@ A request's key resolves to an **identity** — a `jarId` or the literal `admin`
     `<body>` data attributes survive a close — the sheet's DOM scrub does not touch them.
 
 > **Status:** the surface binds identity to the session and enforces jar-scoping + the admin tier.
-> It ships in the installed binary, bound by the Settings `automationEnabled` toggle (audit logging
+> It ships in the installed binary, bound by the `automationEnabled` toggle on the Automation page (audit logging
 > and the operator-facing key-mint / indicator UI landed in Flight 5). The **admin tier works on the
 > packaged binary** too: it is gated purely on the `GOLDFINCH_AUTOMATION_ADMIN` env presence (plus a
 > minted admin key) — env-only, with no dev/`isPackaged` coupling.
@@ -662,7 +662,7 @@ natively awaited.
 > `goldfinch://settings` session with `automation: internal-session` at the resolver (`resolve.js`'s
 > `!allowInternal && isInternalContents` throw), before either eval tool runs. The **admin tier** — a
 > high-bar, deliberately-enabled, loopback-bound, key-gated tier (`GOLDFINCH_AUTOMATION_ADMIN` env var +
-> a separately-minted admin key + the Settings automation toggle), which CAN be enabled on a packaged
+> a separately-minted admin key + the Automation-page toggle), which CAN be enabled on a packaged
 > build — builds its engine with `allowInternal:true` and **reaches** the internal session with both
 > `evaluate` and `injectScript`, by design (end-to-end testing needs to reach internal pages). The
 > **master-password secret sheet is refused for all tiers, admin included** — resolve.js's separate,
@@ -797,7 +797,7 @@ session's key identity, not a tool argument:
 - **Admin key** — `vaultUnlock`'s `accessKey` is the **X25519 admin private key (base64)**. It
   opens the Manager Root Key and therefore **every** vault (including jar vaults created after
   setup). Handing the admin private key over a tool argument is the intended admin-automation
-  unlock; the Settings UI recommends against embedding it in config.
+  unlock; the Automation page recommends against embedding it in config.
 
 **`vaultFill` wire policy (fill-only).** `vaultFill` resolves the login item by id from an unlocked
 reachable vault, then enforces **two** gates before filling:
@@ -1016,7 +1016,7 @@ GOLDFINCH_MCP_KEY=<key> node scripts/mcp-example-client.mjs  # terminal 2: drive
 attaches `Authorization: Bearer <key>` to every request. Without it the server returns `401`.
 In a dev run, obtain the key via `GOLDFINCH_AUTOMATION_DEV_MINT` (see the
 [`AUTOMATION_DEV_MINT` mechanism](#dogfooding--dev-key-acquisition-the-automation_dev_mint-mechanism));
-in a production run, mint the key in the Settings Keys UI (see *Production getting-started* above).
+in a production run, mint the key in the Automation page's Keys section (see *Production getting-started* above).
 
 It honors the same endpoint overrides as documented above (`GOLDFINCH_MCP_PORT`, or
 `GOLDFINCH_MCP_URL` for a full-URL escape hatch). It is **attach-don't-launch** — it does not start
@@ -1025,7 +1025,7 @@ the app.
 ## `.mcp.json` registration
 
 The repo's `.mcp.json` does **not** ship a standing `goldfinch` entry. The surface is
-**off-by-default** (see the Settings toggle below): in a normal session there is no server to
+**off-by-default** (see the Automation page toggle below): in a normal session there is no server to
 reach, so a standing entry would produce perpetual failed connection attempts on every Claude Code
 start. Instead, a consumer who opts in adds the entry themselves at their configured port:
 
@@ -1033,7 +1033,7 @@ start. Instead, a consumer who opts in adds the entry themselves at their config
 "goldfinch": { "type": "http", "url": "http://127.0.0.1:49707/mcp" }
 ```
 
-Substitute your configured port (the Settings UI shows the live address — copy it from there). The
+Substitute your configured port (the Automation page shows the live address — copy it from there). The
 entry is **inert until the automation surface is enabled and the app is running** — a connection
 failure means the server isn't up, not that the config is wrong. (The repo's `.mcp.json` ships an
 empty `mcpServers` map — it registers no servers, including no `goldfinch` entry.)

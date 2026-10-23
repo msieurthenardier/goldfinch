@@ -19,7 +19,7 @@
 //                                                                        #   client is what needs the key)
 //
 //   To get a per-jar key:
-//     • Production: Settings → Keys UI → create a per-jar key.
+//     • Production: Automation page → Keys → create a per-jar key.
 //     • Dev: launch with GOLDFINCH_AUTOMATION_DEV_MINT=1 and read the AUTOMATION_DEV_MINT line
 //       from the server log (see docs/mcp-automation.md "Dogfooding / dev key acquisition").
 //
@@ -32,13 +32,13 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 // Read the per-jar key — required; the server rejects every request (incl. initialize) without it.
-// To get a key: Settings → Keys UI (production) or read the AUTOMATION_DEV_MINT log line (dev —
+// To get a key: Automation page → Keys (production) or read the AUTOMATION_DEV_MINT log line (dev —
 // launch with GOLDFINCH_AUTOMATION_DEV_MINT=1; see docs/mcp-automation.md).
 const key = process.env.GOLDFINCH_MCP_KEY;
 if (!key) {
   console.error(
     'GOLDFINCH_MCP_KEY is not set. This script requires a per-jar key.\n' +
-      '  • Production: Settings → Keys UI → create a per-jar key.\n' +
+      '  • Production: Automation page → Keys → create a per-jar key.\n' +
       '  • Dev: launch with GOLDFINCH_AUTOMATION_DEV_MINT=1 and read the AUTOMATION_DEV_MINT\n' +
       '    line from the server log (see docs/mcp-automation.md "Dogfooding / dev key acquisition").'
   );

@@ -16,17 +16,19 @@
 // `node -e "console.log(new URL('goldfinch://settings').origin)"` sanity check
 // will mislead. Do NOT "fix" these values to match Node's output.
 //
-// ALLOWLIST, not a single origin (Flight 5, extended Flight 3 F3): there are now three
-// trusted internal pages (settings, downloads, jars), each a privileged goldfinch://
+// ALLOWLIST, not a single origin (Flight 5, extended Flight 3 F3): there are now five
+// trusted internal pages (settings, downloads, jars, vault, automation), each a privileged goldfinch://
 // origin. The intended consequence is that ANY internal page can call ANY
 // registerInternalHandler channel — the trust boundary is "internal page vs web," NOT
 // "settings vs downloads vs jars," consistent with the existing single-trust-domain
-// model. A new internal origin is added here (M12 F3 F3: the vault management page).
+// model. A new internal origin is added here (M12 F3 F3: the vault management page; sortie 05:
+// the automation page).
 const INTERNAL_ORIGINS = new Set([
   'goldfinch://settings',
   'goldfinch://downloads',
   'goldfinch://jars',
-  'goldfinch://vault'
+  'goldfinch://vault',
+  'goldfinch://automation'
 ]);
 
 /**

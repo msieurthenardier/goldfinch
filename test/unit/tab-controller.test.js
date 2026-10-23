@@ -120,7 +120,7 @@ function createHarness() {
     openTabContextMenu: noOp,
     currentHomePage: () => homePageValue,
     currentSearchEngine: () => searchEngineValue, // M16 F2 Leg 2 (DD7): openNewTab's reasons rule
-    isInternalPageUrl: (url) => /^goldfinch:\/\/(settings|downloads|jars|vault)$/.test(url),
+    isInternalPageUrl: (url) => /^goldfinch:\/\/(settings|downloads|jars|vault|automation)$/.test(url),
     isSafeTabUrl: (url) => /^https?:/.test(url) || url === 'about:blank',
     resolveNewTabContainer: (containers, defaultId) => containers.find((item) => item.id === defaultId) || null,
     classifyDragPoint: () => ({ zone: 'reorder', index: 0 }),
@@ -238,6 +238,7 @@ test('trusted internal jar name is derived per host, including vault (squawk 000
   const downloads = controller.createTab('goldfinch://downloads', null, { trusted: true });
   const jars = controller.createTab('goldfinch://jars', null, { trusted: true });
   const vault = controller.createTab('goldfinch://vault', null, { trusted: true });
+  const automation = controller.createTab('goldfinch://automation', null, { trusted: true });
   await settle();
 
   assert.equal(settings.container.name, 'Settings');
@@ -247,6 +248,8 @@ test('trusted internal jar name is derived per host, including vault (squawk 000
   // src/renderer/pages/vault.html's <title>/<h1> and overlay-menus.js's kebab
   // entry), not the host name.
   assert.equal(vault.container.name, 'Vault');
+  // Sortie 05: the container name is the ONLY observable proof (internal tabs render no dot).
+  assert.equal(automation.container.name, 'Automation');
 });
 
 test('ordered movement, close fallback, and geometry use the live strip and shared context', async () => {

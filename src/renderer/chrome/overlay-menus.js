@@ -4,7 +4,8 @@ const BLUR_REOPEN_SUPPRESS_MS = 300;
 
 export function buildKebabModel() {
   // Two separators group the menu into three bands: window-scoped (New window) /
-  // internal-page destinations (Settings…Secrets) / app actions (Print, Exit).
+  // internal-page destinations (Settings, Downloads, Cookie jars, Automation, Vault) /
+  // app actions (Print, Exit).
   // The sheet renders `type:'separator'` as role="separator" (menu-overlay.js) and
   // the roving-tabindex/arrow-nav skips it for free (no role="menuitem"), the same
   // idiom the page-context menu uses.
@@ -14,6 +15,7 @@ export function buildKebabModel() {
     { id: 'settings', label: 'Settings' },
     { id: 'downloads', label: 'Downloads' },
     { id: 'jars', label: 'Cookie jars' },
+    { id: 'automation', label: 'Automation' },
     { id: 'vault', label: 'Vault' },
     { type: 'separator' },
     { id: 'print', label: 'Print…' },
@@ -139,6 +141,41 @@ export function createChromePageActions({
     createTab('goldfinch://vault', null, { trusted: true });
   }
 
+  function openAutomationPage() {
+    createTab('goldfinch://automation', null, { trusted: true });
+  }
+
+  // Kebab item actions, keyed by buildKebabModel() id (drift-guarded in overlay-menus.test.js);
+  // consumed by the sheet's channel-6 activation via createOverlayDispatch.
+  /** @type {{ [id: string]: () => void }} */
+  const kebabActions = {
+    'new-window': () => {
+      window.goldfinch.windowCreate();
+    },
+    settings: () => {
+      createTab('goldfinch://settings', null, { trusted: true });
+    },
+    downloads: () => {
+      openDownloads();
+    },
+    jars: () => {
+      openJarsPage();
+    },
+    automation: () => {
+      openAutomationPage();
+    },
+    vault: () => {
+      openVaultPage();
+    },
+    print: () => {
+      const t = activeTab();
+      if (t && !isInternalTab(t) && t.wcId != null) window.goldfinch.print({ webContentsId: t.wcId });
+    },
+    exit: () => {
+      window.goldfinch.appQuit();
+    }
+  };
+
   function siteInfoInternalFlag(tab) {
     return !!tab && (isInternalTab(tab) || isInternalPageUrl(tab.url));
   }
@@ -198,5 +235,14 @@ export function createChromePageActions({
     if (container) openNewTab(container); // M16 F2 Leg 1 (DD4)
   }
 
-  return { openDownloads, openJarsPage, openVaultPage, openSiteSettingsTab, siteInfoModel, createContainerAndOpenTab };
+  return {
+    openDownloads,
+    openJarsPage,
+    openVaultPage,
+    openAutomationPage,
+    kebabActions,
+    openSiteSettingsTab,
+    siteInfoModel,
+    createContainerAndOpenTab
+  };
 }
