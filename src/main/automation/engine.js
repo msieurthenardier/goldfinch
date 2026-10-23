@@ -278,8 +278,9 @@ function createEngine(
     captureWindow: (/** @type {{ windowId?: number }} */ { windowId } = {}) => {
       // Validate the discriminator HERE, against DD2's census — the same single
       // topology source getChromeTarget derives from. Deliberately NOT inferred from
-      // grabWindow returning null: null is ALSO how a genuine capture failure on a
-      // VALID window reports, so inferring the refusal downstream would answer
+      // grabWindow returning null: null is ALSO how a destroyed chrome on a VALID
+      // window reports (squawk 0155: other capture failures now reject with a named
+      // capture-failed), so inferring the refusal downstream would answer
       // "no-such-window" for a window that plainly exists. A named refusal must name
       // the real cause.
       requireWindow(windowId);

@@ -909,6 +909,16 @@ from *genuine errors*:
     that layer is dropped and logged, so a slow menu cannot fail an otherwise-good window capture.
     A merely-slow capture can trip the bound; the refusal is the signal to retry.
 
+  Squawk 0155 added a third, on `captureWindow`'s Wayland composite path:
+  - **`automation: capture-failed — {step}: {reason}`** — the chrome capture (`chrome`), the
+    active guest's capture (`active guest`), or the canvas composite (`composite`) failed for a
+    reason other than a timeout (e.g. `active guest: UnknownVizError`). Previously these were
+    swallowed into the generic `automation: chrome window unavailable`, which now means only that
+    there is no window record or its chrome is destroyed. The active guest's capture is retried
+    **once** after 250ms before this refusal (a freshly opened tab rejects until its first frame,
+    ~100–200ms after `openTab`). A guest hidden behind a chrome takeover panel (load failure, TLS
+    interstitial, crash) is not layered at all, so the capture shows that panel, as the screen does.
+
 ## Accessibility-tree caveat (stale handles)
 
 `readAxTree` returns raw `AXNode`s whose `backendNodeId` and `frameId` are **CDP-session-scoped**

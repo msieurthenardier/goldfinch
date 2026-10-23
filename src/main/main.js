@@ -143,6 +143,7 @@ const { pickSourceByMediaSourceId } = require('./capture-source-picker');
 // F7 DD7 (recon S3): bounded capturePage race — a detached-but-live view's capturePage()
 // never settles, so every unguarded await wedges the request forever. Pure/Electron-free.
 const { withCaptureTimeout } = require('./capture-timeout');
+const { captureFailure, captureWithOneRetry } = require('./capture-failure');
 // F8 Leg 3 / AC5: pure channel-4 `value` validator (string, ≤24) — unit-tested;
 // deliberately NOT part of the manager (the manager never touches channel 4).
 const { sanitizeActivatedValue } = require('./menu-overlay-value');
@@ -735,7 +736,13 @@ async function grabWindow(windowId) {
     const cc = grabRec.chromeView.webContents;
     const activeEntry = grabRec.activeTabWcId != null ? grabRec.tabViews.get(grabRec.activeTabWcId) : null;
     const activeWc = activeEntry ? activeEntry.view.webContents : null;
-    const atc = activeWc && !activeWc.isDestroyed() ? activeWc : null;
+    // Squawk 0155: the guest layer exists only while the guest view is ON SCREEN. A guest
+    // hidden behind a chrome takeover panel (load-failure / TLS interstitial / crash —
+    // applyGuestVisibility's setVisible(false)) is not what the window shows: capturing it
+    // rejected UnknownVizError on the first try, and on a retry composited the hidden
+    // guest's stale pixels OVER the chrome panel that IS on screen. Skip it, exactly as the
+    // overlay layers below are gated on isVisible(); the chrome capture carries the panel.
+    const atc = activeWc && !activeWc.isDestroyed() && activeEntry.view.getVisible() ? activeWc : null;
     if (!cc || cc.isDestroyed()) return null;
 
     // Capture both views in parallel.
@@ -745,11 +752,24 @@ async function grabWindow(windowId) {
     // overlay layers below, which drop). The labels are what make the refusal name its
     // target: Promise.all would otherwise report whichever rejects first with no way to
     // tell the two captures apart.
+    //
+    // Squawk 0155: a non-timeout rejection is NAMED per step (captureFailure) instead of
+    // falling into the catch-all's old bare null. The active guest additionally gets ONE
+    // bounded retry (captureWithOneRetry, 250ms): a freshly created guest rejects
+    // UnknownVizError until its first frame lands (~100-200ms after openTab, live-measured).
+    // The retry re-checks liveness/visibility, so a guest closed or taken over during the
+    // wait drops its layer rather than capturing what is no longer on screen.
+    const captureGuest = () =>
+      atc && !atc.isDestroyed() && activeEntry.view.getVisible()
+        ? withCaptureTimeout(atc.capturePage(), 'active guest')
+        : Promise.resolve(null);
     const [chromeImg, tabImg] = await Promise.all([
-      withCaptureTimeout(cc.capturePage(), 'chrome'),
-      atc && !atc.isDestroyed() ? withCaptureTimeout(atc.capturePage(), 'active guest') : Promise.resolve(null)
+      withCaptureTimeout(cc.capturePage(), 'chrome').catch((err) => {
+        throw captureFailure('chrome', err);
+      }),
+      atc ? captureWithOneRetry(captureGuest, 'active guest') : Promise.resolve(null)
     ]);
-    if (!chromeImg) return null;
+    if (!chromeImg || chromeImg.isEmpty()) throw captureFailure('chrome', new Error('empty image'));
 
     const chromeB64 = chromeImg.toPNG().toString('base64');
     const tabB64 = tabImg ? tabImg.toPNG().toString('base64') : null;
@@ -757,7 +777,7 @@ async function grabWindow(windowId) {
     // Guest placement: main-side ground truth (see the FIX 2(b) header). Same
     // window-content-DIP space as every other view bounds here — no renderer
     // round-trip needed for it.
-    const guestBounds = atc && activeEntry ? activeEntry.view.getBounds() : null;
+    const guestBounds = tabImg && activeEntry ? activeEntry.view.getBounds() : null;
 
     // Layer list, bottom-up: guest at its true bounds, then the overlay views in
     // their z-order (find bar, then the menu-overlay sheet — the sheet is added
@@ -891,14 +911,18 @@ async function grabWindow(windowId) {
     // Left alone, this catch-all swallows it and the composite returns null, which
     // observe.captureWindow turns into the generic 'automation: chrome window
     // unavailable' — hiding the cause, i.e. exactly the silence DD7 exists to remove.
-    // Re-throw it so captureWindow surfaces 'automation: capture-timeout — …'.
     // NOTE: this makes grabWindow REJECT where it previously only ever resolved-or-
     // null'd. Its sole consumer is observe.captureWindow, which awaits it, so the
     // rejection propagates to the tool adapter as isError — the intended DD7 outcome.
-    if (err && /^automation: capture-timeout/.test(err.message || '')) throw err;
-    /* fallback failed */
+    //
+    // Squawk 0155 generalizes DD7: NOTHING is swallowed here any more. A named refusal
+    // (capture-timeout, or a step's capture-failed) passes through verbatim; anything else
+    // (the executeJavaScript composite, a toPNG/getBounds throw) is refused as
+    // 'automation: capture-failed — composite: …'. A null return now means only what the
+    // early returns above mean — no record, or a destroyed chrome — which is what
+    // 'automation: chrome window unavailable' has always claimed.
+    throw captureFailure('composite', err);
   }
-  return null;
 }
 
 // Create + start a fresh MCP server instance, capturing bind-status into mcpStatus
