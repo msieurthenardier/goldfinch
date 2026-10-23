@@ -1,6 +1,6 @@
 # Sortie: Automation Page
 
-**Status**: in-flight
+**Status**: landed
 
 ## Charter
 
@@ -100,7 +100,7 @@ Lift the Automation section (markup, controller code, page-specific CSS) out of 
 ### Pre-Flight Checklist
 - [x] All open questions resolved
 - [x] Design decisions documented
-- [ ] Prerequisites verified
+- [x] Prerequisites verified
 - [x] Validation approach defined
 - [x] Legs defined
 
@@ -137,17 +137,17 @@ Lift the Automation section (markup, controller code, page-specific CSS) out of 
 > **Note:** These are tentative suggestions, not commitments. Legs are planned and created one at a time as the flight progresses.
 
 - [x] `automation-page` - Kebab-action extraction + Automation item; new `goldfinch://automation` page (shell, controllers, CSS, hints) with full host onboarding and drift guards; Settings section removed; docs + behavior specs retargeted; live smoke
-- [ ] `hat-and-alignment` *(optional)* - Guided HAT: kebab placement/click by eye, page vs Settings look, hints, Settings nav non-regression, re-authored behavior specs, a11y audit of the new page
+- [x] `hat-and-alignment` *(optional)* - Guided HAT: kebab placement/click by eye, page vs Settings look, hints, Settings nav non-regression, re-authored behavior specs, a11y audit of the new page
 
 ---
 
 ## Post-Flight
 
 ### Completion Checklist
-- [ ] All legs completed
+- [x] All legs completed
 - [ ] Code merged
-- [ ] Tests passing
-- [ ] Documentation updated
+- [x] Tests passing
+- [x] Documentation updated
 
 ### Verification
 - `npm test`, `npm run lint`, `npm run typecheck`, `npm run format:check` green

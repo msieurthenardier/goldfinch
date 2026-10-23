@@ -205,3 +205,13 @@
   font-size: 13px;
   user-select: none;
 }
+
+/* Keys-section footnotes: spaced below the jar list / fresh-key reveal (settings.css
+   zeroes `main section p` margins, which stacked them into one dense block). */
+.keys-hints {
+  margin-top: 14px;
+}
+
+.keys-hints p + p {
+  margin-top: 8px;
+}

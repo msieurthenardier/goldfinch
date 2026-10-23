@@ -66,16 +66,7 @@
       </section>
       <section id="keys">
         <h2>Keys</h2>
-        <p class="muted">
-          Generate a per-jar key for the automation surface. The key is shown once — copy it immediately.
-        </p>
-        <p class="muted">
-          Each key is scoped to one cookie jar. To create a new jar, open Cookie jars from the … menu.
-        </p>
-        <p class="muted">
-          An agent unlocks a jar's vault with a separate vault access key. Mint one in Vault (… menu) under that jar's
-          Access keys.
-        </p>
+        <p class="muted">Generate a per-jar key for the automation surface.</p>
         <div id="automation-jars"></div>
         <div id="automation-key-reveal" hidden>
           <label for="automation-key-value">New key (shown once)</label>
@@ -86,6 +77,15 @@
           </div>
           <p class="muted">Copy it now — it cannot be shown again. Only its hash is stored.</p>
           <p id="automation-key-message" role="status"></p>
+        </div>
+        <div class="keys-hints">
+          <p class="muted">
+            Each key is scoped to one cookie jar. To create a new jar, open Cookie jars from the … menu.
+          </p>
+          <p class="muted">
+            An agent unlocks a jar's vault with a separate vault access key. Mint one in Vault (… menu) under that jar's
+            Access keys.
+          </p>
         </div>
         <div id="automation-admin" hidden>
           <h3>Admin key</h3>

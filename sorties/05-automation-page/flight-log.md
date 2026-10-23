@@ -3,7 +3,7 @@
 **Flight**: [Automation Page](flight.md)
 
 ## Summary
-Sortie chartered 2026-10-23; flight designed, reviewed twice (Architect), approved by operator — status ready.
+Sortie landed 2026-10-23. Both legs completed: `automation-page` (commit `1a0ce3e`) and `hat-and-alignment` (HAT fixes, squawk 0156, landing artifacts in the final sortie commit). Automation now lives on its own `goldfinch://automation` page, reachable from the kebab menu.
 
 ---
 
@@ -57,9 +57,40 @@ Sortie chartered 2026-10-23; flight designed, reviewed twice (Architect), approv
 - Nit 1 (accepted, no change): `tests/behavior/kebab-menu.md` legacy blockquote listing the old kebab items stays as a history trace, superseded by its 2026-10-23 note.
 - Nit 2 (fixed): AC23 grep hit `tests/behavior/farbling-correctness.md` Preconditions ("Settings -> Automation UI") - fixed (caught at flight review); now names the Automation page (kebab menu -> Automation, `goldfinch://automation`).
 
+### Leg: hat-and-alignment
+**Status**: completed (started 2026-10-23, completed 2026-10-23)
+
+**Changes Made**: HAT fixes 1-2 below (Keys hint layout; Keys intro trimmed).
+
+**Verification**: H1-H4 passed by eye (operator). H5-H7 (behavior specs) skipped by operator ruling; pre-existing spec staleness logged as squawk 0156. H8 a11y audit clean on both `goldfinch://automation` and `goldfinch://settings`. Deferred feature: clickable hint links, follow-up sortie. Gates at landing: format:check, lint, typecheck pass; `npm test` 6032 tests, 6028 pass, 0 fail, 4 todo.
+
+**HAT fix 1 — Keys hint layout**
+- Finding (operator): on `goldfinch://automation` the Keys section showed three `<p class="muted">` paragraphs stacked with no spacing (`main section p { margin: 0 }` in settings.css), reading as one dense block.
+- Operator ruling: keep the "Generate a per-jar key..." intro above the jar list; move the two hint paragraphs below the jar list as spaced footnotes.
+- Change: `automation.html` — the two hint `<p>`s (text unchanged, AC14 strings) now sit in `<div class="keys-hints">` after `#automation-jars` and `#automation-key-reveal`, before `#automation-admin`. `automation.css` — `.keys-hints` margin-top 14px, `p + p` margin-top 8px. `automation-page-shared-scripts.test.js` — added a document-order pin (jar list < key reveal < hints < admin); the verbatim-strings pin is retained. No behavior spec asserted hint position.
+- Verification: format:check, lint, typecheck pass; `npm test` 6028 pass, 0 fail (+1 test vs the prior 6027 pass, consistent); operator to reload the tab to eyeball.
+
+**HAT fix 2 — Keys intro trimmed**
+- Finding (operator): the Keys intro's second sentence duplicates the key-reveal panel's own "Copy it now — it cannot be shown again..." notice.
+- Operator ruling: drop "The key is shown once — copy it immediately."; intro becomes "Generate a per-jar key for the automation surface."
+- Change: `automation.html` intro paragraph only. No unit test or behavior spec pinned the sentence (grep of test/unit and tests/behavior).
+- Verification: format:check, lint, typecheck pass; npm test 6028 pass, 0 fail (no test count change); format:check, lint, typecheck, `npm test` pass.
+
 ---
 
 ## Decisions
+
+---
+
+### HAT feature request deferred — clickable hint links
+**Context**: During HAT step 3 the operator asked for the two Keys hints to become links ("Create a new jar [here]" opening Cookie jars; same for Vault).
+**Decision**: Classified by the FD as a FEATURE (fix-vs-feature gate) that reverses the charter constraint "Hints are plain text — no new internal→chrome open channel". Operator ruled: land this sortie with plain-text hints; charter a follow-up sortie for internal-page cross-links. Operator pre-ruling for that sortie: the vault link opens the Vault page (no per-jar deep link). Sketch carried forward: an origin-gated `internal-open-page { page }` channel with a closed page allowlist (`jars`, `vault`), owner-routed to the sender's chrome (never last-focused), chrome calls the trusted `createTab` (trust stays call-site provenance); precedent `internal-open-tab-in-jar` (`register-browser-ipc.js`, untrusted web URLs only).
+**Impact**: None on this sortie's scope; follow-up to be planned via `/mission-control:sortie` after landing.
+
+### HAT behavior specs skipped — pre-existing spec staleness
+**Context**: Before running H5–H7 the FD found the three specs stale independent of this sortie: `settings-automation.md` and `automation-key-gating.md` read the persisted store from `userData/settings.json` (settings now live in `app.db`'s `documents` table; the file no longer exists on the dev profile), and `settings-automation.md` step 4 expects pre-Flight-8 status/note strings ("start Goldfinch with --automation-dev…") where the page says "Not running — turn on the Automation toggle to bind the surface". Last runs: July 2026.
+**Decision**: Operator ruled: skip the three spec runs in this HAT; acceptance rests on the leg-01 live smoke (AC25), unit tests, and the operator's by-eye H1–H4; log a squawk to re-author and re-run all three.
+**Impact**: H5–H7 dispositioned (not run). Logged as squawk 0156 (`squawks/0156-automation-behavior-specs-stale-store-and-strings.md`, servicing/routine, deferred).
 
 ---
 
@@ -77,6 +108,11 @@ Sortie chartered 2026-10-23; flight designed, reviewed twice (Architect), approv
 - Leg 01 `automation-page` designed. **Risk tier: HIGH** — security-sensitive surface (new `INTERNAL_ORIGINS` entry in main + preload) and a shared-interface change with existing consumers (kebab action table moves out of the composition root; seam-reachable `kebabActionSettings`). → Developer leg-design review.
 - Leg 01 design review (Developer, Sonnet): approve with changes. FD-verified the high: internal tabs render no dot (`tab-controller.js` ~158–162), so the AC25 live dot-title check was unverifiable → dropped; name proof is the AC10 unit pin. Folded: AC5b dispatch-hop unit test (real `kebabActions` through `dispatchActivation`), AC6 regex/failure-mode wording, AC9 set compare, AC10b `isSafeTabUrl` negative, AC13 section contents, AC21 CLAUDE.md budget figure, AC22 extra specs (`chrome-guest-keyboard-nav.md` + check list), AC25 click/rect sequencing + restore, scroll-spy change-not-initial, rebuilt-bundle note, pre-removal test grep. Answers: plain `createTab` (no reuse, matches Downloads/Jars/Vault); `#connection` holds everything before the old Keys h3. Changes were AC tightenings, not redesign → no second review cycle. Leg → ready.
 - Leg 01 Developer signalled `[LAND:leg]`. FD spot-check: leg status `landed`; `npm test` re-run by FD → 6031 tests, 0 fail, 4 todo; `renderer.js` 1505 (split measure) == `RENDERER_LINE_BUDGET`. AC25 scroll-spy 'About becomes current' unreachable on this rig (pre-existing observer geometry, code moved verbatim) — Developer substituted a hide-first-section probe; carried to the HAT as a by-eye check. legs_completed 1/1 autonomous → Phase 2d flight review (Reviewer, Sonnet).
+- Commit `1a0ce3e` (leg 01, review confirmed) verified by FD: clean tree, attribution trailer present, leg status `completed`. Test-count note: 6031 tests = 6027 pass + 4 todo — the two figures in this log are consistent, no correction needed.
+- HAT H1–H4 passed by eye (operator). H2 note: the tab strip shows "Automation" (operator's expectation); `<title>` is "Automation — Goldfinch".
+- HAT H8: `npm run a11y -- --target=goldfinch://automation --tags=wcag2a,wcag2aa,wcag21a,wcag21aa` (admin key from this launch) → "No NEW violations" ✅; same against `goldfinch://settings` (non-regression for the section-nav change) → "No NEW violations" ✅.
+- Leg 02 `hat-and-alignment` designed (interactive HAT — no autonomous Developer/Reviewer cycle; operator verifies step by step, inline fixes per the fix-vs-feature gate). Leg → in-flight.
+- Flight completion (2026-10-23): HAT leg completed, flight status landed. Single commit carries the HAT fixes, leg and flight artifacts, and squawk 0156.
 
 ---
 

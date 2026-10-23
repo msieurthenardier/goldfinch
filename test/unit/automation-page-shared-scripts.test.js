@@ -77,6 +77,17 @@ test('the two agreed hint strings are present verbatim (whitespace-normalized)',
   );
 });
 
+test('the hint paragraphs sit after the jar list and the key reveal, before the admin block', () => {
+  const jars = HTML.indexOf('id="automation-jars"');
+  const reveal = HTML.indexOf('id="automation-key-reveal"');
+  const hints = HTML.indexOf('Each key is scoped');
+  const vaultHint = HTML.indexOf('An agent unlocks');
+  const admin = HTML.indexOf('id="automation-admin"');
+  assert.ok(jars > -1 && reveal > jars, 'jar list precedes key reveal');
+  assert.ok(hints > reveal && vaultHint > hints, 'hints follow the key reveal, in order');
+  assert.ok(admin > vaultHint, 'hints precede the admin block');
+});
+
 test('both pages share the section-nav shell class and settings.css has no aria-label selector for it', () => {
   assert.match(SETTINGS_HTML, /<nav class="section-nav" aria-label="Settings sections">/);
   assert.match(HTML, /<nav class="section-nav" aria-label="Automation sections">/);
