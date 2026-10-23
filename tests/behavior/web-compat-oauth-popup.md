@@ -3,7 +3,7 @@
 **Slug**: `web-compat-oauth-popup`
 **Status**: active
 **Created**: 2026-07-28
-**Last Run**: 2026-10-06-13-24-48 (pass, 8/8: step 3 floating-window clause confirmed by operator by eye; first run, batched; see runs/2026-10-06-13-24-48.md)
+**Last Run**: 2026-10-23-00-18-01 (partial on Electron 44.9.0, squawk 0154: 7 pass + step 3 by-eye clause not observed; electron#55048 supplement; see runs/2026-10-23-00-18-01.md)
 **Cache:** cold
 
 ## Intent

@@ -3,7 +3,7 @@
 **Slug**: `popup-jar-inheritance`
 **Status**: active
 **Created**: 2026-07-10
-**Last Run**: 2026-07-10-16-52-13
+**Last Run**: 2026-10-23-00-18-01 (pass 5/5 on Electron 44.9.0, squawk 0154; step 5 count reconciles with the viewless welcome tab — spec-wording note; see runs/2026-10-23-00-18-01.md)
 
 ## Intent
 
