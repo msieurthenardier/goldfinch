@@ -1,6 +1,6 @@
 # Sortie: Automation Page
 
-**Status**: landed
+**Status**: completed
 
 ## Charter
 
