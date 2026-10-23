@@ -1,4 +1,4 @@
-# Behavior Test: Kebab (⋮) overflow menu — presence, six items, APG keyboard operation
+# Behavior Test: Kebab (⋮) overflow menu — presence, eight items, APG keyboard operation
 
 **Slug**: `kebab-menu`
 **Status**: active
@@ -13,11 +13,13 @@
 
 > **Updated 2026-07-15 (M09 F7 leg 4).** Two changes folded, and the annotations that queued them
 > retired:
-> - **The six-item model is now in the steps.** Order pinned: **New window** (M09 F6 DD5),
->   **Settings, Downloads, Cookie jars, Print…, Exit** — read off the renderer
->   (`src/renderer/renderer.js`'s `kebabModel`), not off another spec. The prior enumeration pins
->   (title, Intent, Observables, steps 3/5) were stale by two designed additions and are gone; the
->   arrow-nav arithmetic is six-wide throughout.
+> - **The item model is pinned in the steps.** Order: **New window** (M09 F6 DD5),
+>   **Settings, Downloads, Cookie jars, Print…, Exit** — read off the renderer.
+>
+> **Updated 2026-10-23 (sortie 05).** The model is now **eight items**: **New window | Settings,
+> Downloads, Cookie jars, Automation, Vault | Print…, Exit** (read off
+> `src/renderer/chrome/overlay-menus.js`'s `buildKebabModel`). The Vault item had been missing from this
+> spec and **Automation** was added directly above it; arrow-nav arithmetic is eight-wide throughout.
 > - **Sheet discovery is now `enumerateWindows().sheetWcId`** (M09 F7 DD2), an exact resolve. The
 >   former guess-and-check discovery, its exclusion list, and the "reads activate a background tab"
 >   rationale behind it are all deleted — DD2 replaced the mechanism and M09 F7 DD6 retired the
@@ -26,8 +28,8 @@
 ## Intent
 
 Verify that Goldfinch's kebab (⋮) overflow menu — a `<button>` in the **toolbar row, immediately to
-the right of the Shield button** — opens a menu exposing **exactly six items, in order: "New
-window", "Settings", "Downloads", "Cookie jars", "Print…", and "Exit"**, and that the menu follows the WAI-ARIA APG **menu-button**
+the right of the Shield button** — opens a menu exposing **exactly eight items, in order: "New
+window", "Settings", "Downloads", "Cookie jars", "Automation", "Vault", "Print…", and "Exit"**, and that the menu follows the WAI-ARIA APG **menu-button**
 pattern: it opens by mouse and by keyboard, focus management and arrow-key navigation work, `Escape`
 closes and restores focus to the trigger, and clicking outside closes it. It also confirms the
 trigger carries a **visible keyboard focus indicator**. This needs a behavior test rather than a unit
@@ -116,9 +118,9 @@ menu-side observables (menu closes, `aria-expanded` resets) — see the Print mo
     `readDom(chromeWcId)` (the Settings-opens-internal observable — internal tabs are not in
     `enumerateTabs`).
   - **Sheet `wcId`** (`enumerateWindows().sheetWcId`): the open menu — `#sheet-menu`
-    `data-menu-type="kebab"` with **`role="menu"`**; the menu items (count = **exactly 6**, each
+    `data-menu-type="kebab"` with **`role="menu"`**; the menu items (count = **exactly 8**, each
     `role="menuitem"`) and their accessible names ("New window", "Settings", "Downloads", "Cookie
-    jars", "Print…", "Exit"); roving tabindex / focused item for focus-on-open and arrow roving — via
+    jars", "Automation", "Vault", "Print…", "Exit"); roving tabindex / focused item for focus-on-open and arrow roving — via
     `readDom(sheetWcId)` / `readAxTree(sheetWcId)`. **Sheet DOM persisting after close is expected**
     (lazy, per-window); "menu closed" is judged by the chrome `aria-expanded="false"` + pixels, never
     by sheet DOM absence. To judge open/closed off `enumerateWindows`, read **`sheetVisible`** — a
@@ -141,9 +143,9 @@ menu-side observables (menu closes, `aria-expanded` resets) — see the Print mo
 |---|---------|------------------|
 | 1 | **Active-precondition probe.** Connect the admin MCP client; call `tools/list`; then call `getChromeTarget()`. Note the current tab count (via `enumerateTabs`). | `tools/list` **includes** (presence-checked, not an exact count) the tools this spec drives: `getChromeTarget`. `getChromeTarget()` returns `{ wcId, kind: 'chrome', url }` where `wcId` is a **numeric** chrome identifier. Record `wcId` and the tab count. If not, halt — preconditions not met. |
 | 2 | Take a `captureWindow()` screenshot; locate and inspect the **toolbar row** (the row with the address bar, Media, and Shield buttons) and the kebab control. Confirm via `readAxTree(chromeWcId)`. | A single **kebab (⋮) button** sits **immediately to the right of the Shield button** as the **last interactive control in the toolbar** — its left edge is at/after the Shield button's right edge. It has an accessible name, `aria-haspopup="menu"`, and `aria-expanded="false"`. [a11y] |
-| 3 | **Mouse — open:** take a `captureWindow()` screenshot; locate the kebab button's coordinates; call `click(chromeWcId, x, y)`. Resolve the sheet's wcId via `enumerateWindows()` if not yet known — this is its first open, so `sheetWcId` is present from here on (see Preconditions). Then read `readAxTree(chromeWcId)` (trigger) and `readDom(sheetWcId)` (menu). | The menu opens: the chrome trigger's `aria-expanded` becomes `true`; `enumerateWindows()` now reports this window's `sheetWcId` **present** and `sheetVisible: true`; the sheet renders `#sheet-menu` with **`role="menu"`** containing **exactly six `role="menuitem"` items**, with accessible names **"New window"**, **"Settings"**, **"Downloads"**, **"Cookie jars"**, **"Print…"**, **"Exit"** (in that order). No seventh item. The menu is composited over the live guest in `captureWindow()`. [a11y] |
+| 3 | **Mouse — open:** take a `captureWindow()` screenshot; locate the kebab button's coordinates; call `click(chromeWcId, x, y)`. Resolve the sheet's wcId via `enumerateWindows()` if not yet known — this is its first open, so `sheetWcId` is present from here on (see Preconditions). Then read `readAxTree(chromeWcId)` (trigger) and `readDom(sheetWcId)` (menu). | The menu opens: the chrome trigger's `aria-expanded` becomes `true`; `enumerateWindows()` now reports this window's `sheetWcId` **present** and `sheetVisible: true`; the sheet renders `#sheet-menu` with **`role="menu"`** containing **exactly eight `role="menuitem"` items**, with accessible names **"New window"**, **"Settings"**, **"Downloads"**, **"Cookie jars"**, **"Automation"**, **"Vault"**, **"Print…"**, **"Exit"** (in that order, Automation directly above Vault). No ninth item. The menu is composited over the live guest in `captureWindow()`. [a11y] |
 | 4 | **Focus on open:** with the menu open (reopen if needed: focus the kebab and `pressKey(chromeWcId, 'Enter')` — trigger-side keydown is chrome-owned), read the sheet's roving state via `readDom(sheetWcId)`. | Opening the menu moves focus **into the menu** — the first item (**"New window"**) is the focused/roving item (`tabindex="0"`, focused) in the sheet document. Focus is never stranded on `<body>`. [a11y] |
-| 5 | **Keyboard — arrow navigation:** with the menu open and the first item focused, call `pressKey(sheetWcId, 'ArrowDown')` **five** times, then `pressKey(sheetWcId, 'ArrowDown')` once more (the wrap), then `pressKey(sheetWcId, 'ArrowUp')`; read the sheet's roving state after each. Also call `pressKey(sheetWcId, 'Home')` and `pressKey(sheetWcId, 'End')`. | `ArrowDown` moves focus **New window → Settings → Downloads → Cookie jars → Print… → Exit** (five presses, first to last); a further `ArrowDown` **wraps from Exit to New window** (record the wrap); `ArrowUp` moves back up (wrapping from **New window** to **Exit**). `Home` focuses **New window**; `End` focuses **Exit**. Focus stays within the six menu items throughout per the sheet reads. [a11y] |
+| 5 | **Keyboard — arrow navigation:** with the menu open and the first item focused, call `pressKey(sheetWcId, 'ArrowDown')` **seven** times, then `pressKey(sheetWcId, 'ArrowDown')` once more (the wrap), then `pressKey(sheetWcId, 'ArrowUp')`; read the sheet's roving state after each. Also call `pressKey(sheetWcId, 'Home')` and `pressKey(sheetWcId, 'End')`. | `ArrowDown` moves focus **New window → Settings → Downloads → Cookie jars → Automation → Vault → Print… → Exit** (seven presses, first to last); a further `ArrowDown` **wraps from Exit to New window** (record the wrap); `ArrowUp` moves back up (wrapping from **New window** to **Exit**). `Home` focuses **New window**; `End` focuses **Exit**. Focus stays within the eight menu items throughout per the sheet reads. [a11y] |
 | 6 | **Keyboard — Escape closes + restores focus:** with the menu open, call `pressKey(sheetWcId, 'Escape')`. Then call `readAxTree(chromeWcId)`. | The menu closes; the chrome trigger's `aria-expanded` returns to `false`; focus is **restored to the kebab trigger** in the chrome (not lost to `<body>`) per the focused node in `readAxTree(chromeWcId)` — corroborate with a chrome `document.hasFocus()` eval (true on chrome after Escape). [a11y] |
 | 7 | **Mouse — click-outside closes:** open the menu again (locate the kebab and `click(chromeWcId, x, y)`), then `click(sheetWcId, x, y)` at a point in the guest region **outside the menu rect**. Read `readAxTree(chromeWcId)` + `captureWindow()`. | The menu closes (`aria-expanded="false"`, menu gone from the pixels) and the outside click is swallowed (no page action — `menu-dismissal.md` owns the full swallow contract). |
 | 8 | **Settings opens the internal settings tab:** note the tab count; open the menu; activate the **Settings** item — it is the **second** item, so arrow-focus is `Home` then one `ArrowDown` (click its sheet coordinates, or arrow-focus + `evaluate(sheetWcId, 'document.activeElement.click()')` — see the activation nuance). Read the chrome address chip via `readDom(chromeWcId)` and take a `captureWindow()`. | Selecting Settings **closes the menu** and **opens/activates the trusted internal `goldfinch://settings` tab**: the address chip shows `data-state="internal"` and the Settings page renders in the guest region (pixels). The internal tab does NOT appear in `enumerateTabs` (internal-session exclusion — the unchanged tab count there is expected, not a "nothing happened" tell). No error/crash. *(This inverts the pre-M04 "Settings is inert placeholder" assertion — Settings has been a real internal page since the `goldfinch://` mechanism landed.)* |

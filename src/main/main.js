@@ -634,12 +634,12 @@ function getTabContents(wcId) {
 
 // The loopback MCP automation server (Flight 3). Module-scoped so the shutdown
 // hooks (before-quit / window-all-closed) can reach it. Stays null until the
-// surface binds: in production the Settings `automationEnabled` toggle is the sole
+// surface binds: in production the Automation page's `automationEnabled` toggle is the sole
 // bind gate (Flight 8); in dev an unpackaged run with --automation-dev force-binds
 // via the dev-enable override (no-op when packaged, DD4).
 let mcpServer = null;
 // Bind-status of the MCP automation server, captured at start (Flight 5 / DD1).
-// Queryable via the origin-checked `automation:get-status` IPC so the Settings UI
+// Queryable via the origin-checked `automation:get-status` IPC so the Automation page
 // can show whether the surface is active and which port it bound. `enabled` is the
 // MCP surface being active in this process; `bound` flips true only after start()
 // resolves; `error` carries the EADDRINUSE/other message on failure.

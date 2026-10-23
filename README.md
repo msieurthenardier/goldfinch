@@ -213,8 +213,8 @@ or download **v0.19.5** directly:
     filter into a folder (one prompt, silent concurrency-capped batch).
 - **Automation surface** (MCP-compatible, loopback-only): exposes drive, observe,
   and eval tools over a Streamable HTTP interface bound to `127.0.0.1`. **Off by
-  default** — the operator enables it via the **Settings `automationEnabled`
-  toggle** (`goldfinch://settings` → Automation). Once enabled, every request
+  default** — the operator enables it via the `automationEnabled`
+  toggle on the **Automation page** (`goldfinch://automation`, ⋯ menu → Automation). Once enabled, every request
   must carry a per-jar API key. The surface is strictly local; no remote or
   background driving. A jar-scoped `getHistory` tool also gives an automation
   client read access to its own jar's browsing-history memory. See
@@ -312,7 +312,7 @@ main process via `ipcRenderer.send('guest-media-list', …)`, which forwards it 
 
 ### Internal pages (`goldfinch://`)
 
-Goldfinch's own chrome pages (currently just **Settings**) are served from a
+Goldfinch's own chrome pages (**Settings**, Downloads, Cookie jars, Automation, Vault) are served from a
 privileged `goldfinch://` URL scheme rather than from web origins. The scheme is
 registered as `standard` + `secure` at module load, and its pages are served from
 a dedicated in-memory internal session (the `goldfinch-internal` partition) via
@@ -343,7 +343,7 @@ persisted controls:
   invalid URLs are rejected with an error message.
 
 Internal pages are **trusted local chrome, not web content**, and are reachable
-only through Goldfinch's own UI (the kebab → **Settings**). Untrusted web content
+only through Goldfinch's own UI (the kebab → **Settings**, **Automation**, …). Untrusted web content
 cannot navigate to, open, embed, or `fetch` the `goldfinch://` scheme. Privileged
 IPC from the settings page is gated at the main process by an origin + session
 check (`registerInternalHandler` in `src/main/internal-ipc.js`). See `CLAUDE.md`

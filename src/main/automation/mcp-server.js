@@ -1074,7 +1074,7 @@ function createMcpServer(opts = {}) {
    *   exactly, so free the port or change GOLDFINCH_MCP_PORT.
    * - Explicit opts.port strict (tests/rebind): a plain in-use message, no env hint.
    * - Fallback exhausted (dev-no-env, or packaged): "no free port found"; on a
-   *   packaged build (env ignored) point at the Settings port control, not the env.
+   *   packaged build (env ignored) point at the Automation page's port control, not the env.
    * @param {number} attemptPort
    * @param {boolean} exhausted true when the fallback ran out of free ports.
    * @returns {string}
@@ -1082,8 +1082,8 @@ function createMcpServer(opts = {}) {
   function eaddrinuseMessage(attemptPort, exhausted) {
     if (exhausted) {
       const where = honorEnv
-        ? ' — change the automation port in Settings or free a port'
-        : ' — change the automation port in Settings'; // packaged: env ignored
+        ? ' — change the automation port on the Automation page (⋯ menu → Automation) or free a port'
+        : ' — change the automation port on the Automation page (⋯ menu → Automation)'; // packaged: env ignored
       return 'automation: no free port found near ' + attemptPort + where;
     }
     if (envUsed) {

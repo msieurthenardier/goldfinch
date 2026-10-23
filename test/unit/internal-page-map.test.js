@@ -9,16 +9,24 @@ const joinPath = { join: (...parts) => parts.join('/') };
 
 test('createInternalPageMap returns the exact current host/path allowlist', () => {
   const map = createInternalPageMap({ baseDir: '/app/src/main', path: joinPath });
-  assert.deepEqual(Object.keys(map).sort(), ['downloads', 'jars', 'settings', 'vault']);
+  assert.deepEqual(Object.keys(map).sort(), ['automation', 'downloads', 'jars', 'settings', 'vault']);
   assert.deepEqual(Object.keys(map.settings).sort(), [
     '/',
-    '/audit-paging.js',
     '/default-browser-row-model.js',
-    '/safe-color.js',
     '/search-engines.js',
+    '/section-scroll-spy.js',
     '/settings.css',
     '/settings.js',
     '/shields-isolation-model.js'
+  ]);
+  assert.deepEqual(Object.keys(map.automation).sort(), [
+    '/',
+    '/audit-paging.js',
+    '/automation.css',
+    '/automation.js',
+    '/safe-color.js',
+    '/section-scroll-spy.js',
+    '/settings.css'
   ]);
   assert.deepEqual(Object.keys(map.downloads).sort(), ['/', '/downloads.css', '/downloads.js']);
   assert.deepEqual(Object.keys(map.jars).sort(), [
@@ -58,6 +66,11 @@ test('createInternalPageMap returns the exact current host/path allowlist', () =
   ]);
   assert.equal(map.settings['/'], '/app/src/main/../renderer/pages/settings.html');
   assert.equal(map.settings['/search-engines.js'], '/app/src/main/../shared/search-engines.js');
+  assert.equal(map.automation['/'], '/app/src/main/../renderer/pages/automation.html');
+  assert.equal(map.automation['/audit-paging.js'], '/app/src/main/../shared/audit-paging.js');
+  assert.equal(map.automation['/safe-color.js'], '/app/src/main/../shared/safe-color.js');
+  assert.equal(map.automation['/section-scroll-spy.js'], '/app/src/main/../renderer/pages/section-scroll-spy.js');
+  assert.equal(map.automation['/settings.css'], '/app/src/main/../renderer/pages/settings.css');
   assert.equal(map.jars['/jar-page-model.js'], '/app/src/main/../shared/jar-page-model.js');
   assert.equal(map.vault['/'], '/app/src/main/../renderer/pages/vault.html');
   assert.equal(map.vault['/vault-page-model.js'], '/app/src/main/../shared/vault-page-model.js');
@@ -96,4 +109,13 @@ test('the existing resolver serves exact map entries and rejects traversal/wrong
   assert.equal(resolve('jars', '/jars.js/../main.js'), null);
   assert.equal(resolve('jars', '/not-allowlisted.js'), null);
   assert.equal(resolve('unknown', '/'), null);
+});
+
+test('the resolver serves the automation page shared modules and no longer serves them on settings (sortie 05)', () => {
+  const resolve = createResolver(createInternalPageMap({ baseDir: '/app/src/main', path: joinPath }));
+  assert.match(resolve('automation', '/audit-paging.js').file, /shared\/audit-paging\.js$/);
+  assert.match(resolve('automation', '/safe-color.js').file, /shared\/safe-color\.js$/);
+  assert.match(resolve('automation', '/automation.js').file, /renderer\/pages\/automation\.js$/);
+  assert.equal(resolve('settings', '/audit-paging.js'), null);
+  assert.equal(resolve('settings', '/safe-color.js'), null);
 });

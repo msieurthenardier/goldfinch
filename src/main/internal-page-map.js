@@ -15,8 +15,8 @@ function createInternalPageMap({ baseDir, path }) {
       '/settings.js': rendererPage('settings.js'),
       // Same-origin shared modules must be explicitly served: disk-relative
       // ../shared imports have no route in the custom scheme.
-      '/audit-paging.js': shared('audit-paging.js'),
-      '/safe-color.js': shared('safe-color.js'),
+      // Sortie 05: the scroll-spy is shared with the automation page.
+      '/section-scroll-spy.js': rendererPage('section-scroll-spy.js'),
       // M16 F1 Leg 2 (DD7): the settings page renders its search-engine radio
       // group from this single source table — no engine data is ever
       // duplicated in markup or page script.
@@ -25,6 +25,17 @@ function createInternalPageMap({ baseDir, path }) {
       '/default-browser-row-model.js': shared('default-browser-row-model.js'),
       // Sortie 02 leg 2: pure model for the restart-to-apply Shields notes + Restart now.
       '/shields-isolation-model.js': shared('shields-isolation-model.js')
+    },
+    // Sortie 05: the MCP automation surface (moved out of Settings). Shares settings.css
+    // for the sidebar shell + shared controls (DD3).
+    automation: {
+      '/': rendererPage('automation.html'),
+      '/automation.css': rendererPage('automation.css'),
+      '/automation.js': rendererPage('automation.js'),
+      '/settings.css': rendererPage('settings.css'),
+      '/section-scroll-spy.js': rendererPage('section-scroll-spy.js'),
+      '/audit-paging.js': shared('audit-paging.js'),
+      '/safe-color.js': shared('safe-color.js')
     },
     // App-level downloads surface; save-path authority remains main-side.
     downloads: {

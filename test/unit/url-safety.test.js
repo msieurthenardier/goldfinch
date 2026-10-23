@@ -263,6 +263,19 @@ test('internal: rejects goldfinch://jars/x (sub-path)', () => {
   assert.equal(isInternalPageUrl('goldfinch://jars/x'), false);
 });
 
+test('internal: allows goldfinch://automation (sortie 05 fifth internal page)', () => {
+  assert.equal(isInternalPageUrl('goldfinch://automation'), true);
+  assert.equal(isInternalPageUrl('goldfinch://automation/'), true);
+  assert.equal(isInternalPageUrl('goldfinch://automation/x'), false);
+});
+
+// Two-point boundary unchanged: the untrusted gate (createTab / will-navigate) still refuses every internal host.
+test('isSafeTabUrl: refuses goldfinch://automation (and the other internal hosts)', () => {
+  for (const host of ['automation', 'settings', 'downloads', 'jars', 'vault']) {
+    assert.equal(isSafeTabUrl('goldfinch://' + host), false, host);
+  }
+});
+
 test('internal: rejects goldfinch://settings/x (sub-path)', () => {
   assert.equal(isInternalPageUrl('goldfinch://settings/x'), false);
 });

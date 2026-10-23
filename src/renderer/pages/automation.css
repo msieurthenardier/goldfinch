@@ -1,0 +1,217 @@
+/* automation.css — goldfinch://automation-only rules (sortie 05). Loaded AFTER
+   settings.css, which supplies the shared shell (nav.section-nav, main, .settings-row,
+   .settings-btn, .settings-text-input, .muted). Rules moved verbatim out of settings.css. */
+
+/* The port is a narrow numeric field — override the wide default min-width. */
+#automation-port {
+  min-width: 90px;
+  max-width: 120px;
+}
+
+/* One-line connect hint deferring detail to docs/mcp-automation.md. */
+.connect-hint {
+  color: var(--fg-dim);
+  font-size: 13px;
+  margin-top: 10px;
+}
+
+/* MCP client config block: a copy-ready `.mcp.json` snippet. Monospace on the
+   dark surface tokens, with horizontal scroll so the JSON never wraps awkwardly. */
+.mcp-config-block {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin: 6px 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-x: auto;
+}
+
+/* --- Automation key management (Leg 3) --- */
+
+/* Per-jar key row: reuses .settings-row layout; the name takes the slack so the
+   status + buttons sit to the right. */
+.jar-row .jar-name {
+  flex: 1 1 auto;
+  font-weight: 500;
+}
+
+/* Per-jar key-state slot (F7 HAT, M06 F4 Leg 5): fixed 14x14 footprint so a
+   keyed row (robot glyph) and an unkeyed row (color dot) never jump against
+   each other. (Operator sizing follow-up: was 12x12, the old .jar-swatch
+   square's slot — bumped one notch together with the glyph/dot below.) */
+.jar-key-icon {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+/* Robot glyph for a jar WITH a minted automation key — same construction as the
+   toolbar automation indicator (src/renderer/index.html #automation-indicator):
+   stroke="currentColor", tinted via the jar's color (isSafeColor-guarded in
+   settings.js) on the element's inline `color`. Renders at 14px (settings.js
+   sets the SVG width/height attributes; sizing lives there, this rule only
+   normalizes display). */
+.jar-key-glyph {
+  display: block;
+}
+
+/* Color dot for a jar WITHOUT a key — mirrors the tab strip's per-tab jar dot
+   (.tab-jar in src/renderer/styles.css: a plain borderless circle), one notch
+   larger (10px vs the tab's 8px — operator sizing follow-up) so it balances
+   the 14px robot glyph in the shared slot. */
+.jar-key-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: block;
+}
+
+/* Show-once reveal block: set apart from the jars list so the just-minted key
+   reads as a distinct, transient affordance. */
+#automation-key-reveal {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--bg-2);
+}
+
+/* Env-gated admin block spacing. */
+#automation-admin {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+/* ---- Activity viewer (Leg 4 / SC10 / DD6) ---- */
+
+/* Active session rows: kind chip + named identity + since. The admin row uses a
+   non-alarm distinct accent (violet) — admin is "more privileged", not "broken". */
+.activity-session {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.activity-kind {
+  flex: 0 0 auto;
+  min-width: 42px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.activity-session.admin .activity-kind {
+  color: #b69cf7; /* lightened from #a371f7 (4.27:1) to clear AA 4.5:1 on --bg-2 */
+  border-color: #a371f7;
+}
+.activity-name {
+  flex: 1 1 auto;
+  font-weight: 600;
+  word-break: break-word;
+}
+.activity-since {
+  flex: 0 0 auto;
+}
+
+/* Recent action log rows: time · op · identity · outcome. Error rows are tinted
+   distinct from ok rows. Monospace-ish columns keep the log scannable. */
+.activity-log-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 3px 0;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.activity-log-time {
+  flex: 0 0 auto;
+}
+.activity-log-op {
+  flex: 0 0 auto;
+  min-width: 90px;
+  color: var(--accent);
+}
+.activity-log-identity {
+  flex: 1 1 auto;
+  word-break: break-word;
+  color: var(--fg-dim);
+}
+.activity-log-outcome {
+  flex: 0 0 auto;
+  color: #6dff8f;
+}
+.activity-log-row.error .activity-log-outcome {
+  color: #ff8c7a;
+}
+
+/* Empty-state line inside either list. */
+.activity-empty {
+  margin: 6px 0;
+}
+
+/* ---- Activity pager (Flight 7 / Leg 9): standard numbered pagination ---- */
+
+/* ‹ 1 2 3 … 7 › — conventional numbered pager below the log. The freeze contract
+   (page 1 live, higher pages frozen) lives underneath but is invisible here. */
+.activity-pager {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 8px 0 4px;
+}
+.pager-btn {
+  min-width: 28px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  color: var(--fg);
+  font-size: 13px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+.pager-btn:hover:not(:disabled):not(.current) {
+  border-color: var(--accent);
+}
+.pager-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.pager-btn.current {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+.pager-ellipsis {
+  padding: 3px 4px;
+  color: var(--fg-dim);
+  font-size: 13px;
+  user-select: none;
+}
+
+/* Keys-section footnotes: spaced below the jar list / fresh-key reveal (settings.css
+   zeroes `main section p` margins, which stacked them into one dense block). */
+.keys-hints {
+  margin-top: 14px;
+}
+
+.keys-hints p + p {
+  margin-top: 8px;
+}

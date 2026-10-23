@@ -67,7 +67,7 @@ Real ESM with explicit `.js` extensions, loaded via `<script type="module">`; un
 
 ### Internal `goldfinch://` pages — trusted-embedder security model
 
-Internal origins (`settings`, `downloads`, `jars`, `vault`) are equally privileged: the trust boundary is **"internal vs web," never per-page**. Security-critical.
+Internal origins (`settings`, `downloads`, `jars`, `vault`, `automation`) are equally privileged: the trust boundary is **"internal vs web," never per-page**. Security-critical.
 
 - **The welcome surface is NOT an internal page** — a chrome-owned viewless tab (`welcome-controller.js`) with no `goldfinch://` URL. Its DOM ids/classes (`#welcome-*`, `.welcome-engine-row`) are a frozen contract (`search-engines.test.js`): restyle may wrap, never rename/remove/re-toggle.
 - `goldfinch` is registered privileged (`{standard: true, secure: true}`) before `app.ready`; `standard: true` is load-bearing. Served from a dedicated in-memory internal session with a **session-scoped** `protocol.handle`. **`INTERNAL_PARTITION` is single-sourced** in `src/shared/internal-page.js` — import, never re-type (drift makes every gate fail open).
@@ -75,7 +75,7 @@ Internal origins (`settings`, `downloads`, `jars`, `vault`) are equally privileg
 - **Route map** (`internal-page-map.js`): exact host → pathname → file; no path arithmetic, no directory passthrough.
 - **The four gates**: (1) trust is call-site provenance — `createTab(url, container, { trusted: true })`, never inferred from the URL, and `onOpenTab` passes no flag; (2) trusted branch validates with `isInternalPageUrl`, untrusted with `isSafeTabUrl`; (3) session-aware `will-navigate`; (4) the protocol handler exists on the internal session alone.
 - **Chrome-fetch invariant: no page-controlled URL is fetched by the chrome outside the owning jar's session.** Chrome CSP forbids remote `img-src`/`media-src` (`csp-pins.test.js`); favicons are fetched main-side and delivered as `data:` URLs; media-panel remote URLs go through the **`goldfinch-media:`** proxy (default session only, `toMediaProxyUrl`, forwarded via the guest's OWN session, streaming). Never assign an `http(s):` URL directly in `media-controller.js`.
-- **Adding an internal page**: entry tree in `internal-page-map.js`; host in `INTERNAL_HOSTS`; origin in `INTERNAL_ORIGINS` (`internal-ipc.js` AND `internal-preload.js`); open via the trusted `createTab` path. `internal-page-route-closure.test.js` is the standing guard.
+- **Adding an internal page**: entry tree in `internal-page-map.js`; host in `INTERNAL_HOSTS`; origin in `INTERNAL_ORIGINS` (`internal-ipc.js` AND `internal-preload.js`); chrome-side tab name in `INTERNAL_JAR_NAMES` (`tab-controller.js`); open via the trusted `createTab` path (kebab item + action in `overlay-menus.js`). `internal-page-route-closure.test.js` and `internal-host-drift.test.js` (hosts === map keys === both origin sets === `INTERNAL_JAR_NAMES`) are the standing guards.
 
 ### Internal-bridge security model (`src/main/internal-ipc.js`)
 
@@ -229,7 +229,7 @@ Encrypted per-jar + global vaults: `.gfvault` files + `manager.json` under `user
 
 ### Formatting is Prettier's
 
-`.prettierrc` is the one source of style; `npm run format` before committing; `npm run format:check` is the CI gate. Two zero-headroom line budgets in `test/unit/seam-contract.test.js` are pinned against Prettier output (`split(/\r?\n/).length`): `RENDERER_LINE_BUDGET` **1546** (`src/renderer/renderer.js`; shared with `vault-restore-workflow-invariants.test.js` via `test/helpers/renderer-line-budget.js` — retarget that ONE module when the count changes) and `BOOKMARKS_BAR_LINE_BUDGET` **1100** (`src/renderer/chrome/bookmarks-bar.js`). A file at budget needs an extraction, not a compaction.
+`.prettierrc` is the one source of style; `npm run format` before committing; `npm run format:check` is the CI gate. Two zero-headroom line budgets in `test/unit/seam-contract.test.js` are pinned against Prettier output (`split(/\r?\n/).length`): `RENDERER_LINE_BUDGET` **1505** (`src/renderer/renderer.js`; shared with `vault-restore-workflow-invariants.test.js` via `test/helpers/renderer-line-budget.js` — retarget that ONE module when the count changes) and `BOOKMARKS_BAR_LINE_BUDGET` **1100** (`src/renderer/chrome/bookmarks-bar.js`). A file at budget needs an extraction, not a compaction.
 
 ## Release / CI
 

@@ -26,7 +26,8 @@ const INTERNAL_ORIGINS = new Set([
   'goldfinch://settings',
   'goldfinch://downloads',
   'goldfinch://jars',
-  'goldfinch://vault'
+  'goldfinch://vault',
+  'goldfinch://automation'
 ]);
 
 // Only expose the bridge when this preload is running in a genuine internal page.

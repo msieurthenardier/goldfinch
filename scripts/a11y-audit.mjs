@@ -26,6 +26,7 @@
 //   npm run a11y -- --target=goldfinch://settings  # audit a guest <webview>
 //                                                  # target by URL substring
 //                                                  # instead of the chrome
+//   npm run a11y -- --target=goldfinch://automation # likewise, the Automation page
 //
 // Exit codes (squawk 0031 — apparatus failure must be distinguishable from a
 // red run):
@@ -61,8 +62,8 @@
 // `injectScript` are refused on any sheet wcId, unconditionally, at every tier
 // (CLAUDE.md § MCP automation, M15 F3), so axe can never be injected into one; the
 // script prints a notice listing the skipped labels instead of treating that refusal
-// as an apparatus failure. NOTE: `goldfinch://settings`
-// is the INTERNAL session. It IS auditable via `--target=goldfinch://settings` under
+// as an apparatus failure. NOTE: `goldfinch://settings` and `goldfinch://automation`
+// are the INTERNAL session. They ARE auditable via `--target=goldfinch://settings` (or `…automation`) under
 // the ADMIN key (admin's engine runs allowInternal, so `evaluate` reaches internal
 // guests); a JAR key cannot — jar keys never see the internal session. The default
 // chrome sweep — what this gate gates on — never depended on a settings-guest run.
@@ -86,7 +87,7 @@ const fixtureUrl = argValue('--url') || DEFAULT_FIXTURE_URL;
 // A reasonable image path inside the fixture, used to force the lightbox open.
 const fixtureImageUrl = new URL('bird.png', fixtureUrl).href;
 // --target=<url-substring>: audit an already-loaded guest page/<webview> target
-// (e.g. goldfinch://settings) instead of the chrome index.html renderer (DD7).
+// (e.g. goldfinch://settings, goldfinch://automation) instead of the chrome index.html renderer (DD7).
 const targetArg = argValue('--target');
 // Mission 20 Flight 2 Leg 4 (DD15): --tls-url=<https url> drives the
 // `cert-blocked` chrome state (a TLS fixture navigation, e.g. `serve-tls.mjs`
@@ -261,7 +262,7 @@ async function getChromeWcId(client) {
 // fixture navigate and drives none of the chrome's state functions (a guest has
 // no togglePanel/togglePrivacy/openLightbox).
 //
-// NOTE (internal session): with the ADMIN key, `--target=goldfinch://settings` works
+// NOTE (internal session): with the ADMIN key, `--target=goldfinch://settings` (or `goldfinch://automation`) works
 // (admin enumerateTabs lists the internal tab and `evaluate` reaches it via
 // allowInternal). With a JAR key the internal session is invisible and unreachable,
 // so an internal-page target cannot be found; use the admin key for those.

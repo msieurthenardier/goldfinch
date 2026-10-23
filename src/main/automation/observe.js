@@ -49,7 +49,7 @@ const { withCaptureTimeout } = require('../capture-timeout');
 // (engine.js) and is DELIBERATELY let through to internal goldfinch:// guests on every op,
 // including these four — admin is a high-bar, deliberately-enabled, loopback-bound,
 // key-gated tier (requires the GOLDFINCH_AUTOMATION_ADMIN env var at launch, a
-// separately-minted admin key, and the Settings automation toggle) that CAN be enabled
+// separately-minted admin key, and the Automation-page toggle) that CAN be enabled
 // on a packaged build, and end-to-end testing needs to reach internal pages. This module
 // therefore carries NO op-local isInternalContents refusal any more.
 //
@@ -576,7 +576,7 @@ async function injectScript(wcId, script, deps) {
  * at resolve.js's `!allowInternal && isInternalContents` throw before this op runs; the
  * admin tier reaches internal goldfinch://settings guests here by design — admin is a
  * high-bar, deliberately-enabled, loopback-bound, key-gated tier (env
- * GOLDFINCH_AUTOMATION_ADMIN + a minted admin key + the Settings toggle) that CAN be
+ * GOLDFINCH_AUTOMATION_ADMIN + a minted admin key + the Automation-page toggle) that CAN be
  * enabled on a packaged build. The menu-overlay SHEET stays refused for all tiers at
  * resolve.js's separate, ungated `isSheetContents` gate (DD3), which this op never
  * bypasses.

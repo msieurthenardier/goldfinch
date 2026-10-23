@@ -637,7 +637,7 @@ interface GoldfinchBridge {
 
 /**
  * Internal bridge surface exposed by src/preload/internal-preload.js to goldfinch:// pages.
- * Only present when the page's origin is in the INTERNAL_ORIGINS allowlist (goldfinch://settings, goldfinch://downloads, goldfinch://jars, goldfinch://vault).
+ * Only present when the page's origin is in the INTERNAL_ORIGINS allowlist (goldfinch://settings, goldfinch://downloads, goldfinch://jars, goldfinch://vault, goldfinch://automation).
  */
 interface GoldfinchInternalBridge {
   version: number;

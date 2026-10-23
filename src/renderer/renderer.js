@@ -354,55 +354,14 @@ function createContainerAndOpenTab(rawName) {
 // implementation and its mutable jar state live in the extracted client.
 const makeBurner = () => jarsClient.makeBurner();
 /* ------------------------------------------------------- kebab (overflow) menu */
-// APG menu-button: role="menu" popup with seven role="menuitem" items — New window,
-// then Settings/Downloads/Cookie jars/Passwords, then Print…/Exit — divided into three
-// bands by two role="separator" rows (skipped by the roving tabindex/arrow-nav, no
-// role="menuitem"). Count and order track `kebabModel` below — the single source of
-// truth; if you add an item there, this line is stale until you edit it too.
-//
-// All menus render from the menu-overlay SHEET (M05 F8, DD4 model-over-IPC):
-// chrome keeps the trigger, open stimuli, model building, and action execution;
-// the sheet is presentation-only. The pre-F8 chrome-DOM menus and their
-// freeze-frame apparatus were retired at the Leg-5 cutover.
-
-// The kebab item actions, extracted into NAMED functions consumed by the
-// sheet's channel-6 activation — one source of truth (Exit is verified by this
-// shared body, never activated live).
-// New Window (M09 F6 Leg 4, DD5): the same body Ctrl/Cmd+N dispatches through
-// dispatchChromeAction('new-window') — main creates the window; its chrome
-// document boots a home tab normally (window-boot-config bootTab:true).
-function kebabActionNewWindow() {
-  window.goldfinch.windowCreate();
-}
+// Kebab menu: model and action table live in chrome/overlay-menus.js
+// (`buildKebabModel` / `createChromePageActions().kebabActions`); all menus render
+// from the menu-overlay SHEET (M05 F8, DD4): chrome keeps the trigger, open
+// stimuli, model building and action execution; the sheet is presentation-only.
+// `kebabActionSettings` stays a hoisted seam wrapper (driven by name via evaluate).
 function kebabActionSettings() {
-  createTab('goldfinch://settings', null, { trusted: true });
+  return pageActions.kebabActions.settings();
 }
-function kebabActionDownloads() {
-  openDownloads();
-}
-function kebabActionJars() {
-  openJarsPage();
-}
-function kebabActionVault() {
-  openVaultPage();
-}
-function kebabActionPrint() {
-  const t = activeTab();
-  if (t && !isInternalTab(t) && t.wcId != null) window.goldfinch.print({ webContentsId: t.wcId });
-}
-function kebabActionExit() {
-  window.goldfinch.appQuit();
-}
-/** @type {{ [id: string]: () => void }} */
-const KEBAB_ACTIONS = {
-  'new-window': kebabActionNewWindow,
-  settings: kebabActionSettings,
-  downloads: kebabActionDownloads,
-  jars: kebabActionJars,
-  vault: kebabActionVault,
-  print: kebabActionPrint,
-  exit: kebabActionExit
-};
 
 let overlayMenuClient;
 let siteSecurityController;
@@ -954,7 +913,7 @@ window.goldfinch.onBookmarkEditSubmit((payload) => bookmarksClient.handleEditSub
 // load); `refreshTabIndicators`/other late-constructed-controller reads use
 // the same late-bound-closure discipline elsewhere in this file.
 const overlayDispatch = createOverlayDispatch({
-  KEBAB_ACTIONS,
+  KEBAB_ACTIONS: pageActions.kebabActions,
   openNewContainerOverlay,
   openNewTab,
   jarsClient,
