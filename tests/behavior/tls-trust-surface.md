@@ -3,7 +3,7 @@
 **Slug**: `tls-trust-surface`
 **Status**: active
 **Created**: 2026-09-15
-**Last Run**: 2026-09-16-04-59-20 — fail/partial (13/16; F1–F3 fixed and re-verified in-run, F4 fixed post-run for HAT verification, #216 Known Issue on rows 14–15; run log `tls-trust-surface/runs/2026-09-16-04-59-20.md`)
+**Last Run**: 2026-10-23-00-18-01 — partial, operator-approved automatable subset on Electron 44.9.0 (squawk 0154): 8/8 judged rows pass (0–5, 12 adapted, 15 localhost leg); trusted/proceed/keyboard rows not run; run log `tls-trust-surface/runs/2026-10-23-00-18-01.md`
 
 ## Intent
 
