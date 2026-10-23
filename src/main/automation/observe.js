@@ -332,8 +332,10 @@ async function readDom(wcId, deps) {
  * ERROR. enumerateWindows is the topology read; this op returns pixels.
  *
  * An unknown windowId is refused UPSTREAM with a named no-such-window (engine.js's
- * requireWindow), so a null from grabWindow here still means exactly what it always
- * meant — the capture itself failed — and keeps its verbatim message.
+ * requireWindow), so a null from grabWindow here keeps its verbatim message. Since squawk 0155
+ * a null means ONLY no record / destroyed chrome: every other composite failure REJECTS with a
+ * named 'automation: capture-failed — {step}: {reason}' (or DD7's capture-timeout), which
+ * propagates through this await unchanged.
  *
  * @param {{ grabWindow: ((windowId?: number) => Promise<string|null>) | null }} deps
  * @param {{ windowId?: number }} [opts]
