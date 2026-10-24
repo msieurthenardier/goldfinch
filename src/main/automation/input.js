@@ -42,6 +42,10 @@ const KEY_MAP = {
   F5: 'F5'
 };
 
+// The advertised key vocabulary (single source for the MCP `pressKey` description):
+// every KEY_MAP name plus the `ShiftTab` composite handled in `keyEvents`.
+const KEY_NAMES = Object.freeze([...Object.keys(KEY_MAP), 'ShiftTab']);
+
 // Canonical Electron modifier vocabulary. Electron `^42` sendInputEvent accepts
 // both forms (control/ctrl, meta/cmd/command, alt/option, shift) natively — we
 // normalize to ONE internal vocabulary so the contract is clean and typos throw
@@ -121,11 +125,7 @@ function keyEvents(name, modifiers = []) {
   }
   if (!keyCode)
     throw new Error(
-      'automation: unknown key ' +
-        name +
-        ' (known: ' +
-        Object.keys(KEY_MAP).join(', ') +
-        ', ShiftTab, or a single letter/digit)'
+      'automation: unknown key ' + name + ' (known: ' + KEY_NAMES.join(', ') + ', or a single letter/digit)'
     );
   // Normalize + validate the caller's modifiers, then merge with the composite's
   // intrinsic modifier and de-dupe (preserving canonical order so an empty list
@@ -425,6 +425,7 @@ const pressKey = (wcId, name, modifiers, deps) => actOn(wcId, keyEvents(name, mo
 // ---------------------------------------------------------------------------
 
 module.exports = {
+  KEY_NAMES,
   keyEvents,
   mouseClickEvents,
   charEvents,

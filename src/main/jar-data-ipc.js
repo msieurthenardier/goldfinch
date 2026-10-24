@@ -424,7 +424,8 @@ function registerJarDataIpc({
   ipcMain.handle('jars-set-retention', handleSetRetention);
   ipcMain.handle('jars-cookies-list', handleCookiesList);
   ipcMain.handle('jars-cookies-remove', handleCookiesRemove);
-  ipcMain.handle('jars-cookies-value', handleCookiesValue);
+  // NOTE (squawk 0141): there is deliberately NO bare 'jars-cookies-value' —
+  // a cookie value is secret, so its ONLY channel is the internal-gated twin below.
   ipcMain.handle('jars-sitedata-list', handleSiteDataList);
   ipcMain.handle('jars-sitedata-remove-origin', handleSiteDataRemoveOrigin);
 

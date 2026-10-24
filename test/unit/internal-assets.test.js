@@ -19,7 +19,10 @@ const syntheticMap = {
   settings: {
     '/': FAKE_HTML,
     '/settings.css': FAKE_CSS,
-    '/settings.js': FAKE_JS,
+    '/settings.js': FAKE_JS
+  },
+  // Mirrors the real map (sortie 05): audit-paging.js is served by the automation host.
+  automation: {
     '/audit-paging.js': FAKE_AUDIT_JS
   }
 };
@@ -89,9 +92,10 @@ test('resolve: /settings.js → settings.js with text/javascript content-type', 
 });
 
 test('resolve: /audit-paging.js → the shared module with text/javascript content-type', () => {
-  // Leg 9 fix: settings.html loads audit-paging.js as a same-origin <script>, so
-  // the internal scheme MUST serve it from its allowlist (a ../shared/ path 404s).
-  const result = resolve('settings', '/audit-paging.js');
+  // Leg 9 fix (host moved to automation in sortie 05): the page loads audit-paging.js as a
+  // same-origin <script>, so the internal scheme MUST serve it from its allowlist.
+  const result = resolve('automation', '/audit-paging.js');
+  assert.equal(resolve('settings', '/audit-paging.js'), null);
   assert.ok(result !== null, 'expected non-null result for /audit-paging.js');
   assert.equal(result.file, FAKE_AUDIT_JS);
   assert.equal(result.contentType, 'text/javascript; charset=utf-8');

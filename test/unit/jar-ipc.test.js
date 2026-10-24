@@ -27,7 +27,6 @@ test('registers exactly the fourteen chrome + fourteen internal jar channels, no
     'jars-clear-data',
     'jars-cookies-list',
     'jars-cookies-remove',
-    'jars-cookies-value',
     'jars-get-default',
     'jars-list',
     'jars-remove',

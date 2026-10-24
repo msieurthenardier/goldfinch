@@ -14,10 +14,14 @@
  */
 
 /**
- * @param {{ document: any, IntersectionObserver: any }} deps
+ * `window` is optional: when supplied, reaching the bottom of the page marks the
+ * LAST section current (a short final section can never otherwise win: an
+ * earlier section still intersects the observer zone at maximum scroll).
+ *
+ * @param {{ document: any, IntersectionObserver: any, window?: any }} deps
  * @returns {void}
  */
-export function initSectionScrollSpy({ document, IntersectionObserver }) {
+export function initSectionScrollSpy({ document, IntersectionObserver, window: win }) {
   // Collect all sections that have a corresponding nav link.
   const sections = Array.from(document.querySelectorAll('main section[id]'));
   const navLinks = Array.from(document.querySelectorAll('nav.section-nav a[href^="#"]'));
@@ -50,6 +54,32 @@ export function initSectionScrollSpy({ document, IntersectionObserver }) {
   /** @type {Set<string>} */
   const visible = new Set();
 
+  // Within this many px of the max scroll counts as "at the bottom" (fractional scroll).
+  const BOTTOM_SLACK = 2;
+
+  /** True when the page is scrollable and scrolled to its end. */
+  function atBottom() {
+    if (!win) return false;
+    const root = document.documentElement;
+    const maxScroll = root.scrollHeight - win.innerHeight;
+    return maxScroll > BOTTOM_SLACK && win.scrollY >= maxScroll - BOTTOM_SLACK;
+  }
+
+  /** Bottom of the page → last section; otherwise the first visible section in document order. */
+  function update() {
+    if (atBottom()) {
+      setActive(/** @type {any} */ (sections[sections.length - 1]).id);
+      return;
+    }
+    for (const section of /** @type {any[]} */ (sections)) {
+      if (visible.has(section.id)) {
+        setActive(section.id);
+        return;
+      }
+    }
+    // Nothing visible — leave the last active link as-is (avoids flash on fast scroll).
+  }
+
   const observer = new IntersectionObserver(
     function (/** @type {any[]} */ entries) {
       for (const entry of entries) {
@@ -60,15 +90,7 @@ export function initSectionScrollSpy({ document, IntersectionObserver }) {
           visible.delete(id);
         }
       }
-
-      // Activate the first section (in document order) that is currently visible.
-      for (const section of /** @type {any[]} */ (sections)) {
-        if (visible.has(section.id)) {
-          setActive(section.id);
-          return;
-        }
-      }
-      // Nothing visible — leave the last active link as-is (avoids flash on fast scroll).
+      update();
     },
     {
       // Trigger when a section crosses the midpoint of the viewport.
@@ -76,6 +98,9 @@ export function initSectionScrollSpy({ document, IntersectionObserver }) {
       threshold: 0
     }
   );
+
+  // Reaching the bottom (or leaving it) may not change any intersection.
+  if (win) win.addEventListener('scroll', update, { passive: true });
 
   for (const section of sections) {
     observer.observe(section);

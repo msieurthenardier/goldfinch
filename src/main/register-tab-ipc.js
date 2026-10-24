@@ -1074,6 +1074,20 @@ function registerTabIpc(deps) {
     scheduleSnapshot?.();
   });
 
+  // Shared by the `reload` / `reloadIgnoringCache` verbs: an empty
+  // `navigationHistory` (crashed before first commit) makes the reload call a
+  // no-op, so load the entry's effective URL instead (squawk 0143).
+  function reloadOrLoadEffective(wc, wcId, owner, label, reloadCall) {
+    const entry = owner.tabViews.get(wcId);
+    if (entry && wc.navigationHistory.length() === 0) {
+      wc.loadURL(effectiveUrl(entry)).catch((err) => {
+        logger.warn(`[tab-navigate] ${label} loadURL rejected:`, err && (err.code || err.message || err));
+      });
+    } else {
+      reloadCall();
+    }
+  }
+
   ipcMain.on('tab-navigate', (event, { wcId, verb, args }) => {
     // Leg 2 (F3 DD2, AC1): owning-chrome check ahead of the existing contents lookup.
     const owner = ownsTab(event, wcId);
@@ -1118,25 +1132,11 @@ function registerTabIpc(deps) {
       // Edge case (leg 2 Edge Cases): a guest that crashed before its first
       // commit has an empty history — `wc.reload()` is a no-op there, so fall
       // back to loading the entry's own effective URL (acceptable variation).
-      const entry = owner.tabViews.get(wcId);
-      if (entry && wc.navigationHistory.length() === 0) {
-        wc.loadURL(effectiveUrl(entry)).catch((err) => {
-          logger.warn('[tab-navigate] reload loadURL rejected:', err && (err.code || err.message || err));
-        });
-      } else {
-        wc.reload();
-      }
+      reloadOrLoadEffective(wc, wcId, owner, 'reload', () => wc.reload());
     } else if (verb === 'reloadIgnoringCache') {
       // Sortie 03 DD4: hard reload — mirrors `reload` (incl. the empty-history
       // loadURL fallback) but bypasses the HTTP cache. Reads no `args`.
-      const entry = owner.tabViews.get(wcId);
-      if (entry && wc.navigationHistory.length() === 0) {
-        wc.loadURL(effectiveUrl(entry)).catch((err) => {
-          logger.warn('[tab-navigate] hard-reload loadURL rejected:', err && (err.code || err.message || err));
-        });
-      } else {
-        wc.reloadIgnoringCache();
-      }
+      reloadOrLoadEffective(wc, wcId, owner, 'hard-reload', () => wc.reloadIgnoringCache());
     } else if (verb === 'stop') {
       wc.stop();
     } else if (verb === 'goBack') {

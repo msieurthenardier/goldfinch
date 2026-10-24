@@ -21,7 +21,7 @@ import {
 
 /* ---- section scroll-spy (shared with the other section-nav internal page) ---- */
 
-initSectionScrollSpy({ document, IntersectionObserver });
+initSectionScrollSpy({ document, IntersectionObserver, window });
 
 /* ---- home-page controller ---- */
 

@@ -73,14 +73,14 @@ or download **v0.19.5** directly:
   otherwise), and **closing the last tab of a moved-out window leaves that
   window open with a fresh home tab** rather than closing the window.
 - **Overflow menu** (the **⋮** button at the right end of the toolbar row):
-  opens a menu with **New window** (a fresh browser window, same as `Ctrl+N`)
-  and **Settings** (opens `goldfinch://settings` in a new tab —
-  a Chrome-style shell with a sticky left section-nav and five titled sections:
-  Appearance, Privacy & Shields, On startup, Downloads, and About; the
-  **Privacy & Shields** section has working global Shields toggles and the
-  **On startup** section has an editable Home page — both persisted and kept
-  in sync with the slide-out Shields panel; remaining sections are stubs) and
-  **Exit** (quits Goldfinch).
+  opens a menu with **New window** (a fresh browser window, same as `Ctrl+N`);
+  **Settings** (opens `goldfinch://settings` in a new tab — a Chrome-style shell
+  with a sticky left section-nav and three titled sections: Startup & appearance,
+  Privacy & Shields, and About; the **Privacy & Shields** section has working
+  global Shields toggles and the **Startup & appearance** section has an editable
+  Home page — both persisted and kept in sync with the slide-out Shields panel),
+  **Downloads**, **Cookie jars**, **Automation** (each opens its `goldfinch://`
+  page in a tab), and **Vault**; **Print…**; and **Exit** (quits Goldfinch).
   Keyboard-operable: focus the button and press `Enter`, `Space`, or `↓` to
   open, arrow keys to move between items, and `Esc` to close.
 - **Address-bar chips**: a small button to the left of the address bar reflects
@@ -113,7 +113,7 @@ or download **v0.19.5** directly:
     `app.on('session-created')` — no per-jar configuration needed.
   - **Spellcheck dictionary download (opt-in only).** Spellcheck is **off by
     default**, so **nothing is fetched** while it is off. After you enable it
-    (Settings → Appearance), the first time you focus an editable field on
+    (Settings → Privacy & Shields), the first time you focus an editable field on
     **Linux or Windows**, Chromium fetches a **one-time per-language Hunspell
     dictionary** (`.bdic`) from the Chromium dictionary CDN
     (`redirector.gvt1.com/edgedl/chrome/dict/…`). On **macOS** the OS-native
@@ -164,7 +164,7 @@ or download **v0.19.5** directly:
     default; **DevTools defaults unpinned** (a power-user tool — opt-in).
   - **Unpinned**: the icon is removed from the toolbar. The panel / DevTools can
     still be opened with its keyboard shortcut (`Ctrl+M` / `Ctrl+Shift+P` /
-    `F12` · `Ctrl+Shift+I`). To restore the icon, go to **Settings → Appearance**
+    `F12` · `Ctrl+Shift+I`). To restore the icon, go to **Settings → Startup & appearance**
     and toggle the pin button for that item.
   - Pin state is persisted across restarts.
 - **Custom page context menu** — right-click web content to open Goldfinch's own
@@ -188,7 +188,7 @@ or download **v0.19.5** directly:
   close (a single tab, or nothing to its right). Right-clicking (or
   Menu-keying) a background tab opens its menu without switching to it.
 - **Opt-in spellcheck** — **off by default**; enable it in **Settings →
-  Appearance**. Once on, misspelled words in editable fields are flagged and
+  Privacy & Shields**. Once on, misspelled words in editable fields are flagged and
   spelling suggestions appear in the right-click context menu; choosing one
   corrects the word. See **Privacy & Shields** below for the one-time dictionary
   download this triggers (Linux/Windows only, after you opt in).
@@ -282,7 +282,7 @@ content only (not `goldfinch://` internal pages).
 DevTools targets **web content only** (the shortcuts and the toolbar button are inert
 on `goldfinch://` internal pages) and opens in Chromium's **native detached window**.
 A pinnable `DevTools` toolbar button is also available — **default unpinned**; pin it
-from Settings → Appearance or by right-clicking the toolbar. The `F12` / `Ctrl+Shift+I`
+from Settings → Startup & appearance or by right-clicking the toolbar. The `F12` / `Ctrl+Shift+I`
 shortcuts work whether or not the button is pinned.
 
 ## Architecture
@@ -295,11 +295,11 @@ shortcuts work whether or not the button is pinned.
 | `src/main/trackers.js` | Registrable-domain (eTLD+1) extraction and tracker classification by category. |
 | `src/preload/chrome-preload.js` | Safe `window.goldfinch` API bridge for the UI. |
 | `src/preload/webview-preload.js` | Injected into every page; scans the DOM for media. |
-| `src/preload/internal-preload.js` | Minimal, context-isolated bridge for trusted `goldfinch://` internal pages (the Settings page). |
+| `src/preload/internal-preload.js` | Minimal, context-isolated bridge for trusted `goldfinch://` internal pages (Settings, Downloads, Cookie jars, Vault, Automation). |
 | `src/shared/internal-page.js` | Single source of truth for the internal `goldfinch-internal` session partition string. |
-| `src/main/settings-store.js` | Durable, atomic, schema-versioned app preferences store (`userData/settings.json`); validated writes; pluggable serialization seam. |
+| `src/main/settings-store.js` | Durable, atomic, schema-versioned app preferences store (`userData/app.db`, `documents` row `'settings'`); validated writes; pluggable serialization seam. |
 | `src/main/internal-ipc.js` | Origin-checked IPC bridge helpers (`registerInternalHandler`) — main-side sender verification for trusted `goldfinch://` internal pages. |
-| `src/renderer/pages/settings.html` | The internal Settings page — Privacy & Shields global toggles and editable Home page (wired and persisted). |
+| `src/renderer/pages/settings.html` | The internal Settings page — Startup & appearance, Privacy & Shields, and About sections (global Shields toggles and editable Home page wired and persisted). |
 | `src/renderer/*` | The browser UI: tabs, toolbar, media panel, privacy panel, lightbox, and the overlay surfaces (floating find bar, menu overlay sheet). |
 
 Each tab is a native `WebContentsView` running real Chromium, hosted on a
@@ -321,25 +321,25 @@ a dedicated in-memory internal session (the `goldfinch-internal` partition) via
 run inline script.
 
 `goldfinch://settings` is a Chrome-style settings shell: a sticky left section-nav
-linking five titled sections (Appearance, Privacy & Shields, On startup, Downloads,
+linking three titled sections (Startup & appearance, Privacy & Shields,
 About) that scroll in a single document. CSS and JS subresources are served from
 the same handler under an explicit per-host path allowlist — the handler never
 builds a file path from the URL (traversal is structurally impossible), and
 content-type is derived from the allowlist entry's extension, never from the URL.
 
-**Appearance**, **Privacy & Shields**, and **On startup** sections have working,
+The **Startup & appearance** and **Privacy & Shields** sections have working,
 persisted controls:
-- **Appearance** — pin-icon toggle buttons for the Media and Shields toolbar items.
+- **Startup & appearance** — pin-icon toggle buttons for the Media and Shields toolbar items.
   Click the pushpin for an item to pin (show in toolbar) or unpin (remove from
   toolbar) it. Changes are persisted immediately and reflected live in the toolbar.
   The keyboard shortcuts (`Ctrl+M` / `Ctrl+Shift+P`) work regardless of pin state.
 - **Privacy & Shields** — five global Shields checkboxes (Shields on/off, block
   trackers, strip tracking params, isolate third-party cookies, farble fingerprint)
-  that read from and write to `shields.json` via the origin-checked internal bridge.
+  that read from and write to the persisted Shields config (`app.db`) via the origin-checked internal bridge.
   Changes stay in sync with the slide-out Shields panel in both directions. Per-site
   pause is panel-only (it needs a current site, which the settings page doesn't have).
-- **On startup** — an editable Home page field that reads from and writes to
-  `settings.json` (the durable settings store). New tabs open to the persisted URL;
+- **Startup & appearance** (Home page) — an editable Home page field that reads from and writes to
+  the durable settings store (`app.db`). New tabs open to the persisted URL;
   invalid URLs are rejected with an error message.
 
 Internal pages are **trusted local chrome, not web content**, and are reachable
