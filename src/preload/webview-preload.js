@@ -381,8 +381,10 @@ if (IS_TOP_FRAME && vaultEligible) {
   document.addEventListener('focusout', vaultIcons.handleFocusOut);
   // Keep the shown icon glued to its field across layout shifts (a focused
   // field can move under scroll/resize/zoom without a DOM mutation firing).
-  window.addEventListener('scroll', () => vaultIcons.placeVaultIcons(), true);
-  window.addEventListener('resize', () => vaultIcons.placeVaultIcons());
+  // Reposition-only: scrolling moves anchors but never changes which fields ARE
+  // anchors, so this skips the full field detection placeVaultIcons runs.
+  window.addEventListener('scroll', () => vaultIcons.repositionVaultIcons(), true);
+  window.addEventListener('resize', () => vaultIcons.repositionVaultIcons());
   // Live vault lock-state push from main (unlock / lock / idle auto-lock): flip the
   // in-field icon glyph + color WITHOUT a page reload. Non-secret boolean only.
   ipcRenderer.on('vault-lock-changed', (_e, payload) => {

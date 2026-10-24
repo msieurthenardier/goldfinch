@@ -832,3 +832,97 @@ test('AC7: an unresolved anchor (targetForAnchor returns null) stays bare — {}
   assert.equal(sends.length, 1);
   assert.deepEqual(sends[0].payload, {});
 });
+
+// --- squawk 0163: scroll/resize reposition without re-detection --------------
+
+function spyDetectors() {
+  const calls = { login: 0, card: 0, identity: 0 };
+  return {
+    calls,
+    extra: {
+      findAllLoginFields: (d) => {
+        calls.login++;
+        return findAllLoginFields(d);
+      },
+      findAllCardFields: () => {
+        calls.card++;
+        return [];
+      },
+      findAllIdentityFields: () => {
+        calls.identity++;
+        return [];
+      }
+    }
+  };
+}
+
+const totalCalls = (c) => c.login + c.card + c.identity;
+
+function focusedLoginFixture(extra, enabled) {
+  const user = new FakeInput('text', 'username');
+  const pass = new FakeInput('password', 'password');
+  const doc = makeDoc([new FakeForm([user, pass])]);
+  const ctl = makeControllerWithFinders(doc, [], { ...extra, ...(enabled ? { getEnabled: enabled } : {}) });
+  ctl.handleFocusIn({ target: user });
+  return { user, doc, ctl };
+}
+
+test('0163: reposition moves the shown icon with ZERO detector calls', () => {
+  const spy = spyDetectors();
+  const { user, doc, ctl } = focusedLoginFixture(spy.extra);
+  const icon = bodyIcon(doc);
+  assert.ok(icon);
+  const before = totalCalls(spy.calls);
+  const topBefore = icon.style.top;
+
+  user._rect = { top: 40, left: 200, width: 180, height: 24 };
+  ctl.repositionVaultIcons();
+
+  assert.equal(bodyIcon(doc), icon, 'same icon node, not recreated');
+  assert.notEqual(icon.style.top, topBefore, 'icon moved with the field');
+  assert.equal(icon.style.top, `${40 + (24 - 16) / 2}px`);
+  assert.equal(totalCalls(spy.calls), before, 'no detector ran');
+});
+
+test('0163: reposition prunes the icon when the field went non-visible, zero detector calls', () => {
+  const spy = spyDetectors();
+  const { user, doc, ctl } = focusedLoginFixture(spy.extra);
+  assert.ok(bodyIcon(doc));
+  const before = totalCalls(spy.calls);
+
+  user.offsetParent = null;
+  ctl.repositionVaultIcons();
+
+  assert.equal(bodyIcon(doc), null, 'icon pruned');
+  assert.equal(totalCalls(spy.calls), before, 'no detector ran');
+});
+
+test('0163: reposition is a no-op while disabled', () => {
+  let enabled = true;
+  const spy = spyDetectors();
+  const { user, doc, ctl } = focusedLoginFixture(spy.extra, () => enabled);
+  const icon = bodyIcon(doc);
+  const topBefore = icon.style.top;
+  const before = totalCalls(spy.calls);
+
+  enabled = false;
+  user._rect = { top: 40, left: 200, width: 180, height: 24 };
+  ctl.repositionVaultIcons();
+
+  assert.equal(icon.style.top, topBefore, 'not moved');
+  assert.equal(bodyIcon(doc), icon, 'not pruned');
+  assert.equal(totalCalls(spy.calls), before);
+});
+
+test('0163: a page-removed (disconnected) icon falls back to placeVaultIcons and is re-created', () => {
+  const spy = spyDetectors();
+  const { doc, ctl } = focusedLoginFixture(spy.extra);
+  const first = bodyIcon(doc);
+  first.remove(); // the page tore it out
+
+  ctl.repositionVaultIcons();
+
+  const healed = bodyIcon(doc);
+  assert.ok(healed, 'self-healing preserved');
+  assert.notEqual(healed, first, 'a fresh icon was created');
+});
