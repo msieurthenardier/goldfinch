@@ -325,15 +325,12 @@ function findAllCardFields(doc) {
     const form = field.form || (typeof field.closest === 'function' ? field.closest('form') : null);
     const scope = form || doc;
     if (seenScopes.has(scope)) continue;
-    const roles = rolesIn(scope);
-    const number = roles.get('number');
-    if (!number) {
-      // Mark a FORM scope resolved even on a miss so we don't re-walk it per field;
-      // the document scope stays unmarked so a later form-less number can still match.
-      if (form) seenScopes.add(scope);
-      continue;
-    }
+    // Mark every scope visited, the document scope included, even on a miss: a
+    // scope's roles depend only on the scope, never on which field reached it, so
+    // re-walking it per form-less field could not change the answer (squawk 0162).
     seenScopes.add(scope);
+    const roles = rolesIn(scope);
+    if (!roles.get('number')) continue;
     out.push(entryFromRoles(roles, scope));
   }
   return out;

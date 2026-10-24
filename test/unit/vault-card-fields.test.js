@@ -699,3 +699,55 @@ test('squawk 0090 trap: fallbackRoleOf in isolation still returns "expiry" for s
   // actual coverage. The 0090 fix is PIPELINE-level, not field-level.
   assert.equal(fallbackRoleOf(new FakeInput({ name: 'sessionExpiry' })), 'expiry');
 });
+
+// --- squawk 0162: form-less document scope is walked once -------------------
+
+test('0162: a form-less card number appearing late in document order is still found', () => {
+  const card = cardForm();
+  const loose = [...fillerFields(25), card.number, card.name, card.exp, card.csc];
+  const all = findAllCardFields(makeDoc([], loose));
+  assert.equal(all.length, 1);
+  assert.equal(all[0].number, card.number);
+  assert.equal(all[0].cardholder, card.name);
+  assert.equal(all[0].expiry, card.exp);
+  assert.equal(all[0].csc, card.csc);
+  assert.equal(all[0].form, null);
+});
+
+test('0162: mixed form + form-less page yields the form entry then the document entry', () => {
+  const a = cardForm();
+  const b = cardForm();
+  const form = new FakeForm([a.number, a.exp]);
+  const all = findAllCardFields(makeDoc([form], [...fillerFields(10), b.number, b.csc]));
+  assert.equal(all.length, 2);
+  assert.equal(all[0].form, form);
+  assert.equal(all[0].number, a.number);
+  assert.equal(all[0].expiry, a.exp);
+  assert.equal(all[1].form, null);
+  // The document scope spans the whole page, form fields included, and the
+  // first field per role wins — pre-existing behavior, unchanged by 0162.
+  assert.equal(all[1].number, a.number);
+  assert.equal(all[1].expiry, a.exp);
+  assert.equal(all[1].csc, b.csc);
+});
+
+test('0162: no card number on a form-less page yields nothing', () => {
+  assert.deepEqual(findAllCardFields(makeDoc([], fillerFields(40))), []);
+});
+
+test('0162: the document scope is evaluated at most once per call, regardless of field count', () => {
+  const walks = (n) => {
+    const doc = makeDoc([], fillerFields(n));
+    let count = 0;
+    const inner = doc.querySelectorAll.bind(doc);
+    doc.querySelectorAll = (s) => {
+      count += 1;
+      return inner(s);
+    };
+    findAllCardFields(doc);
+    return count;
+  };
+  // one candidateFields(doc) enumeration + one rolesIn(doc) walk
+  assert.equal(walks(5), 2);
+  assert.equal(walks(60), 2);
+});

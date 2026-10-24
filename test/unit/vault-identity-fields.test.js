@@ -677,3 +677,119 @@ test('IDENTITY_ROLES is the eleven roles, derived from POSTAL_ROLES + NON_POSTAL
     ].sort()
   );
 });
+
+// --- squawk 0162: form-less pages are linear, not ~n^4 ----------------------
+
+function looseFiller(n) {
+  return Array.from({ length: n }, (_, i) => new FakeInput({ name: `unrelated_field_${i}` }));
+}
+
+// Counts every querySelectorAll on the document, keyed by selector.
+function countingDoc(doc) {
+  const counts = new Map();
+  const inner = doc.querySelectorAll.bind(doc);
+  doc.querySelectorAll = (selector) => {
+    counts.set(selector, (counts.get(selector) || 0) + 1);
+    return inner(selector);
+  };
+  return { doc, counts, total: () => [...counts.values()].reduce((a, b) => a + b, 0) };
+}
+
+test('0162: a form-less anchor appearing late in document order is still found', () => {
+  const street = new FakeInput({ name: 'billingAddress1' });
+  const email = new FakeInput({ name: 'email' });
+  const loose = [...looseFiller(20), street, ...looseFiller(5), email];
+  const all = findAllIdentityFields(makeDoc([], loose));
+  assert.equal(all.length, 1);
+  assert.equal(all[0].street, street);
+  assert.equal(all[0].email, email);
+  assert.equal(all[0].anchor, street);
+  assert.equal(all[0].anchorRole, 'street');
+  assert.equal(all[0].nonPostalAnchor, email);
+  assert.equal(all[0].form, null);
+});
+
+test('0162: a form-less page with no anchor yields nothing, however many fields', () => {
+  const loose = [...looseFiller(30), new FakeInput({ name: 'email' })];
+  assert.deepEqual(findAllIdentityFields(makeDoc([], loose)), []);
+});
+
+test('0162: mixed form + form-less page yields the form entry then the document entry, in order', () => {
+  const fStreet = new FakeInput({ name: 'billingAddress1' });
+  const fEmail = new FakeInput({ name: 'email' });
+  const form = new FakeForm([fStreet, fEmail]);
+  const lStreet = new FakeInput({ name: 'shippingAddress1' });
+  const lName = new FakeInput({ name: 'firstName' });
+  const all = findAllIdentityFields(makeDoc([form], [...looseFiller(8), lStreet, lName]));
+  assert.equal(all.length, 2);
+  assert.equal(all[0].form, form);
+  assert.equal(all[0].street, fStreet);
+  assert.equal(all[0].email, fEmail);
+  assert.equal(all[1].form, null);
+  // The document scope spans the whole page, form fields included, and the
+  // first field per role wins — pre-existing behavior, unchanged by 0162.
+  assert.equal(all[1].street, fStreet);
+  assert.equal(all[1].firstName, lName);
+  assert.equal(all[1].email, fEmail);
+  assert.notEqual(lStreet, null);
+});
+
+test('0162: login- and card-claimed fields stay excluded alongside identity fields', () => {
+  const street = new FakeInput({ name: 'billingAddress1' });
+  const email = new FakeInput({ name: 'email' });
+  const cardName = new FakeInput({ autocomplete: 'cc-name', name: 'card_nameOnCard' });
+  const cardNumber = new FakeInput({ autocomplete: 'cc-number', name: 'cardnumber' });
+  const loginUser = new FakeInput({ name: 'phone' }); // identity-shaped, claimed by login
+  const pw = new FakeInput({ type: 'password', name: 'pw' });
+  const doc = makeDoc([new FakeForm([loginUser, pw])], [...looseFiller(6), street, email, cardName, cardNumber]);
+  assert.equal(isClaimedByLogin(loginUser, doc), true);
+  assert.equal(isClaimedByCard(cardName, doc), true);
+  const all = findAllIdentityFields(doc);
+  assert.equal(all.length, 1);
+  assert.equal(all[0].street, street);
+  assert.equal(all[0].email, email);
+  assert.equal(all[0].phone, null, 'login-claimed field invisible to identity');
+  assert.equal(all[0].fullName, null, 'card-claimed field invisible to identity');
+});
+
+test('0162: detection work on a form-less page is O(1) in the field count', () => {
+  const run = (n) => {
+    const loose = [...looseFiller(n), new FakeInput({ name: 'billingAddress1' }), new FakeInput({ name: 'email' })];
+    const counted = countingDoc(makeDoc([], loose));
+    assert.equal(findAllIdentityFields(counted.doc).length, 1);
+    const miss = countingDoc(makeDoc([], [...looseFiller(n), new FakeInput({ name: 'email' })]));
+    assert.equal(findAllIdentityFields(miss.doc).length, 0);
+    return { hit: counted, miss };
+  };
+  const small = run(6);
+  const big = run(60);
+  for (const key of ['hit', 'miss']) {
+    assert.equal(big[key].total(), small[key].total(), `${key}: doc query count independent of field count`);
+    assert.ok(big[key].total() <= 12, `${key}: bounded (${big[key].total()})`);
+    assert.ok(big[key].counts.get('input, select') <= 6, `${key}: 'input, select' evaluated a bounded number of times`);
+  }
+});
+
+test('0162: login/card detector calls do not grow with the number of forms', () => {
+  const run = (k) => {
+    const forms = Array.from(
+      { length: k },
+      () => new FakeForm([new FakeInput({ name: 'billingAddress1' }), new FakeInput({ name: 'email' })])
+    );
+    const doc = makeDoc(forms, looseFiller(10));
+    const counts = new Map();
+    const inner = doc.querySelectorAll.bind(doc);
+    doc.querySelectorAll = (sel) => {
+      counts.set(sel, (counts.get(sel) || 0) + 1);
+      return inner(sel);
+    };
+    const all = findAllIdentityFields(doc);
+    assert.equal(all.length, k + 1, 'k form entries plus the document-scope entry');
+    return counts;
+  };
+  const one = run(1);
+  const ten = run(10);
+  // Document-level queries (login's password lookup, the candidate enumeration,
+  // card's doc-scope walks) are independent of the form count.
+  assert.deepEqual([...ten.entries()].sort(), [...one.entries()].sort());
+});
