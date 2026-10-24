@@ -52,7 +52,7 @@ test('automation.js imports its flat siblings with @ts-ignore and each is routed
   const imports = [...js.matchAll(/^import\s*\{[^}]*\}\s*from\s*'\.\/([^']+)';/gm)].map((m) => m[1]);
   assert.deepEqual(imports.sort(), ['audit-paging.js', 'safe-color.js', 'section-scroll-spy.js']);
   for (const i of imports) assert.ok(map['/' + i], i);
-  assert.match(js, /initSectionScrollSpy\(\s*\{\s*document,\s*IntersectionObserver\s*\}\s*\)/);
+  assert.match(js, /initSectionScrollSpy\(\s*\{\s*document,\s*IntersectionObserver,\s*window\s*\}\s*\)/);
 });
 
 test('page contract: title, section ids, nav anchors, headings', () => {

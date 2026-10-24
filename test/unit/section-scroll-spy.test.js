@@ -91,3 +91,96 @@ test('no sections or no links: no observer is constructed', async () => {
   initSectionScrollSpy({ document: env.document, IntersectionObserver: env.FakeIO });
   assert.equal(env.getCtor(), null);
 });
+
+// Squawk 0157: bottom-of-page rule (geometry-aware).
+function makeWin(env) {
+  const listeners = [];
+  const win = {
+    innerHeight: 500,
+    scrollY: 0,
+    addEventListener: (type, fn, opts) => listeners.push({ type, fn, opts }),
+    fire: () => listeners.filter((l) => l.type === 'scroll').forEach((l) => l.fn())
+  };
+  env.document.documentElement = { scrollHeight: 1500 }; // max scroll = 1000
+  return win;
+}
+
+test('at bottom with an earlier section still visible: LAST section is current', async () => {
+  const { initSectionScrollSpy } = await load();
+  const env = makeEnv(['a', 'b', 'c']);
+  const win = makeWin(env);
+  initSectionScrollSpy({ document: env.document, IntersectionObserver: env.FakeIO, window: win });
+  const { cb } = env.getCtor();
+  win.scrollY = 600;
+  cb([{ target: env.sections[1], isIntersecting: true }]);
+  assert.deepEqual(
+    env.links.map((l) => l.current()),
+    [null, 'true', null]
+  );
+  win.scrollY = 999; // within slack of 1000, no intersection change
+  win.fire();
+  assert.deepEqual(
+    env.links.map((l) => l.current()),
+    [null, null, 'true']
+  );
+  cb([{ target: env.sections[1], isIntersecting: true }]); // b still visible
+  assert.deepEqual(
+    env.links.map((l) => l.current()),
+    [null, null, 'true']
+  );
+});
+
+test('mid-page keeps the first-visible rule; non-scrollable page never forces last', async () => {
+  const { initSectionScrollSpy } = await load();
+  const env = makeEnv(['a', 'b', 'c']);
+  const win = makeWin(env);
+  initSectionScrollSpy({ document: env.document, IntersectionObserver: env.FakeIO, window: win });
+  const { cb } = env.getCtor();
+  win.scrollY = 400;
+  cb([
+    { target: env.sections[2], isIntersecting: true },
+    { target: env.sections[1], isIntersecting: true }
+  ]);
+  assert.deepEqual(
+    env.links.map((l) => l.current()),
+    [null, 'true', null]
+  );
+  env.document.documentElement.scrollHeight = 500; // fits: maxScroll 0
+  win.scrollY = 0;
+  win.fire();
+  assert.deepEqual(
+    env.links.map((l) => l.current()),
+    [null, 'true', null]
+  );
+});
+
+test('scrolling back up from bottom returns to first-visible', async () => {
+  const { initSectionScrollSpy } = await load();
+  const env = makeEnv(['a', 'b', 'c']);
+  const win = makeWin(env);
+  initSectionScrollSpy({ document: env.document, IntersectionObserver: env.FakeIO, window: win });
+  const { cb } = env.getCtor();
+  cb([{ target: env.sections[1], isIntersecting: true }]);
+  win.scrollY = 1000;
+  win.fire();
+  assert.deepEqual(
+    env.links.map((l) => l.current()),
+    [null, null, 'true']
+  );
+  win.scrollY = 700;
+  win.fire();
+  assert.deepEqual(
+    env.links.map((l) => l.current()),
+    [null, 'true', null]
+  );
+});
+
+test('scroll listener is passive', async () => {
+  const { initSectionScrollSpy } = await load();
+  const env = makeEnv(['a', 'b']);
+  const seen = [];
+  const win = { innerHeight: 1, scrollY: 0, addEventListener: (t, f, o) => seen.push([t, o]) };
+  env.document.documentElement = { scrollHeight: 1 };
+  initSectionScrollSpy({ document: env.document, IntersectionObserver: env.FakeIO, window: win });
+  assert.deepEqual(seen, [['scroll', { passive: true }]]);
+});

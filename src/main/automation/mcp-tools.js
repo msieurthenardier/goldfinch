@@ -1,10 +1,12 @@
 // @ts-check
 'use strict';
 
+const { KEY_NAMES } = require('./input');
+
 // Automation MCP tool registry — the thin, SDK-free adapter over engine.js (DD5/DD6).
 //
 // This module is DELIBERATELY SDK-FREE and ELECTRON-FREE. It imports nothing —
-// it returns plain MCP-shaped result objects ({ content: [...] }, optional
+// (bar the Electron-free key-name list from ./input) it returns plain MCP-shaped result objects ({ content: [...] }, optional
 // isError). The SDK request schemas (ListToolsRequestSchema / CallToolRequestSchema)
 // are wired in mcp-server.js, which is the SOLE SDK importer. Keeping the registry
 // SDK-free makes it unit-testable with a fake engine and no SDK/Electron stub.
@@ -94,8 +96,8 @@ function imageResult(b64) {
 // explicit); it is internal and is NOT leaked by listTools().
 // ---------------------------------------------------------------------------
 
-const PRESS_KEY_NAMES =
-  'Tab, Enter, Escape, Space, ArrowRight, ArrowLeft, ArrowDown, ArrowUp, Home, End, Delete, Backspace, F5, F6, ShiftTab';
+// Derived from input.js's KEY_MAP (+ the ShiftTab composite) so the advertised vocabulary can't drift.
+const PRESS_KEY_NAMES = KEY_NAMES.join(', ');
 
 /**
  * Tool def shape. `call` is the named→positional seam (internal; never leaked by listTools).

@@ -18,7 +18,7 @@ import { initSectionScrollSpy } from './section-scroll-spy.js';
  * settings.js; behavior is unchanged.
  */
 
-initSectionScrollSpy({ document, IntersectionObserver });
+initSectionScrollSpy({ document, IntersectionObserver, window });
 
 /* ---- shared helpers (file-scope, hoisted; visible to every IIFE below) ---- */
 

@@ -1622,3 +1622,19 @@ test('callTool getHistory query+before bad-args throw → isError with the messa
   assert.equal(result.isError, true);
   assert.equal(textOf(result), msg);
 });
+
+test('squawk 0142: pressKey advertises exactly KEY_MAP names + ShiftTab, in the description and both name/key params', () => {
+  const { KEY_NAMES } = require('../../src/main/automation/input.js');
+  const src = require('node:fs').readFileSync(require.resolve('../../src/main/automation/input.js'), 'utf8');
+  // Independent read of the KEY_MAP literal's keys: a key added there must surface in the tool.
+  const body = src.match(/const KEY_MAP = \{([\s\S]*?)\n\};/)[1].replace(/\/\/.*$/gm, '');
+  const mapKeys = [...body.matchAll(/^\s*(\w+):/gm)].map((m) => m[1]);
+  assert.ok(mapKeys.length >= 14, 'KEY_MAP parse sanity');
+  assert.deepEqual([...KEY_NAMES], [...mapKeys, 'ShiftTab']);
+  const reg = buildToolRegistry(() => makeFakeEngine().engine);
+  const pk = reg.listTools().find((t) => t.name === 'pressKey');
+  const list = KEY_NAMES.join(', ');
+  assert.ok(pk.description.includes(list));
+  assert.ok(pk.inputSchema.properties.name.description.includes(list));
+  assert.ok(pk.inputSchema.properties.key.description.includes(list));
+});

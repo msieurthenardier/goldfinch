@@ -1,10 +1,10 @@
 # Squawk 0044: Toolbar buttons that receive keyboard focus draw no visible focus indicator
 
-**Status**: deferred
+**Status**: completed
 **Type**: defect
 **Severity**: routine
 **Reported**: 2026-08-28
-**Completed**: —
+**Completed**: 2026-10-24
 
 ## Report
 
@@ -19,18 +19,22 @@ Source: behavior-test run `tests/behavior/chrome-guest-keyboard-nav/runs/2026-08
 
 ## Corrective Action
 
-*(written at completion)*
+Picked up at the 2026-10-23 turnaround. Re-investigation confirms the deferral finding: **no CSS change is warranted**. Both buttons carry `class="icon-btn"` and `.icon-btn:focus-visible` (`styles.css`, "Visible keyboard focus ring" block) draws `2px solid var(--accent)`, offset 2px. No id-level or other rule resets the outline on `#kebab` / `#bookmarks-overflow` (the only `outline: none` in the file is `#address`, which has its own `:focus-visible` re-add). The earlier "computed outline none" observation is consistent with `:focus-visible` not matching programmatic focus under synthetic automation input. Adding a `:focus` fallback or forced ring class would be a focus-behavior design decision (coupled with the cross-view stale-ring item), so none was made.
+
+Added `test/unit/toolbar-focus-ring-pin.test.js` (source scan): both ids keep the `icon-btn` class in `index.html`, `.icon-btn:focus-visible` has a non-`none` outline, and no id-level rule resets the outline on either button.
+
+Observations, unchanged: `#bookmarks-overflow` is a 24px button in a 30px `overflow: hidden` bar, so the 4px-out ring (2px + 2px offset) may clip ~1px at top/bottom; a real-keyboard look should check this. Other toolbar controls sharing `.icon-btn` get the same ring; `.star-btn`, `.zoom-btn`, `.addr-chip`, `.tab` have their own rules.
 
 ## Verification
 
-*(written at completion)*
+- Pin test passes; neuter-verified (renaming the `.icon-btn:focus-visible` selector, and swapping its outline for `none`, each turn it red; styles.css restored).
+- Operator to confirm by eye with a real keyboard (Shift+Tab / Shift+F6 handoff onto `#kebab` and `#bookmarks-overflow`): if the accent ring shows, close as not-a-defect (pin stays); if not, reopen for the boundary-focus visibility work.
+- **Operator by-eye (2026-10-23, turnaround dev-mode launch): confirmed.**
 
 ## Sign-Off
-
-*(written at completion)*
-**Reviewer**: —
-**Verdict**: —
-**Commit**: —
+**Reviewer**: Reviewer agent (independent, diff-scoped, turnaround batch)
+**Verdict**: confirmed, with no blocking issues. "No change plus pin" is a sound disposition. `#kebab` and `#bookmarks-overflow` both carry `.icon-btn`, `.icon-btn:focus-visible` draws `2px solid var(--accent)`, and no higher-specificity override exists. The pin is neuter-verified. The operator confirmed the ring by eye, including no visible clipping on More bookmarks. Non-blocking: the pin scans id-level resets only. The batch gates were `npm test` 6041 (6037 pass, 0 fail, 4 todo), with typecheck, lint and format:check clean.
+**Commit**: the `squawk: turnaround 2026-10-23` commit on `squawk/turnaround-2026-10-23`
 
 ## Re-triage / Deferral (2026-08-28, turnaround)
 
