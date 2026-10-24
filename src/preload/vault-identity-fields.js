@@ -430,20 +430,43 @@ function isClaimedByCard(field, doc) {
 }
 
 /**
+ * Every node the login OR card detector claims in `doc`, as one Set — the
+ * batch form of `isClaimedByLogin`/`isClaimedByCard` (same two detectors, same
+ * username + six card roles, so the same membership). Each detector walks the
+ * whole document, so this runs each ONCE rather than once per candidate field
+ * (squawk 0162: the per-field form was quadratic on form-less pages).
+ * @param {any} doc
+ * @returns {Set<any>}
+ */
+function claimedNodes(doc) {
+  /** @type {Set<any>} */
+  const claimed = new Set();
+  if (!doc) return claimed;
+  for (const entry of findAllLoginFields(doc)) if (entry.username) claimed.add(entry.username);
+  for (const entry of findAllCardFields(doc)) {
+    for (const role of CARD_CLAIM_ROLES) if (entry[role]) claimed.add(entry[role]);
+  }
+  return claimed;
+}
+
+/**
  * Every identity-capable field in `scope`, in document order, EXCLUDING any
  * field login OR card has claimed (LD3, DD5) — applied before any role
  * resolution, so a login- or card-claimed field cannot serve as this scope's
  * postal anchor either (the "anchor itself can be contested" edge case).
+ * `claimed` is the caller's precomputed `claimedNodes(doc)`; omitted, it is
+ * computed here (one pass per call).
  * @param {any} scope
  * @param {any} doc
+ * @param {Set<any>} [claimed]
  * @returns {any[]}
  */
-function candidateFields(scope, doc) {
+function candidateFields(scope, doc, claimed) {
   if (!scope || typeof scope.querySelectorAll !== 'function') return [];
+  const taken = claimed || claimedNodes(doc);
   return Array.from(scope.querySelectorAll('input, select'))
     .filter(isIdentityCapableField)
-    .filter((field) => !isClaimedByLogin(field, doc))
-    .filter((field) => !isClaimedByCard(field, doc));
+    .filter((field) => !taken.has(field));
 }
 
 /**
@@ -457,10 +480,11 @@ function candidateFields(scope, doc) {
  * resolved SOME role (unresolved fields are dropped).
  * @param {any} scope
  * @param {any} doc
+ * @param {Set<any>} [claimed]
  * @returns {Array<{ field: any, role: string, anchorEligible: boolean }>}
  */
-function resolveScope(scope, doc) {
-  const fields = candidateFields(scope, doc);
+function resolveScope(scope, doc, claimed) {
+  const fields = candidateFields(scope, doc, claimed);
 
   /** @type {Array<{ field: any, role: string, anchorEligible: boolean }>} */
   const viaAutocomplete = [];
@@ -516,10 +540,11 @@ function entryFromResolved(resolved, anchorField, scope) {
  * simply absent from `resolved` — not specially cased here.
  * @param {any} scope
  * @param {any} doc
+ * @param {Set<any>} [claimed]
  * @returns {any | null}
  */
-function identityEntryForScope(scope, doc) {
-  const resolved = resolveScope(scope, doc);
+function identityEntryForScope(scope, doc, claimed) {
+  const resolved = resolveScope(scope, doc, claimed);
   if (resolved.length === 0) return null;
 
   const anchorCandidate = resolved.find((r) => POSTAL_ROLES.has(r.role) && r.anchorEligible);
@@ -548,29 +573,27 @@ function identityEntryForScope(scope, doc) {
  * one per anchored scope. A field inside a `<form>` scopes to that form; a
  * form-less field scopes to the whole document. Returns `[]` when no scope in
  * the document anchors (LD2) — the identity twin of `findAllCardFields`, same
- * per-scope-visited-once discipline (a form scope is marked visited even on a
- * miss so it is not re-walked once per field; the document scope is left open
- * on a miss so a later form-less field can still be tried, matching the card
- * family's own accepted, harmless re-walk).
+ * per-scope-visited-once discipline (every scope, the document scope included,
+ * is marked visited even on a miss so it is not re-walked once per field: a
+ * scope's entry depends only on (scope, doc), never on which field reached it,
+ * so a repeat could not change the answer — squawk 0162). The login/card claims
+ * are computed once per call and shared by every scope.
  * @param {any} doc  a `document`-like object exposing querySelectorAll.
  * @returns {any[]}
  */
 function findAllIdentityFields(doc) {
   if (!doc || typeof doc.querySelectorAll !== 'function') return [];
 
+  const claimed = claimedNodes(doc);
   const seenScopes = new Set();
   const out = [];
-  for (const field of candidateFields(doc, doc)) {
+  for (const field of candidateFields(doc, doc, claimed)) {
     const form = field.form || (typeof field.closest === 'function' ? field.closest('form') : null);
     const scope = form || doc;
     if (seenScopes.has(scope)) continue;
-    const entry = identityEntryForScope(scope, doc);
-    if (!entry) {
-      if (form) seenScopes.add(scope);
-      continue;
-    }
     seenScopes.add(scope);
-    out.push(entry);
+    const entry = identityEntryForScope(scope, doc, claimed);
+    if (entry) out.push(entry);
   }
   return out;
 }

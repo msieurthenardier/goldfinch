@@ -230,8 +230,7 @@ function createEntryObserver({
    * entry (`entry.anchorRole`), read here rather than re-derived, so the
    * value-layer gate can read anchor role AND values from ONE enumeration.
    */
-  function snapshot() {
-    const entries = detect();
+  function snapshot(entries = detect()) {
     return {
       logins: entries.logins.map((entry) => snapshotEntry(entry, LOGIN_ROLES)),
       cards: entries.cards.map((entry) => snapshotEntry(entry, CARD_ROLES)),
@@ -242,8 +241,8 @@ function createEntryObserver({
     };
   }
 
-  function emit() {
-    if (typeof report === 'function') report(snapshot());
+  function emit(entries) {
+    if (typeof report === 'function') report(snapshot(entries));
   }
 
   /**
@@ -276,7 +275,7 @@ function createEntryObserver({
     const entries = detect();
     if (!isDetectedField(field, entries)) return;
     grant(field);
-    emit();
+    emit(entries); // reuse this handler's detection — a second walk is pure cost (squawk 0162)
   }
 
   // Detachment eviction (Leg 2 review round 1 finding): a removed node keeps its

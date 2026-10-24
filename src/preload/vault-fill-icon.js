@@ -530,6 +530,15 @@ function createVaultIconController({
     icon.style.left = `${Math.max(0, left)}px`;
   }
 
+  // Shared by placeVaultIcons and repositionVaultIcons: in-tree icons position
+  // against the field parent's nearest positioned ancestor, body icons against
+  // the document (same in-tree test as the append decision in placeVaultIcons).
+  function positionIconForField(icon, field, rect) {
+    const fieldParent = field.parentElement || null;
+    const inTree = !!fieldParent && typeof win.getComputedStyle === 'function';
+    positionIcon(icon, rect, inTree ? nearestPositionedAncestor(fieldParent) : null);
+  }
+
   // True iff a mutation is purely icon bookkeeping (icon append/remove, or an
   // icon's own style/attr change) — such mutations must NOT trigger the media rescan.
   function isIconOnlyMutation(m) {
@@ -609,11 +618,14 @@ function createVaultIconController({
           placedIcons.add(icon);
           appendTarget.appendChild(icon);
         }
-        positionIcon(icon, rect, inTree ? nearestPositionedAncestor(fieldParent) : null);
+        positionIconForField(icon, focusedField, rect);
       }
     }
+    pruneIcons(activeAnchors);
+  }
 
-    // Prune icons whose field lost focus / vanished / went non-visible this pass.
+  // Prune icons whose field lost focus / vanished / went non-visible this pass.
+  function pruneIcons(activeAnchors) {
     for (const icon of placedIcons) {
       if (!activeAnchors.has(icon._anchor)) {
         icon.remove();
@@ -621,6 +633,26 @@ function createVaultIconController({
         iconByAnchor.delete(icon._anchor);
       }
     }
+  }
+
+  // Scroll/resize path (squawk 0163): move the ALREADY-shown icon without
+  // re-running field detection — scrolling moves anchors, never changes which
+  // fields ARE anchors. Never creates an icon. When there is no live shown icon
+  // for the focused field (page removed it, or it was never shown) it falls back
+  // to placeVaultIcons, keeping that rare self-healing behavior unchanged.
+  function repositionVaultIcons() {
+    if (!getEnabled()) return;
+    const icon = focusedField ? iconByAnchor.get(focusedField) : undefined;
+    if (!focusedField || !icon || !icon.isConnected) {
+      placeVaultIcons();
+      return;
+    }
+    const rect = isFieldVisible(focusedField);
+    if (!rect) {
+      pruneIcons(new Set());
+      return;
+    }
+    positionIconForField(icon, focusedField, rect);
   }
 
   function scheduleIconPlacement(delay = 300) {
@@ -656,6 +688,7 @@ function createVaultIconController({
 
   return {
     placeVaultIcons,
+    repositionVaultIcons,
     scheduleIconPlacement,
     isIconOnlyMutation,
     handleFocusIn,
