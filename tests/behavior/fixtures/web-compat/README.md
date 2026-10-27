@@ -95,16 +95,23 @@ the OS store (the user NSS database):
 
 ```
 node import-client-cert.mjs --import   # pk12util -i certs/client.p12 -d sql:$HOME/.pki/nssdb
-node import-client-cert.mjs --remove   # certutil -D -d sql:$HOME/.pki/nssdb -n "Goldfinch Fixture Client"
+node import-client-cert.mjs --remove   # certutil -F (client cert + key) and -D (Throwaway CA), by fixed nickname
 ```
 
 - **Prerequisite**: `pk12util`/`certutil` from the **`libnss3-tools`**
   package (not installed by default — `sudo apt install libnss3-tools`). The
   helper prechecks both binaries and fails with this hint before touching
   anything; it never installs packages itself.
+- **The p12 import adds THREE things**: the client cert
+  (`Goldfinch Fixture Client`), its private key, and the Throwaway CA
+  (`Goldfinch Fixture Throwaway CA`, bundled via `-certfile ca.pem`).
 - **This mutates the operator's `~/.pki/nssdb`** — flagged deliberately. The
-  import is fully reversed by `--remove` (deletes exactly the fixed
-  nickname). If the NSS database has never been initialized:
+  import is fully reversed by `--remove`, which deletes all three (the cert
+  together with its key, any orphaned key still under the fixture nickname
+  left by an older cert-only remove, and the CA) by their fixed nicknames and
+  touches nothing else. It is idempotent: absent entries are success. Verify
+  with `certutil -L -d sql:$HOME/.pki/nssdb` (neither nickname) and
+  `certutil -K -d sql:$HOME/.pki/nssdb` (no fixture key). If the NSS database has never been initialized:
   `certutil -d sql:$HOME/.pki/nssdb -N --empty-password`.
 - Without the import, `select-client-certificate` never fires (Electron
   continues cert-less when no certificate matches) — the chooser legitimately
