@@ -3,7 +3,7 @@
 **Slug**: `third-party-cookie-isolation`
 **Status**: active
 **Created**: 2026-10-05
-**Last Run**: 2026-10-23-00-18-01 (pass, squawk 0154 on Electron 44.9.0: 14/14 judged, step 9 struck, Version appendix pass; see runs/2026-10-23-00-18-01.md)
+**Last Run**: 2026-10-27-02-44-04 (pass, squawk turnaround 2026-10-26 on Electron 44.9.3: 14/14 judged, step 9 struck, Version appendix pass; see runs/2026-10-27-02-44-04.md)
 
 ## Intent
 
