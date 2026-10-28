@@ -12,12 +12,15 @@
 // NEVER values: { ts, host, path, search, cookieNames, setCookieNames }.
 
 import https from 'node:https';
+import { X509Certificate } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const MAX_AGE = 'Max-Age=3600';
+// Refuse certs expiring sooner than this so a run doesn't die mid-way (squawk 0168).
+const EXPIRY_MARGIN_MS = 60 * 60 * 1000;
 
 function parseArgs(argv) {
   const args = { port: null, log: null };
@@ -38,13 +41,27 @@ function appendLog(entry) {
   if (logPath) fs.appendFileSync(logPath, JSON.stringify(entry) + '\n');
 }
 
-function readCert(name) {
+// Fail fast on an expired / not-yet-valid / nearly-expired cert (squawk 0168);
+// never auto-regenerates. `isCert` is false for the private key PEM.
+function readCert(name, isCert = false) {
+  let buf;
   try {
-    return fs.readFileSync(path.join(here, 'certs', name));
+    buf = fs.readFileSync(path.join(here, 'certs', name));
   } catch {
     console.error(`serve: missing certs/${name} — run \`node gen-certs.mjs\` in ${here} first.`);
     process.exit(1);
   }
+  if (isCert) {
+    const x = new X509Certificate(buf);
+    const now = Date.now();
+    if (now < new Date(x.validFrom).getTime() || new Date(x.validTo).getTime() - now < EXPIRY_MARGIN_MS) {
+      console.error(
+        `serve: certs/${name} is expired, not yet valid, or expires within ${EXPIRY_MARGIN_MS / 60000} min (notBefore ${x.validFrom}, notAfter ${x.validTo}) — run \`node gen-certs.mjs\` in ${here} to regenerate.`
+      );
+      process.exit(1);
+    }
+  }
+  return buf;
 }
 
 const A = '127.0.0.1';
@@ -189,7 +206,7 @@ function route(req, res, host, url) {
   return send(404, 'text/plain', 'not found');
 }
 
-const server = https.createServer({ key: readCert('server-key.pem'), cert: readCert('server.pem') }, (req, res) => {
+const server = https.createServer({ key: readCert('server-key.pem'), cert: readCert('server.pem', true) }, (req, res) => {
   const host = (req.headers.host || '').replace(/:\d+$/, '');
   const url = new URL(req.url || '/', 'https://fixture.invalid');
   let setCookies = [];

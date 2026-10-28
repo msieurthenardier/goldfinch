@@ -42,7 +42,7 @@ pin each link but not the rendered result.
 - The admin MCP key is available **by env-var reference ONLY, never a command
   literal** (standing carry). Capture it from the launch's
   `AUTOMATION_DEV_MINT` line.
-- Fixture certs generated: `node tests/behavior/fixtures/web-compat/gen-certs.mjs`
+- Fixture certs generated (regenerate whenever `serve-tls.mjs` refuses on an expired cert): `node tests/behavior/fixtures/web-compat/gen-certs.mjs`
   (throwaway CA + server cert; gitignored). TLS fixture running on a second
   free port `{T}`: `node tests/behavior/fixtures/web-compat/serve-tls.mjs --port {T}`.
 - A fresh profile is not required; at least one persistent jar exists (the

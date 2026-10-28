@@ -11,7 +11,7 @@ Verifies that a TLS server requesting a client certificate causes a chooser shee
 
 ## Preconditions
 
-- Fixture certs generated: `node tests/behavior/fixtures/web-compat/gen-certs.mjs` (throwaway CA + server cert + client cert, gitignored, regenerated locally).
+- Fixture certs generated: `node tests/behavior/fixtures/web-compat/gen-certs.mjs` (throwaway CA + server cert + client cert, gitignored, regenerated locally; regenerate and re-import into NSS whenever `serve-tls.mjs` refuses on an expired cert).
 - TLS fixture running: `node tests/behavior/fixtures/web-compat/serve-tls.mjs --port {P}` with `requestCert: true`.
 - Client certificate imported into the NSS user store per the fixture README: `node tests/behavior/fixtures/web-compat/import-client-cert.mjs --import` (`libnss3-tools` required; the helper prechecks and fails with the install hint — operator-checked; reversible via `--remove`, see step 5). Without it the select-client-certificate event never fires (Electron continues cert-less when no certs match) — the chooser legitimately does not appear and the page loads unauthenticated.
 - Fresh-profile recipe: `dev-launch.mjs` has no profile flag today — the run session defines how a fresh profile is achieved (documented in the run log when this spec first executes; expected at HAT).

@@ -76,7 +76,7 @@ node serve-tls.mjs --port <port> [--log <path>]
   client cert (`CN=Goldfinch Fixture Client`, EKU clientAuth) + a PKCS#12
   bundle `client.p12` (password `goldfinch`, fixture-only) into `./certs/`.
   **Everything in `certs/` is gitignored** — regenerated locally, never
-  committed (no-committed-baselines rule); validity is 7 days.
+  committed (no-committed-baselines rule); validity is 7 days, and `serve-tls.mjs` refuses to start on an expired (or <1 h from expiry) cert — regenerate then, and re-run the NSS import scripts, since new CA/client certs replace the imported ones.
 - **`serve-tls.mjs`** runs `https.createServer` with `requestCert: true`,
   `rejectUnauthorized: false`: the handshake *requests* a client cert but
   cert-less connections still complete, so the page can serve the
