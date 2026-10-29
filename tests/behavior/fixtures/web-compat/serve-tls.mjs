@@ -22,12 +22,15 @@
 //   curl --cacert trusted-ca.pem https://127.0.0.1:<port>/  (--cert-set trusted) → succeeds WITHOUT -k
 
 import https from 'node:https';
+import { X509Certificate } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const certsDir = path.join(here, 'certs');
+// Refuse certs expiring sooner than this so a run doesn't die mid-way (squawk 0168).
+const EXPIRY_MARGIN_MS = 60 * 60 * 1000;
 
 function parseArgs(argv) {
   const args = { port: null, log: null, certSet: 'untrusted' };
@@ -54,15 +57,30 @@ function appendLog(entry) {
   if (logPath) fs.appendFileSync(logPath, JSON.stringify(entry) + '\n');
 }
 
-function readCert(name) {
+// Fail fast on an expired / not-yet-valid / nearly-expired cert (squawk 0168);
+// never auto-regenerates (that would silently invalidate a CA or client cert
+// already imported into NSS). `isCert` is false for private key PEMs.
+function readCert(name, isCert = false) {
+  let buf;
   try {
-    return fs.readFileSync(path.join(certsDir, name));
+    buf = fs.readFileSync(path.join(certsDir, name));
   } catch {
     console.error(
       `serve-tls: missing ${name} in ${certsDir} — run \`node tests/behavior/fixtures/web-compat/gen-certs.mjs\` first (certs are gitignored, regenerated locally).`
     );
     process.exit(1);
   }
+  if (isCert) {
+    const x = new X509Certificate(buf);
+    const now = Date.now();
+    if (now < new Date(x.validFrom).getTime() || new Date(x.validTo).getTime() - now < EXPIRY_MARGIN_MS) {
+      console.error(
+        `serve-tls: ${name} in ${certsDir} is expired, not yet valid, or expires within ${EXPIRY_MARGIN_MS / 60000} min (notBefore ${x.validFrom}, notAfter ${x.validTo}) — run \`node tests/behavior/fixtures/web-compat/gen-certs.mjs\` to regenerate, then re-run import-trust-anchor.mjs / import-client-cert.mjs --import if you use the NSS imports (regeneration changes the CA and client cert).`
+      );
+      process.exit(1);
+    }
+  }
+  return buf;
 }
 
 // Mission 20 Flight 2 Leg 4 (DD14): the trusted set is byte-identical in
@@ -70,8 +88,8 @@ function readCert(name) {
 // CA differs, so serve-tls.mjs's own request handling never branches on
 // certSet again below this point.
 const key = readCert(certSet === 'trusted' ? 'server-trusted-key.pem' : 'server-key.pem');
-const leafCert = readCert(certSet === 'trusted' ? 'server-trusted.pem' : 'server.pem');
-const ca = readCert(certSet === 'trusted' ? 'trusted-ca.pem' : 'ca.pem');
+const leafCert = readCert(certSet === 'trusted' ? 'server-trusted.pem' : 'server.pem', true);
+const ca = readCert(certSet === 'trusted' ? 'trusted-ca.pem' : 'ca.pem', true);
 // Mission 20 Flight 2 Leg 4 (live-discovered, TLS-trust behavior spec): `cert`
 // carries the FULL CHAIN (leaf + issuing CA), not the leaf alone. A bare leaf
 // PEM (the shape every prior fixture use needed) never gives Chromium a chain

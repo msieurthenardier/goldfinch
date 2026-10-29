@@ -16,7 +16,7 @@ The listener is dual-stack wildcard (`::`, falling back to `0.0.0.0`), so
 ## Run
 
 ```
-node tests/behavior/fixtures/third-party-cookies/gen-certs.mjs   # once; writes gitignored certs/
+node tests/behavior/fixtures/third-party-cookies/gen-certs.mjs   # writes gitignored certs/ (7-day validity); re-run whenever serve.mjs refuses on an expired cert
 node tests/behavior/fixtures/third-party-cookies/serve.mjs --port {fx} --log {log}
 ```
 

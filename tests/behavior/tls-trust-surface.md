@@ -29,7 +29,7 @@ tests pin each link but not the rendered result nor the engine's ordering.
 - Fixture certs generated with the Flight 2 generator:
   `node tests/behavior/fixtures/web-compat/gen-certs.mjs` (throwaway CA +
   server cert for the UNTRUSTED rows; second CA `trusted-ca.pem` + server
-  cert for the TRUSTED rows; gitignored, 7-day validity).
+  cert for the TRUSTED rows; gitignored, 7-day validity; regenerate AND re-run the NSS imports whenever `serve-tls.mjs` refuses on an expired cert).
 - **Before launch**: the second CA imported as an NSS trust anchor —
   `node tests/behavior/fixtures/web-compat/import-trust-anchor.mjs` (uses
   `certutil` on `~/.pki/nssdb`; prints the removal command). The untrusted
