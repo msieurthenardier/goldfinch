@@ -83,7 +83,7 @@
     }
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.32.1"
+    "@modelcontextprotocol/sdk": "1.32.2"
   },
   "overrides": {
     "brace-expansion": "^5.0.8"
@@ -93,7 +93,7 @@
     "@types/node": "^26.6.5",
     "axe-core": "^4.14.0",
     "electron": "44.10.0",
-    "electron-builder": "^26.15.3",
+    "electron-builder": "^26.18.0",
     "esbuild": "^0.28.2",
     "eslint": "^10.13.0",
     "eslint-config-prettier": "^10.1.8",
