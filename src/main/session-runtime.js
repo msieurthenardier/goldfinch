@@ -2,6 +2,7 @@
 'use strict';
 
 const { refusedThirdPartySetCookie } = require('./third-party-cookies');
+const { stripAppToken } = require('./user-agent');
 
 // Positive allowlist: only permissions listed here are granted; everything
 // else — including permission strings that don't exist yet — is denied by
@@ -65,6 +66,9 @@ function createSessionRuntime(deps) {
     // verification observer — installed on every web session below, beside
     // applyShields.
     certObserver,
+    // Squawk 0169: injected app identity for the UA app-token strip (absent -> no-op).
+    getAppName,
+    getAppVersion,
     logger
   } = deps;
 
@@ -270,6 +274,17 @@ function createSessionRuntime(deps) {
     }
 
     applyShields(session);
+    // Squawk 0169: strip ONLY the `<appName>/<appVersion>` token from the web
+    // UA (near-unique fingerprint). `Electron/` stays: 0119 stripped it too and
+    // 0145 reverted because that loops Cloudflare's managed challenge. This is
+    // the ONLY setUserAgent site in src/main (pinned by test).
+    try {
+      const ua = session.getUserAgent();
+      const stripped = stripAppToken(ua, getAppName?.(), getAppVersion?.());
+      if (typeof stripped === 'string' && stripped !== ua) session.setUserAgent(stripped);
+    } catch (err) {
+      logger?.error?.('[session-runtime] user-agent strip failed', err);
+    }
     // Mission 20 Flight 2 Leg 2 (DD6): install the verify-proc observer for
     // EVERY web session, Burner included — BEFORE the jar-lookup block below,
     // whose `if (!jarEntry) return` would otherwise skip the Burner session

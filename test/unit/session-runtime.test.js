@@ -92,6 +92,8 @@ function setup(options = {}) {
     isolateEffective: options.isolateEffective,
     chromeForTab: () => ({ send: (channel, payload) => chromeSends.push([channel, payload]) }),
     certObserver,
+    getAppName: () => 'goldfinch',
+    getAppVersion: () => '0.18.2',
     schedule: (fn) => {
       timers.push(fn);
       return timers.length;
@@ -188,27 +190,37 @@ test('internal-session creation marks and refuses every web-session wiring', () 
 });
 
 // ---------------------------------------------------------------------------
-// Squawk 0145 (reverts 0119): web sessions send Electron's DEFAULT UA. A UA
-// claiming plain Chrome on the Electron runtime fails Cloudflare's managed
-// challenge consistency checks (infinite "Verify you are human" loop), so
-// onSessionCreated must never call setUserAgent on any session.
+// Squawk 0145 (reverts 0119) -> squawk 0169: 0119 stripped BOTH the app token
+// and `Electron/`; 0145 reverted it because a UA claiming plain Chrome on the
+// Electron runtime loops Cloudflare's managed challenge. 0169 strips ONLY the
+// near-unique `goldfinch/<ver>` app token: `Electron/` and `Chrome/` stay.
+// onSessionCreated has exactly one setUserAgent site, web sessions only.
 // ---------------------------------------------------------------------------
 
-test('squawk 0145: a web jar session never gets setUserAgent', () => {
+function assertStrippedUa(userAgentSets) {
+  assert.equal(userAgentSets.length, 1);
+  const ua = userAgentSets[0];
+  assert.ok(!ua.includes('goldfinch/'), 'app token removed');
+  assert.ok(ua.includes('Electron/44.4.4'), 'Electron/ token kept (0145)');
+  assert.ok(ua.includes('Chrome/152.0.7977.130'), 'Chrome/ token kept');
+  assert.equal(ua, ELECTRON_DEFAULT_UA.replace('goldfinch/0.18.2 ', ''));
+}
+
+test('squawk 0169: a web jar session gets the UA minus the app token', () => {
   const h = setup();
   const { session, userAgentSets } = fakeSession(h.log);
   h.runtime.onSessionCreated(session);
-  assert.deepEqual(userAgentSets, []);
+  assertStrippedUa(userAgentSets);
 });
 
-test('squawk 0145: a no-jar (Burner/default) session never gets setUserAgent', () => {
+test('squawk 0169: a no-jar (Burner/default) session gets the UA minus the app token', () => {
   const h = setup({ partition: null });
   const { session, userAgentSets } = fakeSession(h.log);
   h.runtime.onSessionCreated(session);
-  assert.deepEqual(userAgentSets, []);
+  assertStrippedUa(userAgentSets);
 });
 
-test('squawk 0145: the internal session never gets setUserAgent', () => {
+test('squawk 0145/0169: the internal session never gets setUserAgent', () => {
   const h = setup();
   h.setCreatingInternal(true);
   const { session, userAgentSets } = fakeSession(h.log);
@@ -216,7 +228,17 @@ test('squawk 0145: the internal session never gets setUserAgent', () => {
   assert.deepEqual(userAgentSets, []);
 });
 
-test('squawk 0145: no src/main file contains a setUserAgent( call', () => {
+test('squawk 0169: a throwing setUserAgent does not abort the rest of session wiring', () => {
+  const h = setup();
+  const { session, counts } = fakeSession(h.log);
+  session.setUserAgent = () => {
+    throw new Error('boom');
+  };
+  h.runtime.onSessionCreated(session);
+  assert.equal(counts.certVerifyProc, 1);
+});
+
+test('squawk 0145/0169: exactly one setUserAgent( site in src/main, in session-runtime.js', () => {
   const root = path.join(__dirname, '..', '..', 'src', 'main');
   const files = [];
   (function walk(dir) {
@@ -227,8 +249,12 @@ test('squawk 0145: no src/main file contains a setUserAgent( call', () => {
     }
   })(root);
   assert.ok(files.length > 10, 'src/main scan must not be vacuous');
-  const hits = files.filter((f) => /setUserAgent\s*\(/.test(fs.readFileSync(f, 'utf8')));
-  assert.deepEqual(hits, []);
+  const sites = [];
+  for (const f of files) {
+    const n = (fs.readFileSync(f, 'utf8').match(/setUserAgent\s*\(/g) || []).length;
+    if (n) sites.push([path.relative(root, f), n]);
+  }
+  assert.deepEqual(sites, [['session-runtime.js', 1]]);
 });
 
 // ---------------------------------------------------------------------------
