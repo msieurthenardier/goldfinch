@@ -2685,6 +2685,9 @@ const sessionRuntime = createSessionRuntime({
   // Mission 20 Flight 2 Leg 2 (DD6): installed on every web session's
   // setCertificateVerifyProc, beside applyShields.
   certObserver,
+  // Squawk 0169: app identity for the UA app-token strip.
+  getAppName: () => app.getName(),
+  getAppVersion: () => app.getVersion(),
   logger: console
 });
 const { applySpellcheck, applyShields, pruneAllJars } = sessionRuntime;
