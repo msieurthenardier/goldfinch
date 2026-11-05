@@ -1,6 +1,6 @@
 # Sortie: Non-blocking Save Prompt
 
-**Status**: in-flight
+**Status**: landed
 
 ## Charter
 
@@ -11,10 +11,10 @@ When the operator submits a login, card, or identity form, Goldfinch asks "Save 
 Operator report: submitting a form with the vault locked immediately raises the master-password modal (`vault-controller.js` `onVaultCaptureOffer` locked branch, `openOverlayMenu('vault-unlock', …, { keepFocus: true })`), which covers the just-signed-in page and re-grabs focus until it is closed. The unlocked path is modal too (`vault-capture` is a centered `aria-modal` backdrop card on the full-guest sheet). Modern browsers ask non-modally.
 
 ### Success Criteria
-- [ ] With the vault locked OR unlocked, after a form submit the page stays fully usable (click, type, scroll) while the save prompt shows in a corner over the guest.
-- [ ] Unlocked: Save in the corner prompt saves or updates the item with no further dialog, and a new save still offers the destination-vault choice. Locked: Save opens the unlock sheet, and after a successful unlock the save completes without another blocking dialog.
-- [ ] ✕ / "Not now", or 10 s with no interaction, removes the prompt and the held credential is discarded on the main side. Nothing stays pending.
-- [ ] The prompt is keyboard-reachable and operable, a screen reader announces it, and the 10 s timer pauses while the pointer or focus is on it.
+- [x] With the vault locked OR unlocked, after a form submit the page stays fully usable (click, type, scroll) while the save prompt shows in a corner over the guest.
+- [x] Unlocked: Save in the corner prompt saves or updates the item with no further dialog, and a new save still offers the destination-vault choice. Locked: Save opens the unlock sheet, and after a successful unlock the save completes without another blocking dialog.
+- [x] ✕ / "Not now", or 10 s with no interaction, removes the prompt and the held credential is discarded on the main side. Nothing stays pending.
+- [ ] *(met except the screen-reader announcement — P3 UNVERIFIED, no screen reader; HAT H10/H2 verified keyboard and pause)* The prompt is keyboard-reachable and operable, a screen reader announces it, and the 10 s timer pauses while the pointer or focus is on it.
 
 ### Constraints
 - **Native-surface rule**: the prompt floats over the guest; it never resizes or moves the guest slot. The sheet stops covering the whole guest for this prompt only; every other menu type keeps today's behavior.
@@ -168,7 +168,7 @@ Chrome-class view: `file://` page, `contextIsolation: true`, `sandbox: true`, `n
 - [x] `renderer.js` is at 1504/1505 (`RENDERER_LINE_BUDGET`) → no new wiring there; the chrome-side client lives in `vault-controller.js` / a new `chrome/save-prompt-client.js`.
 - [x] `dropCapturesForTab(wcId)` exists (`vault-human.js:1738`) and is already called on tab close.
 - [x] The vault-login fixture does NOT produce an offer today (`index.html:77` `e.preventDefault()`, no navigation/detach) → **fixture extension is a Leg 1 deliverable** (see Leg 1).
-- [ ] `npm run dev:automation` with `GOLDFINCH_AUTOMATION_ADMIN=1 GOLDFINCH_AUTOMATION_DEV_MINT=1` launches and `enumerateWindows` returns `sheetVisible`. **Scheduled as the first step of Leg 1's live smoke**, using a dev-mode env-key script per the operator's standing preference, never the registered `goldfinch-dev` server, which was down during design review. Not verified at planning.
+- [x] *(verified in Leg 1 AC29 step 1)* `npm run dev:automation` with `GOLDFINCH_AUTOMATION_ADMIN=1 GOLDFINCH_AUTOMATION_DEV_MINT=1` launches and `enumerateWindows` returns `sheetVisible`. **Scheduled as the first step of Leg 1's live smoke**, using a dev-mode env-key script per the operator's standing preference, never the registered `goldfinch-dev` server, which was down during design review. Not verified at planning.
 - [x] Screen reader: **none available** (operator, 2026-11-04). P3 cannot be probed. Leg 3 ships both announcement paths (chrome `#save-prompt-status` plus the in-prompt `role="status"`), and its announcement AC is recorded as **unverified** in the leg and the debrief. F6 discoverability is checked by eye in the HAT. This is a recorded gap, not a Divert: no focus steal is introduced to compensate.
 
 ### Pre-Flight Checklist
@@ -228,7 +228,7 @@ Chrome-class view: `file://` page, `contextIsolation: true`, `sandbox: true`, `n
   - the security pins, the unlock-abandonment pin and the two-window AC;
   - the Variant B run and its docs.
 - [x] `keyboard-and-announce` — The DD2 F6 hop in `handleCrossView` / `cross-view-nav.js` (injected `savePromptFor`), the prompt `:key`, the refocus rule, the DD3 `#save-prompt-status` plus the in-prompt status (as P3 allows), the shared-mechanism ACs (F6 paths and the four live regions unchanged), and docs.
-- [ ] `hat-and-alignment` *(optional, recommended — the native-surface rule makes a human watching the rendered prompt the acceptance signal)* — Guided HAT: unlocked + locked flows, all three kinds, F6/Esc/Tab, hover/focus/blur/sheet pause, tab-switch drop, find-bar stacking, resize, fullscreen, two windows, screen reader.
+- [x] `hat-and-alignment` *(optional, recommended — the native-surface rule makes a human watching the rendered prompt the acceptance signal)* — Guided HAT: unlocked + locked flows, all three kinds, F6/Esc/Tab, hover/focus/blur/sheet pause, tab-switch drop, find-bar stacking, resize, fullscreen, two windows, screen reader.
 
 ---
 

@@ -280,3 +280,20 @@ For the Flight Director to log as squawks / HAT items (none fixed in this leg):
   - The consented write (`vault-human.js` ~1580-1598): requires a plain `save`, login/card only, `!downgraded`, `consent.vaultId ∈ rec.choices`, and origin/username/kind equal to the consented offer.
   - The `captureWindow` exclusion is pinned (`save-prompt-automation-guard.test.js` ~229-235).
 - Legs 1-3 → **completed**. Single flight commit next; the HAT leg follows.
+
+### Leg 4 (HAT) — session 1, 2026-11-05 (paused before H12)
+- FD relaunched a fresh fixture profile (`GOLDFINCH_VAULT_TRACE=1`) and drove submits via env-key scripts; operator watched and drove keyboard/mouse. H1–H11 passed; detail in `legs/04-hat-and-alignment.md` → HAT Progress.
+- **A7 confirmed fixed live (H8)**: a >2 min unlock now shows the expired notice in the corner.
+- **A1 operator ruling**: accepted as a known issue (find bar opened after the prompt overlaps its title/✕; recoverable). Carry to debrief.
+- **Fix-vs-feature calls**: none needed; no code changes this session.
+- **Out-of-scope defects** (squawks to file at HAT end, not folded into this sortie): WSLg HTML-fullscreen mis-render/shift (control-reproduced with no prompt; Windows build unaffected), and Esc not exiting HTML fullscreen on the Windows build.
+- Apparatus note: keyboard focus in the find overlay starves MCP `typeText` into the guest (a submit with the find bar focused produced no capture at all) — an apparatus limit, not a product defect.
+
+### Leg 4 (HAT) — session 2, 2026-11-05 (complete)
+- H12 passed for resize and page zoom; the unpin and chrome-zoom sub-steps were unreachable by design of the existing toolbar (FD leg-design gap, recorded in the leg; anchor freshness for those inputs remains unit-test-only, A2).
+- H13 recorded UNVERIFIED (no screen reader).
+- Squawks 0170 and 0171 logged and deferred (out-of-scope fullscreen defects found in H11).
+- No code changes during the HAT; no fix-vs-feature calls arose. Leg 4 → completed.
+- **Debrief carry-forward**: P3 unverified; A1 accepted (find bar opened after the prompt overlaps it); A2 (unpin/chrome-zoom anchor freshness unit-test-only); DD5 (a login opening a foreground new tab loses its offer); F6 needs Fn on the operator's keyboard (not a defect, but discoverability); HAT-design miss on unreachable sub-steps.
+- HAT coverage gaps vs the flight's leg line (for the debrief): only the LOGIN kind was exercised by eye (card/identity offers rely on unit tests), and the two-window variant of H9 was not run (H9 used the key-icon unlock route).
+- Phase 3: all four legs `completed`; CLAUDE.md, `docs/vault.md` and `docs/mcp-automation.md` were updated by the Leg 1–3 Developers and confirmed by the flight Reviewer; no new commands/config. Flight → `landed`. `[COMPLETE:flight]`.
