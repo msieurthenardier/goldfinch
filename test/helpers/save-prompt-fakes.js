@@ -7,6 +7,24 @@
 const { createSavePromptManager } = require('../../src/main/save-prompt-manager');
 const { computeSavePromptBounds } = require('../../src/main/save-prompt-geometry');
 
+// Clock guard (squawk 0172): the manager's default clock is the REAL one, so a test that leaves an
+// offer open would hold the process ~10 s at exit. The harness clock resolves the timer API at CALL
+// time: under a test's MockTimers it forwards to the mocked globals (tests tick them); otherwise it
+// returns an inert handle and NEVER arms a real timer.
+const REAL_SET_TIMEOUT = globalThis.setTimeout;
+const INERT = Symbol('inert-timer');
+const harnessSetTimeout = (fn, ms) =>
+  globalThis.setTimeout === REAL_SET_TIMEOUT ? INERT : globalThis.setTimeout(fn, ms);
+const harnessClearTimeout = (h) => {
+  if (h !== INERT) globalThis.clearTimeout(h);
+};
+
+/** Throws if any live Timeout handle exists (call from an `after` hook in each save-prompt suite). */
+function assertNoLiveTimers() {
+  const live = process.getActiveResourcesInfo().filter((r) => r === 'Timeout');
+  if (live.length) throw new Error(`save-prompt suite left ${live.length} real timer(s) armed`);
+}
+
 function makeFakeView() {
   const listeners = new Map();
   let destroyed = false;
@@ -114,6 +132,8 @@ function makeHarness(over = {}) {
       log.push(['focus-guest']);
       return true;
     },
+    setTimeout: harnessSetTimeout,
+    clearTimeout: harnessClearTimeout,
     ...over
   });
   return { manager, state, views, log, chromeSends, saves, dismisses, guestFocuses };
@@ -127,4 +147,4 @@ function presentShown(h, { token = 1, captureId = 'cap1', wcId = 7, model = OFFE
   return r;
 }
 
-module.exports = { makeFakeView, makeFakeContentView, makeHarness, presentShown, OFFER_MODEL };
+module.exports = { makeFakeView, makeFakeContentView, makeHarness, presentShown, OFFER_MODEL, assertNoLiveTimers };
