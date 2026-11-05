@@ -19,6 +19,7 @@
 // pending-reveal store (the exact composition main.js wires), so release-exactness
 // and the hold lifecycle are exercised for real, not modeled.
 
+const { withOverlaySenderLookup } = require('../helpers/fake-overlay-registry');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
@@ -98,7 +99,7 @@ function harness({ vaultCompromiseRotate, menuType = 'vault-compromise', surfaci
     closeMenuOverlay: (reason, token) => events.push(['close', reason, token])
   };
   const rec = { sheet, win };
-  const registry = { records: () => [rec], getWindowForChrome: () => null };
+  const registry = withOverlaySenderLookup({ records: () => [rec], getWindowForChrome: () => null });
   const chrome = { id: 100, send: (channel, payload) => events.push(['send', channel, payload]) };
 
   registerOverlayIpc({
@@ -128,7 +129,7 @@ test('both compromise channels are GATED on the vaultCompromiseRotate injection'
   const ipcMain = makeIpc();
   registerOverlayIpc({
     ipcMain,
-    registry: { records: () => [], getWindowForChrome: () => null },
+    registry: withOverlaySenderLookup({ records: () => [], getWindowForChrome: () => null }),
     chromeForAttachment: () => null,
     chromeForTab: () => null,
     sanitizeActivatedValue: () => undefined
@@ -431,7 +432,7 @@ function ackHarness() {
   const b = makeWindow(2, 200);
   registerOverlayIpc({
     ipcMain,
-    registry: { records: () => [a.rec, b.rec], getWindowForChrome: () => null },
+    registry: withOverlaySenderLookup({ records: () => [a.rec, b.rec], getWindowForChrome: () => null }),
     chromeForAttachment: (w) => (w === a.rec.win ? a.chrome : w === b.rec.win ? b.chrome : null),
     chromeForTab: () => null,
     sanitizeActivatedValue: (v) => (typeof v === 'string' && v.length <= 24 ? v : undefined),

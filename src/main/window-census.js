@@ -17,7 +17,7 @@
  *
  * @typedef {{ isVisible?: () => boolean, getView?: () => any } | null | undefined} ManagerLike
  * @typedef {{ win: { id: number, [k: string]: any }, chromeView: { webContents: any, [k: string]: any }, tabViews?: Map<number, any>, activeTabWcId?: number | null, bootConfigServed?: boolean, findOverlay?: ManagerLike, sheet?: ManagerLike, [k: string]: any }} RecordLike
- * @typedef {{ windowId: number, chromeWcId: number, booted: boolean, activeTabWcId: number | null, lastFocused: boolean, sheetWcId?: number, sheetVisible: boolean, findWcId?: number, findVisible: boolean, chromePid: number | null, recoveryPaused: boolean }} WindowCensusRow
+ * @typedef {{ windowId: number, chromeWcId: number, booted: boolean, activeTabWcId: number | null, lastFocused: boolean, sheetWcId?: number, sheetVisible: boolean, findWcId?: number, findVisible: boolean, savePromptVisible: boolean, savePromptPaused: boolean, chromePid: number | null, recoveryPaused: boolean }} WindowCensusRow
  * @typedef {{ popupWcId: number, openerWindowId: number, url: string, title: string }} PopupCensusEntry
  */
 
@@ -61,6 +61,21 @@ function viewWcId(mgr) {
 function viewVisible(mgr) {
   try {
     return typeof mgr?.isVisible === 'function' ? !!mgr.isVisible() : false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether the corner save prompt's 10 s timer is currently paused (Sortie 06, DD4/DD10).
+ * Null-tolerant, never throws; `false` when the prompt was never created.
+ * @param {ManagerLike} mgr
+ * @returns {boolean}
+ */
+function promptPaused(mgr) {
+  try {
+    const m = /** @type {any} */ (mgr);
+    return typeof m?.isPaused === 'function' ? !!m.isPaused() : false;
   } catch {
     return false;
   }
@@ -138,6 +153,11 @@ function buildWindowCensus(records, lastFocusedRecord, popupEntries) {
       lastFocused: !!lastFocusedRecord && rec === lastFocusedRecord,
       sheetVisible: viewVisible(rec.sheet),
       findVisible: viewVisible(rec.findOverlay),
+      // Sortie 06 Leg 1 (DD10): the corner save prompt's two census booleans, read LIVE from
+      // `rec.savePrompt` (false when it is null or never created). Deliberately NO
+      // `savePromptWcId` - the prompt's wcId is never exposed to automation.
+      savePromptVisible: viewVisible(rec.savePrompt),
+      savePromptPaused: promptPaused(rec.savePrompt),
       // Mission 20 Flight 3 Leg 3 (DD9/AC9): the chrome renderer's OS pid
       // (null once it has gone and before a reload lands) and whether this
       // window's chrome recovery has stopped for its lifetime (DD6).

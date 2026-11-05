@@ -473,10 +473,10 @@ const overlayMenus = {
   // refocus; the close reason's DD2 lifecycle bucket (resolve vs re-present) is
   // mapped MAIN-SIDE by the store's manager close-observer.
   ...authChallengeController.overlayStates,
-  // The 11 vault sheet states (vault-unlock, vault-picker, vault-capture, vault-set,
+  // The 10 vault sheet states (vault-unlock, vault-picker, vault-set,
   // vault-recovery-show, vault-stepup, vault-accesskey-show, vault-import-unlock,
-  // vault-change-master, vault-recover, vault-adminkey-show) — owned by
-  // vault-controller.js (M15 F2 Leg 1 renderer-extraction), the `downloads:` single-
+  // vault-change-master, vault-recover, vault-adminkey-show; HISTORY: vault-capture retired
+  // Sortie 06) — owned by vault-controller.js (M15 F2 Leg 1 renderer-extraction), the `downloads:` single-
   // entry precedent generalized to a spread. None has a chrome trigger element (all
   // raised from a guest gesture or a cross-renderer vault-page request), so none has
   // an aria-expanded target or trigger refocus; per-sheet rationale lives with the

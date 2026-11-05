@@ -295,13 +295,20 @@ function registerBrowserIpc({
       count: offers.length,
       modes: offers.map((o) => o.model && o.model.mode)
     });
+    // Sortie 06 Leg 1 (DD5/AC12): offers carry the tab's `wcId` and go out only while that tab
+    // is its window's ACTIVE tab; otherwise the held capture is dropped main-side.
+    const offerOwner = registry.getWindowForGuest(wcId);
     for (const offer of offers) {
-      chromeForTab(wcId)?.send('vault-capture-offer', { captureId: offer.captureId, model: offer.model });
+      if (!offerOwner || offerOwner.activeTabWcId !== wcId) {
+        getVaultHuman().captureDismiss(offer.captureId);
+        continue;
+      }
+      chromeForTab(wcId)?.send('vault-capture-offer', { captureId: offer.captureId, model: offer.model, wcId });
     }
   });
 
   // Vault capture DISMISS (M12 F2 Leg 4, DD7): the chrome invokes this when the
-  // vault-capture sheet closes WITHOUT a save (Cancel / Escape / outside-click / a
+  // corner save prompt closes WITHOUT a save (and when an offer cannot be presented) (Cancel / Escape / outside-click / a
   // lifecycle close), so main drops+zeroizes the held record immediately rather than
   // waiting for the 2-min safety timeout. Chrome-trust bare handle (the same class as
   // vault-fill-human); the captureId is an opaque main-minted handle, not a secret.
@@ -313,15 +320,42 @@ function registerBrowserIpc({
   // Vault capture FINALIZE (unlock-to-save continuation): after a login-form submit into a
   // LOCKED vault, capture() held the credential (mode 'locked') and the chrome raised an
   // unlock prompt. On a successful unlock the chrome invokes this to compute the deferred
-  // save/update disposition and open the vault-capture sheet. Returns { captureId, model }, or
+  // save/update disposition and present it in the corner save prompt. Returns { captureId, model }, or
   // a discriminated { reason } the chrome turns into an operator-visible message (expired /
   // locked / tab-changed / unchanged) — never a bare null, because a silent nothing after the
   // operator typed their master password is indistinguishable from a defect. Same chrome-trust
   // bare handle as dismiss; the captureId is an opaque main-minted handle, no password.
-  ipcMain.handle('vault-capture-finalize', (_event, captureId) => {
+  //
+  // Sortie 06 Leg 2 (flight DD7, AC7): this bare handle is the ONE place a consented locked save is
+  // written (inside `captureFinalize`, behind `rec.consent`), so it gained guards: (1) SENDER - the
+  // calling chrome must be the window that OWNS the capture's tab (else `refused`, record intact,
+  // no write); (2) ACTIVE TAB - the capture's tab must be that window's active tab (else the record
+  // is dropped and `tab-changed` returned, no write). Unknown / non-string ids stay `expired` /
+  // null as before.
+  ipcMain.handle('vault-capture-finalize', (event, captureId) => {
     if (!getVaultHuman || typeof captureId !== 'string') return null;
-    const res = getVaultHuman().captureFinalize(captureId);
-    vaultTrace('finalize', { captureId, outcome: res && res.model ? `offer:${res.model.mode}` : res && res.reason });
+    const vh = getVaultHuman();
+    const wcId = vh.captureTabOf(captureId);
+    if (wcId == null) {
+      vaultTrace('finalize', { captureId, outcome: 'expired' });
+      return { reason: 'expired' };
+    }
+    const owner = registry.getWindowForGuest(wcId);
+    const caller = registry.getWindowForChrome(event.sender);
+    if (!owner || !caller || owner !== caller) {
+      vaultTrace('finalize', { captureId, outcome: 'refused' });
+      return { reason: 'refused' };
+    }
+    if (owner.activeTabWcId !== wcId) {
+      vh.captureDismiss(captureId);
+      vaultTrace('finalize', { captureId, outcome: 'tab-changed' });
+      return { reason: 'tab-changed' };
+    }
+    const res = vh.captureFinalize(captureId);
+    vaultTrace('finalize', {
+      captureId,
+      outcome: res && res.saved ? 'saved' : res && res.model ? `offer:${res.model.mode}` : res && res.reason
+    });
     return res;
   });
 

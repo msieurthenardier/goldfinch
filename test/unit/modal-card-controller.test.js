@@ -2,7 +2,8 @@
 
 // Characterization tests for the extracted modal-card controller (M12 Flight 3 Leg 4
 // first-run-setup, DD5 template-registry / modal-card refactor). These encode the EXACT
-// behavior of the landed F2 vault-unlock / vault-capture inline wiring — Tab-cycle,
+// behavior of the landed F2 vault-unlock inline wiring (and, until Sortie 06, the since-retired
+// vault-capture sheet - its cases were generic shared-helper cases and all remain) — Tab-cycle,
 // Escape / backdrop dismiss, and the one-report-per-token discipline — BEFORE
 // menu-overlay.js was re-expressed onto this module, and stay green after. They are the
 // only real net for that landed master-password unlock UI (menu-overlay.js is an IIFE
@@ -215,7 +216,7 @@ test('createSheetEntry: items + dismissible pass through only when supplied', ()
   const items = () => [];
   const withOpts = makeSheetHarness(document, { items, dismissible: false });
   assert.equal(withOpts.entry.items, items, 'items forwarded (menu / picker / cert-picker)');
-  assert.equal(withOpts.entry.dismissible, false, 'dismissible forwarded (secret sheets, capture)');
+  assert.equal(withOpts.entry.dismissible, false, 'dismissible forwarded (secret sheets, keep-focus unlock)');
   // A plain sheet omits both — dismissible undefined means the controller treats it as
   // dismissible (its guard is `=== false`), matching the un-annotated register sites.
   const plain = makeSheetHarness(document);

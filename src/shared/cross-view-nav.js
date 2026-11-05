@@ -21,6 +21,15 @@
  *   Shift+F6          → 'focus-chrome-end' (the chrome's last visible tabbable — the
  *                       backward-boundary placement, DD9's shared tabSequence walk)
  *
+ * Sortie 06 Leg 3 (DD2) - the guest->prompt hop: this decision stays pure and UNCHANGED
+ * ('focus-address' for F6). `handleCrossView` (guest-wiring.js) layers the corner save prompt on
+ * top: an UNMODIFIED F6 (matched on `key === 'F6'`, since Ctrl/Cmd+L also yields
+ * 'focus-address') from the guest whose tab the window's prompt is showing, while the prompt is
+ * an interactive offer, goes to the PROMPT (`focusPrompt()`) instead of the chrome. Only while a
+ * prompt is visible for that tab; every other case is the chrome path described here. Inside the
+ * prompt, F6 -> address bar and Shift+F6 -> guest are decided main-side from the prompt view's
+ * own trusted `before-input-event` (`save-prompt-keys.js`).
+ *
  * F6 is gated on ctrl/meta/alt (parity with the chrome-side classifier,
  * keydown-action.js's `keydownToAction`): Ctrl+F6 / Meta+F6 / Alt+F6 is a
  * no-op on both sides (Edge Cases).

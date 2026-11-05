@@ -452,16 +452,26 @@ contextBridge.exposeInMainWorld('goldfinch', {
   vaultFillGenerated: (payload) => ipcRenderer.invoke('vault-fill-generated', payload),
   // Capture-save (M12 F2 Leg 4, DD7): main forwards a save/update offer as
   // { captureId, model } (model = origin/username/mode/defaultVaultId/choices — NO
-  // password). The chrome opens the vault-capture sheet with it; the sheet's own Save
-  // invoke reports the choice. On a dismiss (close WITHOUT a save) the chrome calls
+  // password). The chrome presents it in the corner save prompt (Sortie 06; it was the
+  // vault-capture sheet before); the prompt's own Save rides `save-prompt:save`. On a dismiss (close WITHOUT a save) the chrome calls
   // vaultCaptureDismiss so main drops+zeroizes the held record immediately (not only on
   // the 2-min timeout). The captured password never crosses to chrome.
   onVaultCaptureOffer: (cb) => ipcRenderer.on('vault-capture-offer', (_e, d) => cb(d)),
   vaultCaptureDismiss: (captureId) => ipcRenderer.invoke('vault-capture-dismiss', captureId),
   // Unlock-to-save continuation: when the offer arrives with mode 'locked', the chrome raises
   // an unlock prompt; on a successful unlock it calls this to compute the deferred save/update
-  // offer and open the vault-capture sheet. Resolves { captureId, model } | null.
+  // offer and present it in the corner prompt. Resolves { captureId, model } | { reason }.
   vaultCaptureFinalize: (captureId) => ipcRenderer.invoke('vault-capture-finalize', captureId),
+  // Sortie 06 (non-blocking save prompt): the corner save prompt is its OWN per-window view.
+  // chrome -> main: `savePromptOpen` (invoke -> { presented, reason? }) and `savePromptAnchor`
+  // (send); main -> chrome: `save-prompt-closed { token, captureId, reason }` (the prompt's own
+  // close channel - never the menu sheet's channel 7) and `vault-capture-dropped { captureId }`
+  // (main dropped a held offer the chrome did not initiate; owner-routed, offered records only).
+  // The model that crosses `savePromptOpen` is METADATA ONLY.
+  savePromptOpen: (payload) => ipcRenderer.invoke('save-prompt:open', payload),
+  savePromptAnchor: (payload) => ipcRenderer.send('save-prompt:anchor', payload),
+  onSavePromptClosed: (cb) => ipcRenderer.on('save-prompt-closed', (_e, d) => cb(d)),
+  onVaultCaptureDropped: (cb) => ipcRenderer.on('vault-capture-dropped', (_e, d) => cb(d)),
   onTabNavState: (cb) => ipcRenderer.on('tab-nav-state', (_e, d) => cb(d)),
 
   // The internal partition string (single source of truth, src/shared/internal-page.js),

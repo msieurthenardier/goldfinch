@@ -25,7 +25,8 @@ const rec = ({
   booted = true,
   activeTabWcId = null,
   sheet = null,
-  findOverlay = null
+  findOverlay = null,
+  savePrompt = null
 } = {}) => ({
   win: { id },
   chromeView: { webContents: { id: chromeWcId } },
@@ -33,7 +34,8 @@ const rec = ({
   activeTabWcId,
   bootConfigServed: booted,
   sheet,
-  findOverlay
+  findOverlay,
+  savePrompt
 });
 
 test('window-census: one record → one row carrying every AC5 field', () => {
@@ -54,11 +56,58 @@ test('window-census: one record → one row carrying every AC5 field', () => {
     lastFocused: true,
     sheetVisible: true,
     findVisible: false,
+    savePromptVisible: false,
+    savePromptPaused: false,
     sheetWcId: 77,
     findWcId: 88,
     chromePid: null,
     recoveryPaused: false
   });
+});
+
+// ---------------------------------------------------------------------------
+// savePromptVisible / savePromptPaused (Sortie 06 Leg 1, DD10/AC26)
+// ---------------------------------------------------------------------------
+
+test('window-census: savePromptVisible/savePromptPaused are ALWAYS-present booleans read LIVE from rec.savePrompt, and no savePromptWcId is exposed', () => {
+  const prompt = { visible: false, paused: false };
+  const manager = {
+    isVisible: () => prompt.visible,
+    isPaused: () => prompt.paused,
+    getView: () => ({ webContents: { id: 99, isDestroyed: () => false } })
+  };
+  const r = rec({ id: 1, savePrompt: manager });
+  let [row] = buildWindowCensus([r], r);
+  assert.equal(row.savePromptVisible, false);
+  assert.equal(row.savePromptPaused, false);
+  prompt.visible = true;
+  prompt.paused = true;
+  [row] = buildWindowCensus([r], r);
+  assert.equal(row.savePromptVisible, true);
+  assert.equal(row.savePromptPaused, true);
+  assert.equal('savePromptWcId' in row, false, 'the prompt wcId is deliberately never exposed');
+  assert.ok(!JSON.stringify(row).includes('99'), 'no prompt wcId leaks under any key');
+});
+
+test('window-census: a null / never-created / throwing savePrompt reads false,false (no throw)', () => {
+  const never = rec({ id: 1, savePrompt: null });
+  const [a] = buildWindowCensus([never], never);
+  assert.equal(a.savePromptVisible, false);
+  assert.equal(a.savePromptPaused, false);
+  const throwing = rec({
+    id: 2,
+    savePrompt: {
+      isVisible: () => {
+        throw new Error('torn down');
+      },
+      isPaused: () => {
+        throw new Error('torn down');
+      }
+    }
+  });
+  const [b] = buildWindowCensus([throwing], throwing);
+  assert.equal(b.savePromptVisible, false);
+  assert.equal(b.savePromptPaused, false);
 });
 
 // ---------------------------------------------------------------------------

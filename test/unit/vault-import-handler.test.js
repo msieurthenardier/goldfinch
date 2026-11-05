@@ -26,6 +26,7 @@
 // at the end of this file for the integration-shaped pin (the real `broadcasts.js` fan-out,
 // proving the notifier reaches every chrome + every internal page, not one window).
 
+const { withOverlaySenderLookup } = require('../helpers/fake-overlay-registry');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
@@ -61,7 +62,7 @@ function makeHarness({ previewResult, previewThrows } = {}) {
     closeMenuOverlay: (reason, token) => closeCalls.push([reason, token])
   };
   const rec = { sheet, win };
-  const registry = { records: () => [rec], getWindowForChrome: () => null };
+  const registry = withOverlaySenderLookup({ records: () => [rec], getWindowForChrome: () => null });
   // The window's CHROME contents (distinct from the sheet's own webContents); its id is the
   // per-window import key (finding 5) — chromeForAttachment(rec.win) resolves to this.
   // `send` is retained ONLY to prove the fixed handler never targets it for this channel
@@ -101,7 +102,7 @@ test('the import handler is GATED on the vaultImportPreview injection (offline o
   const ipcMain = makeIpc();
   registerOverlayIpc({
     ipcMain,
-    registry: { records: () => [], getWindowForChrome: () => null },
+    registry: withOverlaySenderLookup({ records: () => [], getWindowForChrome: () => null }),
     chromeForAttachment: () => null,
     chromeForTab: () => null,
     sanitizeActivatedValue: () => undefined
@@ -290,7 +291,7 @@ test('the injected notifier is the profile-wide BROADCAST path (every chrome + e
   // otherwise-uninvolved window that a real broadcast must still reach.
   const rec1 = { sheet, win: win1, chromeView: { webContents: chrome1 } };
   const rec2 = { win: win2, chromeView: { webContents: chrome2 } };
-  const registry = { records: () => [rec1, rec2], getWindowForChrome: () => null };
+  const registry = withOverlaySenderLookup({ records: () => [rec1, rec2], getWindowForChrome: () => null });
 
   // The internal-page half of the fan-out: a webContents with no `.sheet`/`.chromeView`
   // membership at all, discovered only via webContents.getAllWebContents() +

@@ -149,6 +149,23 @@ function createGuestWiring(deps) {
       alt: input.alt
     });
     if (!action) return false;
+    // Sortie 06 Leg 3 (DD2; R1/R2): the guest->prompt hop. UNMODIFIED F6 from the guest whose tab
+    // the window's corner save prompt is showing, while that prompt is an interactive offer, goes
+    // to the PROMPT instead of the chrome. Matched on `key === 'F6'` (Ctrl/Cmd+L also yields
+    // 'focus-address'); eligibility is decided BEFORE preventDefault so every other case (result
+    // state, other tab, Shift+F6, popup guest with no record) is today's path byte-for-byte.
+    const sp = registry.getWindowForGuest(contents.id)?.savePrompt;
+    if (
+      input.key === 'F6' &&
+      action === 'focus-address' &&
+      sp &&
+      sp.currentWcId() === contents.id &&
+      sp.canFocusPrompt()
+    ) {
+      event.preventDefault();
+      if (!input.isAutoRepeat) sp.focusPrompt();
+      return true;
+    }
     event.preventDefault();
     if (input.isAutoRepeat) return true;
     const chrome = chromeForTab(contents.id);
@@ -742,8 +759,16 @@ function createGuestWiring(deps) {
         // vault-capture-offer per entry, preserving release order; the chrome
         // queues and presents them serially (never a model-replace).
         const gestureOffers = vaultHuman?.()?.captureRelease(wcId) || [];
+        // Sortie 06 Leg 1 (DD5/AC12): the offer carries its tab's `wcId`, and is sent ONLY
+        // while that tab is its window's ACTIVE tab; otherwise the held capture is dropped
+        // here (main-side), so a background tab's submit never prompts over another tab.
+        const offerOwner = registry.getWindowForGuest(wcId);
         for (const gestureOffer of gestureOffers) {
-          sendToChrome('vault-capture-offer', { captureId: gestureOffer.captureId, model: gestureOffer.model });
+          if (!offerOwner || offerOwner.activeTabWcId !== wcId) {
+            vaultHuman?.()?.captureDismiss(gestureOffer.captureId);
+            continue;
+          }
+          sendToChrome('vault-capture-offer', { captureId: gestureOffer.captureId, model: gestureOffer.model, wcId });
         }
         sendToChrome('tab-did-navigate', { wcId, url });
         // Mission 20 Flight 2 Leg 2 (DD6/DD7, FD amendment to DD7): certificate +

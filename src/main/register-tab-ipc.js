@@ -6,6 +6,7 @@ const { isBurnerPartition } = require('../shared/burner');
 // crash is now the third case (alongside a load failure) that hides a guest
 // and refuses it focus.
 const { guestTakenOver } = require('../shared/load-failure');
+const { focusActiveGuest } = require('./focus-active-guest');
 const { effectiveUrl } = require('./tab-entry-url');
 
 /**
@@ -25,6 +26,25 @@ const { effectiveUrl } = require('./tab-entry-url');
 function applyGuestVisibility(entry) {
   if (!entry || !entry.view || entry.view.webContents.isDestroyed()) return;
   entry.view.setVisible(!!entry.active && !guestTakenOver(entry));
+}
+
+/**
+ * Sortie 06 Leg 1 (AC13): the ONE helper every tab-lifecycle drop site uses (tab-set-active
+ * switch, tab-hide, tab-close, tab-moved, HTML-fullscreen enter) instead of hand-copied
+ * insertions. Closes the corner save prompt FIRST when it shows THIS tab's capture - so the
+ * close reason (`tab-switch`/`tab-hide`/...) wins over the "expired" state the capture drop
+ * would otherwise cause - then drops the tab's held captures. The prompt close is a NO-OP when
+ * the prompt shows a different tab; the `dropCapturesForTab` still runs for the outgoing tab.
+ * Must run BEFORE any `syncBounds` fan-out (squawk 0100: the removeChildView completes first).
+ * @param {any} owner  the window record that owns the tab
+ * @param {number} wcId  the outgoing tab
+ * @param {string} reason
+ * @param {any} [vaultHuman]  the vault-human instance (or null/undefined)
+ */
+function closeSavePromptAndDrop(owner, wcId, reason, vaultHuman) {
+  const prompt = owner && owner.savePrompt;
+  if (prompt && prompt.currentWcId() === wcId) prompt.close(reason);
+  vaultHuman?.dropCapturesForTab(wcId);
 }
 
 /**
@@ -249,6 +269,9 @@ function registerTabIpc(deps) {
       view.webContents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
     }
     rec.win.contentView.addChildView(view);
+    // Sortie 06 Leg 1 (AC13): the new guest's attach is a guest add - re-raise a visible save
+    // prompt above it, strictly after.
+    rec.savePrompt?.show();
 
     // Seed initial bounds
     {
@@ -351,7 +374,9 @@ function registerTabIpc(deps) {
     // Lazily resolved via the getter closure AT CALL TIME (see the deps comment
     // above) — a capture held in a tab closed later in the session is still
     // dropped, never missed by a boot-time snapshot of a still-null memo.
-    vaultHuman?.()?.dropCapturesForTab(wcId);
+    // Sortie 06 Leg 1 (AC13): the corner save prompt closes `tab-close` FIRST when it shows this
+    // tab (its reason wins over "expired"), then the held captures drop.
+    closeSavePromptAndDrop(owner, wcId, 'tab-close', vaultHuman?.());
     // M09 F4 Leg 1 (DD2) — closed-tab-stack capture. Sits strictly BEFORE destroy()/
     // tabViews.delete below (the webContents and its navigationHistory must still be
     // alive to read). The allowlist/exclusion body lives in captureClosedTabEntry
@@ -632,6 +657,12 @@ function registerTabIpc(deps) {
     // the documented renderer-side lost state).
     if (source.findOverlay?.isSessionActive(p.wcId)) source.findOverlay.closeSession({ refocusGuest: false });
 
+    // Sortie 06 Leg 1 (AC13): the moved tab's corner save prompt closes `tab-moved` on the SOURCE
+    // window and its held captures drop (flight DD5: "tab moved to another window"). ONE
+    // insertion, beside the find-session close and strictly before htmlFullscreen.forceExit and
+    // the re-parent. Synchronous (the move's pinned synchrony invariant).
+    closeSavePromptAndDrop(source, p.wcId, 'tab-moved', vaultHuman?.());
+
     // M14 F1 L1 (DD1 exit edge): force-exit fullscreen BEFORE the H3 geometry
     // capture below — the captured rect must be the RESTORED slot rect, never
     // the full-window fullscreen rect (which would seed the target wrong and
@@ -773,6 +804,10 @@ function registerTabIpc(deps) {
       // guest changed underneath it) is never re-shown in the interim window. Idempotent when
       // no menu is open, and `target.sheet` is null-tolerant on a live record.
       target.sheet?.closeMenuOverlay('tab-switch');
+      // Sortie 06 Leg 1 (AC13): the TARGET's previous active tab is deactivated by this move, so
+      // its corner save prompt closes `tab-switch` and that tab's captures drop - at the same
+      // site, for the same reason (the async tab-set-active round-trip cannot do it this turn).
+      closeSavePromptAndDrop(target, /** @type {number} */ (target.activeTabWcId), 'tab-switch', vaultHuman?.());
     }
 
     // Focus rules (Chrome parity): the target window is raised and the moved tab is
@@ -1046,6 +1081,10 @@ function registerTabIpc(deps) {
     // Leg 2 (F3 DD2): owning-chrome check — the sender must BE the owner.
     const owner = ownsTab(event, wcId);
     if (!owner) return;
+    // Sortie 06 Leg 1 (AC13): hiding a tab closes ITS corner save prompt (`tab-hide`) and drops
+    // its held captures - FIRST, before the fullscreen restore and the overlay hides below, so
+    // the prompt's removeChildView completes ahead of any bounds sync (squawk 0100).
+    closeSavePromptAndDrop(owner, wcId, 'tab-hide', vaultHuman?.());
     // M14 F1 L1 (DD1 exit edge): hiding the fullscreen tab force-exits the mode
     // FIRST — the restore must run while the entry is still resolvable; the
     // overlay-hide block below then re-hides whatever the restore re-showed.
@@ -1171,16 +1210,12 @@ function registerTabIpc(deps) {
   ipcMain.handle('tab-focus-guest', (event) => {
     const rec = requireChrome(event);
     if (!rec) return false;
-    const wcId = rec.activeTabWcId;
-    if (wcId == null) return false;
-    const entry = rec.tabViews.get(wcId);
-    // Mission 20 Flight 1 (DD1/AC7), widened Flight 3 Leg 2 (DD1): a taken-over
-    // active tab (a load failure OR a crash) refuses the F6 gesture — the
-    // guest never receives OS focus while its entry is taken over; the chrome
-    // moves focus into the panel instead (its own responsibility, DD6).
-    if (!entry || entry.view.webContents.isDestroyed() || guestTakenOver(entry)) return false;
-    entry.view.webContents.focus();
-    return true;
+    // Mission 20 Flight 1 (DD1/AC7), widened Flight 3 Leg 2 (DD1): a taken-over active tab (a
+    // load failure OR a crash) refuses the F6 gesture - the guest never receives OS focus while
+    // its entry is taken over; the chrome moves focus into the panel instead (its own
+    // responsibility, DD6). Sortie 06 Leg 3 (R5): the predicate is the shared focusActiveGuest
+    // (it applies guestTakenOver(entry)), also used by the save prompt's Shift+F6 / refocus.
+    return focusActiveGuest(rec);
   });
 
   ipcMain.on('tab-set-active', (event, { wcId, bounds }) => {
@@ -1247,6 +1282,15 @@ function registerTabIpc(deps) {
       if (wasPageFocused && !entry.view.webContents.isDestroyed() && !guestTakenOver(entry)) {
         entry.view.webContents.focus();
       }
+      // Sortie 06 Leg 1 (AC8/AC13, squawk 0100): a genuine SWITCH closes the OUTGOING tab's
+      // corner save prompt (`tab-switch`) and drops that tab's captures. Keyed on the OUTGOING
+      // `owner.activeTabWcId` (reassigned only at the bottom of this handler) and hoisted AHEAD
+      // of the find block and every syncBounds fan-out below - `switching` itself is computed
+      // later - so the prompt's removeChildView completes BEFORE any resize.
+      const outgoingWcId = owner.activeTabWcId;
+      if (outgoingWcId !== null && outgoingWcId !== wcId) {
+        closeSavePromptAndDrop(owner, outgoingWcId, 'tab-switch', vaultHuman?.());
+      }
       // Find-overlay z-order re-assert (DD2 invariant): strictly AFTER the guest re-add
       // above, or the guest buries the overlay. Do not "optimize" this away when the
       // overlay is already visible — every guest re-add raises the guest.
@@ -1271,6 +1315,13 @@ function registerTabIpc(deps) {
         if (rounded) owner.findOverlay.syncBounds(rounded);
         owner.findOverlay.show();
       }
+      // Sortie 06 Leg 1 (AC8): same-tab re-activation re-raises a VISIBLE corner save prompt
+      // after the guest re-add and the find re-show, and BEFORE the sheet re-show below - the
+      // prompt is never above an open sheet or the tear-off pill. (After a switch the prompt
+      // was closed above, so both calls are inert.) Gated on !fullscreenSameTab for the bounds
+      // sync, like the find block.
+      if (rounded && !fullscreenSameTab) owner.savePrompt?.syncBounds(rounded);
+      owner.savePrompt?.show();
       // Menu-overlay sheet (F8 DD4/DD9/DD7): strictly AFTER the guest re-add AND the
       // find-overlay re-assert above, so the sheet sits top-of-stack. No entry.trusted
       // gate — the sheet serves internal tabs too (DD7).
@@ -1370,6 +1421,9 @@ function registerTabIpc(deps) {
     // stores always and applies only while visible.
     if (wcId === owner.activeTabWcId) {
       owner.findOverlay?.syncBounds(rounded);
+      // Sortie 06 Leg 1 (AC11): the corner save prompt tracks the active guest too (store always,
+      // apply while visible).
+      owner.savePrompt?.syncBounds(rounded);
       // Menu-overlay geometry-follow (F8 DD12): identity mapping — the sheet's bounds
       // ARE the active guest's rounded bounds.
       owner.sheet?.syncBounds(rounded);
@@ -1389,4 +1443,11 @@ function registerTabIpc(deps) {
   });
 }
 
-module.exports = { registerTabIpc, applyGuestVisibility, queueChromeSend, createSendOrQueue, pushTabStateFor };
+module.exports = {
+  registerTabIpc,
+  applyGuestVisibility,
+  queueChromeSend,
+  createSendOrQueue,
+  pushTabStateFor,
+  closeSavePromptAndDrop
+};

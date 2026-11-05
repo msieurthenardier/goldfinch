@@ -1277,3 +1277,82 @@ test('vault-lock and survives-blur compose: an allowlisted menu still closes on 
   mgr.closeMenuOverlay('vault-lock');
   assert.equal(mgr.isMenuOpen(), false, 'vault-lock still closes it');
 });
+
+// ---------------------------------------------------------------------------
+// Sortie 06 Leg 1 (AC16): the optional onVisibilityChanged dep - the corner save prompt's
+// `sheet` timer-pause input. Called at EVERY site that assigns `visible`, deduped to real changes.
+// ---------------------------------------------------------------------------
+
+function setupWithVisibility() {
+  const events = [];
+  const views = [];
+  const contentView = makeFakeContentView();
+  const mgr2 = createMenuOverlayManager({
+    getContentView: () => contentView,
+    createSheetView: () => {
+      const v = makeFakeView();
+      views.push(v);
+      return v;
+    },
+    onVisibilityChanged: (visible) => events.push(visible)
+  });
+  return { mgr2, events, views, contentView };
+}
+
+const MENU = (token, menuType = 'kebab') => ({ menuType, model: [], anchor: null, token });
+
+test('Sortie 06 AC16: show() / hide() report real visibility changes only (re-raise is deduped)', () => {
+  const { mgr2, events } = setupWithVisibility();
+  mgr2.openMenu(MENU(1));
+  assert.deepEqual(events, [true]);
+  mgr2.show(); // re-raise on tab-set-active: no change
+  mgr2.show();
+  assert.deepEqual(events, [true]);
+  mgr2.closeMenuOverlay('toggle');
+  assert.deepEqual(events, [true, false]);
+  mgr2.hide(); // already hidden
+  assert.deepEqual(events, [true, false]);
+});
+
+test('Sortie 06 AC16: a model-replace keeps visibility (no spurious false/true flicker)', () => {
+  const { mgr2, events } = setupWithVisibility();
+  mgr2.openMenu(MENU(1));
+  mgr2.openMenu(MENU(2, 'site-info'));
+  assert.deepEqual(events, [true]);
+});
+
+test('Sortie 06 AC16: teardown of a visible sheet reports false; teardown of a hidden one reports nothing', () => {
+  const { mgr2, events } = setupWithVisibility();
+  mgr2.openMenu(MENU(1));
+  mgr2.teardown();
+  assert.deepEqual(events, [true, false]);
+  mgr2.teardown();
+  assert.deepEqual(events, [true, false]);
+});
+
+test('Sortie 06 AC16: the destroyed-recreate guard reports the lost visibility', () => {
+  const { mgr2, events, views } = setupWithVisibility();
+  mgr2.openMenu(MENU(1));
+  views[0].webContents.markDestroyed();
+  mgr2.ensureView();
+  assert.deepEqual(events, [true, false]);
+});
+
+test('Sortie 06 AC16: the cross-window model-replace detach reports a change only if visibility really flips', () => {
+  const { mgr2, events } = setupWithVisibility();
+  const cvA = makeFakeContentView();
+  const cvB = makeFakeContentView();
+  mgr2.openMenu(MENU(1), { contentView: cvA, win: { id: 1 }, bounds: { x: 0, y: 0, width: 5, height: 5 } });
+  assert.deepEqual(events, [true]);
+  mgr2.openMenu(MENU(2), { contentView: cvB, win: { id: 2 }, bounds: { x: 0, y: 0, width: 5, height: 5 } });
+  // detach (visible -> false) then show() on the new window (false -> true)
+  assert.deepEqual(events, [true, false, true]);
+});
+
+test('Sortie 06 AC16: an omitted onVisibilityChanged changes nothing (every pre-Sortie caller)', () => {
+  setup();
+  assert.doesNotThrow(() => {
+    mgr.openMenu(MENU(1));
+    mgr.closeMenuOverlay('toggle');
+  });
+});

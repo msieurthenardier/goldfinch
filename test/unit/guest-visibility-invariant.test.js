@@ -68,7 +68,10 @@ test("register-tab-ipc.js: tab-focus-guest's body references guestTakenOver (the
   assert.ok(start !== -1, 'tab-focus-guest handler not found');
   const end = registerTabIpcSrc.indexOf('});', start);
   const body = registerTabIpcSrc.slice(start, end);
-  assert.match(body, /guestTakenOver\(entry\)/);
+  // Sortie 06 Leg 3 (R5): the handler delegates to the shared predicate, which owns the refusal.
+  assert.match(body, /return focusActiveGuest\(rec\);/);
+  const shared = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'main', 'focus-active-guest.js'), 'utf8');
+  assert.match(shared, /guestTakenOver\(entry\)/);
 });
 
 test('register-tab-ipc.js: the tab-set-active incoming-focus re-arm is gated on guestTakenOver', () => {

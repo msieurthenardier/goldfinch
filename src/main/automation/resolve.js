@@ -101,7 +101,7 @@ function classifyContents(wc, chromeContents, isChromeContents) {
  *     excluded from enumerate, to close the bypass path)
  *
  * @param {number} wcId  the webContentsId to resolve
- * @param {{ fromId: (id: number) => any, chromeContents?: any, allowInternal?: boolean, isTabViewWcId?: (id: number) => boolean, isPopupWcId?: (id: number) => boolean, isChromeContents?: (wc: any) => boolean, isSheetContents?: (wc: any) => boolean, allowSheet?: boolean, sheetMenuFor?: (wc: any) => ({ menuType: string, token: number } | null) }} deps
+ * @param {{ fromId: (id: number) => any, chromeContents?: any, allowInternal?: boolean, isTabViewWcId?: (id: number) => boolean, isPopupWcId?: (id: number) => boolean, isChromeContents?: (wc: any) => boolean, isSheetContents?: (wc: any) => boolean, isSavePromptContents?: (wc: any) => boolean, allowSheet?: boolean, sheetMenuFor?: (wc: any) => ({ menuType: string, token: number } | null) }} deps
  *   fromId   — webContents.fromId at the call site (injected)
  *   chromeContents — the accessor chrome webContents (injected; passed through
  *                    for callers that immediately classify the result)
@@ -158,6 +158,7 @@ function resolveContents(
     isPopupWcId,
     isChromeContents,
     isSheetContents,
+    isSavePromptContents,
     allowSheet = false,
     sheetMenuFor
   }
@@ -170,6 +171,21 @@ function resolveContents(
 
   if (!wc || wc.isDestroyed?.()) {
     throw new Error('automation: no-such-contents — wcId ' + wcId + ' is not a live webContents');
+  }
+
+  // Sortie 06 Leg 1 (DD10): the corner SAVE-PROMPT view is refused at EVERY tier, BEFORE the
+  // sheet / internal / non-tab checks and regardless of allowInternal / allowSheet. Admin's
+  // non-tab exemption below would otherwise admit any chrome-class wcId (that is how the find
+  // overlay is admin-evaluable). The prompt renders the offer's origin + username + vault
+  // choice and takes the operator's Save click, so it is never automatable. There is NO
+  // allowlist and NO op opt-in. The predicate is injected at BOTH main.js engine sites
+  // (grep-pinned in test/unit/save-prompt-automation-guard.test.js); an absent injection cannot
+  // be refused here, which is why that pin exists. (No live MCP op can obtain the prompt's wcId
+  // at all - the census deliberately exposes none - so this guard is defense in depth.)
+  if (typeof isSavePromptContents === 'function' && isSavePromptContents(wc)) {
+    throw new Error(
+      'automation: save-prompt — wcId ' + wcId + ' is the chrome-owned save prompt and is never automatable (any tier)'
+    );
   }
 
   // PR#112 finding 1, NARROWED by M15 F3 L1 (DD1/DD1a/DD1b/DD1d) from an absolute refusal

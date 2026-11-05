@@ -72,7 +72,11 @@ const call = async (name, args = {}) => {
   try { return JSON.parse(r.value); } catch { return r.value; }
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const sheetOpen = async () => (await call('enumerateWindows')).some((w) => w.sheetVisible);
+// "Did an OFFER surface open?" (Sortie 06): with the vault LOCKED the held capture raises the unlock
+// SHEET (`sheetVisible`); with it UNLOCKED the offer is the non-blocking corner PROMPT
+// (`savePromptVisible`, whose content/pixels are unobservable). Either is the offer surface; the
+// plausibility gate decides whether ANY opens. (The name `sheetOpen` is kept for the call sites.)
+const sheetOpen = async () => (await call('enumerateWindows')).some((w) => w.sheetVisible || w.savePromptVisible);
 
 const results = [];
 function record(suite, label, pass, detail) {
@@ -195,9 +199,11 @@ async function suiteDetection() {
 // `enumerateWindows().sheetVisible` is an admin read with zero cached state —
 // and "did an offer open at all?" is precisely what the gate decides.
 //
-// With the vault LOCKED, a held capture raises the unlock sheet rather than the
-// save sheet; both are sheets, so the signal holds either way. Running unlocked
-// exercises the same assertions.
+// With the vault LOCKED, a held capture raises the unlock sheet; UNLOCKED it is
+// the corner save prompt (Sortie 06; it was the centered save sheet before). The
+// signal is `sheetVisible || savePromptVisible` either way. Note the prompt also
+// expires on its own after ~10 s; each case runs in its own tab and tab-close
+// closes it, so the clean-start check holds.
 
 async function submitForm(wcId, fixture, values) {
   await call('evaluate', {

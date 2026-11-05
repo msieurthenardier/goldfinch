@@ -1,18 +1,19 @@
 // @ts-check
 
-// DOM builder + renderer for the menu-overlay sheet's `vault-capture` template
-// (M12 Flight 2 Leg 4 capture-save, DD7) — the DEDICATED SEVENTH template kind.
-// Extracted as pure, document-injected helpers (the same "pure module in
-// src/shared/" pattern vault-unlock-template.js / vault-picker-template.js use) so
-// the save-vs-update rendering AND the vault-choice-on-save-only contract are
-// unit-testable against the fake-document helper without a live sheet. menu-overlay.js
-// imports these and wires behavior (Save → the captureSave invoke, Cancel/Escape,
-// Tab-cycle).
+// DOM builder + renderer for the corner SAVE PROMPT card (originally the menu-overlay sheet's
+// `vault-capture` template, M12 Flight 2 Leg 4 capture-save, DD7; Sortie 06 Leg 1 moved it to the
+// per-window save-prompt view and made it NON-MODAL: no backdrop, no `aria-modal`, the card is the
+// root). Extracted as pure, document-injected helpers (the same "pure module in src/shared/"
+// pattern vault-unlock-template.js / vault-picker-template.js use) so the save-vs-update
+// rendering AND the vault-choice-on-save-only contract are unit-testable against the
+// fake-document helper without a live view. `src/renderer/save-prompt.js` imports these and wires
+// behavior (Save -> the `save-prompt:save` invoke, Not now / X -> `save-prompt:dismiss`).
 //
-// The card mirrors the vault-unlock backdrop (centered, role="dialog"
-// aria-modal="true") — the submit carries no anchor. It shows the origin + username
-// (read-only), a "Save password?" / "Update password?" heading, and — for a `save`
-// only — a vault choice (default the active jar, "Global" selectable). Save + Cancel.
+// The card is `role="dialog"` with `aria-labelledby` (heading) / `aria-describedby` (the field
+// rows) and NO `aria-modal` - the page behind it stays operable. It shows the origin + username
+// (read-only), a "Save password?" / "Update password?" heading, and - for a `save` only - a vault
+// choice (default the active jar, "Global" selectable). Save + "Not now" + a dismiss X, a 3 px
+// countdown bar, a "1 of N" counter and a `role="status"` node for result states.
 //
 // SECURITY (leg core): the model is METADATA ONLY (origin / username / mode /
 // defaultVaultId / choices / captureId). The captured password NEVER reaches the
@@ -40,6 +41,7 @@
 const KIND_TABLE = {
   card: {
     noun: 'card',
+    resultNoun: 'Card',
     subjectLabel: 'Card',
     // last4 is a declared NON-SECRET field; the PAN never reaches the sheet at all.
     subjectValueText(model) {
@@ -50,12 +52,14 @@ const KIND_TABLE = {
   },
   login: {
     noun: 'password',
+    resultNoun: 'Password',
     subjectLabel: 'Username',
     subjectValueText(model) {
       return model && model.username != null && model.username !== '' ? String(model.username) : '(no username)';
     }
   },
   identity: {
+    resultNoun: 'Details',
     subjectLabel: 'Fields',
     heading(model) {
       const mode = model && model.mode === 'update' ? 'update' : 'save';
@@ -90,48 +94,77 @@ function kindOf(model) {
 }
 
 /**
- * Build the vault-capture card shell (built once by menu-overlay.js; the per-offer
- * content is filled by renderVaultCaptureCard).
+ * Build the save-prompt card shell (built once per init by save-prompt.js; the per-offer content
+ * is filled by renderVaultCaptureCard). NON-MODAL (Sortie 06): the card IS the root - no
+ * backdrop wrapper, no `aria-modal`.
  * @param {Document} document
  * @returns {{
  *   node: HTMLElement,
  *   card: HTMLElement,
+ *   timerFill: HTMLElement,
  *   heading: HTMLElement,
+ *   dismissX: HTMLButtonElement,
+ *   fields: HTMLElement,
  *   originValue: HTMLElement,
  *   subjectLabel: HTMLElement,
  *   usernameValue: HTMLElement,
  *   choices: HTMLElement,
+ *   lockNote: HTMLElement,
  *   error: HTMLElement,
+ *   counter: HTMLElement,
+ *   status: HTMLElement,
  *   save: HTMLButtonElement,
  *   cancel: HTMLButtonElement,
  * }}
  */
 export function buildVaultCaptureCard(document) {
-  const node = document.createElement('div');
-  node.id = 'sheet-vault-capture';
-  node.classList.add('hidden');
-
   const card = document.createElement('div');
+  card.id = 'save-prompt-card';
   card.className = 'new-container-inner vault-capture-inner';
   card.setAttribute('role', 'dialog');
-  card.setAttribute('aria-modal', 'true');
-  card.setAttribute('aria-label', 'Save password');
-  node.appendChild(card);
+  card.setAttribute('aria-labelledby', 'save-prompt-heading');
+  card.setAttribute('aria-describedby', 'save-prompt-fields');
 
+  const timer = document.createElement('div');
+  timer.className = 'save-prompt-timer';
+  const timerFill = document.createElement('div');
+  timerFill.className = 'save-prompt-timer-fill';
+  timer.appendChild(timerFill);
+  card.appendChild(timer);
+
+  const head = document.createElement('div');
+  head.className = 'save-prompt-head';
   const heading = document.createElement('div');
+  heading.id = 'save-prompt-heading';
   heading.className = 'vault-capture-heading';
-  card.appendChild(heading);
+  head.appendChild(heading);
+  const dismissX = /** @type {HTMLButtonElement} */ (document.createElement('button'));
+  dismissX.type = 'button';
+  dismissX.className = 'save-prompt-close';
+  dismissX.setAttribute('aria-label', 'Dismiss');
+  dismissX.textContent = '\u2715';
+  head.appendChild(dismissX);
+  card.appendChild(head);
 
-  const originValue = makeField(document, card, 'Site').value;
+  const fields = document.createElement('div');
+  fields.id = 'save-prompt-fields';
+  fields.className = 'vault-capture-fields';
+  card.appendChild(fields);
+  const originValue = makeField(document, fields, 'Site').value;
   // The second row is Username for a login and Card for a payment card (issue #152),
   // so its LABEL is re-rendered per offer alongside its value.
-  const { label: subjectLabel, value: usernameValue } = makeField(document, card, 'Username');
+  const { label: subjectLabel, value: usernameValue } = makeField(document, fields, 'Username');
 
   const choices = document.createElement('div');
   choices.className = 'vault-capture-choices';
   choices.setAttribute('role', 'radiogroup');
   choices.setAttribute('aria-label', 'Choose a vault');
   card.appendChild(choices);
+
+  // Locked offers (Sortie 06 Leg 2): the note under the choices; hidden for every unlocked offer.
+  const lockNote = document.createElement('div');
+  lockNote.className = 'save-prompt-lock-note hidden';
+  card.appendChild(lockNote);
 
   const error = document.createElement('div');
   error.className = 'vault-capture-error';
@@ -148,12 +181,83 @@ export function buildVaultCaptureCard(document) {
   const cancel = /** @type {HTMLButtonElement} */ (document.createElement('button'));
   cancel.className = 'text-btn vault-sheet-btn';
   cancel.type = 'button';
-  cancel.textContent = 'Cancel';
-  actions.appendChild(save);
+  cancel.textContent = 'Not now';
+  const counter = document.createElement('span');
+  counter.className = 'save-prompt-counter';
+  actions.appendChild(counter);
   actions.appendChild(cancel);
+  actions.appendChild(save);
   card.appendChild(actions);
 
-  return { node, card, heading, originValue, subjectLabel, usernameValue, choices, error, save, cancel };
+  // Result states (saved / expired / ...) render here, in the same view.
+  const status = document.createElement('div');
+  status.className = 'save-prompt-status';
+  status.setAttribute('role', 'status');
+  status.classList.add('hidden');
+  card.appendChild(status);
+
+  return {
+    node: card,
+    card,
+    timerFill,
+    heading,
+    dismissX,
+    fields,
+    originValue,
+    subjectLabel,
+    usernameValue,
+    choices,
+    lockNote,
+    error,
+    counter,
+    status,
+    save,
+    cancel
+  };
+}
+
+/** The locked-offer note (Sortie 06 Leg 2). */
+export const LOCK_NOTE = 'Your vault is locked. You will enter your master password to save.';
+
+/**
+ * The noun a success result uses ("Password saved to ...", "Card saved to ...", "Details saved
+ * to ..."), resolved through KIND_TABLE. @param {{ kind?: string }} model
+ * @returns {string}
+ */
+export function resultNounOf(model) {
+  return KIND_TABLE[kindOf(model)].resultNoun;
+}
+
+/**
+ * Sortie 06 Leg 3 (DD3/R9): the screen-reader announcement for a freshly presented OFFER, built
+ * from KIND_TABLE nouns and the origin HOST only (never a username, vault label or field value).
+ * `withHint` appends "Press F6 to respond." - the chrome's polite region carries it; the prompt's
+ * own status node omits it (the prompt is already in reach). Result-only models announce nothing.
+ * @param {any} model
+ * @param {{ withHint?: boolean }} [opts]
+ * @returns {string | null}
+ */
+export function savePromptAnnouncement(model, { withHint = false } = {}) {
+  if (!model || typeof model !== 'object' || typeof model.result === 'string') return null;
+  /** @type {string} */
+  let host;
+  try {
+    host = new URL(String(model.origin)).host;
+  } catch {
+    host = '';
+  }
+  const where = host ? ` for ${host}` : '';
+  const kind = kindOf(model);
+  const update = model.mode === 'update';
+  let lead;
+  if (kind === 'identity') {
+    const changed = Array.isArray(model.changedFields) ? model.changedFields : [];
+    if (!update) lead = 'Save your details';
+    else lead = changed.length > 0 ? 'Update your saved details' : 'Add to your identity';
+  } else {
+    lead = `${update ? 'Update' : 'Save'} ${KIND_TABLE[kind].noun}`;
+  }
+  return `${lead}${where}?${withHint ? ' Press F6 to respond.' : ''}`;
 }
 
 /**
@@ -186,11 +290,15 @@ function makeField(document, card, labelText) {
  * (empty for `update`) so the caller can read the selection.
  * @param {Document} document
  * @param {ReturnType<typeof buildVaultCaptureCard>} refs
- * @param {{ origin?: string, username?: string|null, mode?: string, defaultVaultId?: string, choices?: Array<string | { vaultId: string, label?: string }>, kind?: string, brand?: string|null, last4?: string|null, addedFields?: string[], changedFields?: string[] }} model
+ * @param {{ origin?: string, username?: string|null, mode?: string, defaultVaultId?: string, choices?: Array<string | { vaultId: string, label?: string, disabled?: boolean }>, kind?: string, brand?: string|null, last4?: string|null, addedFields?: string[], changedFields?: string[] }} model
  * @returns {{ mode: 'save'|'update', choiceInputs: HTMLInputElement[] }}
  */
 export function renderVaultCaptureCard(document, refs, model) {
   const mode = model && model.mode === 'update' ? 'update' : 'save';
+  // A LOCKED offer (Sortie 06 Leg 2) renders like a save (heading, vault choices) with the lock
+  // note and an "Unlock & save" primary; identity always re-asks after unlock, so it reads
+  // "Unlock & review".
+  const locked = !!model && model.mode === 'locked';
   // Copy is per-KIND (issue #152): "Save card?" over a payment capture, and the
   // subject row becomes Card ("Visa •••• 4242") instead of Username — resolved
   // through KIND_TABLE rather than a binary branch. A kind may supply its OWN
@@ -202,11 +310,13 @@ export function renderVaultCaptureCard(document, refs, model) {
       ? entry.heading(model)
       : `${mode === 'update' ? 'Update' : 'Save'} ${entry.noun}?`;
   refs.heading.textContent = heading;
-  refs.card.setAttribute('aria-label', heading.slice(0, -1));
   refs.originValue.textContent = String(model && model.origin != null ? model.origin : '');
   if (refs.subjectLabel) refs.subjectLabel.textContent = entry.subjectLabel;
   refs.usernameValue.textContent = entry.subjectValueText(model);
   refs.error.textContent = '';
+  refs.lockNote.classList.toggle('hidden', !locked);
+  refs.lockNote.textContent = locked ? LOCK_NOTE : '';
+  refs.save.textContent = locked ? (kindOf(model) === 'identity' ? 'Unlock & review' : 'Unlock & save') : 'Save';
 
   refs.choices.textContent = '';
   /** @type {HTMLInputElement[]} */
@@ -235,6 +345,11 @@ export function renderVaultCaptureCard(document, refs, model) {
       input.name = 'vault-capture-choice';
       input.value = String(vaultId != null ? vaultId : '');
       input.checked = def != null ? vaultId === def : i === 0;
+      // An unresolvable vault ("Unknown vault") is shown but not selectable (main still validates).
+      if (c && typeof c === 'object' && c.disabled === true) {
+        input.disabled = true;
+        input.checked = false;
+      }
       const span = document.createElement('span');
       span.textContent = String(labelText != null ? labelText : '');
       optLabel.appendChild(input);

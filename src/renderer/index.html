@@ -448,6 +448,13 @@
          suggestion updates never race those regions' announcements. -->
     <div id="suggest-status" class="sr-only" role="status" aria-live="polite"></div>
 
+    <!-- Corner save-prompt announcement (Sortie 06 Leg 3, DD3): a dedicated SIBLING live region
+         so a new offer ("Save password for example.com? Press F6 to respond.") never races or
+         silences the regions above. Self-closed, never wrapping anything; the page has its own
+         role=status node too (P3 - a polite chrome region while the guest holds focus - is
+         unverified with a screen reader). -->
+    <div id="save-prompt-status" class="sr-only" role="status" aria-live="polite"></div>
+
     <!-- Image lightbox with zoom + pan -->
     <div id="lightbox" class="hidden" role="dialog" aria-modal="true" aria-label="Image viewer">
       <div id="lightbox-toolbar">

@@ -36,6 +36,7 @@ export default [
       'src/shared/origin-match.js',
       'src/preload/chrome-preload.js',
       'src/preload/find-overlay-preload.js',
+      'src/preload/save-prompt-preload.js',
       'src/preload/menu-overlay-preload.js',
       'test/**',
       '*.config.{js,mjs}'
@@ -256,7 +257,10 @@ export default [
       // confirms + Copy-to…) — the same real-ES-module shape (`export function` needs
       // sourceType: module).
       'src/renderer/pages/vault-item-actions-controller.js',
-      'src/renderer/menu-overlay.js'
+      'src/renderer/menu-overlay.js',
+      // save-prompt.js (Sortie 06) is the corner save-prompt page controller - a real ES module
+      // (static import of the shared vault-capture-template builders).
+      'src/renderer/save-prompt.js'
     ],
     languageOptions: { sourceType: 'module' }
   },

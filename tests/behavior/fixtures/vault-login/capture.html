@@ -1,0 +1,51 @@
+<!--
+  BEHAVIOR-TEST FIXTURE — do not deploy or link from production.
+  CAPTURE MODE of the vault-login fixture (Sortie 06, Leg 1): a login form whose submit
+  REALLY NAVIGATES, so a trusted click on #submit (after typeText into #username/#password)
+  produces a `did-navigate` that RELEASES a held save offer — which `index.html` can never do
+  (its submit is preventDefault()ed, as `vault-mcp-surface` relies on).
+
+  Serve exactly like index.html (the same origin; see README.md):
+
+      python3 -m http.server 8099      # from THIS directory
+
+  Then open http://127.0.0.1:8099/capture.html. The form is a plain GET form to landed.html.
+  The inputs deliberately carry NO `name` attribute, so the browser submits NEITHER value:
+  the landing URL is a bare `landed.html?` and no credential ever reaches the address bar or
+  the static server's log. (The capture scanner keys off input type + autocomplete + the
+  trusted click/Enter gesture, not field names.)
+
+  Use a username AND password UNIQUE TO THE RUN for each submit step, so the capture's
+  disposition is `save` regardless of what the profile's seeded Login items are.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vault Login Fixture (capture mode)</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 420px; margin: 3rem auto; padding: 1rem; background: #101418; color: #e0e0e0; }
+    h1 { color: #f90; font-size: 1.2rem; }
+    .marker { color: #0f0; font-size: 0.8rem; margin-bottom: 1.5rem; }
+    label { display: block; margin: 0.75rem 0 0.25rem; font-size: 0.85rem; color: #aaa; }
+    input { width: 100%; padding: 0.5rem; font-size: 1rem; box-sizing: border-box; background: #1b2027; color: #e0e0e0; border: 1px solid #4af; }
+    button { margin-top: 1rem; padding: 0.5rem 1rem; font-size: 1rem; background: #243; color: #cfc; border: 1px solid #4c6; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h1>Vault Login Fixture (capture mode)</h1>
+  <div class="marker">vault-login-capture-fixture-loaded</div>
+
+  <!-- NOT preventDefault()ed: submitting navigates to landed.html. -->
+  <form id="login" method="get" action="landed.html" autocomplete="off">
+    <label for="username">Username</label>
+    <input id="username" type="text" autocomplete="username">
+
+    <label for="password">Password</label>
+    <input id="password" type="password" autocomplete="current-password">
+
+    <button id="submit" type="submit">Sign in</button>
+  </form>
+</body>
+</html>

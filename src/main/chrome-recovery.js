@@ -91,12 +91,17 @@ function createChromeRecovery({ now = Date.now, logger, windowMs = 60_000, maxRe
   /**
    * @param {any} record
    * @param {{ reason?: string, exitCode?: number } | null | undefined} details
-   * @param {{ windowId: number, closeSheet: (reason: string) => void, hideFind: () => void, hideTearoff: () => void, reload: () => void, setTitle: (t: string) => void, onCrash?: (e: any) => void }} hooks
+   * @param {{ windowId: number, closeSheet: (reason: string) => void, hideFind: () => void, hideTearoff: () => void, closeSavePrompt?: () => void, reload: () => void, setTitle: (t: string) => void, onCrash?: (e: any) => void }} hooks
    * @returns {'ignored' | 'reloaded' | 'paused'}
    */
   function onChromeGone(record, details, hooks) {
     const { reason, exitCode } = details || {};
-    const { windowId, closeSheet, hideFind, hideTearoff, reload, setTitle, onCrash } = hooks;
+    const { windowId, closeSheet, hideFind, hideTearoff, closeSavePrompt, reload, setTitle, onCrash } = hooks;
+    // Sortie 06 Leg 1 (AC13): the corner save prompt dies with its chrome (the chrome's queue is
+    // gone with its renderer) - closed `teardown` BEFORE every early return below (`clean-exit`,
+    // the already-`paused` branch and the new-`paused` branch), so a paused window never keeps a
+    // prompt or its held capture's shown state.
+    closeSavePrompt?.();
     if (reason === 'clean-exit') return 'ignored';
 
     record.chromeCrashTimes ??= [];

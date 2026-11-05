@@ -3,6 +3,9 @@
 
 // Mission 20 Flight 3 Leg 2 (DD1): the shared guest-takeover predicate.
 const { guestTakenOver } = require('../shared/load-failure');
+// Sortie 06 Leg 3: the prompt view's trusted key decision + the shared guest-focus predicate.
+const { savePromptKeyAction } = require('./save-prompt-keys');
+const { focusActiveGuest } = require('./focus-active-guest');
 
 /**
  * Register the sole sanctioned Electron `closed` listener. The primitive id is
@@ -36,6 +39,11 @@ function createWindowFactory(deps) {
     createFindOverlayManager,
     createMenuOverlayManager,
     createTearoffOverlayManager,
+    // Sortie 06 Leg 1 (DD1): the corner save prompt. All four are OPTIONAL so a harness that
+    // omits them (window-factory.test.js fakes) still constructs a window with no prompt.
+    createSavePromptManager,
+    computeSavePromptBounds,
+    getVaultHuman,
     htmlFullscreen,
     authChallenges,
     computeFindOverlayBounds,
@@ -101,6 +109,66 @@ function createWindowFactory(deps) {
     view.setBackgroundColor('#00000000');
     loadViewFile(view, paths.tearoffHtml, 'tearoff-overlay');
     return view;
+  }
+
+  // Sortie 06 Leg 1 (DD1/DD9): the corner save-prompt view - chrome-class, context-isolated,
+  // sandboxed, transparent, with ONLY the narrow save-prompt preload. Never focused on show.
+  function createSavePromptView() {
+    const view = new WebContentsView({
+      webPreferences: {
+        preload: paths.savePromptPreload,
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true
+      }
+    });
+    view.setBackgroundColor('#00000000');
+    loadViewFile(view, paths.savePromptHtml, 'save-prompt');
+    return view;
+  }
+
+  // Sortie 06 Leg 3 (DD2; R4/R6/R8): keys are read from the prompt view's TRUSTED
+  // `before-input-event` (never a page channel), acted on only while the prompt is visible, and
+  // scoped to THIS record by closure (a focused prompt in window A never moves focus in B).
+  //   F6        -> focus the chrome THEN send focus-address (focus-then-send).
+  //   Shift+F6  -> the active guest via the shared predicate; a taken-over/destroyed guest falls
+  //                back to chrome focus + 'focus-content' (the chrome's load-failure heading path).
+  //   Esc       -> close('dismissed') only on an interactive offer; otherwise swallowed (no-op).
+  /**
+   * @param {any} view  the freshly created prompt view (the manager builds it lazily)
+   * @param {any} record
+   */
+  function attachSavePromptKeys(view, record) {
+    view.webContents.on('before-input-event', (/** @type {any} */ event, /** @type {any} */ input) => {
+      const manager = record.savePrompt;
+      if (!manager || !manager.isVisible()) return;
+      const action = savePromptKeyAction({
+        type: input.type,
+        key: input.key,
+        control: input.control,
+        meta: input.meta,
+        shift: input.shift,
+        alt: input.alt
+      });
+      if (!action) return;
+      event.preventDefault();
+      if (action === 'dismiss') {
+        if (manager.canDismissByKey()) manager.close('dismissed');
+        return;
+      }
+      if (input.isAutoRepeat) return;
+      const chrome = !record.chromeView.webContents.isDestroyed() ? record.chromeView.webContents : null;
+      if (action === 'to-address') {
+        chrome?.focus();
+        chrome?.send('chrome-shortcut-action', { action: 'focus-address' });
+        return;
+      }
+      // to-guest (Shift+F6): never dead - a refused (taken-over) guest hands to the chrome.
+      if (!focusActiveGuest(record)) {
+        chrome?.focus();
+        chrome?.send('chrome-shortcut-action', { action: 'focus-content' });
+      }
+    });
   }
 
   /** @param {any} record */
@@ -278,7 +346,10 @@ function createWindowFactory(deps) {
       // bucket mapping. Closes over `record` so the store gets window identity
       // natively (it holds no tokens). Fires on BOTH manager emit paths
       // (closeMenuOverlay AND the model-replace 'superseded' branch).
-      onClosed: ({ menuType, reason }) => authChallenges?.notifySheetClosed(record, menuType, reason)
+      onClosed: ({ menuType, reason }) => authChallenges?.notifySheetClosed(record, menuType, reason),
+      // Sortie 06 Leg 1 (AC16): the corner save prompt's `sheet` timer-pause input. Read via
+      // `record.savePrompt` at CALL time (the prompt is constructed just below).
+      onVisibilityChanged: (visible) => record.savePrompt?.setSheetVisible(visible)
     });
 
     const tearoffOverlay = createTearoffOverlayManager({
@@ -289,6 +360,34 @@ function createWindowFactory(deps) {
     record.findOverlay = findOverlay;
     record.sheet = sheet;
     record.tearoffOverlay = tearoffOverlay;
+
+    // Sortie 06 Leg 1 (DD1): the per-window corner save prompt. One instance per window; every
+    // dep closes over THIS record, so window B's blur/focus/sheet/tab events never reach it.
+    // The vault delegates resolve at CALL time (`getVaultHuman` may force-construct vault-human,
+    // which is only reached when a capture is actually being saved/dismissed).
+    if (typeof createSavePromptManager === 'function') {
+      record.savePrompt = createSavePromptManager({
+        getContentView: () => (win.isDestroyed() ? null : win.contentView),
+        createView: () => {
+          const v = createSavePromptView();
+          attachSavePromptKeys(v, record);
+          return v;
+        },
+        getActiveGuestBounds: () => {
+          const entry = record.activeTabWcId != null ? record.tabViews.get(record.activeTabWcId) : null;
+          return entry && !entry.view.webContents.isDestroyed() ? entry.view.getBounds() : null;
+        },
+        isFindVisible: () => !!record.findOverlay?.isVisible(),
+        isSheetVisible: () => !!record.sheet?.isVisible(),
+        isFullscreen: () => record.htmlFullscreen != null,
+        computeBounds: computeSavePromptBounds,
+        chromeZoomFactor: () => (chromeView.webContents.isDestroyed() ? 1 : chromeView.webContents.getZoomFactor()),
+        sendToChrome: sendToOwnChrome,
+        captureSave: (arg) => getVaultHuman().captureSave(arg),
+        captureDismiss: (captureId) => getVaultHuman?.()?.captureDismiss(captureId),
+        focusActiveGuest: () => focusActiveGuest(record)
+      });
+    }
 
     // Mission 20 Flight 3 Leg 3 (DD5/DD6): a dead chrome renderer. Registered
     // AFTER the overlay slots above are assigned — every hook closure reads
@@ -305,6 +404,9 @@ function createWindowFactory(deps) {
         closeSheet: (r) => record.sheet?.closeMenuOverlay(r),
         hideFind: () => record.findOverlay?.hide(),
         hideTearoff: () => record.tearoffOverlay?.hide(),
+        // Sortie 06 Leg 1 (AC13): a dead chrome takes its queue with it - close the prompt
+        // `teardown` (drops the shown capture). Read at CALL time like the hooks above.
+        closeSavePrompt: () => record.savePrompt?.close('teardown'),
         reload: () => chromeView.webContents.reload(),
         setTitle: (t) => {
           if (!win.isDestroyed()) win.setTitle(t);
@@ -314,6 +416,11 @@ function createWindowFactory(deps) {
     });
 
     win.on('close', () => {
+      // Sortie 06 Leg 1 (AC13): the corner save prompt closes FIRST (reason `teardown`, which
+      // drops the shown capture and emits its single `save-prompt-closed`), before the auth
+      // queue cancel and before releaseVaultHoldsForWindow drops this window's captures - so
+      // its close reason wins over the "expired" state those drops would otherwise cause.
+      record.savePrompt?.close('teardown');
       // M14 F1 L2 (DD2): cancel the WHOLE per-window auth queue FIRST — the
       // sheet's own 'teardown' close below only ever resolves the presented
       // head, not queued challenges (load-bearing; unit-pinned). Every native
@@ -341,6 +448,7 @@ function createWindowFactory(deps) {
       popupRegistry?.closeAllForRecord(record);
       findOverlay.teardown();
       tearoffOverlay.teardown();
+      record.savePrompt?.teardown();
       sheet.closeMenuOverlay('teardown');
       sheet.teardown();
 
@@ -349,6 +457,7 @@ function createWindowFactory(deps) {
         rec.findOverlay = null;
         rec.tearoffOverlay = null;
         rec.sheet = null;
+        rec.savePrompt = null;
       }
       if (!rec) return;
 
@@ -396,6 +505,16 @@ function createWindowFactory(deps) {
     });
 
     win.on('blur', () => sheet.closeMenuOverlay('blur'));
+    // Sortie 06 Leg 1 (AC16): the corner save prompt's `windowBlur` timer-pause input, fed from
+    // EVENTS ONLY (blur/minimize -> true, focus/restore -> false). The initial value is false and
+    // is deliberately NEVER seeded from win.isFocused() - that call is unreliable under WSLg /
+    // dev-launch (window-census.js header); a missed pause costs at most a timeout, a stuck pause
+    // would hold a credential for the whole 2-minute TTL. `record.savePrompt` is read at call time
+    // and nulled at close, so a late event is a no-op.
+    win.on('blur', () => record.savePrompt?.setWindowBlurred(true));
+    win.on('minimize', () => record.savePrompt?.setWindowBlurred(true));
+    win.on('focus', () => record.savePrompt?.setWindowBlurred(false));
+    win.on('restore', () => record.savePrompt?.setWindowBlurred(false));
     win.on('resize', () => {
       if (chromeView.webContents.isDestroyed()) return;
       const { width, height } = win.getContentBounds();

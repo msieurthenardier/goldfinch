@@ -1040,66 +1040,6 @@ body {
   color: inherit;
 }
 
-/* ---------- vault-capture template (M12 Flight 2 Leg 4 capture-save, DD7) ----------
-   A centered backdrop + role="dialog" card (mirrors #sheet-vault-unlock) offering to
-   save / update the just-submitted credential. Shows the origin + username (read-only),
-   a Save/Update heading, and — for a save only — a vault radio choice. Reuses
-   .new-container-inner for card chrome + .text-btn for the actions. */
-#sheet-vault-capture {
-  position: absolute;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.55);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.vault-capture-heading {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--fg);
-}
-.vault-capture-field {
-  display: flex;
-  gap: 8px;
-  font-size: 12px;
-}
-.vault-capture-field-label {
-  flex: 0 0 auto;
-  color: var(--fg-dim);
-  min-width: 64px;
-}
-.vault-capture-field-value {
-  flex: 1 1 auto;
-  color: var(--fg);
-  word-break: break-all;
-}
-.vault-capture-choices {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-top: 2px;
-}
-.vault-capture-choices.hidden {
-  display: none;
-}
-.vault-capture-choice {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--fg);
-  cursor: pointer;
-}
-.vault-capture-error {
-  font-size: 12px;
-  color: #ff6b6b;
-  min-height: 15px;
-  line-height: 15px;
-}
-.vault-capture-error:empty {
-  color: transparent;
-}
-
 /* ---------- suggestions template (address-bar, M08 Flight 4 Leg 2) ----------
    Listbox panel matching the menu panel's chrome (same tokens/box as #sheet-menu);
    positioned inline from the translated left-aligned anchor (alignLeft + y clamp

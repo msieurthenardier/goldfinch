@@ -21,19 +21,26 @@ and the real chrome-owned save/update sheet rendering (or NOT rendering) over th
 unit tests cannot provide. The disposition *logic* is unit-tested in `test/unit/vault-capture.test.js`
 (`disposeCapture` → save / update / null); this spec proves the same outcomes drive the live sheet.
 
-**Apparatus boundary (mirrors `vault-human-fill-boundary`, Flight 2 DD8):** the chrome-owned
-menu-overlay **"Save password?" / "Update password?" sheet is MCP-unreachable** — no tool exposes
-its WebContents. Its presence/absence is observed **only** via an admin `captureWindow` pixel
-screenshot; the captured password never enters page DOM. The sheet **interior** (choosing a vault,
-clicking Save) is verified by main-process integration tests + the Flight 4 HAT and is **staged**
-here via the fixture/integration seam — this test does not type into or read the sheet.
+**Apparatus boundary (mirrors `vault-human-fill-boundary`, Flight 2 DD8) — UPDATED Sortie 06:** the
+"Save password?" / "Update password?" offer is no longer a centered menu-overlay sheet. It is the
+non-blocking **corner save prompt**, its own per-window view, and it is **fail-closed to every
+automation op AND excluded from `captureWindow`** (the prompt renders the origin, username and
+vault choice and takes the operator's Save click). So the old pixel evidence is GONE: its
+presence/absence is observed through `enumerateWindows().savePromptVisible` (an always-present
+admin boolean, zero cached state) and, for what it looks like, **by eye** (`[by-eye]`/HAT) — never
+through `captureWindow`. The captured password never enters page DOM. The prompt **interior**
+(choosing a vault, clicking Save) is verified by main-process integration tests + the HAT and is
+**staged** here via the fixture/integration seam — this test does not type into or read the prompt.
+Steps 2/4/5/6 below were retargeted from `captureWindow` pixels to `savePromptVisible` plus
+`[by-eye]`; use the fixture's **capture mode** (`capture.html` → `landed.html`) so the submit
+actually navigates and releases the offer (`index.html` suppresses its submit).
 
 ## Preconditions
 
 - Goldfinch dev build running with the MCP automation surface (`npm run dev:automation`, loopback
   49707).
 - An **admin** transport key is minted (`GOLDFINCH_AUTOMATION_ADMIN` set) — needed for
-  `captureWindow` (the sole MCP observation of the chrome sheet).
+  `enumerateWindows` (`savePromptVisible`, the sole MCP observation of the corner prompt).
 - A **jar** transport key + a **jar vault access key** for the fixture jar (drives the guest tab;
   reads/writes the form fields).
 - The push-button vault-fixture builder has provisioned a **set-up, UNLOCKED manager** and the
@@ -47,8 +54,9 @@ here via the fixture/integration seam — this test does not type into or read t
 - browser (guest DOM: the login form, typed field values, submit, and the **absence** of any
   save/update prompt node in page DOM) — measured via the goldfinch MCP `readDom` / `evaluate` /
   `fill` / `click` (jar key, jar-membership-gated).
-- image (the chrome save/update sheet rendered over the guest — **presence AND absence**) —
-  measured via goldfinch MCP admin `captureWindow` (pixel evidence; the sheet is not DOM-reachable).
+- window topology (the corner save/update prompt over the guest — **presence AND absence**) —
+  measured via goldfinch MCP admin `enumerateWindows().savePromptVisible`. Its pixels are
+  **`[by-eye]`** only: the prompt is excluded from `captureWindow` and refused to every op.
 - filesystem (optional: the stored vault item's password before/after) — measured via the vault
   read seam / integration, never by reading the sheet.
 
@@ -57,17 +65,17 @@ here via the fixture/integration seam — this test does not type into or read t
 | # | Actions | Expected Results |
 |---|---------|------------------|
 | 1 | Open a tab in the fixture jar and navigate it to the login fixture. Wait for the form to render. Confirm the vault is UNLOCKED (toolbar lock indicator unlocked). | Page loads; a `<input type=password>` + username field are present. The manager is set up and unlocked (the capture gate needs unlocked; a locked vault is the variant below). |
-| 2 | **NEW login (save).** Type a brand-new credential into the form — `username: "bob@example.com"`, `password: "s3cret-new"` — and submit the form. Immediately `captureWindow` (admin). | A chrome-owned **"Save password?"** sheet renders over the guest (pixel evidence): a save offer, since no stored login matches this username at this origin. Re-read the guest DOM in full: **no** prompt node, and **no** password value, exists anywhere in page DOM (the offer is chrome-owned; the captured password lives only main-side). |
+| 2 | **NEW login (save).** Type a brand-new credential into the form — `username: "bob@example.com"`, `password: "s3cret-new"` — and submit the form (capture mode). Immediately read `enumerateWindows().savePromptVisible`. | `savePromptVisible` is `true` and **[by-eye]** a chrome-owned **"Save password?"** prompt shows in the corner over the guest: a save offer, since no stored login matches this username at this origin. Re-read the guest DOM in full: **no** prompt node, and **no** password value, exists anywhere in page DOM (the offer is chrome-owned; the captured password lives only main-side). |
 | 3 | Complete the save (staged via the fixture/integration seam — the sheet interior is out of MCP scope): choose the fixture jar and Save. Read the jar vault back via the vault seam. | The jar vault now holds a login `{ username: "bob@example.com", password: "s3cret-new", origin }` in addition to alice's. The held capture record is dropped (no lingering password). |
-| 4 | **UNCHANGED re-login (NO offer — the regression guard).** Reload the fixture. Type the **already-stored, unchanged** credential — `username: "alice@example.com"`, `password: "correct-horse"` (the seeded item) — and submit. `captureWindow` (admin) after the submit settles. | **No** save/update sheet appears — the screenshot shows the plain page with **no** chrome prompt over it. The submitted `{username, password}` exactly matches the stored item, so there is nothing to save. The guest DOM likewise has no prompt node. *(Before the fix this wrongly showed an "Update password?" sheet.)* |
-| 5 | **CHANGED password (update).** Reload the fixture. Type `username: "alice@example.com"` with a **different** password — `password: "rotated-9000"` — and submit. `captureWindow` (admin). | A chrome-owned **"Update password?"** sheet renders over the guest (pixel evidence): the username matches a stored login at this origin but the password differs, so an update is offered. Guest DOM still contains no prompt node / no password value. |
-| 6 | Dismiss the update sheet WITHOUT saving (Escape targeting the chrome / window blur). Re-read the jar vault via the seam. | The sheet closes; the stored alice login is **unchanged** (`password` still `"correct-horse"`) — dismissing offers nothing and the held capture record is dropped. |
+| 4 | **UNCHANGED re-login (NO offer — the regression guard).** Reload the fixture. Type the **already-stored, unchanged** credential — `username: "alice@example.com"`, `password: "correct-horse"` (the seeded item) — and submit. `captureWindow` (admin) after the submit settles (wait past the ~10 s prompt lifetime if in doubt). Read `savePromptVisible` throughout. | **No** save/update prompt appears — `savePromptVisible` stays `false` and **[by-eye]** the page shows no prompt over it. The submitted `{username, password}` exactly matches the stored item, so there is nothing to save. The guest DOM likewise has no prompt node. *(Before the fix this wrongly showed an "Update password?" sheet.)* |
+| 5 | **CHANGED password (update).** Reload the fixture. Type `username: "alice@example.com"` with a **different** password — `password: "rotated-9000"` — and submit. Read `savePromptVisible`. | `savePromptVisible` is `true` and **[by-eye]** an **"Update password?"** prompt shows in the corner: the username matches a stored login at this origin but the password differs, so an update is offered. Guest DOM still contains no prompt node / no password value. |
+| 6 | Dismiss the update prompt WITHOUT saving (**[by-eye]** click ✕ / "Not now", or let the ~10 s timer expire — MCP cannot click the prompt). Re-read the jar vault via the seam. | `savePromptVisible` becomes `false`; the stored alice login is **unchanged** (`password` still `"correct-horse"`) — dismissing offers nothing and the held capture record is dropped. |
 
 ## Out of Scope
 
-- **Sheet interior**: choosing the destination vault, clicking Save/Update, and the Buffer
-  secret-channel zeroization — verified by main-process integration tests and the Flight 4 HAT.
-  Steps 3 and 6 stage/read around the sheet, never through it (MCP-unreachable by design, DD8).
+- **Prompt interior**: choosing the destination vault, clicking Save/Update, and the Buffer
+  secret-channel zeroization — verified by main-process integration tests and the HAT.
+  Steps 3 and 6 stage/read around the prompt, never through it (MCP-unreachable by design, DD10).
 - **Disposition unit logic** (`disposeCapture` → save / update / null; the exact-password no-op;
   active-jar-over-global tie-break) — exhaustively covered in `test/unit/vault-capture.test.js`.
 - **Automation fill path** and the decorative lock icon / gesture-gated fill — covered by
@@ -76,17 +84,18 @@ here via the fixture/integration seam — this test does not type into or read t
 ## Variants (optional)
 
 - **Locked vault → unlock-to-save.** Lock the manager, then submit a NEW credential on the fixture.
-  Expected: an **unlock** prompt is raised first (the credential is held main-side); on a successful
-  unlock the flow continues to the **"Save password?"** sheet. If the submitted credential turns out
+  Expected (INTERIM, Sortie 06 Leg 1; Leg 2 replaces the auto-raise with consent): an **unlock**
+  sheet is raised first (the credential is held main-side); on a successful unlock the flow
+  continues to the **"Save password?"** corner prompt (`savePromptVisible`, **[by-eye]**). If the submitted credential turns out
   to be the seeded, **unchanged** one, the post-unlock disposition offers **nothing** (the no-op
   guard applies after unlock too). Abandoning the unlock drops the held credential.
-- **Prompt survives the submit navigation.** On a fixture whose submit navigates the page, confirm
-  (via `captureWindow`) that the "Save password?" sheet **stays up** after the page finishes loading
-  — it is not torn down by the focus-steal of the spawning navigation (it dismisses only on an
-  explicit Save/Cancel/Escape or a real app-switch).
-- **Sheet chrome.** Confirm (pixel evidence) the save/update sheet reads as a real modal: a titled
-  header with a visible **close (X)** button and comfortable spacing (parity with the picker/unlock
-  sheets).
+- **Prompt survives the submit navigation.** On the capture-mode fixture, confirm
+  `savePromptVisible` is `true` after the page finishes loading — the corner prompt is not torn
+  down by the focus-steal of the spawning navigation (it closes only on Save/Not now/✕, the ~10 s
+  timeout, a tab switch, a lock, or window teardown; a window blur only PAUSES its timer).
+- **Prompt chrome.** **[by-eye]** Confirm the corner prompt reads as a small non-modal card: a
+  titled header with a visible **close (X)** button, a countdown bar, and "Not now" / "Save".
+  (Pixels are out of MCP reach; the old sheet-pixel check is retired.)
 - **Burner tab (DD9 suppression).** Submit a login on the fixture opened in a **burner** partition.
   Expected: **no** capture offer of any kind — burner partitions have no vault, so capture is
   structurally absent.

@@ -65,14 +65,6 @@ interface MenuOverlayBridge {
     username: string;
     secret: Uint8Array;
   }): Promise<{ answered: boolean; reason?: string }>;
-  /** sheet → main: the DEDICATED vault-capture save channel (M12 F2 Leg 4, DD7). The
-   * chosen vaultId + the stashed captureId (+ token) — NEVER the captured password
-   * (held only in the main-side record). Returns { saved }; false re-prompts the sheet. */
-  captureSave(payload: {
-    token: number;
-    captureId: string;
-    vaultId?: string;
-  }): Promise<{ saved: boolean; reason?: string }>;
   /** sheet → main: the DEDICATED vault-set master-password setup channel (M12 F3 Leg 4).
    * Mirrors unlockVault — the password rides as a Uint8Array. Returns { ok }; false
    * re-prompts the sheet, true closes it (main also opens vault-recovery-show). */

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'" />
+    <title>Save prompt</title>
+    <link rel="stylesheet" href="save-prompt.css" />
+  </head>
+  <body>
+    <!-- Corner save prompt (Sortie 06, DD1): a content-sized, never-focused WebContentsView
+         over the guest. The card is built by src/shared/vault-capture-template.js on each
+         save-prompt:init and emptied synchronously on save-prompt:clear. -->
+    <div id="save-prompt-root"></div>
+    <!-- Leg 3 (DD3/R9): the prompt's OWN polite status node, a sibling of the root (the root is
+         emptied on every clear/init). Written with the offer announcement at mount, without the
+         chrome region's "Press F6" hint (the prompt is already in reach). -->
+    <div id="save-prompt-announce" class="sr-only" role="status" aria-live="polite"></div>
+    <script src="save-prompt.js" type="module"></script>
+  </body>
+</html>

@@ -66,7 +66,6 @@ import {
   CERT_CANCEL_ID
 } from '../shared/cert-picker-template.js';
 import { buildVaultPickerCard, renderVaultPickerRows, activationIdFor } from '../shared/vault-picker-template.js';
-import { buildVaultCaptureCard, renderVaultCaptureCard, selectedVaultId } from '../shared/vault-capture-template.js';
 import { buildVaultSetCard } from '../shared/vault-set-template.js';
 import { buildVaultRecoveryCard } from '../shared/vault-recovery-template.js';
 import { buildVaultStepupCard } from '../shared/vault-stepup-template.js';
@@ -1157,120 +1156,8 @@ import {
     }
   });
 
-  /* ------------------------------------------------------ template: vault-capture */
-  // Save / update prompt (M12 Flight 2 Leg 4 capture-save, DD7) — the DEDICATED
-  // SEVENTH template kind, a centered backdrop like vault-unlock (the submit carries
-  // no anchor). Shows the origin + username (read-only), a "Save password?" /
-  // "Update password?" heading, and — for a `save` only — a vault radio choice
-  // (default the active jar, "Global" selectable). Save reports the chosen vaultId +
-  // the stashed captureId to main via a DEDICATED invoke (menuOverlay.captureSave);
-  // the CAPTURED PASSWORD is never here — it lives only in the main-side held record.
-
-  const capture = buildVaultCaptureCard(document);
-  const captureNode = capture.node;
-  root.appendChild(captureNode);
-
-  // The captureId of the offer currently rendered (from the init model) + the render's
-  // choice radios. Set on every vault-capture init; the Save invoke carries the id back.
-  /** @type {string | null} */
-  let captureCaptureId = null;
-  /** @type {HTMLInputElement[]} */
-  let captureChoiceInputs = [];
-  // The fixed vaultId a save invoke falls back to (the update path's vault, which main
-  // ignores). Set per-init from the model's defaultVaultId.
-  /** @type {string | undefined} */
-  let captureDefaultVaultId;
-  let captureBusy = false; // guards a concurrent Save (double-Enter / Enter+click).
-
-  const captureEntry = sheet({
-    node: captureNode,
-    // no `items` — roving no-ops; Tab-cycling + Escape are dialog-local below.
-    // dismissible: false — but NOT for the one-time-key reason. The capture offer is SPAWNED BY a
-    // login-form submit, which also navigates the page; when the submitted page finishes loading it
-    // pulls focus back into the guest view, blurring this sheet. Without the opt-out the menu-
-    // controller's window-blur → closeAll would tear the "Save password?" prompt down before the
-    // operator can act (the prompt flashes and vanishes). This skips ONLY the incidental window-blur
-    // (and outside-click) in the sheet controller; Escape / Cancel / backdrop still dismiss it via
-    // attachModalCard's direct close below, and a real whole-window app-switch still closes it main-
-    // side (currentDismissible stays true — the open call does NOT pass dismissible:false), so the
-    // decline paths are unaffected. The captured credential lives main-side under captureId with a
-    // 2-min safety timeout, so persisting the sheet across the spawning navigation is safe.
-    dismissible: false,
-    onOpen() {
-      captureBusy = false;
-      captureNode.classList.remove('hidden');
-      // Focus the first vault choice on a save, else the Save button (update has none).
-      if (captureChoiceInputs.length) captureChoiceInputs[0].focus();
-      else capture.save.focus();
-    }
-    // no onClose middle (hide + report only)
-  });
-
-  // Save → the DEDICATED captureSave invoke ({ token, captureId, vaultId }). The
-  // vaultId is the checked radio (save) or the fixed default (update — main ignores it,
-  // using the record's fixed vault). NO password on this path. { saved:true } → main
-  // closes the sheet (channel 7 'activated'); { saved:false } → re-prompt with an error
-  // (the held record is dropped on the eventual dismiss / the 2-min timeout).
-  async function submitCapture() {
-    if (report.sent || report.token == null || captureBusy || captureCaptureId == null) return;
-    const token = report.token;
-    const captureId = captureCaptureId;
-    const vaultId = selectedVaultId(captureChoiceInputs) || captureDefaultVaultId;
-    captureBusy = true;
-    let res;
-    try {
-      res = await window.menuOverlay.captureSave({ token, captureId, vaultId });
-    } catch {
-      res = { saved: false };
-    } finally {
-      captureBusy = false;
-    }
-    // Stale-resolution guard: a supersede / model-replace during the await moved the
-    // live token; a late result must not act on the new menu.
-    if (report.token !== token || report.sent) return;
-    if (res && res.saved) {
-      report.sent = true; // suppress the trailing dismissed; main also closes the sheet.
-      menuController.close(captureEntry);
-    } else {
-      capture.error.textContent =
-        res && res.reason === 'locked' ? 'The vault locked — unlock it and try again' : 'Couldn’t save the password';
-    }
-  }
-
-  capture.save.addEventListener('click', () => {
-    void submitCapture();
-  });
-  capture.cancel.addEventListener('click', () => {
-    report.lastStimulus = 'escape';
-    menuController.close(captureEntry);
-  });
-  // Enter → Save stays a card-local keydown; Escape + Tab-cycle (choice radios → Save →
-  // Cancel) + backdrop dismiss are the SHARED modal-card helper (M12 F3 Leg 4, DD5
-  // refactor — replaces the former inline Escape/Tab/backdrop blocks byte-for-byte). The
-  // cycle getter reads captureChoiceInputs LIVE (rebuilt per render).
-  captureNode.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      void submitCapture();
-    }
-  });
-  attachModalCard({
-    node: captureNode,
-    getCycle: () => [...captureChoiceInputs, capture.save, capture.cancel],
-    close: (stimulus) => {
-      report.lastStimulus = stimulus;
-      menuController.close(captureEntry);
-    }
-  });
-
-  /** Render the capture card from the offer model + stash the captureId + choices.
-   * @param {any} model */
-  function renderCapture(model) {
-    captureCaptureId = model && typeof model.captureId === 'string' ? model.captureId : null;
-    captureDefaultVaultId = model && model.defaultVaultId;
-    const { choiceInputs } = renderVaultCaptureCard(document, capture, model);
-    captureChoiceInputs = choiceInputs;
-  }
+  // (HISTORY: the `vault-capture` template lived here until Sortie 06, DD8 - the save/update
+  // offer is now the corner SAVE PROMPT, its own per-window view; see docs/renderer-menu.md.)
 
   /* ---------------------------------------------------------- template: vault-set */
   // First-run master-password SETUP (M12 F3 Leg 4 first-run-setup, DD5) — the EIGHTH
@@ -2863,7 +2750,7 @@ import {
 
   /* ----------------------------------------------------- registry + init dispatch */
 
-  /** @type {{ [menuType: string]: 'menu' | 'info-popup' | 'input-dialog' | 'suggestions' | 'downloads' | 'vault-unlock' | 'vault-picker' | 'vault-capture' | 'vault-set' | 'vault-recovery-show' | 'vault-stepup' | 'vault-accesskey-show' | 'vault-import' | 'vault-change-master' | 'vault-recover' | 'vault-compromise' | 'vault-compromise-recover' | 'vault-adminkey-show' | 'auth-basic' | 'cert-picker' | 'bookmark-edit' | 'cert-override' | 'cert-viewer' }} */
+  /** @type {{ [menuType: string]: 'menu' | 'info-popup' | 'input-dialog' | 'suggestions' | 'downloads' | 'vault-unlock' | 'vault-picker' | 'vault-set' | 'vault-recovery-show' | 'vault-stepup' | 'vault-accesskey-show' | 'vault-import' | 'vault-change-master' | 'vault-recover' | 'vault-compromise' | 'vault-compromise-recover' | 'vault-adminkey-show' | 'auth-basic' | 'cert-picker' | 'bookmark-edit' | 'cert-override' | 'cert-viewer' }} */
   const TEMPLATES = {
     kebab: 'menu',
     container: 'menu',
@@ -2878,7 +2765,6 @@ import {
     'cert-viewer': 'cert-viewer', // M20 F2 Leg 4 — the read-only certificate summary card
     'vault-unlock': 'vault-unlock', // M12 F2 Leg 2 — the FIFTH kind (see above)
     'vault-picker': 'vault-picker', // M12 F2 Leg 3 — the SIXTH kind (see above)
-    'vault-capture': 'vault-capture', // M12 F2 Leg 4 — the SEVENTH kind (see above)
     'vault-set': 'vault-set', // M12 F3 Leg 4 — the EIGHTH kind (first-run setup)
     'vault-recovery-show': 'vault-recovery-show', // M12 F3 Leg 4 — the NINTH kind (dismiss-disabled)
     'vault-stepup': 'vault-stepup', // M12 F3 Leg 5 — the TENTH kind (access-key mint step-up)
@@ -2907,7 +2793,6 @@ import {
     [authEntry, authNode],
     [pickerEntry, pickerNode],
     [certPickerEntry, certPickerNode],
-    [captureEntry, captureNode],
     [vaultSetEntry, vaultSetNode],
     [recoveryEntry, recoveryNode],
     [vaultStepupEntry, vaultStepupNode],
@@ -2982,9 +2867,8 @@ import {
     // emptyNote?}` — DD1). A bare `Array.isArray(model)` guard would reject that
     // object outright and the sheet would silently never render suggestions.
     const template = TEMPLATES[menuType] || 'menu';
-    // `suggestions` and `vault-capture` carry an OBJECT model (the omnibox shape /
-    // the capture offer `{origin, username, mode, defaultVaultId, choices, captureId}`);
-    // every other template carries a flat item array. A bare Array.isArray guard would
+    // `suggestions` carries an OBJECT model (the omnibox shape); every other template
+    // carries a flat item array (or its own object shape, enumerated below). A bare Array.isArray guard would
     // reject the object and the sheet would silently never render it.
     // cert-picker accepts BOTH shapes — renderCertPicker's documented domain:
     // the bare rows array (the a11y audit hook's pre-popup shape) OR
@@ -3003,7 +2887,6 @@ import {
           template === 'cert-viewer'
           ? model === null || (typeof model === 'object' && !Array.isArray(model))
           : template === 'suggestions' ||
-              template === 'vault-capture' ||
               template === 'vault-recovery-show' ||
               template === 'vault-stepup' ||
               template === 'vault-accesskey-show' ||
@@ -3076,8 +2959,7 @@ import {
       // additionally opt OUT of the controller's incidental window-blur / outside-click
       // dismissal — the login submit that spawned the held credential ALSO navigates the
       // page, and the loading guest's focus steal was tearing this prompt down before the
-      // operator could type (the vault-capture entry's dismissible:false precedent, which
-      // fixed exactly this for the already-unlocked branch of the same flow). Escape /
+      // operator could type (the retired vault-capture entry's dismissible:false precedent). Escape /
       // Cancel / the header X / a backdrop click still dismiss it (attachModalCard's own
       // direct closes), and a real app-switch still closes it main-side (the open call
       // keeps currentDismissible true), so every decline path is unchanged. ASSIGNED ON
@@ -3098,13 +2980,6 @@ import {
       // open), then open through the controller (vault-picker discipline).
       renderCertPicker(model);
       menuController.open(certPickerEntry, typeof startIndex === 'number' ? startIndex : 0);
-    } else if (template === 'vault-capture') {
-      // Fixed layout (heading + origin/username + optional vault choice + Save/Cancel),
-      // centered via CSS — the anchor is ignored. Render FIRST (stashes captureId +
-      // choices), then open through the controller. onOpen focuses the first choice
-      // (save) or Save (update); it must NOT fall through to the non-focusing fallback.
-      renderCapture(model);
-      menuController.open(captureEntry, 0);
     } else if (template === 'vault-set') {
       // Fixed layout (password + confirm + error + Set up/Cancel), centered via CSS — the
       // anchor is ignored, model is an empty array. onOpen clears + focuses the password

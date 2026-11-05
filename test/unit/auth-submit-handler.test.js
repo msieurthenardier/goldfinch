@@ -7,6 +7,7 @@
 // that the HANDLER never closes the sheet (the store owns the single close
 // site — 8b).
 
+const { withOverlaySenderLookup } = require('../helpers/fake-overlay-registry');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
@@ -37,7 +38,7 @@ function makeHarness({ delegateResult = { answered: true } } = {}) {
     closeMenuOverlay: (reason, token) => closeCalls.push([reason, token])
   };
   const rec = { sheet };
-  const registry = { records: () => [rec], getWindowForChrome: () => null };
+  const registry = withOverlaySenderLookup({ records: () => [rec], getWindowForChrome: () => null });
 
   // Recording delegate — snapshots the Buffer's bytes BEFORE the handler's
   // finally zeroizes them (the answerFromSheet contract: the store consumes the
@@ -71,7 +72,7 @@ test('registration is gated on the injection — absent delegate registers no ha
   const ipcMain = makeIpc();
   registerOverlayIpc({
     ipcMain,
-    registry: { records: () => [], getWindowForChrome: () => null },
+    registry: withOverlaySenderLookup({ records: () => [], getWindowForChrome: () => null }),
     chromeForAttachment: () => null,
     chromeForTab: () => null,
     sanitizeActivatedValue: () => undefined
@@ -123,7 +124,7 @@ test('a throwing delegate still zeroizes BOTH arrays (finally runs) and rejects 
   let seenBuf = null;
   registerOverlayIpc({
     ipcMain,
-    registry: { records: () => [rec], getWindowForChrome: () => null },
+    registry: withOverlaySenderLookup({ records: () => [rec], getWindowForChrome: () => null }),
     chromeForAttachment: () => null,
     chromeForTab: () => null,
     sanitizeActivatedValue: () => undefined,

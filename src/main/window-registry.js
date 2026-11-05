@@ -63,6 +63,7 @@
  *   findOverlay: any,
  *   sheet: any,
  *   tearoffOverlay: any,
+ *   savePrompt: any,
  *   htmlFullscreen: { wcId: number, savedBounds: any, pendingBounds: any } | null,
  *   dragWcId: number | null,
  *   bookmarkDragActive: boolean,
@@ -108,6 +109,9 @@ function createWindowRegistry() {
       findOverlay: null,
       sheet: null,
       tearoffOverlay: null,
+      // Sortie 06 Leg 1 (DD1): the per-window corner save-prompt manager, assigned by
+      // window-factory.js right after create() (null after the `close` teardown).
+      savePrompt: null,
       // M14 F1 L1 (DD1): HTML fullscreen mode — { wcId, savedBounds,
       // pendingBounds } while a tab holds element fullscreen, else null.
       // Owned by html-fullscreen.js; every exit edge (activation-away,
@@ -257,6 +261,44 @@ function createWindowRegistry() {
   }
 
   /**
+   * "Is this the corner SAVE-PROMPT webContents of any window" (Sortie 06, DD10). The prompt is a
+   * chrome-class view that the admin tier's non-tab chrome exemption would otherwise admit; the
+   * automation resolver refuses it OUTRIGHT at every tier. True for any window's LIVE prompt
+   * view, false when none exists (never created / torn down).
+   * @param {any} wc
+   * @returns {boolean}
+   */
+  function isSavePromptContents(wc) {
+    if (!wc) return false;
+    for (const rec of records()) {
+      const mgr = rec && rec.savePrompt;
+      const view = mgr && typeof mgr.getView === 'function' ? mgr.getView() : null;
+      const pwc = view && view.webContents;
+      if (pwc && !(typeof pwc.isDestroyed === 'function' && pwc.isDestroyed()) && pwc === wc) return true;
+    }
+    return false;
+  }
+
+  /**
+   * The record whose overlay manager (`key`: 'sheet' | 'findOverlay' | 'savePrompt') owns the
+   * view whose webContents IS `sender` (identity compare). Extracted from
+   * register-overlay-ipc.js (Sortie 06 Leg 1, AC18) so every overlay channel family resolves
+   * senders the same way.
+   * @param {any} sender
+   * @param {string} key
+   * @returns {WindowRecord | null}
+   */
+  function recordForOverlaySender(sender, key) {
+    if (!sender) return null;
+    for (const rec of records()) {
+      const manager = /** @type {any} */ (rec)[key];
+      const view = manager ? manager.getView() : null;
+      if (view && !view.webContents.isDestroyed() && view.webContents === sender) return rec;
+    }
+    return null;
+  }
+
+  /**
    * The CURRENT menu of the sheet whose webContents is `wc` — `{ menuType, token, jarId? }`
    * — or `null` (M15 F3 L1, DD1/DD1b). Same `records()` walk and same defensive `typeof`
    * guards as `isSheetContents` above: a record shape lacking `getView` / `isVisible` /
@@ -304,6 +346,8 @@ function createWindowRegistry() {
     isTabViewWcId,
     isChromeContents,
     isSheetContents,
+    isSavePromptContents,
+    recordForOverlaySender,
     sheetMenuFor
   };
 }

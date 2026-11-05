@@ -3,7 +3,8 @@
 // Shared modal-card controller for the menu-overlay sheet's DIALOG-STYLE templates
 // (M12 Flight 3 first-run-setup, DD5 template-registry / modal-card refactor).
 //
-// Extracted from the inline vault-unlock / vault-capture wiring in menu-overlay.js so
+// Extracted from the inline vault-unlock wiring (and, until Sortie 06, the since-retired
+// vault-capture sheet) in menu-overlay.js so
 // the backdrop + Tab-trap + Escape + one-report-token discipline becomes an IMPORTABLE,
 // behaviorally unit-testable module (a11y won't run headless; menu-overlay.js is an
 // IIFE with no controller test — this is the only real net for the landed F2 unlock UI).

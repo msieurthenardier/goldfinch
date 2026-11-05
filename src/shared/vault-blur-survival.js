@@ -21,9 +21,10 @@
 //
 // Explicitly OUT (verified at design review): the dismiss-locked one-time-key SHOW
 // sheets (vault-recovery-show, vault-accesskey-show, vault-adminkey-show — already
-// `dismissible:false`, blur-immune via THAT axis), vault-capture (the capture offer
-// card — no typed secret; its own `dismissible:false` is an unrelated mechanism and
-// stays untouched), vault-picker (metadata-only by design).
+// `dismissible:false`, blur-immune via THAT axis), vault-picker (metadata-only by design).
+// HISTORY: vault-capture (the capture offer card - no typed secret) was also listed here until
+// Sortie 06 retired that sheet; the save offer is now the corner save prompt, its own view with
+// its own timer/pause rules (window blur pauses its 10 s timer rather than closing it).
 const VAULT_BLUR_SURVIVAL_MENU_TYPES = Object.freeze(
   new Set([
     'vault-unlock',

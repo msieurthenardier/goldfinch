@@ -8,6 +8,7 @@
 // vault-recovery-show with the RECOVERY KEY ONLY (never the admin key), and a setup throw
 // rejects while still zeroizing.
 
+const { withOverlaySenderLookup } = require('../helpers/fake-overlay-registry');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
@@ -42,7 +43,7 @@ function makeHarness({ setupResult, setupThrows } = {}) {
     closeMenuOverlay: (reason, token) => closeCalls.push([reason, token])
   };
   const rec = { sheet, win };
-  const registry = { records: () => [rec], getWindowForChrome: () => null };
+  const registry = withOverlaySenderLookup({ records: () => [rec], getWindowForChrome: () => null });
   const chrome = { send: (channel, payload) => chromeSends.push([channel, payload]) };
 
   const captured = { buffer: null, isBuffer: null, bytes: null };

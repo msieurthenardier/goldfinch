@@ -414,9 +414,10 @@ export function createOverlayDispatch(deps) {
     if (menuType === 'suggestions') {
       handleSuggestionsClosed(reason);
     }
-    // Vault-owned close branches (vault-unlock's two dismiss-abandon guards, the
-    // vault-capture dismiss-drop path) moved wholesale to vault-controller.js
-    // (M15 F2 Leg 1 renderer-extraction) — see its handleClosed.
+    // Vault-owned close branches (vault-unlock's two dismiss-abandon guards; HISTORY: the
+    // vault-capture dismiss-drop path, retired Sortie 06 — the corner save prompt has its own
+    // close channel) moved wholesale to vault-controller.js (M15 F2 Leg 1 renderer-extraction) —
+    // see its handleClosed, which also retries a sheet-refused save prompt on ANY close.
     vaultHandleClosed({ menuType, reason });
     // Mission 20 Flight 2 Leg 1 (DD11 seed): a no-op today (site-info/cert-viewer/
     // cert-override have no close-side state yet) — the seat legs 3-4 use for the

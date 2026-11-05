@@ -1,7 +1,7 @@
 'use strict';
 
 // Unit tests for the vault-capture sheet template (Mission 12, Flight 2, Leg 4
-// capture-save, DD7). The card + per-offer content are built by the pure,
+// capture-save, DD7; made NON-MODAL for the corner save prompt, Sortie 06). The card + per-offer content are built by the pure,
 // document-injected buildVaultCaptureCard / renderVaultCaptureCard so the
 // save-vs-update rendering AND the vault-choice-on-save-only contract are testable
 // against the fake-document helper without a live sheet — the same idiom the other
@@ -16,19 +16,55 @@ const { createDocument } = require('./helpers/jars-page-dom');
 const {
   buildVaultCaptureCard,
   renderVaultCaptureCard,
-  selectedVaultId
+  selectedVaultId,
+  resultNounOf
 } = require('../../src/shared/vault-capture-template.js');
 
-test('buildVaultCaptureCard: a centered backdrop + a role="dialog" card with Save/Cancel', () => {
+test('buildVaultCaptureCard (Sortie 06, AC22): a NON-MODAL card - root role="dialog" with aria-labelledby/-describedby, NO aria-modal, NO backdrop', () => {
   const document = createDocument();
   const refs = buildVaultCaptureCard(document);
-  assert.equal(refs.node.id, 'sheet-vault-capture');
-  assert.equal(refs.node.classList.contains('hidden'), true);
+  // the card IS the root (no backdrop wrapper), and it is not pre-hidden
+  assert.equal(refs.node, refs.card);
+  assert.equal(refs.node.id, 'save-prompt-card');
+  assert.equal(refs.card.parentNode, null, 'no backdrop wrapper around the card');
   assert.equal(refs.card.attributes.get('role'), 'dialog');
-  assert.equal(refs.card.attributes.get('aria-modal'), 'true');
+  assert.equal(refs.card.attributes.has('aria-modal'), false, 'the page behind the prompt stays operable');
+  assert.equal(refs.card.attributes.get('aria-labelledby'), refs.heading.id);
+  assert.equal(refs.card.attributes.get('aria-describedby'), refs.fields.id);
+  assert.ok(refs.heading.id && refs.fields.id, 'both targets carry real ids');
+  // controls: Save + "Not now" + a dismiss X; plus the counter, timer bar and result status node
   assert.equal(refs.save.textContent, 'Save');
-  assert.equal(refs.cancel.textContent, 'Cancel');
-  assert.equal(refs.card.parentNode, refs.node);
+  assert.equal(refs.cancel.textContent, 'Not now');
+  assert.equal(refs.dismissX.attributes.get('aria-label'), 'Dismiss');
+  assert.equal(refs.status.attributes.get('role'), 'status');
+  assert.equal(refs.status.classList.contains('hidden'), true, 'result state hidden until used');
+  assert.ok(refs.timerFill && refs.counter);
+});
+
+test('resultNounOf resolves through KIND_TABLE (login / card / identity; unknown -> login)', () => {
+  assert.equal(resultNounOf({ kind: 'login' }), 'Password');
+  assert.equal(resultNounOf({}), 'Password');
+  assert.equal(resultNounOf({ kind: 'card' }), 'Card');
+  assert.equal(resultNounOf({ kind: 'identity' }), 'Details');
+  assert.equal(resultNounOf({ kind: 'constructor' }), 'Password');
+  assert.equal(resultNounOf(null), 'Password');
+});
+
+test('renderVaultCaptureCard: a choice flagged `disabled` (unresolvable jar) is shown but NOT selectable or pre-checked', () => {
+  const document = createDocument();
+  const refs = buildVaultCaptureCard(document);
+  const { choiceInputs } = renderVaultCaptureCard(document, refs, {
+    origin: 'https://a.example',
+    mode: 'save',
+    defaultVaultId: 'gone-jar',
+    choices: [
+      { vaultId: 'gone-jar', label: 'Unknown vault', disabled: true },
+      { vaultId: 'global', label: 'Global' }
+    ]
+  });
+  assert.equal(choiceInputs[0].disabled, true);
+  assert.equal(choiceInputs[0].checked, false);
+  assert.equal(choiceInputs[1].disabled, false);
 });
 
 test('renderVaultCaptureCard (save): Save heading + a vault radio choice, default checked', () => {
@@ -165,7 +201,7 @@ test('renderVaultCaptureCard (identity, fresh save): "Save your details?" + the 
   });
   assert.equal(mode, 'save');
   assert.equal(refs.heading.textContent, 'Save your details?');
-  assert.equal(refs.card.attributes.get('aria-label'), 'Save your details', 'AC18: heading.slice(0, -1)');
+  assert.equal(refs.card.attributes.get('aria-labelledby'), refs.heading.id, 'AC22: the heading labels the dialog');
   assert.equal(refs.subjectLabel.textContent, 'Fields');
   assert.equal(refs.usernameValue.textContent, 'First name, Email, Street address');
   assert.equal(refs.choices.classList.contains('hidden'), false, 'a save offers the vault choice');
@@ -185,7 +221,6 @@ test('renderVaultCaptureCard (identity, gap-fill): "Add to your saved details?" 
   });
   assert.equal(mode, 'update');
   assert.equal(refs.heading.textContent, 'Add to your saved details?');
-  assert.equal(refs.card.attributes.get('aria-label'), 'Add to your saved details');
   assert.equal(refs.usernameValue.textContent, 'Phone');
   assert.deepEqual(choiceInputs, [], 'an update renders no vault choice');
   assert.equal(refs.choices.classList.contains('hidden'), true);
@@ -204,7 +239,6 @@ test('renderVaultCaptureCard (identity, conflict): "Update your saved details?" 
     choices: []
   });
   assert.equal(refs.heading.textContent, 'Update your saved details?');
-  assert.equal(refs.card.attributes.get('aria-label'), 'Update your saved details');
   assert.equal(refs.usernameValue.textContent, 'Phone · Street address, Postal code', 'both groups named');
 });
 
@@ -237,4 +271,45 @@ test('renderVaultCaptureCard (identity): every field label is rendered via textC
   });
   assert.equal(refs.usernameValue.children.length, 0, 'no child elements — text only');
   assert.equal(refs.usernameValue.textContent, '<script>alert(1)</script>');
+});
+
+// ---- Sortie 06 Leg 2 (AC3): the LOCKED offer rendering ------------------------------------------
+
+test('renderVaultCaptureCard (locked login/card): "Save to" choices, the lock note, primary "Unlock & save"', () => {
+  for (const [kind, heading] of [
+    [undefined, 'Save password?'],
+    ['card', 'Save card?']
+  ]) {
+    const document = createDocument();
+    const refs = buildVaultCaptureCard(document);
+    const { choiceInputs } = renderVaultCaptureCard(document, refs, {
+      origin: 'https://a.example',
+      username: 'me',
+      kind,
+      mode: 'locked',
+      defaultVaultId: 'work',
+      choices: [
+        { vaultId: 'work', label: 'Work' },
+        { vaultId: 'global', label: 'Global' }
+      ]
+    });
+    assert.equal(refs.heading.textContent, heading);
+    assert.equal(choiceInputs.length, 2);
+    assert.equal(selectedVaultId(choiceInputs), 'work');
+    assert.equal(refs.save.textContent, 'Unlock & save');
+    assert.equal(refs.lockNote.classList.contains('hidden'), false);
+    assert.equal(refs.lockNote.textContent, 'Your vault is locked. You will enter your master password to save.');
+  }
+});
+
+test('renderVaultCaptureCard (locked identity): primary reads "Unlock & review"; an unlocked re-render hides the note', () => {
+  const document = createDocument();
+  const refs = buildVaultCaptureCard(document);
+  renderVaultCaptureCard(document, refs, { origin: 'https://a.example', kind: 'identity', mode: 'locked' });
+  assert.equal(refs.save.textContent, 'Unlock & review');
+  assert.equal(refs.lockNote.classList.contains('hidden'), false);
+  renderVaultCaptureCard(document, refs, { origin: 'https://a.example', kind: 'identity', mode: 'save' });
+  assert.equal(refs.save.textContent, 'Save');
+  assert.equal(refs.lockNote.classList.contains('hidden'), true);
+  assert.equal(refs.lockNote.textContent, '');
 });
