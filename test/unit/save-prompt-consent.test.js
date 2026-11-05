@@ -4,11 +4,14 @@
 // refused in isolation, against the REAL manager over fakes and the REAL window registry's sender
 // lookup - plus the dynamic `saved` result model and the trace payload keys.
 
-const { test } = require('node:test');
+const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { registerSavePromptIpc, sanitizeSavePromptModel } = require('../../src/main/register-save-prompt-ipc');
 const { createWindowRegistry } = require('../../src/main/window-registry');
-const { makeHarness, OFFER_MODEL } = require('../helpers/save-prompt-fakes');
+const { makeHarness, OFFER_MODEL, assertNoLiveTimers } = require('../helpers/save-prompt-fakes');
+
+// Squawk 0172 guard: no real timer may outlive the suite.
+after(() => assertNoLiveTimers());
 
 const LOCKED_MODEL = Object.freeze({
   origin: 'https://a.example',

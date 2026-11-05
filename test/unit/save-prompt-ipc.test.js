@@ -3,11 +3,14 @@
 // Sortie 06 Leg 1 (AC14b/AC17/AC18): register-save-prompt-ipc.js - every gate refused in
 // isolation, against the REAL manager over fakes and the REAL window registry's sender lookup.
 
-const { test } = require('node:test');
+const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { registerSavePromptIpc, sanitizeSavePromptModel } = require('../../src/main/register-save-prompt-ipc');
 const { createWindowRegistry } = require('../../src/main/window-registry');
-const { makeHarness, presentShown, OFFER_MODEL } = require('../helpers/save-prompt-fakes');
+const { makeHarness, presentShown, OFFER_MODEL, assertNoLiveTimers } = require('../helpers/save-prompt-fakes');
+
+// Squawk 0172 guard: no real timer may outlive the suite.
+after(() => assertNoLiveTimers());
 
 function build({ captureTab = 7, activeTabWcId = 7 } = {}) {
   const handlers = new Map();

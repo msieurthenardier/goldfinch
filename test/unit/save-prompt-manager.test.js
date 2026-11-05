@@ -3,14 +3,23 @@
 // Sortie 06 Leg 1 (AC2-AC9): the per-window corner save-prompt manager. Electron-free fakes;
 // timer cases use MockTimers enabled PER TEST (never file-global).
 
-const { test } = require('node:test');
+const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
 const {
   createSavePromptManager,
   SAVE_PROMPT_TIMEOUT_MS,
   SAVE_PROMPT_SHOW_FALLBACK_MS
 } = require('../../src/main/save-prompt-manager');
-const { makeHarness, presentShown, makeFakeView, OFFER_MODEL } = require('../helpers/save-prompt-fakes');
+const {
+  makeHarness,
+  presentShown,
+  makeFakeView,
+  OFFER_MODEL,
+  assertNoLiveTimers
+} = require('../helpers/save-prompt-fakes');
+
+// Squawk 0172 guard: no real timer may outlive the suite.
+after(() => assertNoLiveTimers());
 
 const enable = (t) => t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
 const closedEvents = (h) => h.chromeSends.filter(([c]) => c === 'save-prompt-closed').map(([, p]) => p);
