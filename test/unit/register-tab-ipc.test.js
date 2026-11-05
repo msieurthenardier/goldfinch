@@ -191,7 +191,25 @@ function setup() {
         isMenuOpen: () => false,
         show: () => log.push(['show-menu', id])
       },
-      tearoffOverlay: { isVisible: () => false, show: () => log.push(['show-tearoff', id]) }
+      tearoffOverlay: { isVisible: () => false, show: () => log.push(['show-tearoff', id]) },
+      // Sortie 06 Leg 1: recording corner-save-prompt fake. `promptWcId` is the tab whose
+      // capture the prompt currently SHOWS (null = no prompt); `promptVisible` gates the
+      // re-raise. The real manager's semantics are pinned by save-prompt-manager.test.js.
+      promptWcId: null,
+      promptVisible: false,
+      savePrompt: {
+        currentWcId: () => record.promptWcId,
+        close: (reason) => {
+          log.push(['close-prompt', id, reason]);
+          record.promptWcId = null;
+          record.promptVisible = false;
+        },
+        isVisible: () => record.promptVisible,
+        syncBounds: () => log.push(['sync-prompt', id]),
+        show: () => {
+          if (record.promptVisible) log.push(['show-prompt', id]);
+        }
+      }
     };
     records.push(record);
     return record;
@@ -307,6 +325,8 @@ function setup() {
     broadcastMoveTargetsChanged: () => log.push(['broadcast-targets']),
     getTabContents: (id) => webContents.fromId(id),
     popupRegistry,
+    // Sortie 06 Leg 1: lazy vault-human getter - records the capture drops.
+    vaultHuman: () => ({ dropCapturesForTab: (wcId) => log.push(['drop-captures', wcId]) }),
     schedule: (fn, ms) => {
       const token = { fn, ms };
       timers.push(token);
@@ -2190,4 +2210,195 @@ test('pushTabStateFor: nothing set beyond nav-state → exactly one send', () =>
   const send = (ch, build) => out.push([ch, build()]);
   pushTabStateFor({}, 5, entry, wc, send);
   assert.deepEqual(out, [['tab-nav-state', { wcId: 5, canGoBack: false, canGoForward: false }]]);
+});
+
+// ---------------------------------------------------------------------------
+// Sortie 06 Leg 1 (AC8 / AC13): the corner save prompt's hide/restore matrix. Each row is a
+// handler-level call-order test over recording fakes.
+// ---------------------------------------------------------------------------
+
+const idx = (h, pred) => h.log.findIndex(pred);
+const ev =
+  (name, ...rest) =>
+  (x) =>
+    x[0] === name && rest.every((v, i) => x[i + 1] === v);
+
+function primedSwitch(h) {
+  const record = h.makeRecord(1);
+  h.addTab(record, 101);
+  h.addTab(record, 102);
+  record.activeTabWcId = 101;
+  record.tabViews.get(101).active = true;
+  record.promptWcId = 101;
+  record.promptVisible = true;
+  h.log.length = 0;
+  return record;
+}
+
+test("Sortie 06 AC8: a tab SWITCH closes the prompt (tab-switch) BEFORE the find/sheet/prompt syncBounds fan-out, then drops the OUTGOING tab's captures", () => {
+  const h = setup();
+  const record = primedSwitch(h);
+  record.findOverlay.isSessionActive = (wcId) => wcId === 102;
+  h.ipcMain.send('tab-set-active', record.chromeView.webContents, {
+    wcId: 102,
+    bounds: { x: 0, y: 89, width: 1200, height: 711 }
+  });
+  const closeP = idx(h, ev('close-prompt', 1, 'tab-switch'));
+  assert.ok(closeP !== -1, 'prompt closed with tab-switch');
+  assert.ok(closeP < idx(h, ev('sync-find')), 'prompt close precedes find syncBounds');
+  assert.ok(closeP < idx(h, ev('sync-menu')), 'prompt close precedes sheet syncBounds');
+  assert.ok(closeP < idx(h, ev('sync-prompt')), 'prompt close precedes its own syncBounds');
+  assert.ok(closeP < idx(h, ev('close-menu')), 'and the sheet close');
+  assert.ok(closeP < idx(h, ev('drop-captures', 101)), 'close reason wins over the capture drop');
+  assert.equal(h.log.some(ev('show-prompt')), false, 'a switch never re-raises the (closed) prompt');
+});
+
+test('Sortie 06 AC8: same-tab re-activation re-raise order: guest add -> find show -> prompt sync -> prompt show -> sheet show -> tear-off show', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  h.addTab(record, 101);
+  record.activeTabWcId = 101;
+  record.tabViews.get(101).active = true;
+  record.findOverlay.isSessionActive = (wcId) => wcId === 101;
+  record.promptWcId = 101;
+  record.promptVisible = true;
+  record.sheet.isMenuOpen = () => true;
+  record.tearoffOverlay.isVisible = () => true;
+  h.log.length = 0;
+  h.ipcMain.send('tab-set-active', record.chromeView.webContents, {
+    wcId: 101,
+    bounds: { x: 0, y: 89, width: 1200, height: 711 }
+  });
+  const order = [
+    idx(h, ev('add-view', 1, 101)),
+    idx(h, ev('show-find')),
+    idx(h, ev('sync-prompt')),
+    idx(h, ev('show-prompt')),
+    idx(h, ev('show-menu')),
+    idx(h, ev('show-tearoff'))
+  ];
+  assert.ok(
+    order.every((i) => i !== -1),
+    `all present: ${order}`
+  );
+  assert.deepEqual(
+    order,
+    [...order].sort((a, b) => a - b),
+    'strictly ascending re-raise order'
+  );
+  assert.equal(h.log.some(ev('close-prompt')), false, 'same-tab re-activation never closes the prompt');
+  assert.equal(h.log.some(ev('drop-captures')), false, 'nor drops captures');
+});
+
+test('Sortie 06 AC13: tab-hide closes the prompt (tab-hide) FIRST, then drops the tab captures', () => {
+  const h = setup();
+  const record = primedSwitch(h);
+  h.ipcMain.send('tab-hide', record.chromeView.webContents, 101);
+  const closeP = idx(h, ev('close-prompt', 1, 'tab-hide'));
+  assert.ok(closeP !== -1);
+  assert.ok(closeP < idx(h, ev('hide-find')));
+  assert.ok(closeP < idx(h, ev('close-menu')));
+  assert.ok(closeP < idx(h, ev('drop-captures', 101)));
+});
+
+test('Sortie 06 AC13: tab-close closes the prompt (tab-close) BEFORE the existing capture drop', () => {
+  const h = setup();
+  const record = primedSwitch(h);
+  h.ipcMain.send('tab-close', record.chromeView.webContents, 101, 0);
+  const closeP = idx(h, ev('close-prompt', 1, 'tab-close'));
+  assert.ok(closeP !== -1);
+  assert.ok(closeP < idx(h, ev('drop-captures', 101)));
+});
+
+test("Sortie 06 AC13: the helper is a NO-OP for the prompt when it shows a DIFFERENT tab, but the outgoing tab's captures STILL drop", () => {
+  const h = setup();
+  const record = primedSwitch(h);
+  record.promptWcId = 999; // the prompt shows some other tab's capture
+  h.ipcMain.send('tab-set-active', record.chromeView.webContents, {
+    wcId: 102,
+    bounds: { x: 0, y: 89, width: 1200, height: 711 }
+  });
+  assert.equal(h.log.some(ev('close-prompt')), false, 'prompt untouched');
+  assert.ok(h.log.some(ev('drop-captures', 101)), 'outgoing tab captures dropped regardless');
+});
+
+test("Sortie 06 AC13: tab-create attach re-raises a visible prompt strictly after the new guest's add", async () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  record.promptWcId = 5;
+  record.promptVisible = true;
+  h.log.length = 0;
+  const wcId = await h.ipcMain.invoke('tab-create', record.chromeView.webContents, {
+    url: 'https://example.test/',
+    partition: 'persist:jar-a',
+    trusted: false
+  });
+  const add = idx(h, ev('add-view', 1, wcId));
+  const show = idx(h, ev('show-prompt', 1));
+  assert.ok(add !== -1 && show > add);
+});
+
+test('Sortie 06 AC11: tab-set-bounds on the ACTIVE tab syncs the prompt (store always, apply while visible)', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  h.addTab(record, 101);
+  h.addTab(record, 102);
+  record.activeTabWcId = 101;
+  h.log.length = 0;
+  h.ipcMain.send('tab-set-bounds', record.chromeView.webContents, {
+    wcId: 101,
+    bounds: { x: 0, y: 89, width: 1200, height: 711 }
+  });
+  assert.ok(h.log.some(ev('sync-prompt', 1)));
+  h.log.length = 0;
+  h.ipcMain.send('tab-set-bounds', record.chromeView.webContents, {
+    wcId: 102,
+    bounds: { x: 0, y: 89, width: 1200, height: 711 }
+  });
+  assert.equal(h.log.some(ev('sync-prompt')), false, "a background tab's bounds never reach the prompt");
+});
+
+test("Sortie 06 AC13: moving the prompt's tab closes the SOURCE prompt (tab-moved) before force-exit and the re-parent; captures drop", () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  const target = h.makeRecord(2);
+  h.addTab(source, 101);
+  h.addTab(source, 102);
+  source.activeTabWcId = 101;
+  source.promptWcId = 101;
+  source.promptVisible = true;
+  h.log.length = 0;
+  h.ipcMain.invoke('tab-move-to-window', source.chromeView.webContents, { wcId: 101, windowId: target.win.id });
+  const closeP = idx(h, ev('close-prompt', 1, 'tab-moved'));
+  assert.ok(closeP !== -1);
+  assert.ok(closeP < idx(h, ev('force-exit')));
+  assert.ok(closeP < idx(h, ev('add-view', 2, 101)), 'before the re-parent');
+  assert.ok(h.log.some(ev('drop-captures', 101)));
+});
+
+test("Sortie 06 AC13: a move INTO a target that deactivates its previous tab closes the TARGET prompt (tab-switch) and drops that tab's captures", () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  const target = h.makeRecord(2);
+  h.addTab(source, 101);
+  h.addTab(source, 102);
+  h.addTab(target, 201);
+  target.activeTabWcId = 201;
+  target.tabViews.get(201).active = true;
+  target.promptWcId = 201;
+  target.promptVisible = true;
+  h.log.length = 0;
+  h.ipcMain.invoke('tab-move-to-window', source.chromeView.webContents, { wcId: 101, windowId: target.win.id });
+  const closeT = idx(h, ev('close-prompt', 2, 'tab-switch'));
+  assert.ok(closeT !== -1, 'target prompt closed');
+  assert.ok(idx(h, ev('close-menu', 2, 'tab-switch')) !== -1);
+  assert.ok(h.log.some(ev('drop-captures', 201)), "the target's previous tab captures dropped");
+});
+
+test('Sortie 06 AC13: navigation inside the tab (a did-navigate) neither closes the prompt nor drops captures - nothing in the tab-ipc handlers is wired to it', () => {
+  const h = setup();
+  const record = primedSwitch(h);
+  record.tabViews.get(101).view.webContents.emit('did-navigate');
+  assert.equal(h.log.some(ev('close-prompt')), false);
+  assert.equal(h.log.some(ev('drop-captures')), false);
 });

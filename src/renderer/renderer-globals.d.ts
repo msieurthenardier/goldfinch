@@ -612,6 +612,8 @@ interface GoldfinchBridge {
   onVaultCaptureOffer(
     cb: (d: {
       captureId: string;
+      /** Sortie 06 (DD5): the offering tab; main sends an offer only for the window's ACTIVE tab. */
+      wcId: number;
       model: {
         origin: string;
         username: string | null;
@@ -622,16 +624,37 @@ interface GoldfinchBridge {
     }) => void
   ): void;
   vaultCaptureDismiss(captureId: string): Promise<void>;
-  vaultCaptureFinalize(captureId: string): Promise<{
+  vaultCaptureFinalize(captureId: string): Promise<
+    | {
+        captureId: string;
+        model: {
+          origin: string;
+          username: string | null;
+          mode: 'save' | 'update';
+          defaultVaultId: string;
+          choices: string[];
+        };
+      }
+    | { captureId: string; saved: true; vaultId: string; kind: 'login' | 'card' }
+    | { reason: 'expired' | 'locked' | 'tab-changed' | 'unchanged' | 'refused' | 'error' }
+    | null
+  >;
+  /** Sortie 06: open (or model-replace) the corner save prompt. Main answers `{ presented:false,
+   * reason }` for 'sheet-open' (keep the offer at the head), 'not-active' / 'fullscreen' / 'gone' /
+   * 'invalid-model' (drop). The model is metadata only; `anchor` is the vault indicator's right
+   * edge in CSS px (main converts to DIP with the live zoom factor). */
+  savePromptOpen(payload: {
+    token: number;
     captureId: string;
-    model: {
-      origin: string;
-      username: string | null;
-      mode: 'save' | 'update';
-      defaultVaultId: string;
-      choices: string[];
-    };
-  } | null>;
+    wcId: number;
+    model: any;
+    anchor: number | null;
+    queue: { index: number; total: number } | null;
+  }): Promise<{ presented: boolean; reason?: string }>;
+  savePromptAnchor(payload: { token: number; right: number | null }): void;
+  onSavePromptClosed(cb: (d: { token: number; captureId: string; reason: string }) => void): void;
+  /** Sortie 06 (DD6): main dropped a held OFFER the chrome did not initiate. */
+  onVaultCaptureDropped(cb: (d: { captureId: string }) => void): void;
   onTabNavState(cb: (d: { wcId: number; canGoBack: boolean; canGoForward: boolean }) => void): void;
 }
 

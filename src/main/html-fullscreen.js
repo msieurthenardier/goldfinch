@@ -1,6 +1,8 @@
 // @ts-check
 'use strict';
 
+const { closeSavePromptAndDrop } = require('./register-tab-ipc');
+
 // HTML5 element fullscreen as a WINDOW-RECORD MODE (M14 F1 L1, flight DD1).
 //
 // The chrome renderer is the normal single source of bounds truth
@@ -36,11 +38,13 @@
  * @param {any} deps
  */
 function createHtmlFullscreen(deps) {
+  // Sortie 06 Leg 1 (AC13): `vaultHuman` is an optional LAZY getter (`() => vaultHuman | null`,
+  // main.js passes the memoized reference); an absent dep tolerates (no capture drop).
   // M14 F1 L2: optional onExited(record) observer (the manager-onClosed additive
   // pattern) — fires at the end of every restore, i.e. on EVERY exit edge (page
   // exit, Esc, force-exit, activation-away…). main.js wires it to the auth
   // pending-challenge store's notifyFullscreenExited re-present trigger.
-  const { registry, chromeForTab, logger, onExited = () => {} } = deps;
+  const { registry, chromeForTab, logger, onExited = () => {}, vaultHuman = () => null } = deps;
 
   /**
    * The single restore path every exit edge funnels through. Clears the mode
@@ -128,6 +132,10 @@ function createHtmlFullscreen(deps) {
     // open sheet menu closes with a tab-lifecycle-family reason.
     record.findOverlay?.hide();
     record.sheet?.closeMenuOverlay('tab-hide');
+    // Sortie 06 Leg 1 (AC13/DD1): the page is taking over the screen - the corner save prompt
+    // closes (`tab-hide`, BEFORE the capture drop so its reason wins over "expired") and this
+    // tab's held captures are dropped.
+    closeSavePromptAndDrop(record, wcId, 'tab-hide', vaultHuman());
   }
 
   /**

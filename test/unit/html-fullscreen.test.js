@@ -380,3 +380,77 @@ test('onExited does NOT fire for a no-op exit (no mode armed) and defaults to a 
   // Absent injection: the L1 setup() harness above builds without onExited —
   // every prior test in this file passing IS the no-op-default proof.
 });
+
+// ---------------------------------------------------------------------------
+// Sortie 06 Leg 1 (AC13): entering HTML fullscreen closes the corner save prompt (tab-hide)
+// and drops the tab's captures; the lazy `vaultHuman` getter is optional.
+// ---------------------------------------------------------------------------
+
+function setupWithVault() {
+  const log = [];
+  const records = [];
+  const registry = { getWindowForGuest: (wcId) => records.find((r) => r.tabViews.has(wcId)) || null };
+  const htmlFullscreen = createHtmlFullscreen({
+    registry,
+    chromeForTab: () => null,
+    vaultHuman: () => ({ dropCapturesForTab: (wcId) => log.push(['drop-captures', wcId]) }),
+    logger: { warn() {} }
+  });
+  const record = {
+    win: {
+      id: 1,
+      isDestroyed: () => false,
+      getContentBounds: () => ({ width: 1200, height: 800 }),
+      contentView: { addChildView: () => {} }
+    },
+    tabViews: new Map(),
+    activeTabWcId: 101,
+    htmlFullscreen: null,
+    findOverlay: null,
+    sheet: null,
+    savePrompt: {
+      shown: 101,
+      currentWcId() {
+        return this.shown;
+      },
+      close: (reason) => log.push(['close-prompt', reason])
+    }
+  };
+  record.tabViews.set(101, {
+    view: {
+      getBounds: () => ({ ...SLOT }),
+      setBounds() {},
+      webContents: { id: 101, isDestroyed: () => false, executeJavaScript: () => Promise.resolve() }
+    },
+    trusted: false
+  });
+  records.push(record);
+  return { htmlFullscreen, record, log };
+}
+
+test('Sortie 06 AC13: fullscreen enter closes the prompt (tab-hide) BEFORE dropping the tab captures', () => {
+  const h = setupWithVault();
+  h.htmlFullscreen.enter(101);
+  assert.deepEqual(h.log, [
+    ['close-prompt', 'tab-hide'],
+    ['drop-captures', 101]
+  ]);
+});
+
+test("Sortie 06 AC13: fullscreen enter with a prompt showing ANOTHER tab leaves it, but still drops this tab's captures", () => {
+  const h = setupWithVault();
+  h.record.savePrompt.shown = 555;
+  h.htmlFullscreen.enter(101);
+  assert.deepEqual(h.log, [['drop-captures', 101]]);
+});
+
+test('Sortie 06 AC13: createHtmlFullscreen tolerates an absent vaultHuman dep and an absent savePrompt', () => {
+  const h = setup();
+  const record = armedRecord(h);
+  assert.ok(record, 'the existing armed fixture still works with no vaultHuman dep');
+  const h2 = setup();
+  const r2 = h2.makeRecord(2);
+  h2.addTab(r2, 201);
+  r2.activeTabWcId = 201;
+  assert.doesNotThrow(() => h2.htmlFullscreen.enter(201));
+});

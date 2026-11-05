@@ -57,6 +57,7 @@ function createHarness(options = {}) {
     getBounds() {
       return this.bounds;
     }
+    setVisible() {}
     setBackgroundColor(color) {
       this.backgroundColor = color;
     }
@@ -122,7 +123,8 @@ function createHarness(options = {}) {
         activeTabWcId: null,
         findOverlay: null,
         sheet: null,
-        tearoffOverlay: null
+        tearoffOverlay: null,
+        savePrompt: null
       };
       records.set(win.id, record);
       log.push(`registry-create:${win.id}`);
@@ -159,6 +161,10 @@ function createHarness(options = {}) {
             isMenuOpen() {
               return false;
             },
+            // Sortie 06: the corner prompt's isSheetVisible reads this live.
+            isVisible() {
+              return false;
+            },
             teardown() {
               log.push('sheet-teardown');
             }
@@ -167,6 +173,9 @@ function createHarness(options = {}) {
           ? {
               hide() {},
               show() {},
+              isVisible() {
+                return false;
+              },
               getSessionTabWcId() {
                 return null;
               },
@@ -210,7 +219,9 @@ function createHarness(options = {}) {
       findHtml: '/app/renderer/find-overlay.html',
       menuPreload: '/app/preload/menu-overlay-preload.js',
       menuHtml: '/app/renderer/menu-overlay.html',
-      tearoffHtml: '/app/renderer/tearoff-overlay.html'
+      tearoffHtml: '/app/renderer/tearoff-overlay.html',
+      savePromptPreload: '/app/preload/save-prompt-preload.js',
+      savePromptHtml: '/app/renderer/save-prompt.html'
     },
     registry,
     isAutomationEnabled: options.isAutomationEnabled || (() => false),
@@ -220,6 +231,19 @@ function createHarness(options = {}) {
     createFindOverlayManager: (deps) => manager('find', deps),
     createMenuOverlayManager: (deps) => manager('sheet', deps),
     createTearoffOverlayManager: (deps) => manager('tearoff', deps),
+    // Sortie 06 Leg 1: the corner save prompt is OPTIONAL (omitted by default so every
+    // pre-existing window-factory test constructs a window with no prompt). A test passes
+    // `createSavePromptManager` (a recording fake, or the REAL factory) to opt in.
+    createSavePromptManager: options.createSavePromptManager
+      ? (deps) => {
+          managerDeps.savePrompt = deps;
+          const instance = options.createSavePromptManager(deps, log);
+          managers.savePrompt = instance;
+          return instance;
+        }
+      : undefined,
+    computeSavePromptBounds: options.computeSavePromptBounds,
+    getVaultHuman: options.getVaultHuman,
     // M14 F1 L1: resize/maximize/unmaximize call the fullscreen re-expand hook
     // with the in-scope record — logged for the ordering assertion.
     htmlFullscreen: options.htmlFullscreen || {

@@ -88,6 +88,7 @@ function originOf(url) {
  * @property {(partition: string) => any} [fromPartition]
  * @property {() => any} [getChromeContents]
  * @property {(wc: any) => boolean} [isChromeContents]
+ * @property {(wc: any) => boolean} [isSavePromptContents]  Sortie 06 (DD10): the corner save prompt, refused at every tier.
  * @property {(wc: any) => boolean} [isSheetContents]  F9 fix (M17 F2 L2): the
  *   secret-sheet predicate — MUST be threaded alongside sheetMenuFor (a pair;
  *   see resolve.js guard 3) so resolveTarget's resolveContents/resolveContentsForJar
@@ -437,6 +438,7 @@ function createVaultContext(deps = /** @type {any} */ ({})) {
     // the sheet absolutely refused at every tier (admin included).
     const sheetDeps = {
       isSheetContents: engineDeps.isSheetContents,
+      isSavePromptContents: engineDeps.isSavePromptContents,
       sheetMenuFor: engineDeps.sheetMenuFor,
       isTabViewWcId: engineDeps.isTabViewWcId,
       isPopupWcId: engineDeps.isPopupWcId

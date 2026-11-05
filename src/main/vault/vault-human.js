@@ -210,6 +210,11 @@ function dispatchByFamily(rec, { login, card, identity }) {
  *   has no registry access, so the chromeId→wcIds lookup is injected rather than reached for
  *   (main.js: `webContents.fromId(chromeId)` → `registry.getWindowForChrome(wc)` →
  *   `[...rec.tabViews.keys()]`, null-safe at every hop). An omitted dep resolves no tabs.
+ * @property {(arg: { captureId: string, wcId: number, offered: boolean, cause?: string }) => void} [onCaptureDropped]
+ *   Sortie 06 Leg 1 (DD6): an OPTIONAL main-side drop observer, invoked from `dropCapture` AFTER
+ *   eviction + zeroization (inside a try/catch — a throwing listener can never block the
+ *   zeroize). Carries NON-SECRET metadata only (`offered` = the record was released as an offer;
+ *   `cause: 'superseded'` = a newer same-family capture replaced it).
  * @property {(event: string, detail: any) => void} [trace]  M21 F3 Leg 4, LD9 — an OPTIONAL
  *   diagnostic trace (no-op default; this module is Electron-free and cannot reach console/env
  *   itself). `main.js` wires the real one behind the same `GOLDFINCH_VAULT_TRACE` gate
@@ -225,6 +230,13 @@ function dispatchByFamily(rec, { login, card, identity }) {
  * save invoke carry only origin / username / vaultId).
  * @typedef {Object} CaptureRecord
  * @property {string} captureId
+ * @property {{ vaultId: string | null, origin: string, username: string | null, kind: 'login' | 'card' | 'identity' }} [consent]
+ *   Sortie 06 Leg 2 (DD7): the operator's recorded consent to save this LOCKED capture, stashed by
+ *   `captureConsent` from the record as offered. Spent or cleared by `captureFinalize`.
+ * @property {boolean} [downgraded]  Sortie 06 Leg 2: stamped by `applyUsernameDowngrade`.
+ * @property {any} [disposed]  Sortie 06 Leg 2: the cached first disposition (idempotent finalize).
+ * @property {boolean} [offered]  Sortie 06 Leg 1 (AC14): non-secret flag set by `captureRelease` on
+ *   the record it releases as an offer; drives the `vault-capture-dropped` push.
  * @property {number} wcId  the owning tab (for last-wins-per-tab supersession).
  * @property {'login' | 'card' | 'identity'} [kind]  the item family (issue #152; identity
  *   M21 F3 Leg 4); absent = 'login', so every pre-card record shape is unchanged.
@@ -302,10 +314,14 @@ function createVaultHuman(deps) {
    * map. Idempotent (a missing / already-dropped record is a no-op) — every exit path
    * funnels through here so no captured password lingers.
    * @param {string} captureId
+   * @param {string} [cause]  'superseded' when a newer same-family capture replaced it.
    */
-  function dropCapture(captureId) {
+  function dropCapture(captureId, cause) {
     const rec = captures.get(captureId);
     if (!rec) return;
+    // Sortie 06 Leg 1 (AC14): read the non-secret routing metadata BEFORE eviction.
+    const droppedWcId = rec.wcId;
+    const droppedOffered = rec.offered === true;
     captures.delete(captureId);
     if (rec.timer != null) _clearTimeout(rec.timer);
     // LD7 (M21 F3 Leg 4, design review HIGH/SECURITY): zeroize EVERY own
@@ -322,6 +338,30 @@ function createVaultHuman(deps) {
     for (const value of Object.values(rec)) {
       if (Buffer.isBuffer(value)) value.fill(0);
     }
+    // Zeroized + evicted FIRST; the observer runs last and can never block either.
+    if (typeof deps.onCaptureDropped === 'function') {
+      try {
+        deps.onCaptureDropped({
+          captureId,
+          wcId: droppedWcId,
+          offered: droppedOffered,
+          ...(cause ? { cause } : {})
+        });
+      } catch {
+        // a throwing listener is swallowed — the record is already zeroized.
+      }
+    }
+  }
+
+  /**
+   * Sortie 06 Leg 1 (AC14b): metadata-only — the owning tab of a HELD capture, or null.
+   * Lets main verify the capture<->tab pairing a chrome claims. Never returns a record.
+   * @param {string} captureId
+   * @returns {number | null}
+   */
+  function captureTabOf(captureId) {
+    const rec = typeof captureId === 'string' ? captures.get(captureId) : undefined;
+    return rec ? rec.wcId : null;
   }
 
   /**
@@ -684,6 +724,9 @@ function createVaultHuman(deps) {
     if (!model || model.mode !== 'update') return model;
     if (rec.username != null || rec.usernameDetected !== true) return model;
     rec.mode = 'save';
+    // Sortie 06 Leg 2: a downgraded disposition is never auto-written by a consented finalize
+    // (the operator consented to a plain save, not to a page-steerable re-file) - it re-asks.
+    rec.downgraded = true;
     rec.vaultId = undefined;
     rec.itemId = undefined;
     rec.choices = [rec.jarId, 'global'];
@@ -745,7 +788,7 @@ function createVaultHuman(deps) {
     // password. Family-scoped (M21 F3 L2, DD1's amendment) — a card hold for the same
     // tab is a DIFFERENT family and survives untouched (`familyOf`).
     for (const [id, rec] of captures) {
-      if (rec.wcId === wcId && familyOf(rec) === 'login') dropCapture(id);
+      if (rec.wcId === wcId && familyOf(rec) === 'login') dropCapture(id, 'superseded');
     }
 
     const normUser = normUsername(username);
@@ -780,7 +823,18 @@ function createVaultHuman(deps) {
     // stays held for that deferred pass; it is not zeroized here.
     if (!store.isUnlocked()) {
       rec.mode = 'locked';
-      return { captureId, model: { origin, username: normUser, mode: /** @type {'locked'} */ ('locked') } };
+      // Sortie 06 Leg 2 (AC2): the vault choice the operator makes BEFORE unlocking. Non-secret and
+      // deterministic (`rec.choices` stays unset until disposition).
+      return {
+        captureId,
+        model: {
+          origin,
+          username: normUser,
+          mode: /** @type {'locked'} */ ('locked'),
+          choices: [jar.id, 'global'],
+          defaultVaultId: jar.id
+        }
+      };
     }
 
     // UNLOCKED: compute the disposition now, applying DD3c's post-dispose downgrade. An
@@ -840,7 +894,7 @@ function createVaultHuman(deps) {
     // Family-scoped supersession (M21 F3 L2, DD1's amendment): only a PRIOR LOGIN hold
     // for this tab is evicted — a pending CARD hold survives untouched.
     for (const [id, rec] of captures) {
-      if (rec.wcId === wcId && familyOf(rec) === 'login') dropCapture(id);
+      if (rec.wcId === wcId && familyOf(rec) === 'login') dropCapture(id, 'superseded');
     }
 
     const captureId = crypto.randomBytes(12).toString('hex');
@@ -898,7 +952,7 @@ function createVaultHuman(deps) {
     // Family-scoped supersession (M21 F3 L2, DD1's amendment): only a PRIOR CARD hold
     // for this tab is evicted — a pending LOGIN hold survives untouched.
     for (const [id, rec] of captures) {
-      if (rec.wcId === wcId && familyOf(rec) === 'card') dropCapture(id);
+      if (rec.wcId === wcId && familyOf(rec) === 'card') dropCapture(id, 'superseded');
     }
 
     const captureId = crypto.randomBytes(12).toString('hex');
@@ -951,7 +1005,7 @@ function createVaultHuman(deps) {
     // Family-scoped supersession (LD1): only a PRIOR IDENTITY hold for this tab
     // is evicted — a pending LOGIN or CARD hold survives untouched.
     for (const [id, rec] of captures) {
-      if (rec.wcId === wcId && familyOf(rec) === 'identity') dropCapture(id);
+      if (rec.wcId === wcId && familyOf(rec) === 'identity') dropCapture(id, 'superseded');
     }
 
     const captureId = crypto.randomBytes(12).toString('hex');
@@ -1073,7 +1127,13 @@ function createVaultHuman(deps) {
         dropCapture(pendingId);
         continue;
       }
-      if (outcome) released.push(outcome);
+      if (outcome) {
+        // Sortie 06 Leg 1 (AC14): flag the NEW record as released-as-an-offer (non-secret),
+        // so its later drop pushes `vault-capture-dropped` to the chrome.
+        const fresh = captures.get(outcome.captureId);
+        if (fresh) fresh.offered = true;
+        released.push(outcome);
+      }
     }
     return released;
   }
@@ -1203,7 +1263,7 @@ function createVaultHuman(deps) {
     // with the gesture order reversed, a still-pending login record even earlier. This
     // loop binds its variable as `prior`, not `rec` — a `rec.wcId`-shaped grep misses it.
     for (const [id, prior] of captures) {
-      if (prior.wcId === wcId && familyOf(prior) === 'card') dropCapture(id);
+      if (prior.wcId === wcId && familyOf(prior) === 'card') dropCapture(id, 'superseded');
     }
 
     const captureId = crypto.randomBytes(12).toString('hex');
@@ -1234,7 +1294,15 @@ function createVaultHuman(deps) {
       rec.mode = 'locked';
       return {
         captureId,
-        model: { kind: 'card', origin, brand: rec.brand, last4: rec.last4, mode: 'locked' }
+        model: {
+          kind: 'card',
+          origin,
+          brand: rec.brand,
+          last4: rec.last4,
+          mode: 'locked',
+          choices: [jar.id, 'global'],
+          defaultVaultId: jar.id
+        }
       };
     }
 
@@ -1402,7 +1470,7 @@ function createVaultHuman(deps) {
     // Family-scoped supersession (LD1): only a PRIOR IDENTITY record for this
     // SAME tab is evicted — a pending LOGIN or CARD hold survives untouched.
     for (const [id, prior] of captures) {
-      if (prior.wcId === wcId && familyOf(prior) === 'identity') dropCapture(id);
+      if (prior.wcId === wcId && familyOf(prior) === 'identity') dropCapture(id, 'superseded');
     }
 
     const captureId = crypto.randomBytes(12).toString('hex');
@@ -1441,7 +1509,7 @@ function createVaultHuman(deps) {
   /**
    * Finalize a held 'locked' capture AFTER a successful unlock (the chrome's unlock-to-save
    * continuation): compute the deferred save/update disposition and return `{ captureId, model }`
-   * so the chrome opens the vault-capture sheet.
+   * so the chrome presents it in the corner save prompt.
    *
    * Every OTHER outcome returns a discriminated `{ reason }` rather than a bare null. The
    * operator has just typed their master password FOR THIS SAVE, so "no sheet appears and
@@ -1456,14 +1524,21 @@ function createVaultHuman(deps) {
    *                   the record is dropped so the captured password never lingers.
    *   'unchanged'   — the credential already stored for this origin is identical, so there is
    *                   genuinely nothing to save; the record is dropped.
+   * With a recorded consent (`captureConsent`) a plain `save` is written here and answered
+   * `{ captureId, saved: true, vaultId, kind }` (Sortie 06 Leg 2); any other consented disposition
+   * clears the consent and returns the model for a re-ask.
    * @param {string} captureId
-   * @returns {{ captureId: string, model: { origin: string, username: string|null, mode: 'save'|'update', defaultVaultId: string, choices: string[] } }
-   *   | { reason: 'expired' | 'locked' | 'tab-changed' | 'unchanged' }}
+   * @returns {any}
    */
   function captureFinalize(captureId) {
     const rec = captures.get(captureId);
     if (!rec) return { reason: /** @type {'expired'} */ ('expired') };
     if (!deps.getVaultStore().isUnlocked()) return { reason: /** @type {'locked'} */ ('locked') };
+    // Idempotent (Sortie 06 Leg 2, AC7.6): the first successful disposition is cached on the
+    // record, so a repeat finalize never re-runs it (`zeroizeCurrentPassword` ran once - a
+    // rotation `update` can never degrade to a `save` on a second call). Consent was already
+    // spent or cleared by the first call.
+    if (rec.disposed) return { captureId, model: rec.disposed };
     const jar = tabJarFor(rec.wcId);
     if (!jar || jar.id !== rec.jarId) {
       dropCapture(captureId);
@@ -1495,7 +1570,71 @@ function createVaultHuman(deps) {
       dropCapture(captureId);
       return { reason: /** @type {'unchanged'} */ ('unchanged') };
     }
-    return { captureId, model };
+    rec.disposed = model;
+    // Sortie 06 Leg 2 (AC7.4; flight DD7): the ONE consented write. Without `rec.consent` this
+    // writes nothing (today's behavior). With it, ONLY a plain `save` for login/card whose
+    // consented vault is still a valid choice AND whose disposed identity (origin / username /
+    // kind) equals what the operator consented against is written - through `captureSave`, the
+    // one write path. Anything else (update, identity, a downgraded username, a vault outside
+    // `rec.choices`) CLEARS the consent and re-asks in the unlocked prompt.
+    const consent = rec.consent;
+    if (!consent) return { captureId, model };
+    delete rec.consent;
+    const family = familyOf(rec);
+    const modelKind = /** @type {any} */ (model).kind ?? 'login';
+    const plainSave =
+      model.mode === 'save' &&
+      rec.downgraded !== true &&
+      (family === 'login' || family === 'card') &&
+      typeof consent.vaultId === 'string' &&
+      Array.isArray(rec.choices) &&
+      rec.choices.includes(consent.vaultId) &&
+      /** @type {any} */ (model).origin === consent.origin &&
+      /** @type {any} */ (model.username ?? null) === (consent.username ?? null) &&
+      modelKind === consent.kind;
+    if (!plainSave) return { captureId, model };
+    let res;
+    try {
+      res = captureSave({ captureId, vaultId: consent.vaultId });
+    } catch {
+      return { reason: /** @type {'error'} */ ('error') };
+    }
+    if (res && res.saved) return { captureId, saved: true, vaultId: consent.vaultId, kind: modelKind };
+    return {
+      reason: res && res.reason === 'locked' ? /** @type {'locked'} */ ('locked') : /** @type {'error'} */ ('error')
+    };
+  }
+
+  /**
+   * Sortie 06 Leg 2 (flight DD7, AC5): record the operator's consent to save a LOCKED capture to a
+   * chosen vault once the vault is unlocked. Metadata only; the consented-against offer is stashed
+   * from the RECORD as offered, never from the payload. No write happens here - `captureFinalize`
+   * reads `rec.consent` after the unlock. Cleared by every drop path (the record IS the consent).
+   * @param {{ captureId: string, vaultId: any }} arg
+   * @returns {{ ok: true } | { ok: false, reason: 'expired' | 'unlocked' | 'refused' | 'bad-vault' }}
+   */
+  function captureConsent({ captureId, vaultId }) {
+    const rec = typeof captureId === 'string' ? captures.get(captureId) : undefined;
+    if (!rec) return { ok: false, reason: 'expired' };
+    if (deps.getVaultStore().isUnlocked()) return { ok: false, reason: 'unlocked' };
+    if (rec.mode !== 'locked') return { ok: false, reason: 'refused' };
+    const family = familyOf(rec);
+    if (family === 'identity') {
+      if (vaultId != null) return { ok: false, reason: 'bad-vault' };
+    } else if (family === 'login' || family === 'card') {
+      if (typeof vaultId !== 'string' || (vaultId !== rec.jarId && vaultId !== 'global')) {
+        return { ok: false, reason: 'bad-vault' };
+      }
+    } else {
+      return { ok: false, reason: 'refused' };
+    }
+    rec.consent = {
+      vaultId: typeof vaultId === 'string' ? vaultId : null,
+      origin: rec.origin,
+      username: rec.username ?? null,
+      kind: /** @type {'login' | 'card' | 'identity'} */ (family)
+    };
+    return { ok: true };
   }
 
   /**
@@ -1701,8 +1840,8 @@ function createVaultHuman(deps) {
   }
 
   /**
-   * Drop a held capture without saving (chrome `handleOverlayClosed` for a dismissed
-   * `vault-capture` sheet). Zeroizes+evicts the record and clears the timer.
+   * Drop a held capture without saving (the corner save prompt's dismiss / timeout /
+   * un-presentable paths; HISTORY: the retired `vault-capture` sheet's close). Zeroizes+evicts the record and clears the timer.
    * @param {string} captureId
    */
   function captureDismiss(captureId) {
@@ -1797,8 +1936,10 @@ function createVaultHuman(deps) {
     holdGestureIdentity,
     captureRelease,
     captureFinalize,
+    captureConsent,
     captureSave,
     captureDismiss,
+    captureTabOf,
     dropCapturesForTab,
     dropCapturesForWindow,
     dropAllCaptures,

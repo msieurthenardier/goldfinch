@@ -92,6 +92,11 @@ const {
 // the credential to F1's fill delegate (in main only; the password never returns
 // to chrome). Constructed once from the vault-store singleton + registry idioms.
 const { createVaultHuman } = require('./vault/vault-human');
+const { runVaultLockTeardown } = require('./vault-lock-teardown');
+const { routeCaptureDropped } = require('./save-prompt-drop-router');
+const { createSavePromptManager } = require('./save-prompt-manager');
+const { computeSavePromptBounds } = require('./save-prompt-geometry');
+const { registerSavePromptIpc } = require('./register-save-prompt-ipc');
 // M09 Flight 9 (session restore): the Electron-free open-window/tab topology store
 // (leg 2) + the pure burner-allowlist snapshot builder (leg 2), wired here (leg 3).
 const sessionStore = require('./session-store');
@@ -800,6 +805,11 @@ async function grabWindow(windowId) {
     if (tabB64 && guestBounds) {
       layers.push({ b64: tabB64, x: guestBounds.x, y: guestBounds.y, w: guestBounds.width, h: guestBounds.height });
     }
+    // Sortie 06 (DD10): the corner SAVE PROMPT is DELIBERATELY NOT a layer here. It renders the
+    // offer's origin + username + vault choice and takes the operator's Save click, so a
+    // captureWindow of it would be a pixel read of the save moment. Only the find overlay and the
+    // sheet layers below are composited (pinned in test/unit/save-prompt-automation-guard.test.js);
+    // the prompt is by-eye only.
     // F7 DD5: composite THE CAPTURED window's OWN overlay layers — the pre-F7
     // attachment gates (`=== grabWin`) are gone because each window's managers only
     // ever hold that window's views, so window A's open menu is structurally
@@ -983,19 +993,19 @@ function getVaultStore() {
         // safety valve this leg closes before Leg 4 makes holding the normal
         // state. Uses the MEMOIZED reference, not the force-constructing
         // getVaultHuman(), so a lock in a session that never captured anything
-        // never constructs vault-human. This is safe even for a `mode:'locked'`
-        // record — NOT because "every live record was created while unlocked"
-        // (false: captureFinalize can leave a 'locked' record live across an
-        // unlock, see its own reason table) but because the chrome's
-        // `pendingCaptureUnlock` is a ONE-SHOT cleared BEFORE the first
-        // `vaultCaptureFinalize` call (vault-controller.js, "so an unrelated
-        // later unlock can't re-fire it") — such a record therefore has no live
-        // client retry waiting on it; it is already an orphan bound for the TTL,
-        // and dropping it now instead of up to two minutes later changes nothing
-        // observable.
-        _vaultHuman?.dropAllCaptures();
-        closeVaultCredentialSheetsOnLock();
-        broadcastVaultLockState();
+        // never constructs vault-human. Sortie 06 Leg 1 (AC15): every window's corner
+        // save prompt closes `vault-lock` BEFORE the drop (so no prompt flashes
+        // "expired"); the ordering lives in vault-lock-teardown.js. A `mode:'locked'`
+        // record is safe to drop here too: the chrome's `pendingCaptureUnlock` ids are
+        // drained by the post-unlock `advance()`, and a `vaultCaptureFinalize` on an
+        // already-dropped id simply answers `expired`, which the chrome presents as a
+        // prompt result state - nothing is written and nothing dangles.
+        runVaultLockTeardown({
+          records: () => registry.records(),
+          vaultHuman: _vaultHuman,
+          closeSheets: closeVaultCredentialSheetsOnLock,
+          broadcast: broadcastVaultLockState
+        });
       },
       onUnlock: () => broadcastVaultLockState()
     });
@@ -1476,6 +1486,13 @@ function getVaultHuman() {
       // dropCapturesForWindow can bridge its tab-keyed captures against a
       // chrome id. Null-safe at every hop — a destroyed/unknown chrome id
       // resolves [], never a throw.
+      // Sortie 06 Leg 1 (AC14): non-secret drop metadata -> the owning window's save-prompt
+      // manager (always) and, when the record was released as an offer, that tab's chrome.
+      onCaptureDropped: (info) =>
+        routeCaptureDropped(info, {
+          managerForTab: (wcId) => registry.getWindowForGuest(wcId)?.savePrompt ?? null,
+          chromeForTab
+        }),
       tabWcIdsForChrome: (chromeId) => {
         const wc = webContents.fromId(chromeId);
         const rec = wc ? registry.getWindowForChrome(wc) : null;
@@ -1554,6 +1571,9 @@ async function startMcpServerInstance() {
         // Grep-pinned as a PAIR across both engine sites — see app-lifecycle.js's dev seam.
         isSheetContents: (wc) => registry.isSheetContents(wc),
         sheetMenuFor: (wc) => registry.sheetMenuFor(wc),
+        // Sortie 06 (DD10): the corner save prompt is refused at EVERY tier. Grep-pinned as present
+        // at BOTH engine sites (an absent injection is NOT refused by anything else at admin).
+        isSavePromptContents: (wc) => registry.isSavePromptContents(wc),
         // F7 DD6 (recon S1): owner routing + the window raise for activateTab. Without
         // BOTH, activateTab silently falls back to the pre-F7 last-focused dispatch —
         // a forgotten injection restores S1 with NO test failure anywhere, which is why
@@ -1589,6 +1609,7 @@ async function startMcpServerInstance() {
       // silently divergent or fail-opens a relaxation without the menuType half.
       isSheetContents: (wc) => registry.isSheetContents(wc),
       sheetMenuFor: (wc) => registry.sheetMenuFor(wc),
+      isSavePromptContents: (wc) => registry.isSavePromptContents(wc),
       isTabViewWcId: (id) => registry.isTabViewWcId(id),
       isPopupWcId: (id) => popupRegistry.isPopupWcId(id)
     },
@@ -1767,6 +1788,9 @@ const htmlFullscreen = createHtmlFullscreen({
   // challenge arriving mid-fullscreen holds (presentation eligibility) and
   // presents here.
   onExited: (record) => authChallenges.notifyFullscreenExited(record),
+  // Sortie 06 Leg 1 (AC13): lazy getter (the memoized reference - never force-constructs
+  // vault-human); entering fullscreen drops the tab's captures + closes its corner prompt.
+  vaultHuman: () => _vaultHuman,
   logger: console
 });
 
@@ -1834,7 +1858,9 @@ const { createWindow } = createWindowFactory({
     findHtml: path.join(__dirname, '..', 'renderer', 'find-overlay.html'),
     menuPreload: path.join(__dirname, '..', 'preload', 'menu-overlay-preload.js'),
     menuHtml: path.join(__dirname, '..', 'renderer', 'menu-overlay.html'),
-    tearoffHtml: path.join(__dirname, '..', 'renderer', 'tearoff-overlay.html')
+    tearoffHtml: path.join(__dirname, '..', 'renderer', 'tearoff-overlay.html'),
+    savePromptPreload: path.join(__dirname, '..', 'preload', 'save-prompt-preload.js'),
+    savePromptHtml: path.join(__dirname, '..', 'renderer', 'save-prompt.html')
   },
   registry,
   isAutomationEnabled: isMcpAutomationEnabled,
@@ -1842,6 +1868,11 @@ const { createWindow } = createWindowFactory({
   createFindOverlayManager,
   createMenuOverlayManager,
   createTearoffOverlayManager,
+  // Sortie 06 Leg 1: the corner save prompt (manager + pure geometry) and the vault-human
+  // accessor its Save/dismiss delegates resolve at CALL time.
+  createSavePromptManager,
+  computeSavePromptBounds,
+  getVaultHuman,
   htmlFullscreen,
   authChallenges,
   computeFindOverlayBounds,
@@ -2173,6 +2204,10 @@ registerTabIpc({
   logger: console
 });
 
+// Sortie 06 Leg 1: the corner save-prompt channels (chrome->main open/anchor; page->main
+// pointer/focus/height/dismiss/save). getVaultHuman resolves at CALL time.
+registerSavePromptIpc({ ipcMain, registry, getVaultHuman });
+
 registerOverlayIpc({
   ipcMain,
   registry,
@@ -2198,11 +2233,8 @@ registerOverlayIpc({
       throw e;
     }
   },
-  // DD7 (capture-save leg): the sheet's Save delegate. Looks up the main-side held
-  // record by captureId, re-checks unlock, and persists via saveItem — the captured
-  // password lives ONLY in that record (never crosses to the sheet). Returns
-  // { saved, reason? }; the handler closes the sheet on saved.
-  vaultCaptureSave: ({ captureId, vaultId }) => getVaultHuman().captureSave({ captureId, vaultId }),
+  // (Sortie 06, DD8: the `vaultCaptureSave` sheet delegate is RETIRED - Save now rides the
+  // four-guarded `save-prompt:save` channel in register-save-prompt-ipc.js.)
   // M12 F3 Leg 4 (first-run-setup): the vault-set sheet's setup delegate. Mirrors the
   // vaultUnlock injection — the memoized getVaultStore() singleton; setup() accepts the
   // zeroizable Buffer master password (the widened :389 guard). Broadcasts the lock-state

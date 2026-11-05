@@ -13,7 +13,7 @@
 // (the cross-jar fetch/proxy fix, DD2) and must include the new
 // goldfinch-media: scheme (the only way the chrome fetches remote media now).
 //
-// The three overlay documents (find-overlay, menu-overlay, tearoff-overlay)
+// The four overlay documents (find-overlay, menu-overlay, tearoff-overlay, save-prompt)
 // must stay unable to reach the proxy scheme or the open web at all — their
 // CSPs are strict (`default-src 'self'`/`'none'`) and must never gain http:,
 // https:, or goldfinch-media: sources, by omission or by future edit.
@@ -28,6 +28,7 @@ const INDEX_HTML = path.join(RENDERER_DIR, 'index.html');
 const FIND_OVERLAY_HTML = path.join(RENDERER_DIR, 'find-overlay.html');
 const MENU_OVERLAY_HTML = path.join(RENDERER_DIR, 'menu-overlay.html');
 const TEAROFF_OVERLAY_HTML = path.join(RENDERER_DIR, 'tearoff-overlay.html');
+const SAVE_PROMPT_HTML = path.join(RENDERER_DIR, 'save-prompt.html');
 
 // Extracts the Content-Security-Policy meta tag's `content` attribute value
 // from an HTML document on disk. Throws (never returns '' or null) if the
@@ -75,7 +76,7 @@ test('chrome index.html CSP: img-src/media-src drop http:/https: and gain goldfi
 });
 
 test('overlay documents stay unreachable from the proxy scheme and the open web (DD2/AC4)', () => {
-  for (const overlayPath of [FIND_OVERLAY_HTML, MENU_OVERLAY_HTML, TEAROFF_OVERLAY_HTML]) {
+  for (const overlayPath of [FIND_OVERLAY_HTML, MENU_OVERLAY_HTML, TEAROFF_OVERLAY_HTML, SAVE_PROMPT_HTML]) {
     const csp = extractCsp(overlayPath);
     assert.equal(/\bhttp:/.test(csp), false, `${overlayPath}: CSP must not contain http: — got "${csp}"`);
     assert.equal(/\bhttps:/.test(csp), false, `${overlayPath}: CSP must not contain https: — got "${csp}"`);
@@ -85,4 +86,17 @@ test('overlay documents stay unreachable from the proxy scheme and the open web 
       `${overlayPath}: CSP must not contain goldfinch-media: — got "${csp}"`
     );
   }
+});
+
+// Sortie 06 Leg 1 (AC22, DD9): the corner save prompt's CSP mirrors the menu-overlay sheet's,
+// exactly - same directives, same values - so the prompt can load nothing beyond its own
+// file:// siblings. Non-vacuous: extractCsp throws on a missing meta tag.
+test('save-prompt.html CSP mirrors the menu-overlay sheet CSP exactly (Sortie 06 AC22)', () => {
+  const prompt = extractCsp(SAVE_PROMPT_HTML);
+  const menu = extractCsp(MENU_OVERLAY_HTML);
+  assert.equal(prompt, menu);
+  assert.equal(directive(prompt, 'default-src'), "'self'");
+  assert.equal(directive(prompt, 'script-src'), "'self'");
+  assert.equal(directive(prompt, 'style-src'), "'self'");
+  assert.equal(/unsafe-inline|unsafe-eval|data:|blob:/.test(prompt), false);
 });

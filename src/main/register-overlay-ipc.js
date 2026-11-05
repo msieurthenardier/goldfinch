@@ -58,7 +58,6 @@ function registerOverlayIpc({
   chromeForTab,
   sanitizeActivatedValue,
   vaultUnlock,
-  vaultCaptureSave,
   vaultSetup,
   vaultMintAccessKey,
   // M12 F4 Leg 1 (export-import); RESHAPED M18 F3 Leg 3 / DD2 ruling 2: PREVIEWS the held
@@ -125,15 +124,9 @@ function registerOverlayIpc({
   getTabContents,
   isSafeTabUrl
 }) {
-  function recordForOverlaySender(sender, key) {
-    if (!sender) return null;
-    for (const rec of registry.records()) {
-      const manager = rec[key];
-      const view = manager ? manager.getView() : null;
-      if (view && !view.webContents.isDestroyed() && view.webContents === sender) return rec;
-    }
-    return null;
-  }
+  // Sender resolution lives on the registry (Sortie 06 Leg 1, AC18) so every overlay channel
+  // family shares one implementation.
+  const recordForOverlaySender = (sender, key) => registry.recordForOverlaySender(sender, key);
 
   const recordForSheetSender = (sender) => recordForOverlaySender(sender, 'sheet');
   const recordForFindSender = (sender) => recordForOverlaySender(sender, 'findOverlay');
@@ -269,25 +262,9 @@ function registerOverlayIpc({
     });
   }
 
-  // DD7 (M12 F2 capture-save): the sheet's Save invoke. Sender-identity + open-token
-  // discipline mirror the vault-unlock handler; the payload carries only the captureId
-  // + the chosen vaultId (NEVER a password — the captured password lives solely in the
-  // main-side held record, keyed by captureId). Gated on the vaultCaptureSave injection
-  // so offline overlay tests that don't wire the vault never register it. On { saved }
-  // main closes the sheet ('activated'); { saved:false } keeps it open to re-prompt.
-  if (vaultCaptureSave) {
-    ipcMain.handle('menu-overlay:vault-capture-save', (event, payload) => {
-      const rec = recordForSheetSender(event.sender);
-      if (!rec || !rec.sheet) return { saved: false };
-      const { token, captureId, vaultId } = payload || {};
-      if (typeof token !== 'number' || typeof captureId !== 'string') return { saved: false };
-      const current = rec.sheet.getCurrentMenu();
-      if (!current || token !== current.token) return { saved: false };
-      const res = vaultCaptureSave({ captureId, vaultId });
-      if (res && res.saved) rec.sheet.closeMenuOverlay('activated', current.token);
-      return res || { saved: false };
-    });
-  }
+  // (Sortie 06, DD8: the `menu-overlay:vault-capture-save` handler is RETIRED. Capture Save now
+  // rides the four-guarded `save-prompt:save` channel in register-save-prompt-ipc.js - the old
+  // handler had no menuType guard.)
 
   // M12 F3 Leg 4 (first-run-setup): the master password's DEDICATED setup channel,
   // mirroring menu-overlay:vault-unlock BYTE-FOR-BYTE (sender identity + open-token +

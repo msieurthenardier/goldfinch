@@ -196,7 +196,7 @@ and admin-key display, access-key minting, import, and every rotation are hosted
 chrome-owned **menu-overlay sheet** (`src/renderer/menu-overlay.js` +
 `src/shared/vault-*-template.js` — `vault-unlock`, `vault-set`, `vault-recovery`,
 `vault-stepup`, `vault-accesskey`, `vault-adminkey`, `vault-import`, `vault-change-master`,
-`vault-recover`, plus the `vault-picker` / `vault-capture` fill sheets). The sheet holds no
+`vault-recover`, plus the `vault-picker` fill sheet; the save/update offer is NOT a sheet — see *The save prompt*). The sheet holds no
 business logic and no privileged APIs; it renders a model and runs the APG keyboard contract.
 
 - **Dual-zeroized Buffer channel.** A secret submitted from a sheet is encoded to a
@@ -221,9 +221,10 @@ business logic and no privileged APIs; it renders a model and runs the APG keybo
   exactly as before; only the incidental window-blur close is suppressed. Membership is a
   single shared allowlist (`src/shared/vault-blur-survival.js`), applied once at the chrome-side
   open funnel (`src/renderer/chrome/overlay-menus.js`) — never decided per call site. The
-  dismiss-locked one-time-key displays above and the no-typed-secret `vault-capture` /
-  `vault-picker` sheets are **not** part of this axis (the show sheets are already
-  blur-immune via `dismissible: false`; the metadata-only sheets have nothing to protect).
+  dismiss-locked one-time-key displays above and the no-typed-secret `vault-picker` sheet
+  are **not** part of this axis (the show sheets are already blur-immune via
+  `dismissible: false`; the metadata-only sheet has nothing to protect). The corner save prompt
+  (below) is not a sheet at all: a window blur only PAUSES its timer.
 - **Close on vault lock.** Locking the vault (manual, or the idle autolock timer) closes any
   open allowlisted credential sheet — the conservative answer once half-typed secrets can
   outlive an app switch: the operator walked away, so wiping in-progress new-master material
@@ -388,7 +389,7 @@ refuse non-login items, and the documented "never card data" guarantee in
 
 A fourth item type, `identity` — one name/email/phone/address profile, at most one per vault.
 **Flight 2 shipped the detector and the item type; Flight 3 wired fill, capture, and the
-capture sheet into the live page** — `classifyCapture`/`identityProfileOf` (below) are called
+capture offer (then a sheet; since Sortie 06 the corner save prompt) into the live page** — `classifyCapture`/`identityProfileOf` (below) are called
 live from `disposeIdentityCapture` (`src/main/vault/vault-human.js`). The Flight 2/3 split
 mirrors Flight 1's own lesson: a single leg that tried to design detection, fill, capture *and*
 the sheets at once would have repeated a mistake that cost Flight 1 six review rounds. Flight
@@ -596,6 +597,124 @@ never offered; the existing `CAPTURE_DROP_MS` safety-timeout continues to cover 
 state via the same drop choke point Leg 1 hardened (vault lock, window close, tab close, TTL).
 Origin is derived and **frozen at gesture time** — never re-derived at settle, since the tab may
 already show a different origin by the time a navigation-commit settle fires.
+
+### The save prompt (Sortie 06): a non-blocking corner prompt, not a sheet
+
+The offer to save / update a captured login, card or identity is presented in a small **corner
+prompt** over the guest — its own per-window, content-sized, transparent `WebContentsView`
+(`rec.savePrompt`), hanging from the vault toolbar indicator. It replaced the centered, modal
+`vault-capture` sheet, which covered the whole guest and swallowed every click. The page stays fully
+usable (click, type, scroll) while the prompt shows, and the prompt **never takes OS focus on
+appearance**. Components: `src/main/save-prompt-manager.js` (Electron-free lifecycle + 10 s timer),
+`save-prompt-geometry.js` (pure), `register-save-prompt-ipc.js` (channels), `save-prompt-drop-router.js`,
+`src/shared/save-prompt-close-effects.js` (the one per-reason table, shared by main and chrome),
+`src/renderer/save-prompt.{html,js,css}` + `save-prompt-preload.js`, and the chrome-side
+`src/renderer/chrome/save-prompt-client.js` (constructed inside `vault-controller.js`).
+
+- **Security model (unchanged secret rules).** The prompt carries **metadata only** — origin,
+  username, card brand/last4, identity field LABELS, vault ids + display labels; never a password,
+  PAN, CVC or identity value. `save-prompt:open`'s model is shape-checked against an explicit
+  allowlist (unknown keys stripped; any key that is a secret field name refuses the open). The view
+  is `contextIsolation`, `sandbox`, `nodeIntegration:false`, with a CSP mirroring the sheet's, a
+  `textContent`-only page, and an **eager clear** (`save-prompt:clear` empties its DOM before the
+  view is removed). It is **refused to every automation op and excluded from `captureWindow`**
+  (see `docs/mcp-automation.md`).
+- **Save is a four-guarded channel.** `save-prompt:save { token, captureId, vaultId }`: (1) sender
+  identity (this window's prompt view), (2) token freshness, (3) kind — the prompt is in its OFFER
+  state (not a result / saving state) and the model is not `locked`, (4) business gate — the
+  captureId is the SHOWN capture, its tab is still the window's active tab, and main's own
+  `captureTabOf` agrees. A double-click is refused by guard 3 (the manager flips to `saving`
+  synchronously). The retired `menu-overlay:vault-capture-save` handler had no menuType guard.
+- **Tab-bound (DD5).** `vault-capture-offer` carries the tab's `wcId`, and main sends it only
+  while that tab is its window's ACTIVE tab (otherwise the held capture is dropped). A tab switch
+  away, tab hide, HTML-fullscreen enter, tab close, tab moved to another window, or window close
+  **drops** the shown capture, that tab's queued captures, and closes the prompt. Navigation inside
+  the tab does not. *Known consequence:* a login whose submit opens a foreground NEW tab loses its
+  offer, because the original tab is no longer active when it releases.
+- **Timer (DD4).** Main owns a 10 s timer (started when the prompt is shown). It pauses while ANY
+  of four inputs is true — pointer over the prompt, focus inside it, window blurred/minimized
+  (event-fed only), or a menu sheet visible — and resumes with the remaining time. A timeout
+  **drops** the held credential. The 2-minute main-side hold (`CAPTURE_DROP_MS`) still bounds
+  everything: if it drops the shown capture, the prompt shows "This save request expired".
+- **Close table (DD6).** `save-prompt-closed { token, captureId, reason }` — reasons `saved`,
+  `dismissed` (✕ / Not now), `timeout`, `expired`, `unlock-requested` (the locked prompt's consent) / `unlock-abandoned` (applied chrome-side when the unlock sheet closes still locked),
+  `tab-switch` / `tab-hide` / `tab-close` / `tab-moved`, `teardown`, `vault-lock`; an unknown reason
+  is treated as `dismissed`. `savePromptCloseEffects(reason)` is the single source of what each
+  does (dismiss the shown capture, advance the queue, drop that tab's queue, clear the queue).
+  Every vault lock closes every window's prompt `vault-lock` BEFORE `dropAllCaptures`, so no
+  prompt flashes "expired". Main also pushes `vault-capture-dropped { captureId }` (owner-routed,
+  offered records only) so the chrome queue is corrected when main drops something the chrome did
+  not initiate.
+- **Queue.** Serial, owned by the chrome (`advance()` is the single opener). Main refuses an open
+  with `sheet-open` / `fullscreen` / `not-active` rather than queueing: a `sheet-open` head stays at
+  the front and retries when ANY menu sheet closes; the others drop the offer.
+- **Locked vault: consent, then unlock, then complete or re-ask (Sortie 06 Leg 2; flight DD7).**
+  A submit into a LOCKED vault shows the same non-blocking corner prompt, with the held capture's
+  locked offer model (`mode: 'locked'`; login/card also carry the non-secret `choices:
+  [jarId, 'global']` + `defaultVaultId`; identity carries neither). The card shows the vault
+  choice ("Save to"), the note "Your vault is locked. You will enter your master password to
+  save.", and the primary **Unlock & save** (identity: **Unlock & review**, because identity always
+  re-asks after unlock). The chrome no longer raises the unlock sheet by itself.
+  - **Consent.** The primary invokes `save-prompt:consent { token, captureId, vaultId }`, with four
+    guards in order: (1) sender = THIS window's prompt view, (2) token, (3) kind = OFFER state with
+    a `locked` model and a dedicated `consenting` in-flight flag (set synchronously so a
+    double-click sends one consent; rolled back by every refusal that leaves the prompt up),
+    (4) business gate = the shown capture, whose tab is the window's active tab and that
+    `captureTabOf` agrees with, then `vaultHuman.captureConsent`, which requires the record still
+    `locked`, the vault still locked, and `vaultId ∈ {rec.jarId, 'global'}` (identity: none). It
+    stashes `rec.consent = { vaultId, origin, username, kind }` FROM THE RECORD, never the payload.
+    Consent lives on the record, so every drop path (TTL, dismiss, tab/window close, lock,
+    supersession) evicts it. On success the prompt closes `unlock-requested`; the chrome queues
+    `{ captureId, wcId, consented: true }` on `pendingCaptureUnlock` and, in the NEXT task (after
+    the prompt is hidden), opens `vault-unlock` (`keepFocus`) — or, if the vault is already
+    unlocked by then, skips the sheet and drains.
+  - **Complete or re-ask.** After the unlock the chrome calls the ONE `vault-capture-finalize`
+    (now sender-gated to the capture's owning window and active-tab-gated: `refused` /
+    `tab-changed`, no write). `captureFinalize` is idempotent (the first disposition is cached on
+    the record). With `rec.consent`, ONLY a plain `save` for login/card whose consented vault is
+    still in `rec.choices` AND whose disposed origin/username/kind equal the consented offer (and
+    that `applyUsernameDowngrade` did not rewrite) is written, through `captureSave`; the chrome
+    then shows "Password saved to {vault}" (`saved` result, 2500 ms). An `update`, any identity
+    disposition, a downgraded disposition or a vault outside the choices clears the consent, writes
+    nothing, and re-asks non-blockingly in the unlocked prompt (a fresh 10 s). The write boundary:
+    `captureSave` is reached only via `save-prompt:save` or this consented finalize (a source-scan
+    allowlist, `test/unit/capture-save-allowlist.test.js`).
+  - **Convert in place.** An unlock by ANY route (including another window; the lock-state
+    broadcast reaches every chrome) finalizes a visible locked prompt once, without consent, and
+    model-replaces it with the result (offer or result-only) at the head of the queue. If the
+    unlock came from a sheet, the lock-state push beats the sheet's close, so main answers
+    `sheet-open`; the head is kept and retried on the sheet's close (the old locked prompt stays
+    visible and paused meanwhile). Queued locked models convert when `advance()` reaches them — a
+    locked model is never presented while the vault is unlocked.
+  - **Unlock abandoned.** The unlock sheet closing while still locked drops EVERY
+    `pendingCaptureUnlock` entry (consent included); main drops the records.
+  - **A7: "expired after unlock".** If main drops a consented record while the unlock is pending
+    (the 2-minute TTL, a tab switch, a vault re-lock), `vault-capture-dropped` marks the chrome's
+    entry `expired` instead of removing it; after the unlock the corner says "This save request
+    expired" without calling finalize (a silent miss after typing a master password was live
+    anomaly A7). The result is shown only if the entry's tab is still the active tab; otherwise it
+    is silently discarded.
+  - `GOLDFINCH_VAULT_TRACE=1` traces `save-prompt:open` `{ captureId, presented, reason }` and
+    consent `{ captureId, outcome }` — opaque ids and reason strings only.
+
+  - **Keyboard and announcement (Sortie 06 Leg 3).** The prompt is never focused on appearance.
+    **F6** from the page tab the prompt is showing moves focus to its primary button (Save /
+    Update / Unlock & save / Unlock & review), via `handleCrossView` in `guest-wiring.js` — only
+    while an interactive offer is up for that tab; in a result state, for another tab, or with no
+    prompt, F6 is the unchanged address-bar hop. Inside the prompt (keys read main-side from its
+    trusted `before-input-event`, `save-prompt-keys.js`; no page key channel): **F6** → address bar,
+    **Shift+F6** → the page (a taken-over tab falls back to the chrome's `focus-content`),
+    **Esc** = Not now (a no-op while a result shows or a save/consent is in flight; once the prompt
+    closes Esc reaches the page again). Tab / Shift+Tab / Enter are native. A `saved` or `dismissed`
+    close hands focus back to the page ONLY if the prompt held focus when the close began (tracked
+    from its webContents `focus`/`blur`; a window blur clears it); the refocus runs after the hide
+    (for a result close, after the result hold), through the shared `focus-active-guest.js` (also
+    behind `tab-focus-guest`). The announcement: the chrome's `#save-prompt-status` polite region
+    says "Save password for example.com? Press F6 to respond." (host only; re-announced via a 30 ms
+    timer, never rAF), and the prompt has its own `role="status"` node with the same text minus
+    "Press F6". **P3 is UNVERIFIED**: that a polite region in a non-focused chrome is spoken while
+    the guest holds focus has not been confirmed with a screen reader (possible double speech is
+    also a HAT item); the HAT checks F6 discoverability by eye.
 
 ### Password-field roles: sign-up, sign-in, and rotation
 

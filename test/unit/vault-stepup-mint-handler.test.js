@@ -9,6 +9,7 @@
 // (never in the invoke reply), and a WRONG step-up password → { ok:false } mints NOTHING and
 // opens no accesskey-show (the vaultUnlock pattern — VaultAuthError mapped to { ok:false }).
 
+const { withOverlaySenderLookup } = require('../helpers/fake-overlay-registry');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const os = require('node:os');
@@ -50,7 +51,7 @@ function makeHarness({ mintResult, mintThrows, injectBroadcast = true } = {}) {
     closeMenuOverlay: (reason, token) => closeCalls.push([reason, token])
   };
   const rec = { sheet, win };
-  const registry = { records: () => [rec], getWindowForChrome: () => null };
+  const registry = withOverlaySenderLookup({ records: () => [rec], getWindowForChrome: () => null });
   const chrome = { send: (channel, payload) => chromeSends.push([channel, payload]) };
 
   const captured = { buffer: null, isBuffer: null, bytes: null, target: undefined, called: 0 };
@@ -92,7 +93,7 @@ test('the mint handler is GATED on the vaultMintAccessKey injection (offline ove
   const ipcMain = makeIpc();
   registerOverlayIpc({
     ipcMain,
-    registry: { records: () => [], getWindowForChrome: () => null },
+    registry: withOverlaySenderLookup({ records: () => [], getWindowForChrome: () => null }),
     chromeForAttachment: () => null,
     chromeForTab: () => null,
     sanitizeActivatedValue: () => undefined
@@ -308,7 +309,7 @@ async function makeRealStoreHarness() {
   const broadcasts = { count: 0 };
   registerOverlayIpc({
     ipcMain,
-    registry: { records: () => [rec], getWindowForChrome: () => null },
+    registry: withOverlaySenderLookup({ records: () => [rec], getWindowForChrome: () => null }),
     chromeForAttachment: (w) =>
       w === win ? { send: (channel, payload) => chromeSends.push([channel, payload]) } : null,
     chromeForTab: () => null,

@@ -34,10 +34,9 @@ opens are programmatic on `menu-overlay:init`:
   template's own `keydown` handler covers Escape/Tab dismissal.
 - **`input-dialog` template** (new-container dialog) — **no `items`**; the dialog owns its own
   Tab-cycle (input → Create → Cancel) and Escape handling.
-- **`vault-*` family** (eleven templates, all centered modal cards): `vault-unlock`
+- **`vault-*` family** (ten templates, all centered modal cards): `vault-unlock`
   (master-password unlock prompt), `vault-picker` (saved-login picker for pick-and-fill —
-  **has `items`**, a roving row list), `vault-capture` (save/update-password prompt),
-  `vault-set` (first-run master-password setup), `vault-recovery-show` (one-time
+  **has `items`**, a roving row list), `vault-set` (first-run master-password setup), `vault-recovery-show` (one-time
   recovery-key display, dismiss-disabled), `vault-stepup` (step-up master-password
   re-auth, reused for access-key mint and for recovery/admin-key rotation),
   `vault-accesskey-show` (one-time minted access-key display, dismiss-disabled),
@@ -46,6 +45,19 @@ opens are programmatic on `menu-overlay:init`:
   change), and `vault-recover` (recover-after-forgotten-master) — every member but
   `vault-picker` registers **without `items`**, Tab-cycling and Escape handled by the
   shared modal-card helper (or, for the dismiss-disabled pair, disabled outright).
+- **The save/update offer is NOT a sheet template any more (Sortie 06).** The former
+  `vault-capture` template (a centered `aria-modal` backdrop card that swallowed every click over the
+  guest) was retired; the offer is the non-blocking corner **save prompt** — its own per-window,
+  content-sized, transparent `WebContentsView` (`rec.savePrompt`; `src/main/save-prompt-manager.js`,
+  `src/main/save-prompt-geometry.js`, `src/renderer/save-prompt.{html,js,css}`, the narrow
+  `save-prompt-preload.js`). It renders from the same pure `src/shared/vault-capture-template.js`
+  builders (now a non-modal `role="dialog"` card, no backdrop, no `aria-modal`), never takes OS focus
+  on show, and has its OWN close channel (`save-prompt-closed`) and reason table
+  (`src/shared/save-prompt-close-effects.js`) — its reasons never flow through the sheet's
+  channel 7. A third overlay view beside the find overlay and the sheet; a sheet opened over it
+  (suggestions, kebab, downloads, an auth challenge) pauses its 10 s timer, and main refuses
+  `save-prompt:open` with `sheet-open` while one is visible (the chrome queue retries on any sheet
+  close). See `docs/vault.md` → *The save prompt*.
 - **`auth-basic` template** (HTTP basic-auth credential prompt, M14 F1 L2) — **no
   `items`**; the password leaves only via the dedicated dual-zeroized `authSubmit`
   channel, never channel-4.

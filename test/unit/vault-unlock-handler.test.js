@@ -12,6 +12,7 @@
 // instead of silently diverging — so the composed unlock→onUnlock→broadcast chain is
 // exercised end-to-end.
 
+const { withOverlaySenderLookup } = require('../helpers/fake-overlay-registry');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
@@ -78,7 +79,7 @@ function makeHarness(store) {
     closeMenuOverlay: (reason, token) => closeCalls.push([reason, token])
   };
   const rec = { sheet };
-  const registry = { records: () => [rec], getWindowForChrome: () => null };
+  const registry = withOverlaySenderLookup({ records: () => [rec], getWindowForChrome: () => null });
 
   // The main.js vaultUnlock delegate, verbatim in shape — now composed from the REAL
   // mapper module (M18 F3 L1, DD9), never a transcribed ladder.

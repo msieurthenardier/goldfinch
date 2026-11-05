@@ -2,20 +2,8 @@
 
 import { buildVaultIndicatorModel } from '../../shared/vault-indicator-model.js';
 import { parsePickIndex, MANAGE_ID, GENERATE_ID, UNLOCK_ID } from '../../shared/vault-picker-template.js';
-
-// Close-reason classification for the vault-capture presentation queue's `advance()`
-// gate (M21 F3 L2, AC5c). Mirrors the resolution-vs-occlusion vocabulary
-// `src/main/auth-challenges.js` already documents and unit-pins (that module cannot be
-// imported here — it is a main-process, Electron-requiring module, and this is
-// chrome-renderer code) rather than inventing a new one: OCCLUSION means the sheet was
-// merely HIDDEN — the operator might refocus, switch back, or the trigger might
-// re-present later — never that anything was resolved, so a queued next offer must
-// never pop open on an unfocused window or over a different tab. Anything NOT in this
-// set is resolution-class (the SAME fail-safe-to-resolution default auth-challenges.js
-// documents: an unrecognized future reason must still let a legitimate presentation
-// continue rather than silently wedging) — escape / outside-click / activated /
-// tab-close / teardown all advance normally.
-const OCCLUSION_CLOSE_REASONS = new Set(['blur', 'superseded', 'tab-hide', 'tab-switch']);
+import { savePromptCloseEffects } from '../../shared/save-prompt-close-effects.js';
+import { createSavePromptClient } from './save-prompt-client.js';
 
 /**
  * Owns the human vault flow end to end (M12 F2-F4's pick-and-fill, chrome-unlock,
@@ -42,7 +30,9 @@ const OCCLUSION_CLOSE_REASONS = new Set(['blur', 'superseded', 'tab-hide', 'tab-
  *   openOverlayMenu: (menuType: string, model: any, anchor: any, startIndex?: number, opts?: any) => boolean,
  *   openToolbarContextMenu?: (item: 'media'|'shields'|'devtools'|'vault', anchorEl: any) => void,
  *   toast?: (title: string, body: string) => void
- * }} deps
+ * }} deps  `toast` is UNUSED since Sortie 06 (the sheet-era save toasts were invisible behind a
+ *   guest and are replaced by the corner prompt's result states); it is still ACCEPTED in the type
+ *   because renderer.js passes it (that file is at its line budget).
  */
 export function createVaultController({
   els,
@@ -55,10 +45,7 @@ export function createVaultController({
   // media/privacy/devtools controllers receive for their pin buttons' right-click
   // "Unpin …" menu; CLAUDE.md's Toolbar-pins pattern). Optional so an offline unit
   // harness constructs without it; the no-op then simply never opens the sheet.
-  openToolbarContextMenu = () => {},
-  // Chrome toast surface (the bookmarks-client `toast` precedent). Optional so an
-  // offline unit harness constructs without one; the no-op then simply says nothing.
-  toast = () => {}
+  openToolbarContextMenu = () => {}
 }) {
   // Human vault flow state machine (M12 F2 Leg 3 pick-and-fill, DD5/DD6). A TRUSTED
   // lock-icon gesture arrives as { wcId } (main-derived, no secret). From there:
@@ -83,28 +70,33 @@ export function createVaultController({
   let pendingVaultFlow = null;
   /** @type {any[]} the last picker model — the index→item source for dispatch. */
   let lastPickerModel = [];
-  /** @type {string | null} the held capture's id (Leg 4) — the dismiss-drop path needs
-   * it when the vault-capture sheet closes without a save. Stays a SCALAR (M21 F3 L2,
-   * AC9): serial presentation (below) means at most one vault-capture sheet is ever
-   * open at a time, so there is never more than one "currently showing" captureId to
-   * track. */
-  let pendingCaptureId = null;
-  /** @type {boolean} whether a vault-capture sheet is CURRENTLY open (M21 F3 L2, AC5b) —
-   * the single guard that makes `advance()` idempotent/self-guarding across its three
-   * callers: extra calls while a sheet is already open are harmless no-ops. */
-  let sheetOpen = false;
-  /** @type {Array<{ captureId: string, model: any }>} the PRESENTATION queue (M21 F3 L2,
-   * DD1) of already-resolved offers waiting their turn — offers arriving while a
-   * vault-capture sheet is open queue here instead of model-replacing it; `advance()` is
-   * the ONLY place one is shifted off and shown. */
+  /** finalize `reason`s that map to a result-only prompt model (anything else speaks as `error`). */
+  const FINALIZE_RESULTS = new Set(['unchanged', 'expired', 'tab-changed', 'locked', 'error']);
+  // ---- Corner save prompt queue state (Sortie 06 Leg 1; flight DD1/DD5/DD6) ------------------
+  // The save moment is presented in the corner SAVE PROMPT - its own per-window view, never the
+  // menu-overlay sheet (the `vault-capture` sheet is retired). The chrome owns the serial queue;
+  // MAIN owns "is a sheet visible / is this the active tab / does this capture belong to that
+  // tab" and answers `save-prompt:open` with { presented:false, reason } rather than queueing.
+  /** @type {{ captureId: string, wcId: number, locked?: boolean } | null} the entry the prompt is CURRENTLY showing
+   * (between a successful open and its `save-prompt-closed`). Replaces the retired scalar
+   * retired `pendingCaptureId` + `sheetOpen` pair (HISTORY: the sheet-era scalars). */
+  let shownEntry = null;
+  /** @type {boolean} a `save-prompt:open` invoke is in flight (keeps advance() single-flight). */
+  let opening = false;
+  /** @type {Array<{ captureId: string, wcId: number, model: any }>} already-resolved offers - or
+   * RESULT-ONLY models ({ result }) from a finalize that has nothing to offer - waiting their turn;
+   * `advance()` is the ONLY place the head is presented. */
   let presentationQueue = [];
-  /** @type {string[]} the LOCKED-mode pending-unlock queue (M21 F3 L2, DD1's amendment) —
-   * every captureId released while the vault was locked, awaiting a single unlock-to-save
-   * drain. `advance()` finalizes one at a time (via `vaultCaptureFinalize`) once the
-   * presentation queue is empty; a successful finalize is pushed onto `presentationQueue`
-   * and travels the SAME path as any other offer — this is not a second advance point.
-   * Drained wholesale (not just the head) on an abandoned unlock (AC8). */
+  /** @type {Array<{ captureId: string, wcId: number, consented?: boolean, expired?: boolean }>} the LOCKED-mode pending-unlock queue
+   * (M21 F3 L2, DD1's amendment): every captureId released while the vault was locked, awaiting a
+   * single unlock-to-save drain; `wcId` rides along from the offer (a result-only model for a
+   * dropped record needs it - AC17). Populated at CONSENT time (Sortie 06 Leg 2: the operator
+   * clicked "Unlock & save" on the corner prompt), never at offer arrival; the chrome no longer
+   * raises the unlock sheet by itself. `expired` is stamped by `vault-capture-dropped` (A7). */
   let pendingCaptureUnlock = [];
+  /** @type {Map<string, Promise<any>>} captureIds with a finalize in flight (AC7: the chrome never
+   * issues two concurrent finalizes for one capture). */
+  const finalizing = new Map();
   // Vault lock indicator (M12 F2 Leg 2 chrome-unlock, DD10). A PURE projection of
   // the pushed `vault-lock-state` (single source of truth = vault-store MRK-present)
   // — never a cache. Hidden until the manager is set up; then locked / unlocked.
@@ -149,89 +141,214 @@ export function createVaultController({
     openOverlayMenu('vault-picker', lastPickerModel, null, 0);
   }
 
-  // Open the vault-capture sheet from a resolved save/update offer (shared by the immediate
-  // unlocked path and the unlock-to-save finalize below). Enriches the SAVE choices with jar
-  // display labels; captureId rides INSIDE the model so the sheet's Save invoke carries it back.
-  /** @param {string} captureId @param {any} model */
-  function openCaptureSheet(captureId, model) {
-    pendingCaptureId = captureId;
-    sheetOpen = true;
-    const choices = Array.isArray(model.choices)
-      ? model.choices.map((/** @type {string} */ vaultId) => {
-          if (vaultId === 'global') return { vaultId, label: 'Global' };
-          const jar = jarsClient.containers.find((/** @type {any} */ c) => c.id === vaultId);
-          return { vaultId, label: jar ? jar.name : vaultId };
-        })
-      : [];
-    openOverlayMenu('vault-capture', { ...model, choices, captureId }, null, 0);
+  // Dismiss a held capture in main (the user-declined / un-presentable path). Fire-and-forget.
+  /** @param {string} captureId */
+  function dismissCapture(captureId) {
+    Promise.resolve(goldfinch.vaultCaptureDismiss(captureId)).catch(() => {});
   }
 
-  // The unlock-to-save continuation produced no save sheet — tell the operator which of
-  // main's four outcomes it was (`captureFinalize`'s discriminated reason), plus a
-  // catch-all for a rejected invoke. 'unchanged' is the one that is NOT a failure: the
-  // stored password already matches, so there is nothing to save — but silence there reads
-  // exactly like a lost credential, which is why it speaks too.
-  /** @param {any} reason */
-  function reportNoCaptureOffer(reason) {
-    pendingCaptureId = null;
-    const copy = {
-      unchanged: ['Nothing to save', 'That password is already saved in your vault.'],
-      expired: ['Password not saved', 'The request expired before the vault was unlocked. Sign in again to save it.'],
-      'tab-changed': ['Password not saved', 'The tab changed before the password could be saved.'],
-      locked: ['Password not saved', 'The vault is locked.']
-    }[String(reason)] || ['Password not saved', 'The saved-password prompt could not be opened.'];
-    toast(copy[0], copy[1]);
+  // Remove an id from both queues (main dropped it: `vault-capture-dropped`). Unknown id = no-op.
+  /** @param {string} captureId */
+  function forgetCapture(captureId) {
+    presentationQueue = presentationQueue.filter((e) => e.captureId !== captureId);
+    // A7: an entry awaiting unlock is one the operator was shown an unlock sheet for (interim) /
+    // consented to (Leg 2) - removing it would make the master-password entry end in SILENCE.
+    // Mark it `expired` instead; the post-unlock drain presents the expired result without
+    // calling finalize (main already dropped the record).
+    for (const e of pendingCaptureUnlock) if (e.captureId === captureId) e.expired = true;
   }
 
-  // Drop EVERY queued captureId (M21 F3 L2, LD2/AC5d) — both the already-resolved
-  // presentation queue and any still-locked entries awaiting their turn at the
-  // unlock-to-save drain. Used when the currently-open vault-capture sheet closes for
-  // an OCCLUSION-class reason (AC5c): nothing will ever call `advance()` again for
-  // THIS window until some unrelated future event, so leaving a sibling queued would
-  // orphan it — LD2's "no orphaned queue entry nothing will ever advance" applies
-  // equally to a not-yet-finalized locked entry as to an already-resolved one. The
-  // record the sheet WAS showing is dismissed by the caller before this runs; this
-  // drains only the siblings.
-  function dismissQueuedOffers() {
-    const captureIds = presentationQueue.map((o) => o.captureId).concat(pendingCaptureUnlock);
-    presentationQueue = [];
-    pendingCaptureUnlock = [];
-    for (const captureId of captureIds) {
-      Promise.resolve(goldfinch.vaultCaptureDismiss(captureId)).catch(() => {});
+  // The prompt client (Sortie 06). Constructed HERE, never in renderer.js (line budget). Its
+  // `onClosed` applies the shared per-reason effects table (DD6) - one source for main and chrome.
+  const promptClient = createSavePromptClient({
+    goldfinch,
+    jarsClient,
+    getIndicator: () => els.vaultIndicator,
+    onClosed({ captureId, wcId, reason }) {
+      shownEntry = null;
+      if (reason === 'unlock-requested') {
+        // Consent recorded main-side (AC6): queue the capture for the post-unlock drain, then -
+        // in the NEXT task, after the prompt is hidden - raise the unlock sheet. No other offer is
+        // presented in the gap (the table row has `advance:false`).
+        pendingCaptureUnlock.push({ captureId, wcId, consented: true });
+        setTimeout(() => {
+          if (!pendingCaptureUnlock.some((e) => e.captureId === captureId)) return;
+          if (lockState.unlocked) {
+            advance();
+            return;
+          }
+          // keepFocus: the consent click is followed by the submit's page load pulling OS focus;
+          // the opt-in makes the sheet survive that blur and re-grab focus, so the master
+          // password cannot be typed into the page's own fields.
+          openOverlayMenu('vault-unlock', [], null, 0, { keepFocus: true });
+        }, 0);
+        return;
+      }
+      const fx = savePromptCloseEffects(reason);
+      if (fx.clearQueue) {
+        presentationQueue = [];
+        pendingCaptureUnlock = [];
+      } else if (fx.dropTabQueue) {
+        // main's dropCapturesForTab already dropped these records: forget, don't dismiss.
+        presentationQueue = presentationQueue.filter((e) => e.wcId !== wcId);
+        pendingCaptureUnlock = pendingCaptureUnlock.filter((e) => e.wcId !== wcId);
+      }
+      if (fx.advance) advance();
     }
+  });
+
+  // The cheap chrome-side pre-check (DD1): this controller's own overlay flags. They are set at
+  // request time and can stick on a refused open, so they only AVOID a pointless round trip -
+  // main (`save-prompt:open` -> 'sheet-open') is the authority.
+  function anyVaultSheetOpen() {
+    for (const st of Object.values(overlayStates)) if (st.open) return true;
+    return false;
   }
 
-  // The ONE place a vault-capture sheet is opened from a queue (M21 F3 L2, AC5/AC5b).
-  // IDEMPOTENT and SELF-GUARDING via the `sheetOpen` flag — every one of its three
-  // callers (handleClosed's vault-capture branch on a resolution-class reason;
-  // onVaultLockState's unlock-success continuation, which STARTS the locked drain;
-  // onVaultCaptureOffer's already-unlocked branch, which opens immediately when idle)
-  // can call it freely; a call while a sheet is already open is a harmless no-op.
-  // Order: the presentation queue first; if it is empty and a locked drain remains,
-  // finalize the NEXT locked entry and recurse — a successful finalize is pushed onto
-  // the SAME presentation queue and travels the same path as any other offer (the two
-  // arrays are not two advance points; only the UNFINALIZED locked half is separate).
+  // The ONE place a save prompt is opened from a queue (M21 F3 L2, AC5/AC5b; retargeted Sortie 06).
+  // IDEMPOTENT and SELF-GUARDING (`shownEntry` / `opening`): every caller - the queued offer
+  // arrival, the post-unlock drain, the prompt's own close, and `handleClosed` for ANY menuType
+  // (so a head refused for `sheet-open` retries as soon as any sheet closes) - can call it freely.
+  // Order: the presentation queue first; if it is empty and a locked drain remains (vault now
+  // unlocked), finalize the NEXT locked entry and re-enter - a successful finalize is pushed onto
+  // the SAME queue and travels the same path as any other offer.
   function advance() {
-    if (sheetOpen) return;
+    if (shownEntry || opening) return;
     if (presentationQueue.length > 0) {
-      const next = presentationQueue.shift();
-      openCaptureSheet(next.captureId, next.model);
+      const head = presentationQueue[0];
+      // A LOCKED model is never presented while the vault is unlocked (any route): finalize it
+      // first - without consent - and present what it resolves to (AC9). Done BEFORE the sheet
+      // check: finalizing presents nothing.
+      if (head.model && head.model.mode === 'locked' && lockState.unlocked) {
+        opening = true;
+        finalizeOnce(head.captureId)
+          .then((offer) => {
+            opening = false;
+            const mapped = mapFinalize(offer);
+            const i = presentationQueue.indexOf(head);
+            if (i >= 0) {
+              if (mapped) presentationQueue[i] = { captureId: head.captureId, wcId: head.wcId, model: mapped };
+              else presentationQueue.splice(i, 1);
+            }
+            if (!mapped) dismissCapture(head.captureId);
+            advance();
+          })
+          .catch(() => {
+            opening = false;
+          });
+        return;
+      }
+      if (anyVaultSheetOpen()) return;
+      const total = presentationQueue.length + pendingCaptureUnlock.length;
+      opening = true;
+      promptClient
+        .present({ captureId: head.captureId, wcId: head.wcId, model: head.model, queue: { index: 1, total } })
+        .then((res) => {
+          opening = false;
+          if (res.presented) {
+            presentationQueue = presentationQueue.filter((e) => e !== head);
+            shownEntry = {
+              captureId: head.captureId,
+              wcId: head.wcId,
+              locked: !!head.model && head.model.mode === 'locked'
+            };
+            return;
+          }
+          // 'sheet-open': keep the head and retry when a sheet closes. Anything else
+          // ('not-active' / 'fullscreen' / 'gone' / 'invalid-model'): the offer cannot be
+          // shown - drop it main-side and move on.
+          if (res.reason === 'sheet-open') return;
+          presentationQueue = presentationQueue.filter((e) => e !== head);
+          dismissCapture(head.captureId);
+          advance();
+        })
+        .catch(() => {
+          // A throw inside the handler must never wedge the queue: reset the in-flight flag; the
+          // head (if still queued) is retried by the next advance() trigger.
+          opening = false;
+        });
       return;
     }
     if (pendingCaptureUnlock.length === 0) return;
-    const captureId = pendingCaptureUnlock.shift();
-    Promise.resolve(goldfinch.vaultCaptureFinalize(captureId))
-      .then((/** @type {any} */ offer) => {
-        if (offer && offer.model) {
-          presentationQueue.push({ captureId: offer.captureId, model: offer.model });
-        } else {
-          reportNoCaptureOffer(offer && offer.reason);
-        }
+    // A locked entry is only finalized once the vault is unlocked (any route): finalizing a
+    // still-locked record would answer `locked` and flash a failure result for nothing.
+    if (!lockState.unlocked) return;
+    const entry = /** @type {{ captureId: string, wcId: number, expired?: boolean }} */ (pendingCaptureUnlock.shift());
+    if (entry.expired) {
+      // Main dropped the record while we awaited the unlock (A7): say so, no finalize.
+      presentationQueue.push({ captureId: entry.captureId, wcId: entry.wcId, model: { result: 'expired' } });
+      advance();
+      return;
+    }
+    opening = true;
+    finalizeOnce(entry.captureId)
+      .then((offer) => {
+        opening = false;
+        const mapped = mapFinalize(offer);
+        if (mapped) presentationQueue.push({ captureId: entry.captureId, wcId: entry.wcId, model: mapped });
+        else dismissCapture(entry.captureId);
         advance(); // drains the rest of the locked queue regardless of this entry's outcome
       })
       .catch(() => {
-        reportNoCaptureOffer('error');
+        opening = false;
+      });
+  }
+
+  // The ONE finalize caller (AC7): at most one in flight per captureId (a second caller shares the
+  // first's promise). Always resolves - a rejected invoke becomes `{ reason: 'error' }`.
+  /** @param {string} captureId @returns {Promise<any>} */
+  function finalizeOnce(captureId) {
+    const inFlight = finalizing.get(captureId);
+    if (inFlight) return inFlight;
+    /** @type {Promise<any>} */
+    let call;
+    try {
+      call = Promise.resolve(goldfinch.vaultCaptureFinalize(captureId));
+    } catch {
+      call = Promise.reject(new Error('finalize threw'));
+    }
+    const p = call.catch(() => ({ reason: 'error' })).finally(() => finalizing.delete(captureId));
+    finalizing.set(captureId, p);
+    return p;
+  }
+
+  // Map a finalize answer to the model to present: the offer (a re-ask), the `saved` result, or a
+  // RESULT-ONLY model saying why there is nothing to save. `refused` -> null (present nothing; the
+  // caller drops the capture).
+  /** @param {any} offer @returns {any} */
+  function mapFinalize(offer) {
+    if (offer && offer.saved === true) {
+      return {
+        result: 'saved',
+        vaultLabel: promptClient.labelChoice(String(offer.vaultId)).label,
+        kind: offer.kind
+      };
+    }
+    if (offer && offer.model) return offer.model;
+    const reason = offer && typeof offer.reason === 'string' ? offer.reason : 'error';
+    if (reason === 'refused') return null;
+    return { result: FINALIZE_RESULTS.has(reason) ? reason : 'error' };
+  }
+
+  // The vault unlocked (by ANY route) while a LOCKED prompt is on screen: convert it in place
+  // (AC9). Finalize ONCE without consent, put the result at the HEAD of the queue, forget the
+  // shown locked entry so advance() can run; the present is a model-replace of the visible prompt
+  // (or is retried on the unlock sheet's close when main answers `sheet-open`).
+  function convertShownLocked() {
+    const entry = shownEntry;
+    if (!entry || !entry.locked) return;
+    shownEntry = null;
+    opening = true;
+    finalizeOnce(entry.captureId)
+      .then((offer) => {
+        opening = false;
+        const mapped = mapFinalize(offer);
+        if (mapped) presentationQueue.unshift({ captureId: entry.captureId, wcId: entry.wcId, model: mapped });
+        else dismissCapture(entry.captureId);
         advance();
+      })
+      .catch(() => {
+        opening = false;
       });
   }
 
@@ -439,42 +556,28 @@ export function createVaultController({
   });
 
   // Vault capture offer (M12 F2 Leg 4 capture-save, DD7; multi-hold M21 F3 L2, DD1's
-  // amendment). Main forwards { captureId, model } after a login-form OR card-form
-  // submit in a set-up, unlocked, persistent-jar tab (model =
-  // origin/username/mode/defaultVaultId/choices — NEVER a password; the captured secret
-  // lives only in the main-side held record). A settle can now release MULTIPLE
-  // families for one tab, so main pushes ONE offer per family; each push arrives here
-  // as its own call.
-  goldfinch.onVaultCaptureOffer(({ captureId, model }) => {
-    // Unlock-to-save (locked vault): the credential is held main-side; raise the unlock
-    // prompt first, ONCE PER DRAIN (AC7) — only the FIRST locked offer of an otherwise-
-    // empty drain opens it; every later one just appends to `pendingCaptureUnlock` and
-    // waits its turn (onVaultLockState's continuation / advance() drains the array
-    // serially). An abandoned unlock drops EVERY queued captureId (AC8), read directly
-    // off this array — see handleClosed's vault-unlock branch below.
-    if (model && model.mode === 'locked') {
-      const firstOfDrain = pendingCaptureUnlock.length === 0;
-      pendingCaptureUnlock.push(captureId);
-      if (firstOfDrain) {
-        // keepFocus: this prompt is spawned BY a login/card-form submit, which also
-        // navigates the page; when the submitted page loads it pulls OS focus into the
-        // guest. Without the opt-in the sheet's window-blur dismissal tore this prompt
-        // down mid-redirect and the held credential was dropped — the operator saw the
-        // prompt flash and could never save it (the same defect the vault-capture sheet
-        // fixed for the already-unlocked branch of this very flow). The flag makes the
-        // card survive that incidental blur AND makes main re-grab focus for it, so the
-        // master password cannot be typed into the page's own fields. Every deliberate
-        // decline (Escape / Cancel / X / backdrop / a real app-switch) still closes it
-        // and still drops every held credential via handleClosed's vault-unlock branch.
-        openOverlayMenu('vault-unlock', [], null, 0, { keepFocus: true });
-      }
-      return;
-    }
-    // Already unlocked: queue the resolved offer and let advance() present it — never
-    // open it directly (AC5, "truly serial, never a model-replace"). advance() no-ops
-    // if a vault-capture sheet is already showing a sibling offer.
-    presentationQueue.push({ captureId, model });
+  // amendment; presented in the corner prompt since Sortie 06). Main forwards { captureId, model,
+  // wcId } after a login/card/identity-form submit in a set-up, persistent-jar tab (model =
+  // metadata only - NEVER a password; the captured secret lives only in the main-side held
+  // record). Main ALREADY gated the send to the window's ACTIVE tab (DD5), so the chrome adds no
+  // arrival check. A settle can release MULTIPLE families for one tab, so main pushes ONE offer
+  // per family; each push arrives here as its own call.
+  goldfinch.onVaultCaptureOffer(({ captureId, model, wcId }) => {
+    // A LOCKED offer is queued like any other (Sortie 06 Leg 2, AC4): it presents in the corner
+    // with "Unlock & save", and NOTHING raises the unlock sheet here - the operator's click
+    // records consent main-side first (`save-prompt-closed` `unlock-requested`, above).
+    // Queue the offer and let advance() present it - never open it directly (truly serial, never
+    // a model-replace). advance() no-ops while one is showing.
+    presentationQueue.push({ captureId, wcId, model });
     advance();
+  });
+
+  // Main dropped a held OFFER the chrome did not initiate (CAPTURE_DROP_MS, tab-changed, tab /
+  // window close, lock, supersession). Main is the source of truth for capture existence; the
+  // chrome queue is advisory and corrected by this push. An unknown id is a no-op. If it is the
+  // SHOWN capture, main flips the prompt to its expired state itself.
+  goldfinch.onVaultCaptureDropped(({ captureId }) => {
+    if (typeof captureId === 'string') forgetCapture(captureId);
   });
 
   // Subscribe FIRST, then fetch the initial state — so a transition that fires
@@ -503,8 +606,11 @@ export function createVaultController({
     // advance() is idempotent/self-guarding (AC5b) — calling it here even when
     // `pendingCaptureUnlock` is empty, or repeatedly across unrelated unlock
     // broadcasts, is a harmless no-op.
-    if (pendingCaptureUnlock.length > 0 && state.unlocked) {
-      advance();
+    if (state.unlocked) {
+      // Convert a visible LOCKED prompt in place (AC9; the unlock may have come from any route,
+      // including another window); queued locked heads convert when advance() reaches them.
+      convertShownLocked();
+      if (pendingCaptureUnlock.length > 0 || presentationQueue.length > 0) advance();
     }
   });
   goldfinch
@@ -533,17 +639,6 @@ export function createVaultController({
       refocus() {}
     },
     'vault-picker': {
-      open: false,
-      token: 0,
-      blurClosedAt: -Infinity,
-      ariaTarget: () => null,
-      refocus() {}
-    },
-    // Vault capture save/update sheet (M12 F2 Leg 4 capture-save, DD7). Raised from a
-    // main-forwarded login-submit offer — no chrome trigger element, so no aria-expanded
-    // target and no trigger refocus (the guest owns focus). handleClosed drops the
-    // held record on a non-save close.
-    'vault-capture': {
       open: false,
       token: 0,
       blurClosedAt: -Infinity,
@@ -661,7 +756,7 @@ export function createVaultController({
   // for the three DISMISS-DISABLED show/ack sheets' validated no-op (their only ever
   // activation is id:'ack', already consumed by main closing the sheet); `false` for
   // every non-vault menuType and for the vault menuTypes with no channel-4 activation
-  // at all (vault-unlock, vault-set, vault-capture, vault-stepup, vault-import-unlock,
+  // at all (vault-unlock, vault-set, vault-stepup, vault-import-unlock,
   // vault-change-master, vault-recover, vault-compromise-recover) — those fall through
   // exactly as they did when `dispatchOverlayActivation`'s switch had no case for them
   // (unchanged behavior).
@@ -767,7 +862,7 @@ export function createVaultController({
   // `lockState` and both guards moved together into this module, so the gating logic
   // itself was never touched, only relocated).
   /** @param {{ menuType: string, reason: string }} args */
-  function handleClosed({ menuType, reason }) {
+  function handleClosed({ menuType }) {
     // Human vault flow (M12 F2 Leg 3): the user dismissed the unlock prompt (Cancel/
     // Escape/outside-click) without unlocking — abandon the flow so a later unrelated
     // unlock (recovery/admin, or another tab) can't spring the picker on this stale
@@ -789,8 +884,7 @@ export function createVaultController({
     // `advance()` drains `pendingCaptureUnlock` progressively (and lockState.unlocked
     // is true), so this is correctly skipped.
     //
-    // NO 'superseded' carve-out here, unlike the vault-capture branch below — deliberately,
-    // and the asymmetry is only apparent. A NEWER capture's unlock prompt is the SAME
+    // NO 'superseded' carve-out here - deliberately. A NEWER capture's unlock prompt is the SAME
     // menuType, so `open()` bumps this menuType's chrome-side token BEFORE main emits the
     // superseded channel 7 for the OLD one, and overlay-menus.js drops that stale-token close
     // without ever reaching here — the case the sibling guard protects against cannot arrive.
@@ -798,58 +892,19 @@ export function createVaultController({
     // pendingCaptureUnlock still names these captures, the prompt is gone, and dropping the
     // held secrets promptly is the conservative answer.
     if (menuType === 'vault-unlock' && pendingCaptureUnlock.length > 0 && !lockState.unlocked) {
-      const captureIds = pendingCaptureUnlock;
+      const entries = pendingCaptureUnlock;
       pendingCaptureUnlock = [];
-      pendingCaptureId = null;
-      for (const captureId of captureIds) {
-        Promise.resolve(goldfinch.vaultCaptureDismiss(captureId)).catch(() => {});
-      }
+      for (const entry of entries) dismissCapture(entry.captureId);
     }
-    // Human vault capture (M12 F2 Leg 4, DD7 — the dismiss-drop path, HIGH; serial
-    // presentation M21 F3 L2, AC5/AC5c/AC5d/AC9): the save/update sheet closed. Tell
-    // main to drop+zeroize the held record NOW (not just on the 2-min timeout) UNLESS
-    // this was a save. 'activated' = a successful save (main already dropped the
-    // record).
+    // The `vault-capture` sheet branch is RETIRED (Sortie 06, DD8): the save prompt is its own
+    // view with its own close channel (`save-prompt-closed`, applied in the prompt client's
+    // `onClosed` via the shared per-reason table), so its reasons never flow through here.
     //
-    // NO 'superseded' carve-out here (fixed post-landing — the leg's own Notes flagged
-    // this as a latent gap, and the Flight Director overruled deferring it: `sheetOpen`
-    // is state THIS leg introduced, so its lifecycle bug is this leg's to fix). The
-    // pre-fix reasoning assumed a same-family "newer capture model-replaced this sheet"
-    // case could still reach here — it cannot, under this leg's OWN serial design:
-    // `openCaptureSheet` has exactly one caller (`advance()`, above), and `advance()`
-    // returns immediately whenever `sheetOpen` is true — so a vault-capture sheet can
-    // never model-replace another vault-capture sheet; a same-family resubmit now
-    // QUEUES behind the open sheet instead of ever calling `openMenu` against it.
-    // Therefore a 'superseded' close of `vault-capture` can only mean an UNRELATED menu
-    // (kebab, suggestions, page-context, …) took over — exactly the case
-    // `OCCLUSION_CLOSE_REASONS` already lists 'superseded' for, mirroring
-    // `auth-challenges.js`'s own occlusion bucket. Routing it through the SAME
-    // occlusion path as 'blur' below closes the bug the old carve-out caused: a stuck
-    // `sheetOpen === true` that permanently refused every future `advance()` call for
-    // the window, plus an abandoned held record left alive until the 2-minute TTL
-    // instead of dismissed promptly.
-    if (menuType === 'vault-capture') {
-      const captureId = pendingCaptureId;
-      pendingCaptureId = null;
-      sheetOpen = false;
-      if (captureId != null && reason !== 'activated') {
-        Promise.resolve(goldfinch.vaultCaptureDismiss(captureId)).catch(() => {});
-      }
-      if (OCCLUSION_CLOSE_REASONS.has(reason)) {
-        // LD2: an occlusion-class close (blur / superseded / tab-hide / tab-switch)
-        // drops the WHOLE remaining queue, matching what already happens to the offer
-        // that WAS showing (dismissed just above) — leaving a queued sibling behind
-        // would orphan it, since nothing will call advance() again for an occluded
-        // (or superseded-by-an-unrelated-menu) window. Deliberately does NOT call
-        // advance() here — doing so would re-open a vault-capture sheet on top of the
-        // menu the operator just opened.
-        dismissQueuedOffers();
-      } else {
-        // AC5c: resolution-class only (escape / outside-click / activated / tab-close /
-        // teardown) — present the next queued offer, if any.
-        advance();
-      }
-    }
+    // ANY menuType closing may unblock a head that main refused with `sheet-open` (address-bar
+    // suggestions, the downloads popup, kebab, ... all count as "a sheet is visible"), so retry.
+    // `advance()` is cheap and idempotent. Deliberately LAST: the unlock-abandoned drop above has
+    // already emptied its queue.
+    advance();
   }
 
   // M12 F3 Leg 4 (first-run-setup, DD5/DD9): a11y SHEET_STATES hooks for the two new setup

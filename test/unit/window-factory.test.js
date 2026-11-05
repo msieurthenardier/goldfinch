@@ -484,3 +484,282 @@ test('sheet keyDown Ctrl+Shift+R sends chrome-shortcut-action hard-reload once t
   assert.equal(prevented, 1);
   assert.deepEqual(h.chromeSends, [['chrome-shortcut-action', { action: 'hard-reload' }]]);
 });
+
+// ---------------------------------------------------------------------------
+// Sortie 06 Leg 1 (AC13 / AC16): the corner save prompt's construction, pause feeds and close order
+// ---------------------------------------------------------------------------
+
+const { createSavePromptManager } = require('../../src/main/save-prompt-manager');
+const { computeSavePromptBounds } = require('../../src/main/save-prompt-geometry');
+
+/** A recording stand-in for the manager (the window-factory contract only). */
+function recordingPrompt(_deps, log) {
+  return {
+    close: (reason) => log.push(`prompt-close:${reason}`),
+    teardown: () => log.push('prompt-teardown'),
+    setWindowBlurred: (v) => log.push(`prompt-blur:${v}`),
+    setSheetVisible: (v) => log.push(`prompt-sheet:${v}`),
+    isVisible: () => false,
+    getView: () => null
+  };
+}
+
+test('Sortie 06: a window without createSavePromptManager still constructs (rec.savePrompt stays null)', () => {
+  const h = createHarness();
+  const rec = h.factory.createWindow();
+  assert.equal(rec.savePrompt, null);
+  assert.doesNotThrow(() => {
+    rec.win.emit('blur');
+    rec.win.emit('focus');
+    rec.win.emit('close');
+  });
+});
+
+test('Sortie 06 AC13: the prompt view is chrome-class: sandboxed, context-isolated, ONLY the save-prompt preload, transparent, lazy', () => {
+  const h = createHarness({ createSavePromptManager: recordingPrompt, computeSavePromptBounds });
+  const rec = h.factory.createWindow();
+  assert.ok(rec.savePrompt, 'manager assigned onto the record');
+  assert.equal(h.viewOptions.length, 1, 'only the chrome view exists - the prompt view is lazy');
+  const view = h.managerDeps.savePrompt.createView();
+  assert.deepEqual(view.opts.webPreferences, {
+    preload: '/app/preload/save-prompt-preload.js',
+    contextIsolation: true,
+    nodeIntegration: false,
+    sandbox: true
+  });
+  assert.equal(view.backgroundColor, '#00000000');
+  assert.deepEqual(view.webContents.loadedFiles, ['/app/renderer/save-prompt.html']);
+});
+
+test('Sortie 06 AC13: window close tears the prompt down FIRST (before the auth cancel / vault holds / any capture drop), then teardown beside the other overlays, then nulls the slot', () => {
+  const calls = [];
+  const h = createHarness({
+    createSavePromptManager: recordingPrompt,
+    computeSavePromptBounds,
+    authChallenges: {
+      cancelForWindow: () => calls.push('auth-cancel'),
+      notifyWindowFocused() {},
+      notifySheetClosed() {}
+    },
+    releaseVaultHoldsForWindow: () => calls.push('release-vault-holds')
+  });
+  const rec = h.factory.createWindow();
+  h.log.length = 0;
+  rec.win.emit('close');
+  const log = h.log;
+  const iClose = log.indexOf('prompt-close:teardown');
+  assert.equal(iClose, 0, 'the prompt close is the FIRST statement of the close handler');
+  assert.deepEqual(calls, ['auth-cancel', 'release-vault-holds']);
+  assert.ok(log.indexOf('prompt-teardown') > log.indexOf('tearoff-teardown'));
+  assert.ok(log.indexOf('prompt-teardown') < log.indexOf('sheet-teardown'));
+  assert.equal(rec.savePrompt, null);
+});
+
+test('Sortie 06 AC13: the chrome-recovery hook list carries closeSavePrompt, read at CALL time', () => {
+  const recovered = [];
+  const h = createHarness({ createSavePromptManager: recordingPrompt, computeSavePromptBounds });
+  // swap in a spying chromeRecovery-compatible assertion through the real render-process-gone wiring
+  const rec = h.factory.createWindow();
+  assert.ok(rec.savePrompt);
+  // the factory registered a render-process-gone listener whose hooks object carries closeSavePrompt
+  const src = require('node:fs').readFileSync(require.resolve('../../src/main/window-factory'), 'utf8');
+  assert.match(src, /closeSavePrompt:\s*\(\)\s*=>\s*record\.savePrompt\?\.close\('teardown'\)/);
+  assert.deepEqual(recovered, []);
+});
+
+test('Sortie 06 AC16: windowBlur is EVENT-fed only - blur/minimize pause, focus/restore resume, initial value false (never seeded from isFocused)', () => {
+  const h = createHarness({ createSavePromptManager, computeSavePromptBounds });
+  const rec = h.factory.createWindow();
+  // A window that REPORTS unfocused at creation must still start unpaused (WSLg isFocused is unreliable).
+  rec.win._focused = false;
+  const guest = new h.FakeWebContentsView({});
+  guest.bounds = { x: 0, y: 100, width: 1000, height: 600 };
+  rec.tabViews.set(guest.webContents.id, { view: guest, trusted: false });
+  rec.activeTabWcId = guest.webContents.id;
+
+  assert.deepEqual(
+    rec.savePrompt.present({
+      token: 1,
+      captureId: 'c',
+      wcId: guest.webContents.id,
+      model: { origin: 'x', mode: 'save' }
+    }),
+    {
+      presented: true
+    }
+  );
+  assert.equal(rec.savePrompt.isPaused(), false, 'initial value is false regardless of win.isFocused()');
+
+  rec.win.emit('blur');
+  assert.equal(rec.savePrompt.isPaused(), true);
+  rec.win.emit('focus');
+  assert.equal(rec.savePrompt.isPaused(), false);
+  rec.win.emit('minimize');
+  assert.equal(rec.savePrompt.isPaused(), true);
+  rec.win.emit('restore');
+  assert.equal(rec.savePrompt.isPaused(), false);
+  rec.win.emit('close'); // clears the manager's height fail-safe timer
+});
+
+test("Sortie 06 AC16: the sheet feeds the `sheet` pause input through the menu manager's onVisibilityChanged dep", () => {
+  const h = createHarness({ createSavePromptManager, computeSavePromptBounds });
+  const rec = h.factory.createWindow();
+  rec.savePrompt.present({ token: 1, captureId: 'c', wcId: 1, model: { origin: 'x', mode: 'save' } });
+  assert.equal(rec.savePrompt.isPaused(), false);
+  h.managerDeps.sheet.onVisibilityChanged(true);
+  assert.equal(rec.savePrompt.isPaused(), true);
+  h.managerDeps.sheet.onVisibilityChanged(false);
+  assert.equal(rec.savePrompt.isPaused(), false);
+  rec.win.emit('close');
+});
+
+test("Sortie 06: the existing blur close of the sheet is untouched, and window A's blur never reaches window B's prompt", () => {
+  const h = createHarness({ createSavePromptManager, computeSavePromptBounds });
+  const a = h.factory.createWindow();
+  const b = h.factory.createWindow();
+  a.savePrompt.present({ token: 1, captureId: 'ca', wcId: 1, model: { origin: 'x', mode: 'save' } });
+  b.savePrompt.present({ token: 2, captureId: 'cb', wcId: 2, model: { origin: 'x', mode: 'save' } });
+  h.log.length = 0;
+  a.win.emit('blur');
+  assert.ok(h.log.includes('sheet-close:blur'));
+  assert.equal(a.savePrompt.isPaused(), true);
+  assert.equal(b.savePrompt.isPaused(), false);
+  a.win.emit('close');
+  b.win.emit('close');
+});
+
+// ---------------------------------------------------------------------------
+// Sortie 06 Leg 3 (AC3 / R4 / R6 / R8): the prompt view's trusted before-input-event
+// ---------------------------------------------------------------------------
+
+function keyPrompt({ visible = true, canDismiss = true } = {}) {
+  const calls = [];
+  const factory = () => ({
+    close: (reason) => calls.push(`close:${reason}`),
+    teardown: () => {},
+    setWindowBlurred: () => {},
+    setSheetVisible: () => {},
+    isVisible: () => visible,
+    canDismissByKey: () => canDismiss,
+    getView: () => null,
+    calls
+  });
+  return { factory, calls };
+}
+
+function keyHarness(opts) {
+  const kp = keyPrompt(opts);
+  const h = createHarness({ createSavePromptManager: kp.factory, computeSavePromptBounds });
+  const rec = h.factory.createWindow();
+  const view = h.managerDeps.savePrompt.createView();
+  const press = (input) => {
+    const event = {
+      prevented: false,
+      preventDefault() {
+        this.prevented = true;
+      }
+    };
+    view.webContents.emit('before-input-event', event, { type: 'keyDown', ...input });
+    return event;
+  };
+  return { h, rec, view, press, calls: kp.calls };
+}
+
+test('Leg 3 AC3: F6 in the prompt -> chrome focus THEN focus-address (focus-then-send); preventDefault', () => {
+  const { h, rec, press } = keyHarness();
+  const n = h.log.length;
+  const ev = press({ key: 'F6' });
+  assert.equal(ev.prevented, true);
+  const tail = h.log.slice(n);
+  assert.deepEqual(tail, [`focus-wc:${rec.chromeView.webContents.id}`, 'send:chrome-shortcut-action']);
+  assert.deepEqual(h.chromeSends.at(-1), ['chrome-shortcut-action', { action: 'focus-address' }]);
+});
+
+test('Leg 3 AC3: F6 auto-repeat is swallowed without a second focus/send', () => {
+  const { h, press } = keyHarness();
+  const before = h.chromeSends.length;
+  const ev = press({ key: 'F6', isAutoRepeat: true });
+  assert.equal(ev.prevented, true);
+  assert.equal(h.chromeSends.length, before);
+});
+
+function addActiveGuest(rec, id, extra = {}) {
+  const wc = {
+    id,
+    focused: false,
+    isDestroyed: () => false,
+    focus() {
+      this.focused = true;
+    }
+  };
+  rec.tabViews.set(id, { view: { webContents: wc }, ...extra });
+  rec.activeTabWcId = id;
+  return wc;
+}
+
+test('Leg 3 AC3: Shift+F6 focuses the active guest through the shared predicate', () => {
+  const { h, rec, press } = keyHarness();
+  const guest = addActiveGuest(rec, 901);
+  const before = h.chromeSends.length;
+  const ev = press({ key: 'F6', shift: true });
+  assert.equal(ev.prevented, true);
+  assert.equal(guest.focused, true);
+  assert.equal(h.chromeSends.length, before, 'no chrome send');
+});
+
+test('Leg 3 R6: Shift+F6 into a taken-over (or absent) guest falls back to chrome focus + focus-content', () => {
+  const { h, rec, press } = keyHarness();
+  const guest = addActiveGuest(rec, 902, { loadFailure: { code: -105 } });
+  press({ key: 'F6', shift: true });
+  assert.equal(guest.focused, false);
+  assert.equal(rec.chromeView.webContents.focused, true);
+  assert.deepEqual(h.chromeSends.at(-1), ['chrome-shortcut-action', { action: 'focus-content' }]);
+});
+
+test('Leg 3 AC3/R4: Escape dismisses an interactive offer; an uninteractive prompt swallows it with no close', () => {
+  const a = keyHarness();
+  const ev = a.press({ key: 'Escape' });
+  assert.equal(ev.prevented, true);
+  assert.deepEqual(a.calls, ['close:dismissed']);
+  const b = keyHarness({ canDismiss: false });
+  assert.equal(b.press({ key: 'Escape' }).prevented, true);
+  assert.deepEqual(b.calls, []);
+});
+
+test('Leg 3 AC3/R4: Tab, Enter, modified F6/Escape and keyUp are NOT intercepted', () => {
+  const { press, calls, h } = keyHarness();
+  const before = h.chromeSends.length;
+  for (const input of [
+    { key: 'Tab' },
+    { key: 'Tab', shift: true },
+    { key: 'Enter' },
+    { key: 'F6', control: true },
+    { key: 'Escape', alt: true }
+  ]) {
+    assert.equal(press(input).prevented, false, JSON.stringify(input));
+  }
+  assert.equal(h.chromeSends.length, before);
+  assert.deepEqual(calls, []);
+});
+
+test('Leg 3 R4: once the prompt is closed (not visible) F6 and Escape reach the page untouched', () => {
+  const { press, calls, h } = keyHarness({ visible: false });
+  const before = h.chromeSends.length;
+  assert.equal(press({ key: 'Escape' }).prevented, false);
+  assert.equal(press({ key: 'F6' }).prevented, false);
+  assert.equal(h.chromeSends.length, before);
+  assert.deepEqual(calls, []);
+});
+
+test("Leg 3: two windows - window A's prompt keys act on A's record only", () => {
+  const kp = keyPrompt();
+  const h = createHarness({ createSavePromptManager: kp.factory, computeSavePromptBounds });
+  const recA = h.factory.createWindow();
+  const viewA = h.managerDeps.savePrompt.createView();
+  const recB = h.factory.createWindow();
+  addActiveGuest(recB, 903);
+  const guestA = addActiveGuest(recA, 904);
+  viewA.webContents.emit('before-input-event', { preventDefault() {} }, { type: 'keyDown', key: 'F6', shift: true });
+  assert.equal(guestA.focused, true);
+  assert.equal(recB.tabViews.get(903).view.webContents.focused, false);
+});

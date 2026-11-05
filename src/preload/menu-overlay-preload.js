@@ -94,13 +94,10 @@ contextBridge.exposeInMainWorld('menuOverlay', {
   // M12 F3 Leg 4: the recovery-show Copy — main owns the OS clipboard (string-only, the
   // chrome-clipboard-write precedent); a one-way send, sender-validated main-side.
   copyText: (text) => ipcRenderer.send('menu-overlay:copy-text', { text }),
-  // DD7 (M12 F2 capture-save): the sheet's Save reports the chosen vaultId + the
-  // stashed captureId (+ token). It rides an invoke like unlockVault (the sheet needs
-  // the { saved } result back to re-prompt on a lock race). The CAPTURED PASSWORD is
-  // NEVER on this path — it lives only in the main-side held record, keyed by captureId.
-  captureSave: (payload) => ipcRenderer.invoke('menu-overlay:vault-capture-save', payload),
+  // (HISTORY: `captureSave` / `menu-overlay:vault-capture-save` retired Sortie 06, DD8 - capture Save
+  // rides the four-guarded `save-prompt:save` channel of the corner save prompt's own preload.)
   // M15 F1 Leg 2 (flight DD4): the bookmark-edit sheet's DEDICATED submit
-  // channel. Mirrors captureSave's shape (an invoke, no secret) — the sheet
+  // channel. Mirrors the invoke-with-result shape (no secret) — the sheet
   // needs the { ok } result back to keep the card open + show an inline error
   // on a pre-forward validation failure. `payload` carries { token, id,
   // action: 'save' | 'remove', name?, url? } — never a raw sendActivated

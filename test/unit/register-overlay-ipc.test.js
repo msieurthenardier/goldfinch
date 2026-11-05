@@ -1,5 +1,6 @@
 'use strict';
 
+const { withOverlaySenderLookup } = require('../helpers/fake-overlay-registry');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -58,11 +59,11 @@ test('overlay registrar preserves sender roles, token checks, and close-before-a
       hide: () => events.push(['tear-hide'])
     }
   };
-  const registry = {
+  const registry = withOverlaySenderLookup({
     records: () => [rec],
     getWindowForChrome: (sender) => (sender === chromeSender ? rec : null),
     getWindowForGuest: (wcId) => (wcId === 42 ? rec : null)
-  };
+  });
 
   registerOverlayIpc({
     ipcMain,
@@ -136,7 +137,7 @@ function makeCertHarness({ menuType = 'cert-picker', certSelectFromSheet } = {})
     closeMenuOverlay: (reason, token) => events.push(['close', reason, token])
   };
   const rec = { win: {}, sheet };
-  const registry = { records: () => [rec], getWindowForChrome: () => null };
+  const registry = withOverlaySenderLookup({ records: () => [rec], getWindowForChrome: () => null });
   registerOverlayIpc({
     ipcMain,
     registry,
@@ -238,7 +239,7 @@ function makeBookmarkEditHarness({ validateBookmarkEdit, list, jarId } = {}) {
     closeMenuOverlay: (reason, token) => events.push(['close', reason, token])
   };
   const rec = { win: {}, sheet };
-  const registry = { records: () => [rec], getWindowForChrome: () => null };
+  const registry = withOverlaySenderLookup({ records: () => [rec], getWindowForChrome: () => null });
   registerOverlayIpc({
     ipcMain,
     registry,
@@ -257,7 +258,7 @@ function makeBookmarkEditHarness({ validateBookmarkEdit, list, jarId } = {}) {
 
 test('the registrar never registers menu-overlay:bookmark-edit-submit when validateBookmarkEdit is absent (offline overlay tests)', () => {
   const ipcMain = makeIpcWithHandle();
-  const registry = { records: () => [], getWindowForChrome: () => null };
+  const registry = withOverlaySenderLookup({ records: () => [], getWindowForChrome: () => null });
   registerOverlayIpc({
     ipcMain,
     registry,
@@ -478,7 +479,7 @@ function makeOverflowDropHarness({ menuType = 'bookmarks-overflow', token = 7 } 
     closeMenuOverlay: (reason, tok) => events.push(['close', reason, tok])
   };
   const rec = { win: {}, sheet };
-  const registry = { records: () => [rec], getWindowForChrome: () => null };
+  const registry = withOverlaySenderLookup({ records: () => [rec], getWindowForChrome: () => null });
   registerOverlayIpc({
     ipcMain,
     registry,
@@ -578,7 +579,7 @@ function makeSheetDragHarness({ menuType = 'bookmarks-overflow', token = 7 } = {
     closeMenuOverlay: (reason, tok) => events.push(['close', reason, tok])
   };
   const rec = { win: {}, sheet };
-  const registry = { records: () => [rec], getWindowForChrome: () => null };
+  const registry = withOverlaySenderLookup({ records: () => [rec], getWindowForChrome: () => null });
   registerOverlayIpc({
     ipcMain,
     registry,
@@ -695,11 +696,11 @@ test('menu-overlay:refocus is sheet-sender-gated and never steals focus from ano
     activeTabWcId: null,
     tabViews: new Map()
   };
-  const registry = {
+  const registry = withOverlaySenderLookup({
     records: () => [rec],
     getWindowForChrome: (sender) => (sender === chromeSender ? rec : null),
     getWindowForGuest: () => null
-  };
+  });
   registerOverlayIpc({
     ipcMain,
     registry,
@@ -757,11 +758,11 @@ function makeOpenBoundsHarness({ activeEntry = null } = {}) {
     activeTabWcId: activeEntry ? 42 : null,
     tabViews: activeEntry ? new Map([[42, activeEntry]]) : new Map()
   };
-  const registry = {
+  const registry = withOverlaySenderLookup({
     records: () => [rec],
     getWindowForChrome: (sender) => (sender === chromeSender ? rec : null),
     getWindowForGuest: () => null
-  };
+  });
   registerOverlayIpc({
     ipcMain,
     registry,
@@ -863,7 +864,7 @@ function makeCertOverrideHarness({
   const tabViews = new Map();
   if (entry) tabViews.set(activeTabWcId, entry);
   const rec = { win: {}, sheet, activeTabWcId, tabViews };
-  const registry = { records: () => [rec], getWindowForChrome: () => null };
+  const registry = withOverlaySenderLookup({ records: () => [rec], getWindowForChrome: () => null });
   const wc = omitWc
     ? null
     : {
@@ -893,7 +894,7 @@ function certOverrideHandler(h) {
 
 test('the registrar never registers menu-overlay:cert-override-proceed when certTrust is absent (offline overlay tests)', () => {
   const ipcMain = makeIpcWithHandle();
-  const registry = { records: () => [], getWindowForChrome: () => null };
+  const registry = withOverlaySenderLookup({ records: () => [], getWindowForChrome: () => null });
   registerOverlayIpc({
     ipcMain,
     registry,

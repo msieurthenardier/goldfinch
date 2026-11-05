@@ -166,7 +166,8 @@ const KEEP_FOCUS_MAX = 5;
  *   hideFindOverlay?: () => void,
  *   restoreFindOverlay?: (reason: string) => void,
  *   focusChrome?: (win?: any) => void,
- *   onClosed?: (info: { menuType: string, reason: string }) => void
+ *   onClosed?: (info: { menuType: string, reason: string }) => void,
+ *   onVisibilityChanged?: (visible: boolean) => void
  * }} deps
  */
 function createMenuOverlayManager({
@@ -182,11 +183,22 @@ function createMenuOverlayManager({
   // without ever calling closeMenuOverlay — hooking only closeMenuOverlay would
   // stall the auth queue on exactly the occlusion case it depends on). The
   // mapping consumer must therefore be path-agnostic about 'superseded'.
-  onClosed = () => {}
+  onClosed = () => {},
+  // Sortie 06 Leg 1 (AC16/DD4): optional visibility observer for the corner save prompt's
+  // `sheet` timer-pause input. Called at EVERY site that assigns `visible`, deduped to real
+  // changes (show() re-runs on each re-raise).
+  onVisibilityChanged = () => {}
 }) {
   /** @type {SheetViewLike | null} */
   let view = null;
   let visible = false;
+  // Single assignment point for `visible` (deduped change notification).
+  /** @param {boolean} next */
+  function setVisibleState(next) {
+    if (visible === next) return;
+    visible = next;
+    onVisibilityChanged(next);
+  }
   let ready = false;
   /** @type {Bounds | null} */
   let lastGuestBounds = null;
@@ -266,7 +278,7 @@ function createMenuOverlayManager({
       }
     }
     view = null;
-    visible = false;
+    setVisibleState(false);
     ready = false;
     currentMenu = null;
     pendingInit = null;
@@ -279,7 +291,7 @@ function createMenuOverlayManager({
   function ensureView() {
     if (view && view.webContents.isDestroyed()) {
       view = null;
-      visible = false;
+      setVisibleState(false);
       ready = false;
       currentMenu = null;
       pendingInit = null;
@@ -327,7 +339,7 @@ function createMenuOverlayManager({
     if (lastGuestBounds) v.setBounds(lastGuestBounds);
     cv.addChildView(v);
     v.setVisible(true);
-    visible = true;
+    setVisibleState(true);
   }
 
   // Hide = removeChildView, gated on visibility (never setVisible(false)-only).
@@ -340,7 +352,7 @@ function createMenuOverlayManager({
     if (!visible) return;
     const cv = attachedContentView();
     if (cv && view) cv.removeChildView(view);
-    visible = false;
+    setVisibleState(false);
   }
 
   /**
@@ -399,7 +411,7 @@ function createMenuOverlayManager({
       // must physically move the view).
       if (crossWindow && visible && view) {
         /** @type {Attachment} */ (attachment).contentView.removeChildView(view);
-        visible = false;
+        setVisibleState(false);
       }
     }
     attachment = nextAtt;

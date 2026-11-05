@@ -538,6 +538,102 @@ test('handleCrossView suppresses the focus-then-send pair on auto-repeat but sti
   assert.equal(h.calls.includes('focus-chrome'), false, 'no repeated chrome.focus() either');
 });
 
+// ---------------------------------------------------------------------------
+// Sortie 06 Leg 3 (AC1; R1/R2): the guest->prompt F6 hop, resolved in-module through the
+// existing `registry` dep. Every non-eligible case is today's exact chrome path.
+// ---------------------------------------------------------------------------
+
+function fakePrompt({ wcId = 70, can = true } = {}) {
+  const calls = [];
+  return {
+    calls,
+    currentWcId: () => wcId,
+    canFocusPrompt: () => can,
+    focusPrompt: () => {
+      calls.push('focusPrompt');
+      return true;
+    }
+  };
+}
+
+function f6Case(prompt, { wcId = 70, key = 'F6', extra = {}, internal = false } = {}) {
+  const h = setup();
+  const web = new FakeContents(wcId, internal);
+  h.wiring.wireGuestContents(web);
+  h.records.set(wcId, { savePrompt: prompt });
+  const event = inputEvent();
+  web.emit('before-input-event', event, { type: 'keyDown', key, ...extra });
+  return { h, event };
+}
+
+test('Leg 3 AC1: unmodified F6 from the prompt tab with an interactive prompt -> focusPrompt, NO chrome focus/send', () => {
+  const p = fakePrompt();
+  const { h, event } = f6Case(p);
+  assert.equal(event.prevented, true);
+  assert.deepEqual(p.calls, ['focusPrompt']);
+  assert.deepEqual(h.sends, []);
+  assert.equal(h.calls.includes('focus-chrome'), false);
+});
+
+test('Leg 3 AC1: auto-repeat F6 on the prompt hop is swallowed without a second focusPrompt', () => {
+  const p = fakePrompt();
+  const { h, event } = f6Case(p, { extra: { isAutoRepeat: true } });
+  assert.equal(event.prevented, true);
+  assert.deepEqual(p.calls, []);
+  assert.deepEqual(h.sends, []);
+});
+
+test("Leg 3 AC1: Shift+F6 with a prompt visible is today's focus-chrome-end", () => {
+  const p = fakePrompt();
+  const { h, event } = f6Case(p, { extra: { shift: true } });
+  assert.equal(event.prevented, true);
+  assert.deepEqual(p.calls, []);
+  assert.deepEqual(h.sends, [['chrome-shortcut-action', { action: 'focus-chrome-end' }]]);
+});
+
+test("Leg 3 AC1: Ctrl+L with a prompt visible is today's focus-address (key is not F6)", () => {
+  const p = fakePrompt();
+  const { h } = f6Case(p, { key: 'l', extra: { control: true } });
+  assert.deepEqual(p.calls, []);
+  assert.deepEqual(h.sends, [['chrome-shortcut-action', { action: 'focus-address' }]]);
+});
+
+test("Leg 3 AC1/R2: F6 while the prompt is not interactive (result state) is today's focus-address", () => {
+  const p = fakePrompt({ can: false });
+  const { h, event } = f6Case(p);
+  assert.equal(event.prevented, true);
+  assert.deepEqual(p.calls, []);
+  assert.deepEqual(h.sends, [['chrome-shortcut-action', { action: 'focus-address' }]]);
+});
+
+test("Leg 3 AC1: F6 with the prompt shown for a DIFFERENT tab is today's focus-address", () => {
+  const p = fakePrompt({ wcId: 999 });
+  const { h } = f6Case(p);
+  assert.deepEqual(p.calls, []);
+  assert.deepEqual(h.sends, [['chrome-shortcut-action', { action: 'focus-address' }]]);
+});
+
+test("Leg 3 AC1: an internal guest's F6 with a prompt for its tab id still follows the prompt hop rule, else today's path", () => {
+  const p = fakePrompt({ wcId: 999 });
+  const { h } = f6Case(p, { internal: true });
+  assert.deepEqual(h.sends, [['chrome-shortcut-action', { action: 'focus-address' }]]);
+});
+
+test('Leg 3 R1: a record with no savePrompt, and a popup guest (no record), fall through to the chrome path', () => {
+  const h = setup();
+  const web = new FakeContents(71, false);
+  h.wiring.wireGuestContents(web);
+  h.records.set(71, {});
+  web.emit('before-input-event', inputEvent(), { type: 'keyDown', key: 'F6' });
+  const popup = new FakeContents(72, false);
+  h.wiring.wireGuestContents(popup);
+  popup.emit('before-input-event', inputEvent(), { type: 'keyDown', key: 'F6' });
+  assert.deepEqual(h.sends, [
+    ['chrome-shortcut-action', { action: 'focus-address' }],
+    ['chrome-shortcut-action', { action: 'focus-address' }]
+  ]);
+});
+
 // M14 F1 L1 (DD1): enter/leave-html-full-screen route to the injected module —
 // web guests only (an internal page must never seize the window).
 test('html fullscreen events wire to the module on web guests only', () => {
@@ -676,6 +772,7 @@ test('did-navigate releases a held gesture capture via vaultHuman().captureRelea
     })
   });
   const wc = new FakeContents(60);
+  h.records.set(60, { activeTabWcId: 60 }); // the offer's tab IS its window's active tab
   h.wiring.wireTabViewEvents({ webContents: wc }, 60, 'persist:jar-a');
 
   wc.emit('did-navigate');
@@ -683,7 +780,7 @@ test('did-navigate releases a held gesture capture via vaultHuman().captureRelea
   assert.deepEqual(releaseCalls, [60]);
   assert.deepEqual(h.sends[0], [
     'vault-capture-offer',
-    { captureId: 'cap1', model: { origin: 'https://a.example', username: 'me', mode: 'save' } }
+    { captureId: 'cap1', model: { origin: 'https://a.example', username: 'me', mode: 'save' }, wcId: 60 }
   ]);
   assert.deepEqual(h.sends[1], ['tab-did-navigate', { wcId: 60, url: wc.url }]);
 });
@@ -701,6 +798,7 @@ test('AC4: did-navigate sends ONE vault-capture-offer per entry captureRelease r
     })
   });
   const wc = new FakeContents(63);
+  h.records.set(63, { activeTabWcId: 63 });
   h.wiring.wireTabViewEvents({ webContents: wc }, 63, 'persist:jar-a');
 
   wc.emit('did-navigate');
@@ -709,10 +807,41 @@ test('AC4: did-navigate sends ONE vault-capture-offer per entry captureRelease r
   assert.equal(offerSends.length, 2, 'one vault-capture-offer per released entry');
   assert.equal(offerSends[0][1].captureId, 'cap-login', 'release order preserved — login first');
   assert.equal(offerSends[1][1].captureId, 'cap-card', 'release order preserved — card second');
+  assert.deepEqual(
+    offerSends.map(([, p]) => p.wcId),
+    [63, 63],
+    'every offer carries its tab wcId (Sortie 06, DD5)'
+  );
   const navigateIndex = h.sends.findIndex(([channel]) => channel === 'tab-did-navigate');
   assert.ok(
     h.sends.findIndex(([channel]) => channel === 'vault-capture-offer') < navigateIndex,
     'every vault-capture-offer send precedes tab-did-navigate'
+  );
+});
+
+// Sortie 06 Leg 1 (DD5/AC12): the offer is gated MAIN-side to the window's ACTIVE tab. A
+// background tab's release is dismissed (the held capture dropped) and nothing is sent.
+test('Sortie 06 AC12: did-navigate for a NON-ACTIVE tab dismisses each released capture main-side and sends NO offer', () => {
+  const dismissed = [];
+  const h = setup({
+    vaultHuman: () => ({
+      captureRelease: () => [
+        { captureId: 'cap-a', model: { origin: 'https://a.example', username: 'me', mode: 'save' } },
+        { captureId: 'cap-b', model: { kind: 'card', origin: 'https://a.example', mode: 'save' } }
+      ],
+      captureDismiss: (id) => dismissed.push(id)
+    })
+  });
+  const wc = new FakeContents(64);
+  h.records.set(64, { activeTabWcId: 99 }); // a DIFFERENT tab is active
+  h.wiring.wireTabViewEvents({ webContents: wc }, 64, 'persist:jar-a');
+
+  wc.emit('did-navigate');
+
+  assert.deepEqual(dismissed, ['cap-a', 'cap-b']);
+  assert.equal(
+    h.sends.some(([channel]) => channel === 'vault-capture-offer'),
+    false
   );
 });
 

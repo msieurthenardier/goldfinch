@@ -32,6 +32,7 @@
 // report with ZERO rows (the spec's "empty list is CORRECT after a second
 // rotation" distinction).
 
+const { withOverlaySenderLookup } = require('../helpers/fake-overlay-registry');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -127,7 +128,7 @@ function makeOverlayHarness(main, { menuType, onStash }) {
   const rec = { sheet, win };
   registerOverlayIpc({
     ipcMain,
-    registry: { records: () => [rec], getWindowForChrome: () => null },
+    registry: withOverlaySenderLookup({ records: () => [rec], getWindowForChrome: () => null }),
     chromeForAttachment: (w) => (w === win ? { id: 100, send: () => {} } : null),
     chromeForTab: () => null,
     sanitizeActivatedValue: () => undefined,

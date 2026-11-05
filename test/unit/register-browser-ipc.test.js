@@ -36,8 +36,20 @@ function makeHarness(options = {}) {
   };
   const chrome = { send: (...args) => events.push(['chrome-send', ...args]) };
   // Vault fill-icon native-menu delegate capture (I8): the owning window + recorded calls.
-  const iconMenuWin = { id: 17, isDestroyed: () => false };
+  const iconMenuWin = {
+    id: 17,
+    isDestroyed: () => false,
+    isMaximized: () => false,
+    minimize: () => events.push(['minimize']),
+    maximize: () => events.push(['maximize']),
+    close: () => events.push(['close'])
+  };
+  // Sortie 06 (DD5/AC12): the guest-5 owner record; `activeTabWcId` gates the main-side offer send.
+  const ownerRecord = { win: iconMenuWin, activeTabWcId: 5 };
   const iconMenuCalls = [];
+  // Sortie 06 Leg 2: a SECOND window (its own chrome sender) for the finalize owner-gate tests.
+  const otherChromeSender = {};
+  const otherRecord = { win: { id: 18 }, activeTabWcId: 99 };
   // Leg 5 (broadened-capture): a fake human whose holdGestureLogin/holdGestureCard
   // record their args (recording ONLY the gesture-hold call — this leg's IPC
   // handlers never dispose/offer anything themselves) and whose captureRelease
@@ -66,6 +78,17 @@ function makeHarness(options = {}) {
     },
     captureDismiss(id) {
       human.dismissed.push(id);
+    },
+    // Sortie 06 Leg 2: finalize seams (captureId -> owning tab; recorded finalize calls).
+    tabs: new Map([['held', 5]]),
+    finalized: [],
+    nextFinalize: { captureId: 'held', model: { mode: 'save' } },
+    captureTabOf(id) {
+      return human.tabs.has(id) ? human.tabs.get(id) : null;
+    },
+    captureFinalize(id) {
+      human.finalized.push(id);
+      return human.nextFinalize;
     }
   };
   registerBrowserIpc({
@@ -92,19 +115,9 @@ function makeHarness(options = {}) {
     },
     registry: {
       getWindowForChrome: (sender) =>
-        sender === chromeSender
-          ? {
-              win: {
-                id: 17,
-                isMaximized: () => false,
-                minimize: () => events.push(['minimize']),
-                maximize: () => events.push(['maximize']),
-                close: () => events.push(['close'])
-              }
-            }
-          : null,
+        sender === chromeSender ? ownerRecord : sender === otherChromeSender ? otherRecord : null,
       // Guest sender → owning window record (used by the vault fill-icon native menu path).
-      getWindowForGuest: (id) => (id === 5 ? { win: iconMenuWin } : null)
+      getWindowForGuest: (id) => (id === 5 ? ownerRecord : null)
     },
     createWindow: () => ({ win: { id: 23 } }),
     broadcastJarsChanged: () => events.push(['jars-changed']),
@@ -139,9 +152,12 @@ function makeHarness(options = {}) {
     wc,
     chrome,
     chromeSender,
+    otherChromeSender,
+    otherRecord,
     human,
     iconMenuCalls,
     iconMenuWin,
+    ownerRecord,
     chromeForTabCalls
   };
 }
@@ -458,7 +474,9 @@ test('vault capture settle (Leg 5, DD4 detachment path): guest-vault-gesture-set
   };
   h.human.nextOffer = [{ captureId: 'cap123', model: offerModel }];
   h.listeners.get('guest-vault-gesture-settle')({ sender: { id: 5 } });
-  assert.deepEqual(h.events, [['chrome-send', 'vault-capture-offer', { captureId: 'cap123', model: offerModel }]]);
+  assert.deepEqual(h.events, [
+    ['chrome-send', 'vault-capture-offer', { captureId: 'cap123', model: offerModel, wcId: 5 }]
+  ]);
   // The forwarded payload never carries a password (grep the whole event stream).
   assert.ok(!JSON.stringify(h.events).includes('typed-secret'), 'no captured password crosses to chrome');
 });
@@ -474,9 +492,23 @@ test('AC4: guest-vault-gesture-settle sends ONE vault-capture-offer per entry ca
   ];
   h.listeners.get('guest-vault-gesture-settle')({ sender: { id: 5 } });
   assert.deepEqual(h.events, [
-    ['chrome-send', 'vault-capture-offer', { captureId: 'cap-login', model: h.human.nextOffer[0].model }],
-    ['chrome-send', 'vault-capture-offer', { captureId: 'cap-card', model: h.human.nextOffer[1].model }]
+    ['chrome-send', 'vault-capture-offer', { captureId: 'cap-login', model: h.human.nextOffer[0].model, wcId: 5 }],
+    ['chrome-send', 'vault-capture-offer', { captureId: 'cap-card', model: h.human.nextOffer[1].model, wcId: 5 }]
   ]);
+});
+
+// Sortie 06 Leg 1 (DD5/AC12): the offer is gated MAIN-side to the window's ACTIVE tab - a
+// background tab's settle dismisses the held captures and sends nothing.
+test('Sortie 06 AC12: guest-vault-gesture-settle for a NON-ACTIVE tab dismisses each released capture and sends no offer', () => {
+  const h = makeHarness();
+  h.ownerRecord.activeTabWcId = 99;
+  h.human.nextOffer = [
+    { captureId: 'cap-login', model: { origin: 'https://a.example', username: 'me@a', mode: 'save' } },
+    { captureId: 'cap-card', model: { kind: 'card', origin: 'https://a.example', mode: 'save' } }
+  ];
+  h.listeners.get('guest-vault-gesture-settle')({ sender: { id: 5 } });
+  assert.deepEqual(h.events, [], 'no vault-capture-offer is sent for a background tab');
+  assert.deepEqual(h.human.dismissed, ['cap-login', 'cap-card']);
 });
 
 test('vault fill-icon context menu: a BARE guest signal pops a NATIVE menu over the owning window — no secret, no guest DOM', () => {
@@ -683,4 +715,38 @@ test('browser-import commit rejects a malformed payload with { ok:false, reason:
   const ok = await handler({ sender: { id: 7 } }, { handle: 'h1', target: 'global', mode: 'merge' });
   assert.equal(ok.ok, true);
   assert.equal(calls.length, 1);
+});
+
+// ---------------------------------------------------------------------------
+// vault-capture-finalize (Sortie 06 Leg 2, AC7 / AC10.7-8): the bare chrome handle that now hosts
+// the consented write gained a SENDER gate and an ACTIVE-TAB gate.
+// ---------------------------------------------------------------------------
+
+test("AC10.8: finalize from a NON-OWNING window's chrome -> refused, no finalize, record intact (no dismiss)", async () => {
+  const h = makeHarness();
+  const res = await h.handlers.get('vault-capture-finalize')({ sender: h.otherChromeSender }, 'held');
+  assert.deepEqual(res, { reason: 'refused' });
+  assert.deepEqual(h.human.finalized, []);
+  assert.deepEqual(h.human.dismissed, [], 'the record is left intact');
+  // a non-chrome sender is refused the same way
+  assert.deepEqual(await h.handlers.get('vault-capture-finalize')({ sender: {} }, 'held'), { reason: 'refused' });
+  assert.deepEqual(h.human.finalized, []);
+});
+
+test('AC10.7: finalize for a NON-ACTIVE tab -> tab-changed, no finalize/write, record dropped', async () => {
+  const h = makeHarness();
+  h.ownerRecord.activeTabWcId = 6;
+  const res = await h.handlers.get('vault-capture-finalize')({ sender: h.chromeSender }, 'held');
+  assert.deepEqual(res, { reason: 'tab-changed' });
+  assert.deepEqual(h.human.finalized, []);
+  assert.deepEqual(h.human.dismissed, ['held']);
+});
+
+test('AC7: finalize for an unknown id -> expired; a non-string id -> null; the owner + active tab reaches captureFinalize', async () => {
+  const h = makeHarness();
+  const fin = h.handlers.get('vault-capture-finalize');
+  assert.deepEqual(await fin({ sender: h.chromeSender }, 'nope'), { reason: 'expired' });
+  assert.equal(await fin({ sender: h.chromeSender }, 42), null);
+  assert.deepEqual(await fin({ sender: h.chromeSender }, 'held'), h.human.nextFinalize);
+  assert.deepEqual(h.human.finalized, ['held']);
 });

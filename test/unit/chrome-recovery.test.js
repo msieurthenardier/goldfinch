@@ -338,3 +338,45 @@ test('buildRecoveryAdopts: zero tabs returns an empty array', () => {
   });
   assert.deepEqual(out, []);
 });
+
+// ---------------------------------------------------------------------------
+// Sortie 06 Leg 1 (AC13): closeSavePrompt runs BEFORE every early return
+// ---------------------------------------------------------------------------
+
+test('Sortie 06 AC13: closeSavePrompt runs FIRST on a reloading crash (before closeSheet)', () => {
+  const recovery = createChromeRecovery({ now: () => 1000 });
+  const { hooks, calls } = makeHooks({ closeSavePrompt: () => calls.push(['closeSavePrompt']) });
+  recovery.onChromeGone(makeRecord(), { reason: 'crashed', exitCode: 139 }, hooks);
+  assert.equal(calls[0][0], 'closeSavePrompt');
+  assert.equal(calls[1][0], 'closeSheet');
+});
+
+test('Sortie 06 AC13: closeSavePrompt also runs on the clean-exit, already-paused, and newly-paused early returns', () => {
+  // clean-exit
+  let recovery = createChromeRecovery({ now: () => 1000 });
+  let made = makeHooks({ closeSavePrompt: () => made.calls.push(['closeSavePrompt']) });
+  assert.equal(recovery.onChromeGone(makeRecord(), { reason: 'clean-exit' }, made.hooks), 'ignored');
+  assert.deepEqual(made.calls, [['closeSavePrompt']]);
+
+  // newly paused (4th crash inside the window) and already paused (5th)
+  let t = 1000;
+  recovery = createChromeRecovery({ now: () => t });
+  const record = makeRecord();
+  made = makeHooks({ closeSavePrompt: () => made.calls.push(['closeSavePrompt']) });
+  for (let i = 0; i < 3; i++) {
+    recovery.onChromeGone(record, { reason: 'crashed', exitCode: 139 }, made.hooks);
+    t += 10;
+  }
+  made.calls.length = 0;
+  assert.equal(recovery.onChromeGone(record, { reason: 'crashed', exitCode: 139 }, made.hooks), 'paused');
+  assert.equal(made.calls[0][0], 'closeSavePrompt', 'newly-paused branch');
+  made.calls.length = 0;
+  assert.equal(recovery.onChromeGone(record, { reason: 'crashed', exitCode: 139 }, made.hooks), 'ignored');
+  assert.equal(made.calls[0][0], 'closeSavePrompt', 'already-paused branch');
+});
+
+test('Sortie 06 AC13: an absent closeSavePrompt hook is tolerated (offline callers)', () => {
+  const recovery = createChromeRecovery({ now: () => 1000 });
+  const { hooks } = makeHooks();
+  assert.doesNotThrow(() => recovery.onChromeGone(makeRecord(), { reason: 'crashed', exitCode: 1 }, hooks));
+});

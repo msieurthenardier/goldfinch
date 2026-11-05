@@ -24,7 +24,7 @@ const find = require('./find');
  *   F7 DD3: takes an OPTIONAL windowId — omitted → the last-focused record (the
  *   pre-F7 contract every existing caller relies on); supplied → that window's
  *   chrome, or null when the id names no registered window.
- * @param {{ allowInternal?: boolean, getDownloads?: (() => any) | null, grabWindow?: ((windowId?: number) => Promise<string|null>) | null, listWindows?: (() => Array<{ windowId: number, chrome: any, booted: boolean, ownsTab: (wcId: number) => boolean }>) | null, listPopups?: (() => any[]) | null, enumerateWindows?: (() => any[]) | null, isTabViewWcId?: ((id: number) => boolean) | null, isPopupWcId?: ((id: number) => boolean) | null, isChromeContents?: ((wc: any) => boolean) | null, isSheetContents?: ((wc: any) => boolean) | null, sheetMenuFor?: ((wc: any) => ({ menuType: string, token: number } | null)) | null, chromeForTab?: ((id: number) => any) | null, raiseWindowForTab?: ((id: number) => void) | null, getHistoryReads?: ({ listRecent: (jarId: string, opts: any) => any, search: (jarId: string, query: string, opts: any) => any }) | null, isKnownJar?: ((jarId: string) => boolean) | null }} [opts]
+ * @param {{ allowInternal?: boolean, getDownloads?: (() => any) | null, grabWindow?: ((windowId?: number) => Promise<string|null>) | null, listWindows?: (() => Array<{ windowId: number, chrome: any, booted: boolean, ownsTab: (wcId: number) => boolean }>) | null, listPopups?: (() => any[]) | null, enumerateWindows?: (() => any[]) | null, isTabViewWcId?: ((id: number) => boolean) | null, isPopupWcId?: ((id: number) => boolean) | null, isChromeContents?: ((wc: any) => boolean) | null, isSheetContents?: ((wc: any) => boolean) | null, isSavePromptContents?: ((wc: any) => boolean) | null, sheetMenuFor?: ((wc: any) => ({ menuType: string, token: number } | null)) | null, chromeForTab?: ((id: number) => any) | null, raiseWindowForTab?: ((id: number) => void) | null, getHistoryReads?: ({ listRecent: (jarId: string, opts: any) => any, search: (jarId: string, query: string, opts: any) => any }) | null, isKnownJar?: ((jarId: string) => boolean) | null }} [opts]
  *   allowInternal — one of admin's TWO relaxations (DD6 / Leg 2 + M05 F8 DD8):
  *   when true, deps carry allowInternal so resolveContents (a) lets the internal
  *   goldfinch://settings session through AND (b) skips the non-tab-contents
@@ -119,6 +119,7 @@ function createEngine(
     isPopupWcId = null,
     isChromeContents = null,
     isSheetContents = null,
+    isSavePromptContents = null,
     sheetMenuFor = null,
     chromeForTab = null,
     raiseWindowForTab = null,
@@ -198,6 +199,7 @@ function createEngine(
       ...(typeof isPopupWcId === 'function' ? { isPopupWcId } : {}),
       ...(typeof isChromeContents === 'function' ? { isChromeContents } : {}),
       ...(typeof isSheetContents === 'function' ? { isSheetContents } : {}),
+      ...(typeof isSavePromptContents === 'function' ? { isSavePromptContents } : {}),
       ...(typeof sheetMenuFor === 'function' ? { sheetMenuFor } : {}),
       ...(typeof chromeForTab === 'function' ? { chromeForTab } : {}),
       ...(typeof raiseWindowForTab === 'function' ? { raiseWindowForTab } : {})

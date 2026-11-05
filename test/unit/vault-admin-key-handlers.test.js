@@ -9,6 +9,7 @@
 //     vault-adminkey-show with the NEW one-time admin private key ONLY (never in the invoke reply).
 // A WRONG step-up → { ok:false } (VaultAuthError mapped in main) → nothing shown/closed.
 
+const { withOverlaySenderLookup } = require('../helpers/fake-overlay-registry');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
@@ -41,7 +42,7 @@ function baseHarness(extraInjections, menuType) {
     closeMenuOverlay: (reason, token) => closeCalls.push([reason, token])
   };
   const rec = { sheet, win };
-  const registry = { records: () => [rec], getWindowForChrome: () => null };
+  const registry = withOverlaySenderLookup({ records: () => [rec], getWindowForChrome: () => null });
   const chrome = { send: (channel, payload) => chromeSends.push([channel, payload]) };
 
   registerOverlayIpc({

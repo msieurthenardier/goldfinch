@@ -343,6 +343,7 @@ async function freePortInRange(lo = 49152, hi = 65535) {
  *   getChromeContents: () => any,
  *   isChromeContents?: (wc: any) => boolean,
  *   isSheetContents?: (wc: any) => boolean,
+ *   isSavePromptContents?: (wc: any) => boolean,
  *   sheetMenuFor?: (wc: any) => ({ menuType: string, token: number } | null),
  *   isTabViewWcId?: (id: number) => boolean,
  *   isPopupWcId?: (id: number) => boolean,

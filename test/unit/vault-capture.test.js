@@ -554,8 +554,10 @@ test('capture LOCKED: holds the credential + returns a mode:locked offer (unlock
     assert.equal(offer.model.mode, 'locked', 'the chrome is told to prompt an unlock first');
     assert.equal(offer.model.origin, A);
     assert.equal(offer.model.username, 'me@a');
-    // No disposition (save/update) is computed while locked — it is deferred to finalize.
-    assert.equal(offer.model.defaultVaultId, undefined);
+    // No disposition (save/update) is computed while locked — it is deferred to finalize. Sortie 06
+    // Leg 2 (AC2): the locked offer carries the non-secret, deterministic vault choice instead.
+    assert.deepEqual(offer.model.choices, ['work', 'global']);
+    assert.equal(offer.model.defaultVaultId, 'work');
     // The incoming deserialized array is still wiped (the password is COPIED into the held record).
     assert.ok(bytes.every((b) => b === 0));
   } finally {

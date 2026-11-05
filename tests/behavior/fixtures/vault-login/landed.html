@@ -1,0 +1,48 @@
+<!--
+  BEHAVIOR-TEST FIXTURE — do not deploy or link from production.
+  The LANDING page of the vault-login fixture's capture mode (Sortie 06, Leg 1): what
+  capture.html's form navigates to. It exists to prove a page stays fully USABLE while the
+  corner save prompt shows over it:
+
+    - #probe : a text input — typeText into it while the prompt is up
+    - #bump  : a button — click it while the prompt is up
+    - #count : the visible click counter, starting at 0, +1 per #bump click
+
+  Reusable per fresh tab: opening this URL (or going through capture.html again) always starts
+  the counter at 0 — nothing is persisted.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vault Login Fixture (landed)</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 420px; margin: 3rem auto; padding: 1rem; background: #101418; color: #e0e0e0; }
+    h1 { color: #f90; font-size: 1.2rem; }
+    .marker { color: #0f0; font-size: 0.8rem; margin-bottom: 1.5rem; }
+    label { display: block; margin: 0.75rem 0 0.25rem; font-size: 0.85rem; color: #aaa; }
+    input { width: 100%; padding: 0.5rem; font-size: 1rem; box-sizing: border-box; background: #1b2027; color: #e0e0e0; border: 1px solid #4af; }
+    button { margin-top: 1rem; padding: 0.5rem 1rem; font-size: 1rem; background: #243; color: #cfc; border: 1px solid #4c6; cursor: pointer; }
+    #count { font-size: 1.4rem; margin-left: 0.75rem; }
+  </style>
+</head>
+<body>
+  <h1>Signed in</h1>
+  <div class="marker">vault-login-landed-fixture-loaded</div>
+
+  <label for="probe">Probe</label>
+  <input id="probe" type="text" autocomplete="off">
+
+  <button id="bump" type="button">Bump</button>
+  <span id="count" aria-live="off">0</span>
+
+  <script>
+    var n = 0;
+    document.getElementById('bump').addEventListener('click', function () {
+      n += 1;
+      document.getElementById('count').textContent = String(n);
+    });
+  </script>
+</body>
+</html>
