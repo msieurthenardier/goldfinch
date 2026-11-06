@@ -12,36 +12,55 @@ const { buildVaultIndicatorModel } = require('../../src/shared/vault-indicator-m
 test('not set up → hidden (regardless of the unlocked flag)', () => {
   assert.deepEqual(buildVaultIndicatorModel({ setUp: false, unlocked: false }), {
     visible: false,
-    state: 'locked'
+    state: 'locked',
+    automationHeld: false
   });
   // A nonsensical unlocked-while-not-set-up snapshot still hides (visibility gates on setUp).
   assert.deepEqual(buildVaultIndicatorModel({ setUp: false, unlocked: true }), {
     visible: false,
-    state: 'locked'
+    state: 'locked',
+    automationHeld: false
   });
 });
 
 test('set up + locked → visible, locked', () => {
   assert.deepEqual(buildVaultIndicatorModel({ setUp: true, unlocked: false }), {
     visible: true,
-    state: 'locked'
+    state: 'locked',
+    automationHeld: false
   });
 });
 
 test('set up + unlocked → visible, unlocked', () => {
   assert.deepEqual(buildVaultIndicatorModel({ setUp: true, unlocked: true }), {
     visible: true,
-    state: 'unlocked'
+    state: 'unlocked',
+    automationHeld: false
   });
 });
 
 test('never throws on malformed / partial / missing input (defensive coercion)', () => {
-  assert.deepEqual(buildVaultIndicatorModel(null), { visible: false, state: 'locked' });
-  assert.deepEqual(buildVaultIndicatorModel(undefined), { visible: false, state: 'locked' });
-  assert.deepEqual(buildVaultIndicatorModel({}), { visible: false, state: 'locked' });
+  const hidden = { visible: false, state: 'locked', automationHeld: false };
+  assert.deepEqual(buildVaultIndicatorModel(null), hidden);
+  assert.deepEqual(buildVaultIndicatorModel(undefined), hidden);
+  assert.deepEqual(buildVaultIndicatorModel({}), hidden);
   // Truthy-but-non-boolean fields coerce.
   assert.deepEqual(buildVaultIndicatorModel({ setUp: 1, unlocked: 'yes' }), {
     visible: true,
-    state: 'unlocked'
+    state: 'unlocked',
+    automationHeld: false
   });
+});
+
+test('automationHeld (Sortie 07): true only when set up AND locked AND held; coerces truthy non-booleans', () => {
+  assert.deepEqual(buildVaultIndicatorModel({ setUp: false, unlocked: false, automationHeld: true }), {
+    visible: false,
+    state: 'locked',
+    automationHeld: false
+  });
+  assert.equal(buildVaultIndicatorModel({ setUp: true, unlocked: false, automationHeld: true }).automationHeld, true);
+  assert.equal(buildVaultIndicatorModel({ setUp: true, unlocked: true, automationHeld: true }).automationHeld, false);
+  assert.equal(buildVaultIndicatorModel({ setUp: true, unlocked: false, automationHeld: false }).automationHeld, false);
+  assert.equal(buildVaultIndicatorModel({ setUp: true, unlocked: false, automationHeld: 'yes' }).automationHeld, true);
+  assert.doesNotThrow(() => buildVaultIndicatorModel({ automationHeld: {} }));
 });

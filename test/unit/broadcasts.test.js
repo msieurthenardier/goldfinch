@@ -59,6 +59,15 @@ test('shared broadcasts include every chrome and internal page exactly once, nev
   assert.deepEqual(h.guest.sends, []);
 });
 
+test('broadcastToChromes reaches every chrome once and never internal pages or guests', () => {
+  const h = setup();
+  h.broadcastToChromes('vault-automation-held', { held: true });
+  assert.deepEqual(h.chromeA.sends, [{ channel: 'vault-automation-held', payload: { held: true } }]);
+  assert.deepEqual(h.chromeB.sends, h.chromeA.sends);
+  assert.deepEqual(h.internal.sends, []);
+  assert.deepEqual(h.guest.sends, []);
+});
+
 test('all broadcasters drop destroyed chrome/internal contents', () => {
   const deadChrome = contents('dead-chrome', { destroyed: true });
   const deadInternal = contents('dead-internal', { destroyed: true, internal: true });

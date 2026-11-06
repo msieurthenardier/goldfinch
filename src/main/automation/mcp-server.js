@@ -403,10 +403,12 @@ async function freePortInRange(lo = 49152, hi = 65535) {
  * @param {number} [opts.port]  listen port override (takes precedence over
  *   GOLDFINCH_MCP_PORT / the default); used by tests to pick a free high port.
  *   An explicit `opts.port` forces STRICT bind-exactly-or-reject semantics.
+ * @param {() => void} [opts.onVaultHeldChange]  Sortie 07: fired when any session ctx's held state flips
+ *   (main recomputes + pushes the aggregate). Optional; a throw is swallowed.
  * @param {boolean} [opts.honorEnv]  when false (packaged build, DD6), the
  *   GOLDFINCH_MCP_PORT env is ignored everywhere (port resolution + strict
  *   detection). main.js passes `!app.isPackaged`. Defaults to true.
- * @returns {{ start: () => Promise<void>, stop: () => Promise<void>, port: number, getActivity: () => { sessions: any[], log: any[] } }}
+ * @returns {{ start: () => Promise<void>, stop: () => Promise<void>, port: number, getActivity: () => { sessions: any[], log: any[] }, zeroizeAllVaultSessions: () => void, isVaultHeld: () => boolean }}
  *   NOTE: `port` is a live getter returning the actually-bound port (updated by
  *   start() including a fallback retry). Callers MUST read `mcpServer.port` live
  *   each time — do NOT destructure it (that snapshots the pre-start value).
@@ -495,6 +497,8 @@ function createMcpServer(opts = {}) {
       : () => {
           throw new Error('automation: vault-fill-not-wired — the main→preload fill delegate lands in Leg 4');
         };
+  // Sortie 07: aggregate-held change hook (main.js recomputes + pushes). Never throws into a ctx.
+  const onVaultHeldChange = typeof opts.onVaultHeldChange === 'function' ? opts.onVaultHeldChange : () => {};
   const getVaultAutoLockMinutes = typeof opts.getAutoLockMinutes === 'function' ? opts.getAutoLockMinutes : () => 10;
 
   // ONE audit log per server (shared across all per-session Servers). Its onChange
@@ -900,7 +904,14 @@ function createMcpServer(opts = {}) {
       // vault-context degrades cleanly).
       answerAuthDelegate,
       getPendingChallenge,
-      getAutoLockMinutes: getVaultAutoLockMinutes
+      getAutoLockMinutes: getVaultAutoLockMinutes,
+      onHeldChange: () => {
+        try {
+          onVaultHeldChange();
+        } catch {
+          /* a notify failure must never fail an unlock or a zeroize */
+        }
+      }
     });
 
     // Create a NEW session: fresh transport + Server scoped to this identity,
@@ -1119,6 +1130,9 @@ function createMcpServer(opts = {}) {
     // Close all live sessions. Each transport.close() fires its onclose, which
     // deletes the entry; snapshot first so iteration is not disturbed by that.
     const entries = [...sessions.values()];
+    // Sortie 07: zeroize BEFORE clearing/closing so a transport.close() throw (swallowed
+    // below) can never orphan a ctx's keys with no held flip.
+    zeroizeVaultContexts(entries.map((e) => e.vaultCtx));
     sessions.clear();
     for (const { transport } of entries) {
       try {
@@ -1139,6 +1153,22 @@ function createMcpServer(opts = {}) {
     return auditLog.snapshot();
   }
 
+  /**
+   * The operator's vault lock reached us (main's onLock teardown): zeroize every live
+   * session's vault keys. Sessions, transports, identities and the audit log are untouched.
+   */
+  function zeroizeAllVaultSessions() {
+    zeroizeVaultContexts([...sessions.values()].map((e) => e.vaultCtx));
+  }
+
+  /** True iff some session's ctx holds >= 1 vault key (from ctx key state, never membership). */
+  function isVaultHeld() {
+    for (const { vaultCtx } of sessions.values()) {
+      if (vaultCtx.heldIds().length > 0) return true;
+    }
+    return false;
+  }
+
   // `port` is a live getter (not a fixed value): start() may bind a different free
   // port in fallback mode, and consumers (main.js's post-start capture,
   // currentAutomationStatus) must read the bound port. Callers MUST NOT destructure
@@ -1149,7 +1179,9 @@ function createMcpServer(opts = {}) {
     get port() {
       return boundPort;
     },
-    getActivity
+    getActivity,
+    zeroizeAllVaultSessions,
+    isVaultHeld
   };
 }
 
@@ -1258,8 +1290,24 @@ function revokeAdminKey(settings) {
   settings.set('automationAdminKeyHash', '');
 }
 
+/**
+ * Zeroize every given vault ctx. Planner/actuator shape: each ctx in its OWN try/catch with
+ * NO early return, so one throwing session never stops the others (Sortie 07).
+ * @param {Iterable<{ zeroize: () => void }>} ctxs
+ */
+function zeroizeVaultContexts(ctxs) {
+  for (const ctx of ctxs) {
+    try {
+      ctx.zeroize();
+    } catch {
+      /* isolated: the remaining sessions must still be zeroized */
+    }
+  }
+}
+
 module.exports = {
   createMcpServer,
+  zeroizeVaultContexts,
   resolvePort,
   freePortInRange,
   DEFAULT_PORT,

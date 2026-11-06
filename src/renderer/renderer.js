@@ -825,7 +825,7 @@ const openPageContextOverlaySheet = (anchor) => {
     pageContextModel(pageCtx.params, pageCtx.toolbarItem, {
       isBookmarked,
       canBookmark,
-      vaultLocked: vaultController.isVaultLocked()
+      ...vaultController.vaultMenuOpts()
     }),
     anchor,
     0

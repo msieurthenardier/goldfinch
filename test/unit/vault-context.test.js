@@ -365,13 +365,13 @@ test('a wrong/foreign access key unlocks NOTHING — a normal { unlocked: [] } r
     const store = makeStore(fx.dir);
     const ctx = createVaultContext({ vaultStore: store, fillDelegate: makeFill().fn });
     // wrong jar secret
-    assert.deepEqual(ctx.unlock('work', 'not-the-secret'), { unlocked: [] });
+    assert.deepEqual(ctx.unlock('work', 'not-the-secret'), { unlocked: [], held: [] });
     assert.deepEqual(ctx.list(), []);
     // the personal secret presented on a work session opens nothing (structural).
-    assert.deepEqual(ctx.unlock('work', fx.personalSecret), { unlocked: [] });
+    assert.deepEqual(ctx.unlock('work', fx.personalSecret), { unlocked: [], held: [] });
     assert.deepEqual(ctx.list(), []);
     // a bad admin private key opens nothing (no throw).
-    assert.deepEqual(ctx.unlock('admin', 'bm90LWEta2V5'), { unlocked: [] });
+    assert.deepEqual(ctx.unlock('admin', 'bm90LWEta2V5'), { unlocked: [], held: [] });
   } finally {
     rm(fx.dir);
   }
@@ -773,10 +773,10 @@ test('zeroize (transport.onclose) clears the session — a fresh vaultUnlock is 
 });
 
 // ---------------------------------------------------------------------------
-// No singleton coupling — both directions.
+// One-way coupling — automation never moves the human lock; the human lock reaches sessions via main's onLock teardown.
 // ---------------------------------------------------------------------------
 
-test('no singleton coupling: an MCP unlock NEVER changes the vault-store human lock state', async () => {
+test('one-way coupling: an MCP unlock NEVER changes the vault-store human lock state', async () => {
   const fx = await buildFixture();
   try {
     const store = makeStore(fx.dir);
@@ -796,7 +796,7 @@ test('no singleton coupling: an MCP unlock NEVER changes the vault-store human l
   }
 });
 
-test('no singleton coupling: vault-store.lockNow() NEVER empties a live MCP session (fresh-buffer copies)', async () => {
+test("ctx holds independent key copies: the store's own lockNow() does not reach a ctx directly (main's onLock teardown does — vault-lock-teardown.test.js)", async () => {
   const fx = await buildFixture();
   try {
     const store = makeStore(fx.dir);
@@ -1178,5 +1178,102 @@ test('AC21: answerAuth() refuses an identity item id as no-match — never dispa
     assert.equal(aw.answers.length, 0, 'the identity is never handed to answerAuthDelegate');
   } finally {
     rm(fx.dir);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Sortie 07: `held` on unlock, heldIds(), and the onHeldChange empty<->non-empty flip.
+// ---------------------------------------------------------------------------
+
+test('unlock reports held; a bad key after a good key keeps keys; zeroize then bad key -> held []', async () => {
+  const fx = await buildFixture();
+  try {
+    const store = makeStore(fx.dir);
+    const ctx = createVaultContext({ vaultStore: store, fillDelegate: makeFill().fn });
+    assert.deepEqual(ctx.unlock('work', fx.workSecret), { unlocked: ['work'], held: ['work'] });
+    assert.deepEqual(ctx.unlock('work', 'not-the-secret'), { unlocked: [], held: ['work'] });
+    assert.deepEqual(
+      ctx.list().map((r) => r.id),
+      ['w1'],
+      'existing keys are untouched by a failed unlock'
+    );
+    ctx.zeroize();
+    assert.deepEqual(ctx.unlock('work', 'not-the-secret'), { unlocked: [], held: [] });
+  } finally {
+    rm(fx.dir);
+  }
+});
+
+test('heldIds() returns a fresh array copy', async () => {
+  const fx = await buildFixture();
+  try {
+    const ctx = createVaultContext({ vaultStore: makeStore(fx.dir), fillDelegate: makeFill().fn });
+    ctx.unlock('work', fx.workSecret);
+    const a = ctx.heldIds();
+    a.push('mutated');
+    assert.deepEqual(ctx.heldIds(), ['work']);
+    assert.notEqual(ctx.heldIds(), ctx.heldIds());
+  } finally {
+    rm(fx.dir);
+  }
+});
+
+test('onHeldChange fires only on the ctx empty<->non-empty flip (admin multi-vault = one true)', async () => {
+  const fx = await buildFixture();
+  try {
+    const events = [];
+    const ctx = createVaultContext({
+      vaultStore: makeStore(fx.dir),
+      fillDelegate: makeFill().fn,
+      onHeldChange: (h) => events.push(h)
+    });
+    ctx.unlock('work', 'bad');
+    assert.deepEqual(events, [], 'a failed unlock does not fire');
+    ctx.zeroize();
+    assert.deepEqual(events, [], 'zeroize on an empty ctx does not fire');
+    ctx.unlock('admin', fx.adminPrivateKeyB64);
+    assert.ok(ctx.heldIds().length >= 3);
+    assert.deepEqual(events, [true], 'an admin unlock opening N vaults flips exactly once');
+    ctx.unlock('admin', fx.adminPrivateKeyB64);
+    assert.deepEqual(events, [true], 're-unlocking held vaults does not fire');
+    ctx.zeroize();
+    assert.deepEqual(events, [true, false]);
+  } finally {
+    rm(fx.dir);
+  }
+});
+
+test('onHeldChange fires false when revalidate drops the last key; a throwing callback is swallowed', async () => {
+  const dir = tmpDir();
+  const setup = makeStore(dir);
+  await setup.setup({ masterPassword: MASTER });
+  setup.saveItem('work', {
+    id: 'w1',
+    type: 'login',
+    title: 'W',
+    origin: 'https://work.example',
+    username: 'u',
+    password: 'p'
+  });
+  const { secret, keyId } = await setup.mintAccessKey('work', { masterPassword: MASTER });
+  try {
+    const events = [];
+    let boom = false;
+    const ctx = createVaultContext({
+      vaultStore: makeStore(dir),
+      fillDelegate: makeFill().fn,
+      onHeldChange: (h) => {
+        events.push(h);
+        if (boom) throw new Error('cb');
+      }
+    });
+    boom = true;
+    assert.deepEqual(ctx.unlock('work', secret), { unlocked: ['work'], held: ['work'] }, 'throwing cb never throws');
+    setup.revokeAccessKey('work', keyId);
+    assert.deepEqual(ctx.list(), []);
+    assert.deepEqual(events, [true, false]);
+    assert.doesNotThrow(() => ctx.zeroize());
+  } finally {
+    rm(dir);
   }
 });

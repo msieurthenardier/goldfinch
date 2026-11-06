@@ -24,6 +24,7 @@ const {
   revokeJarKey,
   revokeAdminKey,
   deriveAuditDetail,
+  zeroizeVaultContexts,
   redactUrlForAudit
 } = require('../../src/main/automation/mcp-server');
 const { hashKey, validateKey } = require('../../src/main/automation/automation-auth');
@@ -1530,7 +1531,7 @@ async function buildVaultFixture() {
   return { dir, workSecret: work.secret };
 }
 
-async function startVaultServer(sink, fixture, fillCalls) {
+async function startVaultServer(sink, fixture, fillCalls, extraOpts = {}) {
   const vsessions = new Map();
   const vsessionFor = (p) => {
     if (!vsessions.has(p)) vsessions.set(p, { __partition: p, __goldfinchInternal: false });
@@ -1564,7 +1565,8 @@ async function startVaultServer(sink, fixture, fillCalls) {
     fillDelegate: (a) => fillCalls.push(a),
     getAutoLockMinutes: () => 10,
     broadcast: (payload) => sink.push(payload),
-    port: TEST_PORT
+    port: TEST_PORT,
+    ...extraOpts
   });
   await server.start();
   return server;
@@ -1659,5 +1661,132 @@ test('audit — enumerateTabs tool call records detail:null (no context needed)'
     }
   } finally {
     await server.stop();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Sortie 07: the operator's vault lock zeroizes every live session's vault keys.
+// ---------------------------------------------------------------------------
+
+test('zeroizeVaultContexts — every ctx is zeroized even when one throws (no early return)', () => {
+  const calls = [];
+  zeroizeVaultContexts([
+    { zeroize: () => calls.push('a') },
+    {
+      zeroize: () => {
+        throw new Error('boom');
+      }
+    },
+    { zeroize: () => calls.push('c') }
+  ]);
+  assert.deepEqual(calls, ['a', 'c']);
+});
+
+test('zeroizeAllVaultSessions — empties every session, keeps them routable, flips isVaultHeld, fires onVaultHeldChange', async () => {
+  const fixture = await buildVaultFixture();
+  const fires = [];
+  const server = await startVaultServer([], fixture, [], { onVaultHeldChange: () => fires.push(server.isVaultHeld()) });
+  try {
+    const c1 = await connectClient(WORK_KEY);
+    const c2 = await connectClient(WORK_KEY);
+    try {
+      for (const c of [c1, c2]) {
+        const r = toolJson(await c.callTool({ name: 'vaultUnlock', arguments: { accessKey: fixture.workSecret } }));
+        assert.deepEqual(r, { unlocked: ['work'], held: ['work'] });
+      }
+      assert.equal(server.isVaultHeld(), true);
+      assert.equal(fires.length, 2, 'one flip per session ctx');
+      fires.length = 0;
+      server.zeroizeAllVaultSessions();
+      assert.equal(server.isVaultHeld(), false);
+      assert.ok(fires.length >= 1, 'onVaultHeldChange fired on the lock');
+      for (const c of [c1, c2]) {
+        assert.deepEqual(toolJson(await c.callTool({ name: 'vaultList', arguments: {} })), []);
+        const bad = toolJson(await c.callTool({ name: 'vaultUnlock', arguments: { accessKey: 'wrong' } }));
+        assert.deepEqual(bad, { unlocked: [], held: [] });
+      }
+      // still routable + a fresh unlock works again
+      const again = toolJson(await c1.callTool({ name: 'vaultUnlock', arguments: { accessKey: fixture.workSecret } }));
+      assert.deepEqual(again.held, ['work']);
+      assert.equal(server.isVaultHeld(), true);
+    } finally {
+      await c1.close();
+      await c2.close();
+    }
+  } finally {
+    await server.stop();
+    fs.rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test('stop() zeroizes held sessions before closing transports (isVaultHeld false after stop)', async () => {
+  const fixture = await buildVaultFixture();
+  const server = await startVaultServer([], fixture, []);
+  try {
+    const c = await connectClient(WORK_KEY);
+    try {
+      await c.callTool({ name: 'vaultUnlock', arguments: { accessKey: fixture.workSecret } });
+      assert.equal(server.isVaultHeld(), true);
+      await server.stop();
+      assert.equal(server.isVaultHeld(), false);
+    } finally {
+      await c.close().catch(() => {});
+    }
+  } finally {
+    await server.stop();
+    fs.rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test('real-trigger: the store own lockNow() (while locked) and idle timer zeroize a live session via the teardown wiring', async () => {
+  const { runVaultLockTeardown } = require('../../src/main/vault-lock-teardown');
+  const fixture = await buildVaultFixture();
+  let server = null;
+  const idle = [];
+  const store = vaultStoreApi.load(fixture.dir, {
+    scryptParams: VAULT_FAST_SCRYPT,
+    getAutoLockMinutes: () => 10,
+    listJars: () => VAULT_JARS,
+    setTimeout: (fn) => {
+      idle.push(fn);
+      return idle.length;
+    },
+    clearTimeout: () => {},
+    onLock: () =>
+      runVaultLockTeardown({
+        records: () => [],
+        vaultHuman: null,
+        closeSheets() {},
+        broadcast() {},
+        zeroizeAutomationVaults: () => server.zeroizeAllVaultSessions()
+      })
+  });
+  server = await startVaultServer([], fixture, [], { vaultStore: store });
+  try {
+    const c = await connectClient(WORK_KEY);
+    try {
+      const unlock = async () =>
+        toolJson(await c.callTool({ name: 'vaultUnlock', arguments: { accessKey: fixture.workSecret } }));
+      assert.deepEqual((await unlock()).held, ['work']);
+      assert.equal(store.isUnlocked(), false, 'the operator store is LOCKED');
+      store.lockNow(); // (a) Lock now while already locked
+      assert.deepEqual(toolJson(await c.callTool({ name: 'vaultList', arguments: {} })), []);
+      assert.equal(server.isVaultHeld(), false);
+      // (c) re-unlock works
+      assert.deepEqual((await unlock()).held, ['work']);
+      // (b) operator unlocked by master password, then the store's idle timer fires
+      await store.unlock(VAULT_MASTER);
+      assert.equal(store.isUnlocked(), true);
+      assert.equal(idle.length > 0, true, 'the idle timer is armed');
+      idle[idle.length - 1]();
+      assert.equal(store.isUnlocked(), false, 'the idle timer locked the store');
+      assert.deepEqual(toolJson(await c.callTool({ name: 'vaultList', arguments: {} })), []);
+      assert.deepEqual((await unlock()).held, ['work']);
+    } finally {
+      await c.close();
+    }
+  } finally {
+    await server.stop();
+    fs.rmSync(fixture.dir, { recursive: true, force: true });
   }
 });

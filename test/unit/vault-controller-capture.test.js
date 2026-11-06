@@ -42,6 +42,8 @@ function harness({
   // offers to finalize into two DIFFERENT models. Falls back to `finalizeResult` when omitted.
   finalizeFor = null,
   vaultIndicatorEl = null,
+  // Sortie 07: a controllable getVaultAutomationHeld() result (a promise); default resolves {held:false}.
+  heldFetch = null,
   vaultLockRejects = false,
   dismissThrows = false,
   containers = [],
@@ -63,6 +65,7 @@ function harness({
   const goldfinch = new Proxy(
     {
       getVaultLockState: () => Promise.resolve({ setUp: true, unlocked }),
+      getVaultAutomationHeld: () => heldFetch || Promise.resolve({ held: false }),
       vaultCaptureDismiss: (id) => {
         if (dismissThrows) throw new Error('dismiss exploded');
         dismissed.push(id);
@@ -836,4 +839,90 @@ test('indicatorAction() ignores any action other than lock/unlock (validated no-
   h.controller.indicatorAction(undefined);
   assert.equal(h.opens.length, 0);
   assert.deepEqual(h.vaultLockCalls, []);
+});
+
+// ---------------------------------------------------------------------------
+// Sortie 07: the held cue (own channel `vault-automation-held`).
+// ---------------------------------------------------------------------------
+
+function recordingIndicatorEl() {
+  const classes = new Set();
+  const el = fakeVaultIndicatorEl({ right: 100, width: 28 });
+  el.classes = classes;
+  el.attrs = {};
+  el.classList = {
+    toggle(name, on) {
+      if (on) classes.add(name);
+      else classes.delete(name);
+    }
+  };
+  el.setAttribute = (k, v) => {
+    el.attrs[k] = v;
+  };
+  return el;
+}
+
+test('held push while locked toggles the vault-automation-held class and the aria-label; clearing restores them', async () => {
+  const indicator = recordingIndicatorEl();
+  const h = harness({ unlocked: false, vaultIndicatorEl: indicator });
+  await settle();
+  h.on.onVaultLockState({ setUp: true, unlocked: false });
+  h.on.onVaultAutomationHeld({ held: true });
+  assert.equal(indicator.classes.has('vault-automation-held'), true);
+  assert.equal(indicator.attrs['aria-label'], 'Vault locked — automation has vault access');
+  h.on.onVaultAutomationHeld({ held: false });
+  assert.equal(indicator.classes.has('vault-automation-held'), false);
+  assert.equal(indicator.attrs['aria-label'], 'Vault locked');
+  // unlocked + held: no badge
+  h.on.onVaultAutomationHeld({ held: true });
+  h.on.onVaultLockState({ setUp: true, unlocked: true });
+  assert.equal(indicator.classes.has('vault-automation-held'), false);
+  assert.equal(indicator.attrs['aria-label'], 'Vault unlocked');
+});
+
+test('a held push does NOT spring a pending unlock->picker continuation', async () => {
+  const h = harness({ unlocked: false });
+  await settle();
+  h.on.onVaultLockState({ setUp: true, unlocked: false });
+  h.on.onVaultGesture({ wcId: 5 }); // locked gesture -> pendingVaultFlow 'unlocking' + unlock sheet
+  assert.equal(h.opens.length, 1);
+  assert.equal(h.opens[0].menuType, 'vault-unlock');
+  h.on.onVaultAutomationHeld({ held: true });
+  h.on.onVaultAutomationHeld({ held: false });
+  await settle();
+  assert.equal(h.opens.length, 1, 'no picker (or anything else) opened by held pushes');
+});
+
+test('a late getVaultAutomationHeld fetch after a push does not overwrite it; with no push it applies', async () => {
+  let resolveFetch;
+  const heldFetch = new Promise((r) => {
+    resolveFetch = r;
+  });
+  const indicator = recordingIndicatorEl();
+  const h = harness({ unlocked: false, vaultIndicatorEl: indicator, heldFetch });
+  await settle();
+  h.on.onVaultLockState({ setUp: true, unlocked: false });
+  h.on.onVaultAutomationHeld({ held: true });
+  resolveFetch({ held: false }); // stale answer arrives AFTER the push
+  await settle();
+  assert.equal(indicator.classes.has('vault-automation-held'), true);
+  assert.equal(h.controller.vaultMenuOpts().automationHeld, true);
+
+  // no push: the fetch applies
+  const ind2 = recordingIndicatorEl();
+  const h2 = harness({ unlocked: false, vaultIndicatorEl: ind2, heldFetch: Promise.resolve({ held: true }) });
+  await settle();
+  h2.on.onVaultLockState({ setUp: true, unlocked: false });
+  assert.equal(h2.controller.vaultMenuOpts().automationHeld, true);
+});
+
+test('vaultMenuOpts() reflects both stashes', async () => {
+  const h = harness({ unlocked: false });
+  await settle();
+  assert.deepEqual(h.controller.vaultMenuOpts(), { vaultLocked: true, automationHeld: false });
+  h.on.onVaultLockState({ setUp: true, unlocked: true });
+  h.on.onVaultAutomationHeld({ held: true });
+  assert.deepEqual(h.controller.vaultMenuOpts(), { vaultLocked: false, automationHeld: true });
+  h.on.onVaultLockState({ setUp: true, unlocked: false });
+  assert.deepEqual(h.controller.vaultMenuOpts(), { vaultLocked: true, automationHeld: true });
 });

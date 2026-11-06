@@ -22,11 +22,14 @@
 //     only in memory, `.fill(0)`-zeroized on transport teardown (mcp-server's
 //     `transport.onclose`) AND on an idle-timer backstop (DD5). Two concurrent
 //     sessions hold INDEPENDENT Buffers — one teardown never zeroizes the other.
-//   - NO singleton coupling either direction: this path uses only the store's
-//     STATELESS methods (`unlockVaultWithAccessKey`, `openAllWithAdminKey`,
-//     `readVaultItems`) — it never installs an MRK or mutates the store's human
-//     `mrk`/`vaultKeys`, and `vault-store.lockNow()` never empties a live session
-//     (each session holds its own fresh-buffer copies).
+//   - ONE-WAY coupling (Sortie 07): automation -> store stays decoupled — this path
+//     uses only the store's STATELESS methods (`unlockVaultWithAccessKey`,
+//     `openAllWithAdminKey`, `readVaultItems`), never installs an MRK, never mutates
+//     the store's human `mrk`/`vaultKeys`, and never resets the operator's idle timer.
+//     Store lock -> automation now zeroizes: the operator's lock reaches this ctx via
+//     main's store `onLock` teardown (`mcpServer.zeroizeAllVaultSessions()`), NOT via
+//     any reference held here — the ctx holds no store reference to the human lock and
+//     keeps independent fresh-buffer key copies.
 //
 // FILL IS FILL-ONLY: `fill` resolves an origin-matched login from an unlocked
 // reachable vault, enforces jar membership (via resolveContentsForJar) + origin
@@ -73,6 +76,8 @@ function originOf(url) {
  *   NON-SECRET read of the tab's presented-or-head pending auth challenge (M14
  *   F1 L2) — the origin-match input for answerAuth.
  * @property {() => number} [getAutoLockMinutes]  idle auto-lock minutes reader.
+ * @property {(held: boolean) => void} [onHeldChange]  fired AFTER a mutation, only on this
+ *   ctx's own empty<->non-empty flip of its key map. A throw is swallowed.
  * @property {() => number} [now]  clock (default Date.now) — TOTP + idle stamps.
  * @property {(fn: () => void, ms: number) => any} [setTimeout]  idle-timer arm.
  * @property {(handle: any) => void} [clearTimeout]  idle-timer clear.
@@ -112,7 +117,8 @@ function originOf(url) {
  *
  * @param {VaultContextDeps} deps
  * @returns {{
- *   unlock: (identity: string, accessKey: string) => { unlocked: string[] },
+ *   unlock: (identity: string, accessKey: string) => { unlocked: string[], held: string[] },
+ *   heldIds: () => string[],
  *   list: () => Array<{ vaultId: string, id: string, title: string|null, origin: string|null, username: string|null, hasTotp: boolean }>,
  *   totp: (itemId: string, vaultId?: string) => { id: string, code: string|null },
  *   fill: (identity: string, target: { wcId: number, itemId: string, vaultId?: string }, engineDeps?: FillEngineDeps) => { filled: boolean, id?: string, reason?: string },
@@ -140,6 +146,7 @@ function createVaultContext(deps = /** @type {any} */ ({})) {
         };
   const getPendingChallenge = typeof deps.getPendingChallenge === 'function' ? deps.getPendingChallenge : () => null;
   const getAutoLockMinutes = typeof deps.getAutoLockMinutes === 'function' ? deps.getAutoLockMinutes : () => 10;
+  const onHeldChange = typeof deps.onHeldChange === 'function' ? deps.onHeldChange : null;
   const now = typeof deps.now === 'function' ? deps.now : Date.now;
   const setT = typeof deps.setTimeout === 'function' ? deps.setTimeout : setTimeout;
   const clearT = typeof deps.clearTimeout === 'function' ? deps.clearTimeout : clearTimeout;
@@ -167,10 +174,30 @@ function createVaultContext(deps = /** @type {any} */ ({})) {
   }
 
   /**
+   * Fire onHeldChange iff the key map's emptiness flipped relative to `wasHeld`. Never throws.
+   * @param {boolean} wasHeld
+   */
+  function notifyIfFlipped(wasHeld) {
+    const isHeld = keys.size > 0;
+    if (isHeld === wasHeld || !onHeldChange) return;
+    try {
+      onHeldChange(isHeld);
+    } catch {
+      /* a notify failure must never fail an unlock / zeroize / revalidate */
+    }
+  }
+
+  /** @returns {string[]} a fresh copy of the held vault ids (insertion order). */
+  function heldIds() {
+    return [...keys.keys()];
+  }
+
+  /**
    * Zeroize every session key Buffer and clear the maps + idle timer. Idempotent
    * — safe to call on transport teardown, on an idle fire, and again after.
    */
   function zeroize() {
+    const wasHeld = keys.size > 0;
     clearTimer();
     for (const buf of keys.values()) {
       try {
@@ -182,6 +209,7 @@ function createVaultContext(deps = /** @type {any} */ ({})) {
     keys.clear();
     unlockedIds.clear();
     grants.clear();
+    notifyIfFlipped(wasHeld);
   }
 
   /**
@@ -215,6 +243,7 @@ function createVaultContext(deps = /** @type {any} */ ({})) {
    * NEXT operation, never lingering until teardown/idle.
    */
   function revalidate() {
+    const wasHeld = keys.size > 0;
     for (const vaultId of [...unlockedIds]) {
       const grant = grants.get(vaultId);
       let stillValid;
@@ -236,6 +265,7 @@ function createVaultContext(deps = /** @type {any} */ ({})) {
       }
       if (!stillValid) dropVault(vaultId);
     }
+    notifyIfFlipped(wasHeld);
   }
 
   /**
@@ -267,6 +297,7 @@ function createVaultContext(deps = /** @type {any} */ ({})) {
    *        keyless fallback path, which records no grant.
    */
   function setKey(vaultId, key, grant) {
+    const wasHeld = keys.size > 0;
     const prev = keys.get(vaultId);
     if (prev && prev !== key) {
       try {
@@ -278,6 +309,7 @@ function createVaultContext(deps = /** @type {any} */ ({})) {
     keys.set(vaultId, key);
     unlockedIds.add(vaultId);
     if (grant) grants.set(vaultId, grant); // finding 2: remember what authorized this key.
+    notifyIfFlipped(wasHeld);
   }
 
   /**
@@ -286,10 +318,11 @@ function createVaultContext(deps = /** @type {any} */ ({})) {
    *     vault only; a per-jar access key holds no envelope for global/siblings).
    *   - admin identity → `openAllWithAdminKey(accessKey)` (the X25519 admin private
    *     key opens the MRK → every vault key), merged into `keys`.
-   * A wrong/foreign key opens nothing → normal `{ unlocked: [] }` (DD6), NOT a throw.
+   * A wrong/foreign key opens nothing → normal `{ unlocked: [], held }` (DD6), NOT a throw;
+   * existing keys are untouched and `held` reports every vault id the session still holds.
    * @param {string} identity  jarId | 'admin'
    * @param {string} accessKey
-   * @returns {{ unlocked: string[] }}
+   * @returns {{ unlocked: string[], held: string[] }}
    */
   function unlock(identity, accessKey) {
     /** @type {string[]} */
@@ -321,7 +354,7 @@ function createVaultContext(deps = /** @type {any} */ ({})) {
       // (DD6), never a throw. The accessKey is never surfaced anywhere.
     }
     touch();
-    return { unlocked: opened };
+    return { unlocked: opened, held: heldIds() };
   }
 
   /**
@@ -572,7 +605,7 @@ function createVaultContext(deps = /** @type {any} */ ({})) {
     return { answered: true, id: itemId, origin: challengeOrigin };
   }
 
-  return { unlock, list, totp, fill, answerAuth, touch, zeroize };
+  return { unlock, heldIds, list, totp, fill, answerAuth, touch, zeroize };
 }
 
 module.exports = { createVaultContext };

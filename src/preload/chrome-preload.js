@@ -436,6 +436,10 @@ contextBridge.exposeInMainWorld('goldfinch', {
   // vault-store's MRK-present state.
   onVaultLockState: (cb) => ipcRenderer.on('vault-lock-state', (_e, d) => cb(d)),
   getVaultLockState: () => ipcRenderer.invoke('vault-lock-state-get'),
+  // Sortie 07: one non-secret boolean - some MCP session holds vault keys. Own channel (never
+  // vault-lock-state, whose handler runs the unlock continuations).
+  onVaultAutomationHeld: (cb) => ipcRenderer.on('vault-automation-held', (_e, d) => cb(d)),
+  getVaultAutomationHeld: () => ipcRenderer.invoke('vault-automation-held-get'),
   // Explicit global LOCK (M12 F5 HAT batch 1, I8): the chrome-trust trigger for the fill-icon
   // native menu's "Lock now". Global + idempotent; carries no secret. The onLock hook already
   // broadcasts vault-lock-state, so no re-broadcast follows.

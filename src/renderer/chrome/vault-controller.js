@@ -105,6 +105,11 @@ export function createVaultController({
   let vaultStatePushed = false;
   /** @type {{ setUp: boolean, unlocked: boolean }} the last-known lock state (stashed). */
   let lockState = { setUp: false, unlocked: false };
+  // Sortie 07: "an MCP session holds vault keys" (own channel `vault-automation-held`; never
+  // rides vault-lock-state, whose handler runs the unlock continuations). `heldPushed` guards
+  // the boot fetch so a late fetch never overwrites a fresher push.
+  let automationHeld = false;
+  let heldPushed = false;
 
   /** Open the badged vault picker for a tab: read the origin-filtered, metadata-only
    * reachable items (in main) and raise the vault-picker sheet. Enriches each row with
@@ -352,15 +357,20 @@ export function createVaultController({
       });
   }
 
-  /** @param {{ setUp: boolean, unlocked: boolean }} state */
-  function renderVaultIndicator(state) {
+  /** Render from BOTH stashes (lock state + automation-held). */
+  function renderVaultIndicator() {
     const el = els.vaultIndicator;
     if (!el) return;
-    const model = buildVaultIndicatorModel(state);
+    const model = buildVaultIndicatorModel({ ...lockState, automationHeld });
     el.classList.toggle('hidden', !model.visible);
     el.classList.toggle('vault-locked', model.visible && model.state === 'locked');
     el.classList.toggle('vault-unlocked', model.visible && model.state === 'unlocked');
-    const label = model.visible && model.state === 'unlocked' ? 'Vault unlocked' : 'Vault locked';
+    el.classList.toggle('vault-automation-held', model.automationHeld);
+    const label = model.automationHeld
+      ? 'Vault locked — automation has vault access'
+      : model.visible && model.state === 'unlocked'
+        ? 'Vault unlocked'
+        : 'Vault locked';
     el.setAttribute('aria-label', label);
   }
 
@@ -370,6 +380,11 @@ export function createVaultController({
    * manager is set up; the indicator itself is hidden then (unreachable in practice). */
   function isVaultLocked() {
     return !lockState.unlocked;
+  }
+
+  /** The toolbar vault context-menu opts (Sortie 07): both stashes, spread into pageContextModel. */
+  function vaultMenuOpts() {
+    return { vaultLocked: isVaultLocked(), automationHeld };
   }
 
   /** The vault indicator's context-menu "Lock now" action: the SAME explicit
@@ -586,7 +601,7 @@ export function createVaultController({
   goldfinch.onVaultLockState((/** @type {{ setUp: boolean, unlocked: boolean }} */ state) => {
     vaultStatePushed = true;
     lockState = state;
-    renderVaultIndicator(state);
+    renderVaultIndicator();
     // Continue a mid-unlock flow ONLY when we are the tab that raised the unlock
     // prompt (phase === 'unlocking') and the store is now unlocked — the phase guard
     // stops an unrelated later unlock (recovery/admin, or another tab) from springing
@@ -617,7 +632,22 @@ export function createVaultController({
     .getVaultLockState()
     .then((/** @type {{ setUp: boolean, unlocked: boolean }} */ state) => {
       lockState = state;
-      if (!vaultStatePushed) renderVaultIndicator(state);
+      if (!vaultStatePushed) renderVaultIndicator();
+    })
+    .catch(() => {});
+  // Sortie 07: subscribe FIRST, then fetch; the fetch applies ONLY if no push arrived (it
+  // neither stashes nor renders otherwise). Never runs the lock-state continuations.
+  goldfinch.onVaultAutomationHeld((/** @type {{ held: boolean }} */ d) => {
+    heldPushed = true;
+    automationHeld = !!(d && d.held);
+    renderVaultIndicator();
+  });
+  goldfinch
+    .getVaultAutomationHeld()
+    .then((/** @type {{ held: boolean }} */ d) => {
+      if (heldPushed) return;
+      automationHeld = !!(d && d.held);
+      renderVaultIndicator();
     })
     .catch(() => {});
 
@@ -964,6 +994,7 @@ export function createVaultController({
     handleActivation,
     handleClosed,
     isVaultLocked,
+    vaultMenuOpts,
     lockNow,
     unlockNow,
     indicatorAction,

@@ -6,8 +6,9 @@
 //   1. every window's corner save prompt closes `vault-lock` FIRST - the manager sets
 //      `settling` so the drop in step 2 cannot flash "This save request expired";
 //   2. `dropAllCaptures()` zeroizes and drops every held capture;
-//   3. the allowlisted credential sheets close;
-//   4. the lock state is broadcast.
+//   3. every live MCP session's vault keys are zeroized (Sortie 07; own try/catch);
+//   4. the allowlisted credential sheets close;
+//   5. the lock state is broadcast.
 // A throwing prompt close must never skip the capture drop (the security-relevant step), so
 // each is isolated.
 
@@ -15,11 +16,12 @@
  * @param {{
  *   records: () => Array<{ savePrompt?: any }>,
  *   vaultHuman?: { dropAllCaptures: () => any } | null,
+ *   zeroizeAutomationVaults?: () => void,
  *   closeSheets: () => void,
  *   broadcast: () => void
  * }} deps
  */
-function runVaultLockTeardown({ records, vaultHuman, closeSheets, broadcast }) {
+function runVaultLockTeardown({ records, vaultHuman, zeroizeAutomationVaults, closeSheets, broadcast }) {
   for (const rec of records()) {
     try {
       rec.savePrompt?.close('vault-lock');
@@ -28,6 +30,11 @@ function runVaultLockTeardown({ records, vaultHuman, closeSheets, broadcast }) {
     }
   }
   vaultHuman?.dropAllCaptures();
+  try {
+    zeroizeAutomationVaults?.();
+  } catch {
+    // isolated: the sheet close and lock-state broadcast below must still run.
+  }
   closeSheets();
   broadcast();
 }
