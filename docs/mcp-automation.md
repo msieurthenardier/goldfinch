@@ -855,7 +855,7 @@ identities and the audit list are untouched, and the agent keeps driving tabs. A
 *current* access, not the grant: an agent holding the access key can `vaultUnlock` again, so the
 durable cut-off is revoking or rotating the access key. While the operator's vault is locked and
 some session holds keys, the toolbar vault indicator shows an accent badge ("Vault locked —
-automation has vault access") and its right-click menu offers **Lock now** beside **Unlock now**.
+automation has vault access") and its right-click menu offers an "Automation has vault access" note, **Unlock now**, and **End automation access** (the same global lock); the button's tooltip carries the same wording.
 Sessions use JSON responses with no SSE stream, so teardown means a graceful `DELETE`.
 
 **Audit.** All five vault tools flow through the standard activity audit (below). The recorded

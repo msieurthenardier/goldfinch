@@ -372,6 +372,7 @@ export function createVaultController({
         ? 'Vault unlocked'
         : 'Vault locked';
     el.setAttribute('aria-label', label);
+    el.title = model.automationHeld ? label : 'Vault';
   }
 
   /** Whether the vault is currently locked (squawk 0038's "Lock now" context-menu item

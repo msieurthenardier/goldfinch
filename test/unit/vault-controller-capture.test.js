@@ -870,9 +870,11 @@ test('held push while locked toggles the vault-automation-held class and the ari
   h.on.onVaultAutomationHeld({ held: true });
   assert.equal(indicator.classes.has('vault-automation-held'), true);
   assert.equal(indicator.attrs['aria-label'], 'Vault locked — automation has vault access');
+  assert.equal(indicator.title, 'Vault locked — automation has vault access');
   h.on.onVaultAutomationHeld({ held: false });
   assert.equal(indicator.classes.has('vault-automation-held'), false);
   assert.equal(indicator.attrs['aria-label'], 'Vault locked');
+  assert.equal(indicator.title, 'Vault');
   // unlocked + held: no badge
   h.on.onVaultAutomationHeld({ held: true });
   h.on.onVaultLockState({ setUp: true, unlocked: true });

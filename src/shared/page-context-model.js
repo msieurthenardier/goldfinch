@@ -76,10 +76,13 @@ export function pageContextModel(params, toolbarItem, opts = {}) {
     // fill picker) — see vault-controller.js's unlockNow().
     if (toolbarItem === 'vault') {
       // Sortie 07: locked while an automation session holds vault keys also offers
-      // "Lock now" (ends the agents' current access; ids/dispatch unchanged).
+      // a note + "End automation access" (the same global lock: id/dispatch unchanged).
       if (opts.vaultLocked) {
+        if (opts.automationHeld) {
+          model.push({ type: 'note', text: 'Automation has vault access' }, { type: 'separator' });
+        }
         model.push({ type: 'item', id: 'action:vault-unlock', label: 'Unlock now' });
-        if (opts.automationHeld) model.push({ type: 'item', id: 'action:vault-lock', label: 'Lock now' });
+        if (opts.automationHeld) model.push({ type: 'item', id: 'action:vault-lock', label: 'End automation access' });
       } else {
         model.push({ type: 'item', id: 'action:vault-lock', label: 'Lock now' });
       }

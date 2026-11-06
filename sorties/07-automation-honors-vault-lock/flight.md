@@ -1,6 +1,6 @@
 # Sortie: Automation Honors the Vault Lock
 
-**Status**: in-flight
+**Status**: landed
 
 ## Charter
 
@@ -19,18 +19,18 @@ only on transport teardown or its own op-reset idle timer; the store's `onLock` 
 and `docs/mcp-automation.md:849-851` documents that decoupling as intended. This sortie reverses it.
 
 ### Success Criteria
-- [ ] With an MCP session holding a jar vault key, operator **Lock now** leaves that session
+- [x] With an MCP session holding a jar vault key, operator **Lock now** leaves that session
       locked: `vaultList` returns no items, `vaultTotp` returns `code: null`, `vaultFill` /
       `vaultAnswerAuth` refuse as locked; a fresh `vaultUnlock` with the valid key works again.
-- [ ] The same holds when the operator's **idle auto-lock** fires.
-- [ ] A `vaultUnlock` with a wrong key returns `unlocked: []` plus an explicit `held` list of the
+- [x] The same holds when the operator's **idle auto-lock** fires.
+- [x] A `vaultUnlock` with a wrong key returns `unlocked: []` plus an explicit `held` list of the
       vault ids the session still holds (empty after a lock); existing session keys are untouched.
-- [ ] While the operator's vault is locked and any automation session holds vault keys, the
+- [x] While the operator's vault is locked and any automation session holds vault keys, the
       toolbar vault indicator shows an accent badge + the label "Vault locked — automation has
       vault access", and its right-click menu offers **Unlock now** AND **Lock now**; Lock now
       ends the agents' current vault access and clears the badge (a durable cut-off is still
       revoking the access key).
-- [ ] `docs/mcp-automation.md`, `docs/vault.md` and `CLAUDE.md` describe the new coupling; no doc,
+- [x] `docs/mcp-automation.md`, `docs/vault.md` and `CLAUDE.md` describe the new coupling; no doc,
       test or comment still asserts that a human lock leaves automation sessions untouched.
 
 ### Constraints
@@ -169,7 +169,7 @@ not pin the opposite order.
 
 **DD6 — Right-click menu: locked+held offers both items.** `pageContextModel`'s toolbar-`vault`
 branch takes `opts.automationHeld`: unlocked → [Lock now]; locked → [Unlock now]; locked + held →
-[Unlock now, Lock now]. Ids stay `action:vault-unlock` / `action:vault-lock` (dispatch unchanged).
+[Unlock now, Lock now]. **HAT amendment (operator ruling, Leg 2 H5):** the locked+held menu became [note "Automation has vault access", separator, Unlock now, **End automation access**] and the indicator `title` shows "Vault locked — automation has vault access" while held — copy only, ids/dispatch unchanged. Ids stay `action:vault-unlock` / `action:vault-lock` (dispatch unchanged).
 `renderer.js:828` passes the opts via a REPLACED line (e.g. `...vaultController.vaultMenuOpts()`
 returning `{ vaultLocked, automationHeld }`) so the line count is unchanged — `renderer.js` is at
 1504/1505. CLAUDE.md's "Vault right-click when locked is 'Unlock now'" line is updated.
@@ -245,15 +245,15 @@ returning `{ vaultLocked, automationHeld }`) so the line count is unchanged — 
   (~946-955).
 
 ### Checkpoints
-- [ ] Unit: a wrong key after a good key keeps keys and reports `held`; lock → `held: []`.
-- [ ] Unit (required): `zeroizeAllVaultSessions` zeroizes EVERY session across ≥2 sessions, and
+- [x] Unit: a wrong key after a good key keeps keys and reports `held`; lock → `held: []`.
+- [x] Unit (required): `zeroizeAllVaultSessions` zeroizes EVERY session across ≥2 sessions, and
       one throwing ctx doesn't stop the others.
-- [ ] Unit: `onHeldChange` fires once per flip (admin multi-vault unlock = one flip; re-unlock of
+- [x] Unit: `onHeldChange` fires once per flip (admin multi-vault unlock = one flip; re-unlock of
       a held vault = none); the aggregate push dedups against the last pushed value and recomputes
       from ctx sizes.
-- [ ] Unit: teardown step order + throwing-zeroize isolation; source-scan wiring pin.
-- [ ] Behavior test `vault-mcp-lock-coupling` passes.
-- [ ] HAT signed off.
+- [x] Unit: teardown step order + throwing-zeroize isolation; source-scan wiring pin.
+- [x] Behavior test `vault-mcp-lock-coupling` passes.
+- [x] HAT signed off.
 
 ### Adaptation Criteria
 
@@ -274,7 +274,7 @@ returning `{ vaultLocked, automationHeld }`) so the line count is unchanged — 
 - [x] `automation-honors-vault-lock` - DD1–DD6 end to end: session ctx + server + teardown step,
       held projection channel, indicator badge + menu, tool description, docs, unit tests, and the
       `vault-mcp-lock-coupling` behavior test run.
-- [ ] `hat-and-alignment` - Guided HAT: operator unlocks by hand, agent unlocks, Lock now from the
+- [x] `hat-and-alignment` - Guided HAT: operator unlocks by hand, agent unlocks, Lock now from the
       indicator menu (both states), idle auto-lock at `vaultAutoLockMinutes: 1`, badge by eye,
       bad-key unlock reporting, the agent re-unlocking after a lock (badge returns), and
       Lock-now-while-locked with a pending locked-vault save offer (offer dropped, as accepted).
@@ -284,10 +284,10 @@ returning `{ vaultLocked, automationHeld }`) so the line count is unchanged — 
 ## Post-Flight
 
 ### Completion Checklist
-- [ ] All legs completed
+- [x] All legs completed
 - [ ] Code merged
-- [ ] Tests passing (`npm test`, `typecheck`, `lint`, `format:check`)
-- [ ] Documentation updated (`docs/mcp-automation.md`, `docs/vault.md`, `CLAUDE.md`)
+- [x] Tests passing (`npm test`, `typecheck`, `lint`, `format:check`)
+- [x] Documentation updated (`docs/mcp-automation.md`, `docs/vault.md`, `CLAUDE.md`)
 
 ### Verification
 `npm test` (new + updated vault-context / mcp-server / teardown / indicator / page-context suites),

@@ -143,3 +143,36 @@ Controller indicator test uses a new recording fake (the existing fake's `classL
   secrets on any surface), and that the AC9/AC15 pins are mutation-guarded. Leg 1 status →
   **completed**. A Developer is spawned to commit (crew protocol); the draft PR follows. The HAT leg
   (`hat-and-alignment`) is next: interactive, guided by the FD with the operator.
+- Leg 2 `hat-and-alignment` started (interactive). HAT env: throwaway fixture profile `/tmp/behavior-tests/goldfinch/sortie-07-hat/2026-11-06-05-48-51/`, fixture server on 127.0.0.1:8099, app in dev:automation, FD agent driver (sessions J = Jar A, A = admin).
+- HAT H1–H4 PASS (operator). H5 PASS on behavior (menu Lock now cleared the cue, J `vaultList` →
+  `[]`), with an operator UX finding: the locked+held state is not self-explanatory. The causes are
+  an unexplained dot (hover tooltip just "Vault"), "Lock now" on an already-locked icon reading as
+  a no-op, and no feedback.
+  - **FD fix-vs-feature call: FIX** (copy/tooltip only, no behavior change; single surface — the
+    toolbar vault indicator and its pure menu model; no design review needed).
+  - Operator rulings: (a) the menu in locked+held becomes [note "Automation has vault access",
+    separator, Unlock now, **End automation access**] with the id unchanged (`action:vault-lock`,
+    same global lock); (b) the tooltip (title) shows "Vault locked — automation has vault access"
+    while held; (c) NO confirmation toast (the cue clearing is the feedback).
+  - Implemented by a Developer (Sonnet): `page-context-model.js`, `vault-controller.js` (title),
+    tests, CLAUDE.md, `docs/mcp-automation.md`. Gates: 6333 / 6329 / 0 fail; typecheck, lint and
+    format clean. Sheet focus is verified by code: the note is non-`menuitem`, so arrows land only
+    on the two items.
+  - This amends flight DD6's "Lock now" label for the locked+held state. Pending: by-eye re-check
+    after an app relaunch.
+- HAT H5 (remaining part) PASS: Unlock now raised the unlock sheet; Escape kept the vault locked
+  and the cue on. A mid-step pause of ~37 min let J's own 10-min session idle timer zeroize it
+  (expected; the step was redone).
+- HAT H6 PASS (idle auto-lock): with `vaultAutoLockMinutes`=1 the operator unlocked at 15:51:31Z
+  and the vault had auto-locked by 15:52:52Z. J was empty (`[]` / `held: []`) and showed no cue. J's
+  own timer was armed at 15:49:34Z under the 10-min setting and would not have fired before
+  ~15:59, so the operator's idle lock is what cut J off.
+- HAT H7 PASS: locked + J held, the capture page submit raised the corner "Unlock & save" offer.
+  Lock now made the prompt close (`savePromptVisible: false`), saved nothing, cleared the dot and
+  locked J out. Accepted behavior; the operator found it reads acceptably.
+- HAT H8 PASS after an app relaunch with the copy fix. The tooltip reads "Vault locked —
+  automation has vault access", the menu is [note, separator, Unlock now, End automation access]
+  with arrows on the two items only, and End automation access cleared the dot and locked J out.
+  **Operator sign-off: "looks good".**
+- Leg 2 `hat-and-alignment` → **completed**. The flight is landed. HAT env torn down (app, driver,
+  fixture server stopped). The HAT copy fix is committed with the HAT artifacts.
