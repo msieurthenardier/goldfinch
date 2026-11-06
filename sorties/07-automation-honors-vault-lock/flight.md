@@ -1,6 +1,6 @@
 # Sortie: Automation Honors the Vault Lock
 
-**Status**: landed
+**Status**: completed
 
 ## Charter
 

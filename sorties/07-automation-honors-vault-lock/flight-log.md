@@ -176,3 +176,4 @@ Controller indicator test uses a new recording fake (the existing fake's `classL
   **Operator sign-off: "looks good".**
 - Leg 2 `hat-and-alignment` → **completed**. The flight is landed. HAT env torn down (app, driver,
   fixture server stopped). The HAT copy fix is committed with the HAT artifacts.
+- 2026-11-06: Flight debrief written (`flight-debrief.md`). Squawks 0173/0174/0175 logged from its action items. Status → **completed** (operator confirmed).
