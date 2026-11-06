@@ -26,6 +26,13 @@ function createBroadcasters({ registry, webContents, isInternalContents, closedT
     }
   }
 
+  function broadcastToChromes(channel, payload) {
+    // Chrome-only fan-out: no internal pages, no guests.
+    for (const record of registry.records()) {
+      liveChrome(record)?.send(channel, payload);
+    }
+  }
+
   function broadcastToChromeAndInternal(channel, payload) {
     // Chromes are sent separately from the global internal-session walk. This
     // prevents ordinary guests from receiving privileged app-state pushes and
@@ -43,6 +50,7 @@ function createBroadcasters({ registry, webContents, isInternalContents, closedT
   return {
     broadcastClosedTabStackChanged,
     broadcastMoveTargetsChanged,
+    broadcastToChromes,
     broadcastToChromeAndInternal
   };
 }

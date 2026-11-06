@@ -696,7 +696,9 @@ const VAULT_TOOLS = [
       "A JAR key's session interprets accessKey as that jar's per-jar vault access secret and unlocks ONLY that jar's vault " +
       '(a per-jar access key holds no envelope for the global vault or sibling jars — global logins via automation require the admin key). ' +
       'An ADMIN session interprets accessKey as the X25519 admin private key (base64) and unlocks EVERY vault. ' +
-      'Returns { unlocked: [vaultId, …] } — a wrong/foreign key unlocks nothing ({ unlocked: [] }), a NORMAL result, not an error. ' +
+      'Returns { unlocked: [vaultId, …], held: [vaultId, …] } — a wrong/foreign key unlocks nothing ({ unlocked: [] }), a NORMAL result, not an error. ' +
+      '`held` lists every vault this session holds after the call, so a wrong key reports what remains unlocked. ' +
+      "An operator vault lock (Lock now or idle auto-lock) zeroizes every session's vault keys; after one, held is empty and you must call vaultUnlock again. " +
       'The accessKey is never returned, logged, or echoed.',
     inputSchema: {
       type: 'object',

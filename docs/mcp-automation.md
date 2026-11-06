@@ -793,7 +793,7 @@ not the automation engine, and hold no cross-session state.
 
 | Tool | Input schema | Result shape |
 |------|--------------|--------------|
-| `vaultUnlock` | `{ accessKey: string }` *(required)* | JSON text: `{ unlocked: [vaultId, …] }` — the vaults this session opened. A **wrong/foreign key opens nothing** (`{ unlocked: [] }`, a **normal** result, not an error). |
+| `vaultUnlock` | `{ accessKey: string }` *(required)* | JSON text: `{ unlocked: [vaultId, …], held: [vaultId, …] }` — `unlocked` is the vaults THIS call opened; `held` is every vault this session holds after the call. A **wrong/foreign key opens nothing** and leaves existing keys untouched (`{ unlocked: [], held: ["work"] }` after an earlier good unlock; `held: []` after a lock) — a **normal** result, not an error. |
 | `vaultList` | *(none)* | JSON text: array of `{ vaultId, id, title, origin, username, hasTotp }` — **metadata only** for the login items in this session's unlocked vaults. **Never** a password, TOTP secret, card data, or identity-profile data (`vault-context.js` filters every resolution to `item.type === 'login'`, the same structural exclusion that already keeps card items out — see `docs/vault.md`'s "Identity items" section). Only unlocked vaults contribute. |
 | `vaultTotp` | `{ itemId: string }` *(required)* | JSON text: `{ id, code }` — the **current** TOTP code for a named unlocked item. `code` is `null` when the item is absent, not in an unlocked vault, or has no TOTP. The TOTP **secret** is never returned. |
 | `vaultFill` | `{ wcId: integer, itemId: string }` *(required)* | JSON text: `{ filled: true, id, origin }` on success, or a **normal** `{ filled: false, reason }` (`"locked"` / `"no-match"` / `"origin-mismatch"` / `"ambiguous"`) when nothing was filled. `origin` is the resolved top-frame origin the fill targeted — non-secret (the client already knows the tab's URL via `enumerateTabs`), never a credential. `"ambiguous"` means the bare `itemId` matched more than one unlocked vault's item; pass `vaultId` (from `vaultList`) to disambiguate. The credential is handed to Goldfinch's internal fill effect and **never returned**. |
@@ -846,10 +846,17 @@ or answerable by, this tool.
 `.fill(0)`-**zeroized on transport teardown** (a graceful `DELETE` or a dropped SSE stream) — a
 fresh session must `vaultUnlock` again. A **per-session idle timer** (duration from the
 `vaultAutoLockMinutes` setting, reset on each vault op) zeroizes the session as a belt-and-suspenders
-backstop for a client that drops without signalling. There is **no singleton coupling** with the
-operator's own vault lock in either direction: automation unlock/teardown never changes the human
-lock state, and a human "Lock now" never empties a live automation session (each holds its own
-fresh-buffer copies).
+backstop for a client that drops without signalling. The coupling with the operator's own vault
+lock is **one-way**: automation unlock/teardown never changes the human lock state or resets the
+operator's idle timer, but the operator's lock (Lock now from any surface, idle auto-lock, quit)
+**zeroizes every live session's vault keys** (main's store `onLock` teardown →
+`mcpServer.zeroizeAllVaultSessions()`) while the sessions themselves stay open — transports,
+identities and the audit list are untouched, and the agent keeps driving tabs. A lock ends
+*current* access, not the grant: an agent holding the access key can `vaultUnlock` again, so the
+durable cut-off is revoking or rotating the access key. While the operator's vault is locked and
+some session holds keys, the toolbar vault indicator shows an accent badge ("Vault locked —
+automation has vault access") and its right-click menu offers an "Automation has vault access" note, **Unlock now**, and **End automation access** (the same global lock); the button's tooltip carries the same wording.
+Sessions use JSON responses with no SSE stream, so teardown means a graceful `DELETE`.
 
 **Audit.** All five vault tools flow through the standard activity audit (below). The recorded
 `detail` carries the **item id** for `vaultFill` / `vaultTotp`, the **item id + resolved origin**

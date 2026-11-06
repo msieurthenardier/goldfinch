@@ -56,7 +56,7 @@ const UNPIN_LABELS = { media: 'Unpin Media', shields: 'Unpin Shields', devtools:
  * @param {any} params  the guest context-menu params captured at open (or null —
  *   keyboard/toolbar invocations carry no params; yields the Inspect-only menu)
  * @param {('media'|'shields'|'devtools'|'vault'|null)} [toolbarItem]  toolbar-unpin mode (media/shields/devtools) or the vault indicator's Lock-now mode (squawk 0038)
- * @param {{ isBookmarked?: boolean, canBookmark?: boolean, vaultLocked?: boolean }} [opts]  M15 F1 Leg 2 — extensible options bag (canBookmark added M15 F2 Leg 3; vaultLocked added squawk 0038)
+ * @param {{ isBookmarked?: boolean, canBookmark?: boolean, vaultLocked?: boolean, automationHeld?: boolean }} [opts]  M15 F1 Leg 2 — extensible options bag (canBookmark added M15 F2 Leg 3; vaultLocked added squawk 0038)
  * @returns {Array<{ type: 'item', id: string, label: string } | { type: 'separator' } | { type: 'note', text: string }>}
  */
 export function pageContextModel(params, toolbarItem, opts = {}) {
@@ -75,11 +75,17 @@ export function pageContextModel(params, toolbarItem, opts = {}) {
     // with no pendingVaultFlow set, so a successful unlock does not spring the
     // fill picker) — see vault-controller.js's unlockNow().
     if (toolbarItem === 'vault') {
-      model.push(
-        opts.vaultLocked
-          ? { type: 'item', id: 'action:vault-unlock', label: 'Unlock now' }
-          : { type: 'item', id: 'action:vault-lock', label: 'Lock now' }
-      );
+      // Sortie 07: locked while an automation session holds vault keys also offers
+      // a note + "End automation access" (the same global lock: id/dispatch unchanged).
+      if (opts.vaultLocked) {
+        if (opts.automationHeld) {
+          model.push({ type: 'note', text: 'Automation has vault access' }, { type: 'separator' });
+        }
+        model.push({ type: 'item', id: 'action:vault-unlock', label: 'Unlock now' });
+        if (opts.automationHeld) model.push({ type: 'item', id: 'action:vault-lock', label: 'End automation access' });
+      } else {
+        model.push({ type: 'item', id: 'action:vault-lock', label: 'Lock now' });
+      }
       return model;
     }
     const label = UNPIN_LABELS[toolbarItem];

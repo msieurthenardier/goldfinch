@@ -86,3 +86,48 @@ test('AC15 source pin: main.js onLock calls runVaultLockTeardown (regex-target, 
   // and the retired direct call is gone from onLock
   assert.equal(/onLock:\s*\(\)\s*=>\s*\{[\s\S]*?_vaultHuman\?\.dropAllCaptures\(\)[\s\S]*?onUnlock/.test(src), false);
 });
+
+test('AC8: zeroizeAutomationVaults runs between the capture drop and the sheets; throw is isolated; absent is a no-op', () => {
+  const order = [];
+  runVaultLockTeardown({
+    records: () => [{ savePrompt: { close: () => order.push('close') } }],
+    vaultHuman: { dropAllCaptures: () => order.push('dropAll') },
+    zeroizeAutomationVaults: () => order.push('zeroize'),
+    closeSheets: () => order.push('sheets'),
+    broadcast: () => order.push('broadcast')
+  });
+  assert.deepEqual(order, ['close', 'dropAll', 'zeroize', 'sheets', 'broadcast']);
+
+  const after = [];
+  assert.doesNotThrow(() =>
+    runVaultLockTeardown({
+      records: () => [],
+      vaultHuman: null,
+      zeroizeAutomationVaults: () => {
+        throw new Error('boom');
+      },
+      closeSheets: () => after.push('sheets'),
+      broadcast: () => after.push('broadcast')
+    })
+  );
+  assert.deepEqual(after, ['sheets', 'broadcast'], 'a throwing zeroize still runs sheets + broadcast');
+  assert.doesNotThrow(() =>
+    runVaultLockTeardown({ records: () => [], vaultHuman: null, closeSheets() {}, broadcast() {} })
+  );
+});
+
+test('AC9 source pin: main.js onLock passes zeroizeAutomationVaults bound to the LIVE mcpServer?.zeroizeAllVaultSessions()', () => {
+  const src = maskComments(fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'main', 'main.js'), 'utf8'));
+  const callRe = /onLock:\s*\(\)\s*=>\s*\{[\s\S]*?runVaultLockTeardown\(\{[\s\S]*?\}\);\s*\},\s*onUnlock/;
+  const m = callRe.exec(src);
+  assert.ok(m, 'the onLock -> runVaultLockTeardown call is locatable');
+  const prop = /zeroizeAutomationVaults:\s*\(\)\s*=>\s*mcpServer\?\.zeroizeAllVaultSessions\(\)/;
+  assert.ok(prop.test(m[0]), 'the call must bind zeroizeAutomationVaults to mcpServer?.zeroizeAllVaultSessions()');
+  // assertMutated: neuter the property inside the call; the pin must then fail.
+  const mutatedCall = m[0].replace(
+    /zeroizeAutomationVaults:\s*\(\)\s*=>\s*mcpServer\?\.zeroizeAllVaultSessions\(\),?/,
+    ''
+  );
+  assert.notEqual(mutatedCall, m[0], 'the mutation actually changed the source');
+  assert.equal(prop.test(mutatedCall), false, 'the pin fails on the neutered source');
+});

@@ -227,3 +227,19 @@ test('toolbar mode "vault": vaultLocked defaults to falsy when opts is omitted (
   const model = pageContextModel(null, /** @type {any} */ ('vault'));
   assert.deepEqual(model, [{ type: 'item', id: 'action:vault-lock', label: 'Lock now' }]);
 });
+
+test('toolbar mode "vault" (Sortie 07): locked + automationHeld offers note + [Unlock now, End automation access]; other combos unchanged', () => {
+  const unlock = { type: 'item', id: 'action:vault-unlock', label: 'Unlock now' };
+  const lock = { type: 'item', id: 'action:vault-lock', label: 'Lock now' };
+  const v = /** @type {any} */ ('vault');
+  assert.deepEqual(pageContextModel(null, v, { vaultLocked: true, automationHeld: true }), [
+    { type: 'note', text: 'Automation has vault access' },
+    { type: 'separator' },
+    unlock,
+    { type: 'item', id: 'action:vault-lock', label: 'End automation access' }
+  ]);
+  assert.deepEqual(pageContextModel(null, v, { vaultLocked: true, automationHeld: false }), [unlock]);
+  assert.deepEqual(pageContextModel(null, v, { vaultLocked: false, automationHeld: true }), [lock]);
+  assert.deepEqual(pageContextModel(null, v, { vaultLocked: false, automationHeld: false }), [lock]);
+  assert.deepEqual(pageContextModel(null, v), [lock]);
+});

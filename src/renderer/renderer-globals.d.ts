@@ -578,6 +578,9 @@ interface GoldfinchBridge {
   // Vault lock-state (M12 F2 Leg 2 chrome-unlock, DD10): subscribe + init-time fetch.
   onVaultLockState(cb: (d: { setUp: boolean; unlocked: boolean }) => void): void;
   getVaultLockState(): Promise<{ setUp: boolean; unlocked: boolean }>;
+  // Sortie 07: an MCP session holds vault keys (one boolean, own channel).
+  onVaultAutomationHeld(cb: (d: { held: boolean }) => void): void;
+  getVaultAutomationHeld(): Promise<{ held: boolean }>;
   // Explicit global LOCK (M12 F5 HAT batch 1, I8): chrome-trust trigger for the fill-icon
   // native menu's "Lock now". Global + idempotent, no secret; onLock broadcasts, no re-broadcast.
   vaultLock(): Promise<{ ok: boolean }>;

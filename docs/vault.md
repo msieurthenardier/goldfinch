@@ -297,8 +297,10 @@ consumer reference: `docs/mcp-automation.md` (*Vault tools*).
   the wire.
 - **Session-scoped teardown.** A session's vault keys are Buffers, `.fill(0)`-zeroized on
   transport teardown (a graceful `DELETE` or a dropped SSE stream), with a per-session idle
-  timer as a belt-and-suspenders backstop. There is no singleton coupling with the human lock
-  in either direction — each holds its own fresh-buffer copies.
+  timer as a belt-and-suspenders backstop. The coupling with the human lock is one-way:
+  automation never changes the human lock state, but the operator's lock (manual, idle,
+  quit) zeroizes every session's keys via the store's `onLock` teardown
+  (`zeroizeAllVaultSessions`); the sessions stay open and may `vaultUnlock` again.
 - **Audit surface = origin + unlock count, never a secret.** `deriveAuditDetail`
   (`mcp-server.js`) records the resolved fill **origin** for `vaultFill`, the item id +
   resolved **origin** for `vaultAnswerAuth`, the **count** of

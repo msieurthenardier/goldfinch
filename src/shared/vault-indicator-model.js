@@ -16,17 +16,21 @@
 //   - set up + locked   → visible, 'locked'.
 //   - set up + unlocked → visible, 'unlocked'.
 //
+// Sortie 07: a third input `automationHeld` (an MCP session holds vault keys, pushed on its
+// own channel). The model's `automationHeld` is true ONLY when set up AND locked AND held -
+// no badge while the operator is unlocked.
+//
 // Never throws — malformed / partial input coerces to booleans (defensive
 // defaults), matching every other shared decision module in this codebase.
 
 /**
- * @param {{ setUp?: any, unlocked?: any } | null | undefined} input
- * @returns {{ visible: boolean, state: 'locked' | 'unlocked' }}
+ * @param {{ setUp?: any, unlocked?: any, automationHeld?: any } | null | undefined} input
+ * @returns {{ visible: boolean, state: 'locked' | 'unlocked', automationHeld: boolean }}
  */
 export function buildVaultIndicatorModel(input) {
   const opts = input || {};
   const setUp = !!opts.setUp;
   const unlocked = !!opts.unlocked;
-  if (!setUp) return { visible: false, state: 'locked' };
-  return { visible: true, state: unlocked ? 'unlocked' : 'locked' };
+  if (!setUp) return { visible: false, state: 'locked', automationHeld: false };
+  return { visible: true, state: unlocked ? 'unlocked' : 'locked', automationHeld: !unlocked && !!opts.automationHeld };
 }

@@ -600,14 +600,18 @@ const closedTabStack = createClosedTabStack();
 // Push helpers read the live registry on every call. Closed-tab updates are
 // chrome-only; move targets are per-record; shared state fans out to every
 // chrome plus each trusted internal page, never ordinary web guests.
-const { broadcastClosedTabStackChanged, broadcastMoveTargetsChanged, broadcastToChromeAndInternal } =
-  createBroadcasters({
-    registry,
-    webContents,
-    isInternalContents,
-    closedTabStack,
-    buildMoveTargets
-  });
+const {
+  broadcastClosedTabStackChanged,
+  broadcastMoveTargetsChanged,
+  broadcastToChromes,
+  broadcastToChromeAndInternal
+} = createBroadcasters({
+  registry,
+  webContents,
+  isInternalContents,
+  closedTabStack,
+  buildMoveTargets
+});
 
 // Resolve a chrome webContents for the sheet's DD7 attachment window (leg 4):
 // a live registered window → ITS chrome; a provided-but-gone window → null
@@ -643,6 +647,21 @@ function getTabContents(wcId) {
 // bind gate (Flight 8); in dev an unpackaged run with --automation-dev force-binds
 // via the dev-enable override (no-op when packaged, DD4).
 let mcpServer = null;
+// Sortie 07: "some MCP session holds vault keys" projection for the chrome vault indicator.
+// `lastPushedHeld` is a PUSH GATE only (dedup); the get-handle below always recomputes LIVE.
+// The aggregate is recomputed from ctx key state (mcpServer.isVaultHeld()), pushed chrome-only
+// as one boolean (no identity, no counts) on its own channel, never on `vault-lock-state`.
+let lastPushedHeld = false;
+function publishHeld() {
+  try {
+    const held = mcpServer?.isVaultHeld() === true;
+    if (held === lastPushedHeld) return;
+    lastPushedHeld = held;
+    broadcastToChromes('vault-automation-held', { held });
+  } catch {
+    // a notify failure must never fail an unlock, a zeroize, or a server stop/start.
+  }
+}
 // Bind-status of the MCP automation server, captured at start (Flight 5 / DD1).
 // Queryable via the origin-checked `automation:get-status` IPC so the Automation page
 // can show whether the surface is active and which port it bound. `enabled` is the
@@ -986,6 +1005,8 @@ function getVaultStore() {
       // locked state, never after. M18 F3 L3 (DD5 ruling 4): also drop EVERY held
       // multi-vault import record — the safety-drop matrix's lock row (manual AND idle,
       // since both route through this one onLock hook).
+      // Sortie 07: the same hook also zeroizes every live MCP session's vault keys (isolated step
+      // in runVaultLockTeardown) - the operator's lock is authoritative over automation.
       onLock: () => {
         _pendingVaultImports.dropAll();
         _pendingBrowserImports.dropAll();
@@ -1003,6 +1024,9 @@ function getVaultStore() {
         runVaultLockTeardown({
           records: () => registry.records(),
           vaultHuman: _vaultHuman,
+          // Sortie 07: the operator's lock zeroizes every MCP session's vault keys (sessions
+          // stay open). Reads the LIVE module `mcpServer` at call time - null/disabled is a no-op.
+          zeroizeAutomationVaults: () => mcpServer?.zeroizeAllVaultSessions(),
           closeSheets: closeVaultCredentialSheetsOnLock,
           broadcast: broadcastVaultLockState
         });
@@ -1617,8 +1641,10 @@ async function startMcpServerInstance() {
     // session open/close broadcasts the new audit snapshot over the M02 channel.
     broadcast: (payload) => broadcastToChromeAndInternal('automation-activity-changed', payload),
     // Password-vault surface (Mission 12, Flight 1, Leg 3). The per-session MCP
-    // vault context reaches the vault store's STATELESS methods only (no singleton
-    // coupling).
+    // vault context reaches the vault store's STATELESS methods only (automation never
+    // changes the operator's lock state; the operator's lock reaches sessions via the
+    // store's onLock -> zeroizeAllVaultSessions, Sortie 07).
+    onVaultHeldChange: () => publishHeld(),
     vaultStore: getVaultStore(),
     // The REAL main→preload fill delegate (Leg 4). vault-context.fill resolves +
     // membership/origin-checks the credential, then hands us `{ wcId, credential }`;
@@ -1666,6 +1692,7 @@ async function startMcpServerInstance() {
     mcpStatus.error = (err && err.message) || String(err);
     console.error('[mcp] failed to start automation server:', err && err.message);
   }
+  publishHeld();
 }
 
 // The serialized automation toggle core (Flight 9, Leg 7 / DD8(a)). Both the live
@@ -1677,7 +1704,10 @@ async function startMcpServerInstance() {
 // and `mcpStatus` (setStatus); start/stop are startMcpServerInstance / mcpServer.stop().
 const automationToggle = makeAutomationToggle({
   start: startMcpServerInstance,
-  stop: () => mcpServer.stop(),
+  stop: async () => {
+    await mcpServer.stop();
+    publishHeld();
+  },
   getServer: () => mcpServer,
   setServer: (server) => {
     mcpServer = server;
@@ -2457,6 +2487,11 @@ registerOverlayIpc({
 // The indicator subscribes to the `vault-lock-state` broadcast FIRST, then calls
 // this once for the initial state; a push that already arrived wins.
 ipcMain.handle('vault-lock-state-get', () => computeVaultLockState());
+
+// Sortie 07: init-time query for the "an automation session holds vault keys" cue. Bare
+// ipcMain.handle (chrome trust, one non-secret boolean). Computed LIVE - never answered from
+// `lastPushedHeld`, which is only the push gate.
+ipcMain.handle('vault-automation-held-get', () => ({ held: mcpServer?.isVaultHeld() === true }));
 
 // Explicit global LOCK — chrome-trust surface (M12 F5 HAT batch 1, I8). The fill-icon
 // native context menu's "Lock now" runs in the chrome/main trust domain (it can't reach the

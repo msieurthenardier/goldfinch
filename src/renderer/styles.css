@@ -2086,8 +2086,11 @@ a:focus-visible {
    the manager is set up (renderer.js toggles .hidden via buildVaultIndicatorModel);
    then .vault-locked (dim, closed padlock) or .vault-unlocked (accent, open
    padlock). Two stacked glyphs — exactly one shows per state. Flex-centered like
-   the other toolbar glyph buttons; no badge. */
+   the other toolbar glyph buttons. Sortie 07: .vault-automation-held (locked AND an
+   automation session holds vault keys) adds a small accent badge via a positioned
+   pseudo-element — it never changes the button's box. */
 #vault-indicator {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2107,6 +2110,17 @@ a:focus-visible {
 }
 #vault-indicator.vault-unlocked {
   color: var(--accent);
+}
+#vault-indicator.vault-automation-held::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  pointer-events: none;
 }
 
 /* Downloads indicator (M11 F1 Leg 2, DD1/DD5; HAT fix Leg 4 — Chrome-like persistence).

@@ -32,6 +32,7 @@ function harness({ reachableItems = [] } = {}) {
       // test's own explicit onVaultLockState push below — every test calls
       // `await flush()` right after construction to let this settle FIRST.
       getVaultLockState: () => Promise.resolve({ setUp: false, unlocked: false }),
+      getVaultAutomationHeld: () => Promise.resolve({ held: false }),
       vaultReachableItems: (wcId) => {
         vaultReachableItemsCalls.push(wcId);
         return Promise.resolve(reachableItems);
