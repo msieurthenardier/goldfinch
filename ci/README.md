@@ -96,16 +96,10 @@ Concourse resolves `((var.field))` from Vault at `concourse/goldfinch/goldfinch/
 > Concourse s3 resource parses `endpoint` as a full URL and rejects a bare
 > `host:port`.
 
-**The Vault dev server is in-memory** — secrets are lost on container restart.
-They are reseeded from `~/projects/concourse-local/.vault-seeds.json` on startup,
-so any secret added live **must also be added there**. The MinIO entry is already
-in the seed file; the deploy-key entry is added when you provision the key (below).
-
-> Seed-file format: the seed entrypoint writes each field to a temp file and
-> passes `field=@file` to `vault kv put`, so **multiline values round-trip**
-> (the SSH deploy key's PEM, newlines preserved). (An earlier entrypoint
-> word-split an unquoted `$ARGS` and corrupted multiline values — fixed when
-> this pipeline adopted the deploy key.)
+Vault is persistent (raft storage on a Docker volume) and unseals itself on
+start, so secrets survive container restarts and live **only in Vault** — there
+is no re-seed file. Each secret is written once, with the `concourse-admin`
+policy token (see step 3 below).
 
 ### Provision the SSH deploy key (one-time)
 
@@ -123,27 +117,26 @@ nothing else; no account-wide PAT).
    Paste the contents of `goldfinch-deploy.pub`. **Leave "Allow write access"
    UNCHECKED** (read-only is all the pipeline needs).
 
-3. Seed the **private** key into Vault **and** the seed file (run locally so the
-   key never leaves your machine):
+3. Write the **private** key into Vault with the host `vault` CLI (run locally
+   so the key never leaves your machine):
 
    ```bash
-   # Vault (multiline-safe via @file):
-   docker cp goldfinch-deploy concourse-local-vault-1:/tmp/git-key
-   docker exec concourse-local-vault-1 sh -c \
-     "VAULT_ADDR=http://127.0.0.1:8200 VAULT_TOKEN=root vault kv put concourse/goldfinch/goldfinch/git-key private_key=@/tmp/git-key && rm -f /tmp/git-key"
-
-   # Seed file (so it survives a Vault restart) — homedir-relative, no hardcoded path:
-   KEYFILE=goldfinch-deploy node -e '
-     const fs=require("fs"), path=require("path");
-     const f=path.join(require("os").homedir(), "projects/concourse-local/.vault-seeds.json");
-     const a=JSON.parse(fs.readFileSync(f,"utf8"));
-     const p="concourse/goldfinch/goldfinch/git-key";
-     const data={private_key: fs.readFileSync(process.env.KEYFILE,"utf8")};
-     const e=a.find(x=>x.path===p); if(e)e.data=data; else a.push({path:p,data});
-     fs.writeFileSync(f, JSON.stringify(a,null,2)+"\n"); console.log("seed file updated");
-   '
+   ( export VAULT_ADDR=http://127.0.0.1:8200
+     export VAULT_TOKEN="$(grep '^VAULT_TOKEN=' ~/projects/concourse-local/.env | cut -d= -f2-)"
+     vault kv put concourse/goldfinch/goldfinch/git-key private_key=@goldfinch-deploy )
    ```
+
+   The subshell keeps the token out of your shell history, never echoes it, never
+   puts it on a command line, and discards it when the subshell exits. It is the
+   `concourse-admin` policy token, scoped to `concourse/*` — not root.
+   `private_key=@file` stores the whole file, newlines included.
+
+   Use the host CLI only for the deploy key — never concourse-local's MCP
+   `set_secret`, which would put the PEM into an agent's context. (`set_secret`
+   is fine for the MinIO fields.)
 
 4. Delete the local private key (`rm goldfinch-deploy`) — it now lives only in
-   Vault + the seed file.
-   ```
+   Vault.
+
+If Vault's data is ever lost, generate a new deploy key and re-run steps 1-4
+(replace the old key in GitHub's Deploy keys).

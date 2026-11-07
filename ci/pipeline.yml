@@ -17,8 +17,7 @@ resources:
     source:
       uri: git@github.com:msieurthenardier/goldfinch.git
       branch: main
-      # Read-only SSH deploy key (repo-scoped). The seed entrypoint was made
-      # multiline-safe so this PEM round-trips the Vault seed file. See ci/README.md.
+      # Read-only SSH deploy key (repo-scoped), stored in Vault. Provisioning: see ci/README.md.
       private_key: ((git-key.private_key))
 
   - name: linux-installers
