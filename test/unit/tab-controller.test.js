@@ -1023,6 +1023,49 @@ test('rightmost (#97, no freeze) pointer close: resolves to the new last tab, or
   assert.equal(b.setActiveCount().length, 0);
 });
 
+// Sortie 08 DD9: squeezed strip — active tab on its wider floor, background tabs narrower.
+function squeeze(list, activeIdx) {
+  list.forEach((t, i) => {
+    const w = i === activeIdx ? 78 : 55;
+    t.btn.getBoundingClientRect = () => ({ width: w, left: 0, right: w, top: 0, bottom: 0, height: 0 });
+  });
+}
+
+test('DD9: pointer ✕ close of the active mid tab freezes the right neighbour at the CLOSED width', async () => {
+  const { list, hit, tabTarget, closeEvent, setActiveSilently } = await pointerHarness();
+  setActiveSilently(list[1]);
+  squeeze(list, 1);
+  let atResolve = null;
+  hit.hook = () => {
+    atResolve = [list[0], list[2], list[3], list[4]].map((t) => t.btn.style.flex);
+  };
+  hit.el = tabTarget(list[2]);
+  list[1].btn.listeners.get('click')(closeEvent());
+  assert.deepEqual(atResolve, ['0 0 55px', '0 0 78px', '0 0 55px', '0 0 55px']); // frozen before resolution
+  assert.equal(list[2].btn.style.flex, '0 0 78px');
+  assert.equal(list[0].btn.style.flex, '0 0 55px');
+  assert.equal(list[3].btn.style.flex, '0 0 55px');
+  assert.equal(list[4].btn.style.flex, '0 0 55px');
+});
+
+test('DD9: middle-click close applies the same neighbour rule', async () => {
+  const { list, hit, tabTarget, setActiveSilently } = await pointerHarness();
+  setActiveSilently(list[1]);
+  squeeze(list, 1);
+  hit.el = tabTarget(list[2]);
+  list[1].btn.listeners.get('auxclick')({ button: 1, clientX: 1, clientY: 2, preventDefault() {} });
+  assert.equal(list[2].btn.style.flex, '0 0 78px');
+  assert.equal(list[3].btn.style.flex, '0 0 55px');
+});
+
+test('DD9: pointer close of the LAST tab sets no flex at all (#97)', async () => {
+  const { list, closeEvent, setActiveSilently } = await pointerHarness();
+  setActiveSilently(list[4]);
+  squeeze(list, 4);
+  list[4].btn.listeners.get('click')(closeEvent());
+  for (const t of list.slice(0, 4)) assert.equal(t.btn.style.flex || '', '');
+});
+
 test('pointer close of the ONLY tab takes the openNewTab path without throwing', async () => {
   const { h, list, hit, tabTarget, closeEvent } = await pointerHarness(1);
   hit.el = tabTarget(list[0]); // stale: already removed from `tabs`

@@ -183,7 +183,7 @@ export function createTabController(deps) {
     btn.draggable = true;
     btn.addEventListener('click', (e) => {
       if (/** @type {HTMLElement} */ (e.target).closest('.tab-close')) {
-        if (tabs.size > 1 && !isLastTab(id)) freezeTabWidths(); // DD5: defer reflow on pointer-close
+        if (tabs.size > 1 && !isLastTab(id)) freezeTabWidths(id); // DD5: defer reflow on pointer-close
         // Sortie 08 DD6: only the two pointer sites pass a pointer. `detail === 0` is a
         // keyboard-synthesized click with no real position.
         if (e.detail > 0) closeTab(id, { pointer: { x: e.clientX, y: e.clientY } });
@@ -202,7 +202,7 @@ export function createTabController(deps) {
     btn.addEventListener('auxclick', (e) => {
       if (e.button !== 1) return;
       e.preventDefault();
-      if (tabs.size > 1 && !isLastTab(id)) freezeTabWidths();
+      if (tabs.size > 1 && !isLastTab(id)) freezeTabWidths(id);
       closeTab(id, { pointer: { x: e.clientX, y: e.clientY } }); // sortie 08 DD6
     });
     // Tab context menu (M09 F5 Leg 1, DD2): a real right-click AND the Context-Menu
@@ -1081,9 +1081,18 @@ export function createTabController(deps) {
   let widthsFrozen = false;
   // Deferred resize-on-close (DD5): freeze remaining tabs' rendered widths so a pointer-close
   // doesn't reflow the strip out from under the cursor. Released on #tabstrip mouseleave.
-  function freezeTabWidths() {
+  // Sortie 08 DD9: with `closingId`, the closed tab's right neighbour is pinned at the CLOSED
+  // tab's width (not its own) so it fills the vacated slot and lands under the cursor.
+  function freezeTabWidths(closingId) {
     for (const t of tabs.values()) {
       t.btn.style.flex = `0 0 ${t.btn.getBoundingClientRect().width}px`;
+    }
+    const closing = closingId !== undefined ? tabs.get(closingId) : undefined;
+    if (closing) {
+      const order = orderedTabIds();
+      const nextId = order[order.indexOf(closingId) + 1];
+      const next = nextId !== undefined ? tabs.get(nextId) : undefined;
+      if (next) next.btn.style.flex = `0 0 ${closing.btn.getBoundingClientRect().width}px`;
     }
     widthsFrozen = true;
   }

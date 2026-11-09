@@ -37,6 +37,12 @@ by eye at HAT (see Out of Scope).
   mouseMove→mouseDown→mouseUp at (x, y); `{ button: 'middle' }` delivers a trusted middle-click.
   `#window-controls` sits inside `#tabstrip`, so a window-control click does NOT end the width
   freeze; to end it, click at a coordinate in the web content area.
+- **⚠ Park the REAL pointer over `#tabstrip` for the whole run (apparatus fact, sortie 08 HAT).** MCP
+  `click` (`sendInputEvent`) never moves the OS pointer. Every pointer close now switches tabs, and on
+  WSLg/Wayland the guest-view swap re-delivers leave/enter at the REAL pointer position — if it rests
+  over the page, `#tabstrip` gets a `mouseleave` ~16 ms after the click and the DD5 freeze releases,
+  so the next row's coordinate lands on a reflowed strip. Have the operator rest the mouse on an
+  empty part of the strip (not on a tab) before Step 3, or the freeze rows are void.
 - **Active-tab observables** (read after every close): (a) `enumerateTabs()`/`readAxTree(chrome)`
   — exactly one `selected: true`; (b) chrome `evaluate` of
   `({ active: document.querySelector('#tabs .tab.active')?.dataset.id, address: document.getElementById('address').value })`;
@@ -55,6 +61,7 @@ by eye at HAT (see Out of Scope).
 | 2 | Open fixture tabs `P1`…`P8` (in order, after the default tab). Activate `P2` by clicking its tab body. Record the DOM order and every `.tab` / `.tab-close` rect. | (setup) Titles pairwise distinct; `P2` is the active tab. |
 | 3 | **Background ✕ close, mid-strip.** Click the ✕ of `P4` (a background tab, not last). Do not move elsewhere. Read the active-tab observables and the `.tab` rects. | `P4` is gone (count −1). The active tab is the tab whose post-removal rect contains the click coordinate — with the equal fixture widths this is `P5`, which slid left into `P4`'s slot under the frozen widths (record the containing rect; if the point fell in the 4px gap, no tab contains it and `P2` stays active — re-run with a coordinate at the ✕'s center). `selected`, `.tab.active`, and `#address` all name `P5`; `captureWindow()` shows `P5`'s fixture color in the guest slot. Remaining tab widths are unchanged from Step 2 (freeze intact). |
 | 4 | **Run continues.** Click the same coordinate again (now `P5`'s ✕, the active tab). Read the observables. | `P5` is gone. The active tab is `P6` (now under the coordinate) — NOT the rightmost tab. `selected`/`.tab.active`/`#address`/rendered color all name `P6`. Widths still frozen. |
+| 4b | **Squeezed strip (sortie 08 DD9).** Open enough tabs that the active tab is wider than background tabs (`.tab.active` on its min-width floor; confirm via rect reads). Make a mid-strip tab active, then click its ✕ at a fixed point 3 times, reading rects after each. | Each close activates the ADJACENT (right-neighbour) tab, whose post-close rect contains the click point, and the active `.tab-close` rect still contains the click point after each close. The run also holds when it starts from a BACKGROUND tab's ✕, because the ✕ is right-aligned at every width, within the ≤7px floor shift in the 57–77px band. |
 | 5 | **Middle-click close switches.** Click `P1`'s body to make `P1` active (still inside the strip — the freeze holds). Then middle-click the body of `P7` (a background, non-last tab). Read the observables and the post-removal rect containing the coordinate. | `P7` is gone. The active tab is the tab whose rect now contains the middle-click coordinate (`P8`, the right neighbour that slid in), NOT `P1`. All four observables agree on it. |
 | 5b | **Already-active target — no redundant switch.** Read the active tab (`P8`). Click the ✕ of the tab immediately LEFT of `P8` (`P6`, background, non-last). Read the observables. | `P6` is gone; `P8` slides under the coordinate and is already active, so it stays active (all four observables name `P8`; the rendered guest is unchanged). The no-redundant-`tabSetActive` property itself is unit-pinned (not observable here). |
 | 6 | End the freeze: click at a coordinate in the web content area (outside `#tabstrip`). Read rects. | (setup) Tabs re-expand (freeze released). The active tab is unchanged by this click. |

@@ -1,6 +1,6 @@
 # Sortie: Close-Burst Tab Visibility
 
-**Status**: in-flight
+**Status**: landed
 
 ## Charter
 
@@ -19,7 +19,7 @@ Operator report (2026-11-08): while closing a run of tabs, the previously focuse
 ### Constraints
 - Real activation through the existing `activateTab` path (operator ruling 2026-11-08) — visible and active never diverge; no "preview" state.
 - Only a pointer close changes the visible tab (operator ruling 2026-11-08: "it should really only show the adjacent tab"); no hover switching, no dwell timers, no burst lifecycle state.
-- The width freeze (DD5, issue #97 carve-out) is unchanged.
+- The width freeze (DD5, issue #97 carve-out) is unchanged — *amended at HAT (2026-11-08, operator): on a pointer close, the tab that slides into the vacated slot takes the closed tab's width (DD9); the rest of the freeze and the #97 carve-out are unchanged.*
 - No guest-slot animation (`WebContentsView` native-surface invariant).
 - Renderer-only. `src/renderer/renderer.js` is at its 1505-line budget and is not touched.
 - Out of scope: the keyboard-close fallback that activates the rightmost tab rather than a neighbour — squawk 0177.
@@ -80,10 +80,15 @@ Make every pointer close (✕ click or middle-click on a tab) end with the tab u
 **DD8 — Spec re-author (external reader contract).** `tests/behavior/tab-reorder.md` Step 9 asserts a background ✕/middle close leaves the active tab unchanged. That contract changes deliberately: re-author Step 9 so it asserts (a) the closed tab is never activated en route (it is gone, never `selected`), and (b) afterwards the selected tab is the tab under the click coordinate. `responsive-tab-strip.md` Steps 6–7 assert widths only; they remain valid and gain no assertion here (the new spec owns activation). Step 6 of `tab-reorder.md` (keyboard Delete → DOM-last) is untouched — it is squawk 0177's.
 - Re-author details (design review): Step 9 has TWO actions (✕ click, then middle-click), each judged separately; each records the post-removal `.tab` rect containing the click point and asserts that tab is selected. Pin both targets to NON-last tabs (a last-tab middle-click has no freeze and would need Step 7's branch logic). Also update any restatement of the old invariant in `tab-reorder.md`'s banner/Intent ("click-model" text) and the cross-reference at `tests/behavior/tab-keyboard-operability.md:58` that points at this step as the pointer-model check.
 
+**DD9 — The sliding-in tab takes the vacated slot's width (added at HAT, operator-approved 2026-11-08).** When a pointer close freezes widths, the closed tab's right neighbour in DOM order is frozen at the CLOSED tab's rendered width instead of its own.
+- Finding (HAT H5, reproduced over MCP): in a squeezed strip the active tab sits on its 78px floor while background tabs are ~55px. Closing the active tab froze the neighbour at 55px, so it did not reach the cursor; `elementFromPoint` resolved the tab AFTER it (Teal instead of Green — violating "only show the adjacent tab"), which then grew to 78px with its ✕ ~50px from the cursor, and the next clicks landed on its body. H1 passed only because unsqueezed tabs share one width.
+- Rationale: the adjacent tab exactly fills the vacated slot, so it is the tab under the cursor and, once active, its ✕ sits where the closed tab's ✕ was — a reliable click-click-click run at any squeeze level.
+- Trade-off: when a narrow background tab is closed and its neighbour becomes active, the neighbour still grows to the 78px floor (tabs to its right shift ~23px); the cursor stays on the neighbour, so a middle-click run is unaffected. A neighbour that is already active keeps its floor (min-width wins). Narrow background tabs still show no ✕ (M09 F1 design, out of scope).
+
 ### Prerequisites
 - [x] No active mission covers this outcome (all 22 missions completed)
 - [x] No open sortie overlaps (sorties 01–07: none touch `closeTab`)
-- [ ] Squawk 0177 is NOT in progress concurrently (both edit the same `closeTab` fallback block; the `tab-moved-away` handler carries a duplicate of that fallback) — verify at execution start. **Sequencing rule**: if 0177 lands first, DD4's no-target branch is whatever neighbour rule 0177 installed (not "today's `pop()`"), and `pointer-close-shows-tab` Steps 7–8 expect the right neighbour instead of the DOM-order-last tab; the leg re-reads `closeTab` before editing. If this sortie lands first, 0177 re-reads the new `closeTab` and leaves the pointer branch intact.
+- [x] Squawk 0177 is NOT in progress concurrently (both edit the same `closeTab` fallback block; the `tab-moved-away` handler carries a duplicate of that fallback) — verify at execution start. **Sequencing rule**: if 0177 lands first, DD4's no-target branch is whatever neighbour rule 0177 installed (not "today's `pop()`"), and `pointer-close-shows-tab` Steps 7–8 expect the right neighbour instead of the DOM-order-last tab; the leg re-reads `closeTab` before editing. If this sortie lands first, 0177 re-reads the new `closeTab` and leaves the pointer branch intact.
 - [ ] Admin MCP apparatus available: `npm run dev:automation` with `GOLDFINCH_AUTOMATION_DEV_MINT=1 GOLDFINCH_AUTOMATION_ADMIN=1`, admin key captured per launch, `connectAutomation()` env-key scripts (operator standing preference — never the registered `goldfinch-dev` MCP server); local HTTP fixture with distinct page titles/colors
 
 ### Pre-Flight Checklist
@@ -108,8 +113,8 @@ Make every pointer close (✕ click or middle-click on a tab) end with the tab u
 ### Checkpoints
 - [x] Unit tests green (`npm test`), `npm run typecheck`, `npm run lint`, `npm run format:check`
 - [x] Live smoke against the running app exercises every apparatus primitive (DD7)
-- [ ] `pointer-close-shows-tab` run passes; `tab-reorder` Step 9 (re-authored) passes
-- [ ] HAT: operator closes runs of tabs by ✕ and middle-click, mid-strip and from the right end, and confirms the page under the cursor is always the one shown with no flash
+- [ ] `pointer-close-shows-tab` run passes; `tab-reorder` Step 9 (re-authored) passes — *deferred to the debrief (operator, 2026-11-08): automation apparatus releases the DD5 freeze on every view swap unless the REAL pointer is parked over the strip (flight log → Anomalies); spec stays `draft`*
+- [x] HAT: operator closes runs of tabs by ✕ and middle-click, mid-strip and from the right end, and confirms the page under the cursor is always the one shown with no flash
 
 ### Adaptation Criteria
 
@@ -123,17 +128,17 @@ Make every pointer close (✕ click or middle-click on a tab) end with the tab u
 
 ### Legs
 - [x] `pointer-close-activation` - Pointer-close resolves and activates the tab under the cursor (DD1–DD6), unit tests, grep-AC, `tab-reorder.md` Step 9 re-author, CLAUDE.md bullet, live smoke (DD7)
-- [ ] `hat-and-alignment` - Guided HAT session: operator closes runs of tabs by hand (✕ and middle-click, mid-strip and from the right end, a comfortable strip AND a squeezed 20+-tab strip for the 64px-floor shift, one close with the cursor in the 4px gap); watches for any flash and confirms hovering never switches; run `pointer-close-shows-tab`; fix what surfaces (behavior changes route through the fix-vs-feature gate)
+- [x] `hat-and-alignment` - Guided HAT session: operator closes runs of tabs by hand (✕ and middle-click, mid-strip and from the right end, a comfortable strip AND a squeezed 20+-tab strip for the 64px-floor shift, one close with the cursor in the 4px gap); watches for any flash and confirms hovering never switches; run `pointer-close-shows-tab`; fix what surfaces (behavior changes route through the fix-vs-feature gate)
 
 ---
 
 ## Post-Flight
 
 ### Completion Checklist
-- [ ] All legs completed
+- [x] All legs completed
 - [ ] Code merged
-- [ ] Tests passing
-- [ ] Documentation updated
+- [x] Tests passing
+- [x] Documentation updated
 
 ### Verification
 - `npm test`, `npm run typecheck`, `npm run lint`, `npm run format:check` green

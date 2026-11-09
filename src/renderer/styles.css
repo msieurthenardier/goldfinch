@@ -331,6 +331,10 @@ html.platform-darwin #window-controls {
   font-weight: 700;
 }
 .tab .tab-close {
+  /* Sortie 08 HAT: the close button stays at the tab's right end at every width
+     (in the 57-77px band the title is hidden, so without this it packs left), so
+     a run of pointer closes finds it in the same place. */
+  margin-left: auto;
   flex: none;
   width: 16px;
   height: 16px;
