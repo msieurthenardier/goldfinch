@@ -55,7 +55,7 @@ Verify that a keyboard-only / screen-reader user can operate the Goldfinch tab s
 - Accessible names of the **toolbar / media-card / player / Shields** controls and the global `:focus-visible` coverage beyond the tab strip — those are F23, verified by the axe-core audit (`npm run a11y`) and the F23 leg, not this spec.
 - F24 items (reduced-motion, live regions, `role="dialog"`, landmarks, contrast, color-independent cues) — verified by the axe audit + the F24 legs.
 - The hostile-scheme guard on tab creation — covered by `tab-scheme-guard.md`.
-- Mouse/pointer tab activation, close, and **drag reorder** — this spec is scoped to the *keyboard/AT* contract; the pointer click/drag model (including the DD2 activation-semantics change) is verified by the `tab-reorder` spec's click-model regression step (M09 Flight 2 leg 2).
+- Mouse/pointer tab activation, close, and **drag reorder** — this spec is scoped to the *keyboard/AT* contract; the pointer click/drag model (including the DD2 activation-semantics change) is verified by the `tab-reorder` spec's click-model regression step (M09 Flight 2 leg 2; Step 9 re-authored in sortie 08 — a pointer close activates the tab under the cursor, see also `pointer-close-shows-tab`).
 
 ## Variants (optional)
 

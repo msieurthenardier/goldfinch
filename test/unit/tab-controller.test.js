@@ -862,3 +862,171 @@ test('onViewCreated closes the orphaned view via tabClose with skipCapture when 
     false
   );
 });
+
+// ---------------------------------------------------------------------------
+// Sortie 08 Leg 1: pointer close (✕ click / middle-click) activates the tab
+// under the cursor AFTER removal — one activation, no fallback-then-switch.
+// These drive the REAL btn listeners with hand-built events.
+// ---------------------------------------------------------------------------
+
+async function pointerHarness(count = 5) {
+  const h = createHarness();
+  const controller = await loadController(h);
+  const list = [];
+  for (let i = 0; i < count; i++) list.push(controller.createTab(`https://t${i}.test/`));
+  await settle();
+  // `elementFromPoint` answers from this box; null = nothing hit.
+  const hit = { el: null, hook: null };
+  h.deps.document.elementFromPoint = (x, y) => {
+    hit.seen = (hit.seen || 0) + 1;
+    if (hit.hook) hit.hook(x, y);
+    return hit.el;
+  };
+  const tabTarget = (t) => ({ dataset: t.btn.dataset, closest: (sel) => (sel === '.tab' ? t.btn : null) });
+  const closeEvent = (extra = {}) => ({
+    target: { closest: (sel) => (sel === '.tab-close' ? {} : null) },
+    clientX: 11,
+    clientY: 22,
+    detail: 1,
+    preventDefault() {},
+    ...extra
+  });
+  const setActiveSilently = (t) => {
+    controller.activateTab(t.id);
+    h.calls.length = 0;
+  };
+  const setActiveCount = () => h.calls.filter(([n]) => n === 'tabSetActive');
+  return { h, controller, list, hit, tabTarget, closeEvent, setActiveSilently, setActiveCount };
+}
+
+test('pointer ✕ close of a background tab activates the tab under the cursor, once, after tabClose', async () => {
+  const { h, list, hit, tabTarget, closeEvent, setActiveSilently, setActiveCount, controller } = await pointerHarness();
+  setActiveSilently(list[0]);
+  hit.el = tabTarget(list[2]); // right neighbour slides in
+  list[1].btn.listeners.get('click')(closeEvent());
+  assert.equal(controller.activeTab(), list[2]);
+  const sets = setActiveCount();
+  assert.equal(sets.length, 1);
+  assert.equal(sets[0][1], list[2].wcId);
+  const names = h.calls.map(([n]) => n);
+  assert.ok(names.indexOf('tabClose') < names.indexOf('tabSetActive'));
+});
+
+test('pointer ✕ close of the ACTIVE mid-strip tab activates the neighbour, never the DOM-last tab', async () => {
+  const { h, list, hit, tabTarget, closeEvent, setActiveSilently, setActiveCount, controller } = await pointerHarness();
+  setActiveSilently(list[1]);
+  hit.el = tabTarget(list[2]);
+  list[1].btn.listeners.get('click')(closeEvent());
+  assert.equal(controller.activeTab(), list[2]);
+  const sets = setActiveCount();
+  assert.equal(sets.length, 1);
+  assert.equal(sets[0][1], list[2].wcId);
+  assert.ok(!sets.some((c) => c[1] === list[4].wcId));
+  assert.equal(h.calls.filter(([n]) => n === 'tabClose').length, 1);
+});
+
+test('middle-click (auxclick button 1) passes the pointer; other buttons close nothing', async () => {
+  const { list, hit, tabTarget, setActiveSilently, controller } = await pointerHarness();
+  setActiveSilently(list[0]);
+  hit.el = tabTarget(list[2]);
+  const aux = list[1].btn.listeners.get('auxclick');
+  aux({ button: 2, clientX: 1, clientY: 2, preventDefault() {} });
+  assert.equal(controller.orderedTabIds().length, 5);
+  aux({ button: 1, clientX: 1, clientY: 2, preventDefault() {} }); // detail undefined
+  assert.equal(controller.orderedTabIds().length, 4);
+  assert.equal(controller.activeTab(), list[2]);
+});
+
+test('target already active (background close) -> no tabSetActive', async () => {
+  const { h, list, hit, tabTarget, closeEvent, setActiveSilently, setActiveCount } = await pointerHarness();
+  setActiveSilently(list[2]);
+  hit.el = tabTarget(list[2]);
+  list[1].btn.listeners.get('click')(closeEvent());
+  assert.equal(setActiveCount().length, 0);
+  assert.equal(h.calls.filter(([n]) => n === 'tabClose').length, 1);
+});
+
+test('no resolvable target: background close keeps active; active close takes the DOM-last fallback', async () => {
+  for (const el of [
+    null,
+    { closest: () => null },
+    { dataset: { id: 'ghost' }, closest: () => ({ dataset: { id: 'ghost' } }) }
+  ]) {
+    const a = await pointerHarness();
+    a.setActiveSilently(a.list[0]);
+    a.hit.el = el;
+    a.list[1].btn.listeners.get('click')(a.closeEvent());
+    assert.equal(a.controller.activeTab(), a.list[0]);
+    assert.equal(a.setActiveCount().length, 0);
+
+    const b = await pointerHarness();
+    b.setActiveSilently(b.list[1]);
+    b.hit.el = el;
+    b.list[1].btn.listeners.get('click')(b.closeEvent());
+    assert.equal(b.controller.activeTab(), b.list[4]);
+  }
+});
+
+test('keyboard-synthesized click (detail 0) does not consult elementFromPoint', async () => {
+  const { list, hit, tabTarget, closeEvent, setActiveSilently, controller } = await pointerHarness();
+  setActiveSilently(list[0]);
+  hit.el = tabTarget(list[2]);
+  list[1].btn.listeners.get('click')(closeEvent({ detail: 0 }));
+  assert.equal(hit.seen || 0, 0);
+  assert.equal(controller.activeTab(), list[0]);
+});
+
+test('resolver hitting the .tab-close child of a tab resolves that tab', async () => {
+  const { list, hit, closeEvent, setActiveSilently, controller } = await pointerHarness();
+  setActiveSilently(list[0]);
+  hit.el = { closest: (sel) => (sel === '.tab' ? list[3].btn : null) };
+  list[1].btn.listeners.get('click')(closeEvent());
+  assert.equal(controller.activeTab(), list[3]);
+});
+
+test('closeTab(id) with no opts never consults elementFromPoint (existing callers)', async () => {
+  const { list, hit, tabTarget, setActiveSilently, controller } = await pointerHarness();
+  setActiveSilently(list[1]);
+  hit.el = tabTarget(list[2]);
+  controller.closeTab(list[1].id);
+  assert.equal(hit.seen || 0, 0);
+  assert.equal(controller.activeTab(), list[4]);
+});
+
+test('width freeze happens before the pointer target is resolved (mid-strip close)', async () => {
+  const { list, hit, tabTarget, closeEvent, setActiveSilently } = await pointerHarness();
+  setActiveSilently(list[0]);
+  let flexAtResolve = null;
+  hit.hook = () => {
+    flexAtResolve = [list[0], list[2], list[3], list[4]].map((t) => t.btn.style.flex);
+  };
+  hit.el = tabTarget(list[2]);
+  list[1].btn.listeners.get('click')(closeEvent());
+  assert.ok(flexAtResolve, 'resolver ran');
+  assert.ok(flexAtResolve.every((f) => f && f.length > 0));
+});
+
+test('rightmost (#97, no freeze) pointer close: resolves to the new last tab, or nothing', async () => {
+  const a = await pointerHarness();
+  a.setActiveSilently(a.list[0]);
+  a.hit.el = a.tabTarget(a.list[3]);
+  a.list[4].btn.listeners.get('click')(a.closeEvent());
+  assert.equal(a.list[3].btn.style.flex || '', ''); // no freeze on the last tab
+  assert.equal(a.controller.activeTab(), a.list[3]);
+  assert.equal(a.setActiveCount().length, 1);
+
+  const b = await pointerHarness();
+  b.setActiveSilently(b.list[0]);
+  b.hit.el = null;
+  b.list[4].btn.listeners.get('click')(b.closeEvent());
+  assert.equal(b.controller.activeTab(), b.list[0]);
+  assert.equal(b.setActiveCount().length, 0);
+});
+
+test('pointer close of the ONLY tab takes the openNewTab path without throwing', async () => {
+  const { h, list, hit, tabTarget, closeEvent } = await pointerHarness(1);
+  hit.el = tabTarget(list[0]); // stale: already removed from `tabs`
+  list[0].btn.listeners.get('click')(closeEvent());
+  await settle();
+  assert.ok(h.calls.filter(([n]) => n === 'tabCreate').length >= 2);
+});
