@@ -1,6 +1,6 @@
 # Sortie: Close-Burst Tab Visibility
 
-**Status**: landed
+**Status**: completed
 
 ## Charter
 
