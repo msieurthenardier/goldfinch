@@ -183,8 +183,11 @@ export function createTabController(deps) {
     btn.draggable = true;
     btn.addEventListener('click', (e) => {
       if (/** @type {HTMLElement} */ (e.target).closest('.tab-close')) {
-        if (tabs.size > 1 && !isLastTab(id)) freezeTabWidths(); // DD5: defer reflow on pointer-close
-        closeTab(id);
+        if (tabs.size > 1 && !isLastTab(id)) freezeTabWidths(id); // DD5: defer reflow on pointer-close
+        // Sortie 08 DD6: only the two pointer sites pass a pointer. `detail === 0` is a
+        // keyboard-synthesized click with no real position.
+        if (e.detail > 0) closeTab(id, { pointer: { x: e.clientX, y: e.clientY } });
+        else closeTab(id);
         return;
       }
       // Activation ruling (M09 F11 Leg 2): native HTML5 DnD does NOT fire a `click`
@@ -199,8 +202,8 @@ export function createTabController(deps) {
     btn.addEventListener('auxclick', (e) => {
       if (e.button !== 1) return;
       e.preventDefault();
-      if (tabs.size > 1 && !isLastTab(id)) freezeTabWidths();
-      closeTab(id);
+      if (tabs.size > 1 && !isLastTab(id)) freezeTabWidths(id);
+      closeTab(id, { pointer: { x: e.clientX, y: e.clientY } }); // sortie 08 DD6
     });
     // Tab context menu (M09 F5 Leg 1, DD2): a real right-click AND the Context-Menu
     // key / Shift+F10 on a FOCUSED tab both deliver here (the single native
@@ -860,7 +863,12 @@ export function createTabController(deps) {
     return `Move to ${dest} failed`; // no reply at all — still an outcome, never silence
   }
 
-  function closeTab(id) {
+  /**
+   * @param {string} id
+   * @param {{ pointer?: { x: number, y: number } }} [opts] pointer — set ONLY by the two
+   *   pointer-close sites (sortie 08 DD6); the tab under it becomes active after removal.
+   */
+  function closeTab(id, opts) {
     // Defensive drag-cancel (M09 F2 Leg 2 Edge Case): a tab-list mutation during a live drag
     // invalidates its slotRects snapshot regardless of which tab this close targets.
     if (dnd) cancelDnd();
@@ -881,7 +889,17 @@ export function createTabController(deps) {
     tab.btn.remove();
     tabs.delete(id);
 
-    if (ctx.activeTabId === id) {
+    // Sortie 08 DD3/DD4: a pointer close activates the tab now under the cursor — ONE
+    // activation, never the fallback followed by a second switch (that would flash the
+    // DOM-order-last tab). Resolved only after removal (and after the width freeze).
+    const wasActive = ctx.activeTabId === id;
+    const target = opts && opts.pointer ? tabIdAtPoint(opts.pointer.x, opts.pointer.y) : null;
+    if (target) {
+      if (wasActive || target !== ctx.activeTabId) activateTab(target);
+      return;
+    }
+
+    if (wasActive) {
       // DD1: DOM order is authoritative — orderedTabIds() reads the current strip,
       // NOT Map insertion order (which no longer necessarily matches visual order
       // once a tab has been reordered).
@@ -1045,12 +1063,36 @@ export function createTabController(deps) {
     return ids[ids.length - 1] === id;
   }
 
+  // Sortie 08 DD3: the id of the `.tab` under a viewport point, or null (no elementFromPoint,
+  // nothing/no tab hit, or an id not in `tabs`). Call only AFTER the closed tab left the DOM.
+  /**
+   * @param {number} x
+   * @param {number} y
+   * @returns {string | null}
+   */
+  function tabIdAtPoint(x, y) {
+    if (typeof document.elementFromPoint !== 'function') return null;
+    const el = document.elementFromPoint(x, y);
+    const tabEl = el && typeof el.closest === 'function' ? el.closest('.tab') : null;
+    const tid = tabEl && tabEl.dataset ? tabEl.dataset.id : undefined;
+    return tid && tabs.has(tid) ? tid : null;
+  }
+
   let widthsFrozen = false;
   // Deferred resize-on-close (DD5): freeze remaining tabs' rendered widths so a pointer-close
   // doesn't reflow the strip out from under the cursor. Released on #tabstrip mouseleave.
-  function freezeTabWidths() {
+  // Sortie 08 DD9: with `closingId`, the closed tab's right neighbour is pinned at the CLOSED
+  // tab's width (not its own) so it fills the vacated slot and lands under the cursor.
+  function freezeTabWidths(closingId) {
     for (const t of tabs.values()) {
       t.btn.style.flex = `0 0 ${t.btn.getBoundingClientRect().width}px`;
+    }
+    const closing = closingId !== undefined ? tabs.get(closingId) : undefined;
+    if (closing) {
+      const order = orderedTabIds();
+      const nextId = order[order.indexOf(closingId) + 1];
+      const next = nextId !== undefined ? tabs.get(nextId) : undefined;
+      if (next) next.btn.style.flex = `0 0 ${closing.btn.getBoundingClientRect().width}px`;
     }
     widthsFrozen = true;
   }
