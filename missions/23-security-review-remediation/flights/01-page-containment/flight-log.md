@@ -108,9 +108,36 @@ Paths are under `src/`.
 
 ## Leg Progress
 
+### Leg 01 — `probe-and-audit` (landed 2026-11-13, uncommitted)
+
+Evidence: [`probe-results.md`](probe-results.md) (Q1–Q4), [`guard-audit.md`](guard-audit.md) (Q5–Q7, `[A]` table), [`ipc-census.md`](ipc-census.md) (Q8); rig at `tests/behavior/fixtures/page-containment-probe/`. No product source changed. Baseline: 6348 unit tests (6344 pass, 4 todo, 0 fail, ~7 s); `renderer.js` 1504 lines.
+
+| Question | Answer | Consequence |
+| --- | --- | --- |
+| Q1 guest reach to preload IPC | **Object reachable** in rig and product: once any main → guest message is delivered, a page-patched array method receives Electron's emit event whose `sender` is the preload's IPC object. `require` / `process` are not reachable. | Finding 1 is live at full severity. DD1's main-side gate is the boundary; DD3's preload hardening is defence in depth only. |
+| Q2 main ↔ isolated world free of page code | **Not free.** The round trip returns the right value and the world's built-ins are its own, but each main-initiated call passes through Electron's dispatch in the page world: the page's wrappers saw 7 calls, one of them a `then` lookup on an object with the result's own key names. Alteration of the reply was not measured. Mid-call cross-site navigation leaves the call pending forever. | **DD4's premise fails as written → divert (operator ruling).** DD5's "nothing secret transits the page world" also fails for a main-initiated delivery. |
+| Q3 isolated-world listener trust | **Pass**, including on the product's own icon: `isTrusted` true for a real click, false for a synthetic one, despite page tampering. A page can suppress the listener (fail-closed). The world detects an overlay, a scaled icon and an opacity-0 icon. | The gesture can be _observed_ honestly; the open problem is carrying that fact to main. |
+| Q4 committed-URL userinfo | Admitted directly and via redirect; `enumerateTabs` and the address bar show `user:pass@`. `file://host/` not answerable on Linux. | DD11 confirmed needed. |
+| Q5 guard audit | 35 guards: 22 sound, 11 gaps, 2 not settleable statically. No critical gap outside this flight's surfaces. | No divert from the audit. Gaps owned by existing legs; one low squawk (internal session has no permission handler). |
+| Q6 `confirmedOrigins` | No vault format bump needed; the editor save path drops the field and `metadataOf` hides it. | DD6's remembered-sites variant can ship in this flight. |
+| Q7 popups | Default holds; a popup cannot raise the picker and no flow breaks. Popups must stay admitted for `shields-farble`, `vault-eligible`, `guest-window-close`. | DD1 tab-guest class refined. |
+| Q8 census | 214 channels, each registered once: 89 `handle`, 51 `on`, 74 internal. 78 refusing, 47 bare (`tab-reopen` was miscounted as refusing), 2 non-refusing, 13 guest. | DD2's table source. 9 bare twins have no caller (delete); 13 chrome-only channels take a tab id without an ownership check. |
+
+Other facts for later legs: a script that throws **rejects** a main-initiated isolated-world call (unlike the same-process call); `frameToken` changes on every cross-document navigation and is stable across `pushState` / hash, and must be captured as a primitive (the `mainFrame` object is reused); `WebFrameMain` has no isolated-world method; dummy credential-shaped fill payloads passed through page-patchable built-ins in the rig (confirms finding 2's payload path); `tabOriginFor` reads `wc.getURL()`, not the tab entry; `guest-tab-boundary` is also sent by internal tabs; fixture directories are lint-ignored. `[A]` re-verification: 73 rows — 63 confirmed, 5 partly true, 3 not verifiable from the repo, 2 answered by Q1.
+
 ---
 
 ## Decisions
+
+### Flight Director Notes
+
+- 2026-11-13 — Operator approved the flight spec. Branch `flight/01-page-containment` created; planning artifacts committed (`7e2d8c4`); mission set `active`, flight `in-flight`. Crew file `leg-execution.md` loaded and structurally valid (Developer and Reviewer on Sonnet).
+- 2026-11-13 — Leg `probe-and-audit` designed. **Risk tier: high** — it changes no product source, but its answers decide the DD4 divert and the scope of every later leg, so a wrong probe is a wrong flight. Design review spawned (Developer, Sonnet).
+- 2026-11-13 — Q2 cannot be answered by driving the product: nothing in `src/main/` calls into the isolated world today and the leg may not add a product hook. Decision: a standalone rig on the project's Electron binary with the product's guest `webPreferences`; rig-versus-product differences are recorded with the answers.
+- 2026-11-13 — The leg runs as two parallel Developer spawns (Track A live probes, Track B static audit and census) writing disjoint files; the Flight Director folds both into this log. Neither track edits the log.
+- 2026-11-13 — This leg is a decision gate: no later leg is designed until the operator has seen its results.
+- 2026-11-13 — Design review of the leg: approve with changes, all incorporated; no second cycle (refinements only). Both tracks signalled `[LAND:leg]`; neither was interrupted by safeguards. Track B's documents are taken as reported; the Flight Director read Track A's Q2 evidence directly.
+- 2026-11-13 — **Divert raised.** Q2 failed as posed, which the flight's adaptation criteria and the operator's no-fallback ruling make a stop. `vault-fill-trust` is not designed until the operator rules. The IPC gate legs and `jar-isolation-and-downloads` do not depend on Q2.
 
 Runtime decisions not in original plan.
 

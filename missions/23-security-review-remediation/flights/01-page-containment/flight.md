@@ -1,6 +1,6 @@
 # Flight: Page Containment
 
-**Status**: ready
+**Status**: in-flight
 
 > Architect design review: **approve with changes** (2026-11-12). Second pass: approve with changes, no blocking holes; its contradictions (picker-context model, token reuse, arming rule, allowlist wording, HAT text) are resolved in the text below. First-pass changes incorporated: clickjacking and record lifecycle in DD4/DD5/DD8, format-bump probe for DD6 (Q6), arming placement in DD7, sync registrar in DD1, store validator in DD9, `ipc-gate` split in two, Q6–Q8 added.
 **Mission**: [Security Review Remediation](../../mission.md)

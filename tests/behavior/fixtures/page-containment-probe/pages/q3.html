@@ -1,0 +1,52 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>q3-pending</title>
+<head>
+  <script src="/q3-tamper.js"></script>
+</head>
+<body style="margin: 0">
+  <button id="plain" style="position: absolute; left: 20px; top: 20px; width: 120px; height: 40px">plain</button>
+  <div id="icon" style="position: absolute; left: 300px; top: 100px; width: 40px; height: 20px; background: #c33"></div>
+  <ul id="ord" style="position: absolute; left: 0; top: 500px"></ul>
+  <script>
+    (function () {
+      var sc = window.__t.sc;
+      var icon = document.getElementById('icon');
+      if (sc === 'overlay') {
+        var o = document.createElement('div');
+        o.id = 'overlay';
+        o.style.cssText = 'position:absolute;left:290px;top:90px;width:70px;height:50px;background:transparent';
+        document.body.appendChild(o);
+      } else if (sc === 'scale') {
+        icon.style.transformOrigin = '0 0';
+        icon.style.transform = 'scale(40)';
+      } else if (sc === 'opacity') {
+        icon.style.opacity = '0';
+      }
+      document.getElementById('plain').addEventListener('click', function (e) {
+        document.title = 'plain:' + e.isTrusted;
+      });
+      window.__synth = function () {
+        icon.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      };
+      window.__pageRead = function () {
+        var r = icon.getBoundingClientRect();
+        var cs = getComputedStyle(icon);
+        return {
+          elementFromPointIsIcon: document.elementFromPoint(320, 110) === icon,
+          rect: [r.left, r.top, r.width, r.height],
+          opacity: cs.opacity,
+          visibility: cs.visibility,
+          pointerEvents: cs.pointerEvents,
+          addCalls: window.__t.addCalls,
+          isTrustedOverride: window.__t.isTrustedOverride
+        };
+      };
+      window.__tryRemove = function () {
+        icon.removeEventListener('click', function () {});
+        return 'removeEventListener(page-made fn) done';
+      };
+    })();
+  </script>
+</body>
+</html>
