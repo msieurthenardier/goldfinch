@@ -6,7 +6,7 @@
 // REDESIGNED AGAIN at Flight 4 Leg 5's HAT ("look-and-feel FIX, not a
 // feature" — the operator found the round badge hard to read). Factored OUT
 // of webview-preload.js so the icon glyph, placement, focus-gating and the
-// isTrusted-guarded click / contextmenu handlers unit-test headlessly against
+// click / contextmenu handlers (no `isTrusted` read, see below) unit-test headlessly against
 // a hand-rolled fake `document` — the preload itself cannot be required under
 // `node --test` (its top-level `window` / MutationObserver / ipcRenderer
 // side-effects throw in plain Node), so the testable core lives here,
@@ -21,17 +21,31 @@
 // F2 SECURITY INVARIANTS PRESERVED HERE (do not weaken):
 //   - the icon is DECORATIVE — it holds NO credential/secret; a hostile page
 //     removing/faking it gains nothing (DD1);
-//   - its click / contextmenu are isTrusted-GUARDED via a captured getter —
-//     a scripted iconEl.click() / synthetic dispatch is ignored (DD3);
-//   - clicking sends a BARE IPC (`guest-vault-gesture`, no payload) and
-//     right-click sends a BARE IPC (`guest-vault-icon-menu`, no payload) — main
+//   - clicking sends `guest-vault-gesture` and right-click sends
+//     `guest-vault-icon-menu`, each carrying ONLY non-secret data (the icon's own
+//     bounding box, plus the validated generate-gesture info on the click) — main
 //     derives the trusted wcId from the sender; no secret ever enters the DOM.
+//
+// MISSION 23 FLIGHT 1 (leg `vault-fill-trust`, revised DD4): the page's world
+// DECIDES NOTHING about whether a click was real. This module used to drop a
+// click whose `isTrusted` (read through a captured getter) was false, but the
+// guest runs `contextIsolation:false`, so a page can spoof anything read here
+// and can send these messages itself with no click at all (leg 1's probes).
+// The check now lives in MAIN, which witnesses the guest's real pointer input
+// through `input-event` and honours a message only when a real click landed
+// inside the box reported below (src/main/vault/gesture-verifier.js). The box
+// is page-supplied — the stated residual, documented in docs/vault.md. The
+// capture classifier's own trust read (webview-preload.js) is a separate thing
+// and unchanged.
 
 // Generate-in-picker gesture payload (Mission 21, Flight 4, Leg 3 —
 // generate-in-picker, DD5/AC7): a pure, Electron-free preload module already
 // required directly by password-field-roles.test.js and vault-capture-plan.js
 // — a plain `require()` here, not an injected dep, matching that precedent.
 const { generateGestureInfo } = require('./password-field-roles');
+// Mission 23 Flight 1 (`vault-fill-trust`): the ONE time limit of a picker open, shared with main's
+// per-open picker context (an unlock between the click and the pick must not outlive the fill target).
+const { PICKER_TTL_MS } = require('../shared/vault-picker-limits');
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const ICON_ATTR = 'data-goldfinch-vault-lock';
@@ -262,7 +276,6 @@ function isFieldVisible(field) {
  * @param {any} deps.document
  * @param {any} deps.window
  * @param {any} deps.ipcRenderer
- * @param {any} deps.isTrustedGet  captured Event.prototype.isTrusted getter (or null)
  * @param {(doc: any) => Array<{username: any, password: any, form: any}>} deps.findAllLoginFields
  * @param {(doc: any) => Array<{number: any, cardholder: any, expiry: any, csc: any, form: any}>} [deps.findAllCardFields]
  *   payment-card entries (issue #152). OPTIONAL: an omitted injection yields no card
@@ -285,7 +298,6 @@ function createVaultIconController({
   document: doc,
   window: win,
   ipcRenderer,
-  isTrustedGet,
   findAllLoginFields,
   findAllCardFields,
   findAllIdentityFields,
@@ -318,7 +330,8 @@ function createVaultIconController({
   // anchors and a cross-consumption would silently mis-target.
   /** @type {{ kind: 'login'|'card'|'identity', field: any, expiresAt: number } | null} */
   let pendingFillTarget = null;
-  const FILL_TARGET_TTL_MS = 60 * 1000;
+  // Wall-clock time is deliberate here: a clock step can only lengthen or shorten one open by its own size.
+  const FILL_TARGET_TTL_MS = PICKER_TTL_MS;
 
   // Resolve the fill target for a focused anchor: the password field of the login
   // entry the anchor belongs to, the number field of its card entry, or (DD8,
@@ -380,30 +393,43 @@ function createVaultIconController({
   /** @type {ReturnType<typeof setTimeout> | null} */
   let iconTimer = null;
 
-  // Read the GENUINE isTrusted via the captured getter (contextIsolation is off,
-  // so a hostile page can override Event.prototype's getter). Annoyance-hardening
-  // only: a determined page can raise the prompt but can NEVER complete a
-  // chrome-owned fill (DD1/DD3).
-  const readTrusted = (e) => (isTrustedGet ? isTrustedGet.call(e) : e.isTrusted);
+  // The icon's own bounding box in viewport CSS pixels, read INSIDE the handler (the icon is placed by
+  // layout, so a stale measurement would lie). Main scales it by the tab's live zoom factor and checks
+  // that the real click it witnessed landed inside. Four numbers, nothing else.
+  /** @param {any} e @returns {{ x: number, y: number, width: number, height: number } | null} */
+  function iconBox(e) {
+    const el = e && e.currentTarget;
+    if (!el || typeof el.getBoundingClientRect !== 'function') return null;
+    const r = el.getBoundingClientRect();
+    return { x: r.left, y: r.top, width: r.width, height: r.height };
+  }
 
-  function onIconClick(e) {
-    if (!readTrusted(e)) return; // scripted iconEl.click() / synthetic dispatch → ignored
-    // Bind the CLICKED form's password field for the fill round-trip (finding 9) so the
-    // eventual `vault-fill` lands on THIS form, not the document's first. The icon's anchor
-    // (`_anchor`, set at placement) is the focused username/password field it decorates.
+  // Bind the fill target for the round trip to the chrome-owned picker and back (PR#112 finding 9): the
+  // icon's anchor (`_anchor`, set at placement) is the focused username/password field it decorates, and
+  // its resolved entry's field is what the eventual fill lands on — not the document's first. Human
+  // fills have NO first-form fallback any more (Mission 23 Flight 1), so BOTH handlers (the click and the
+  // native menu's "Fill login…") must bind. SINGLE-USE and TTL-bounded (`consumeFillTarget`).
+  /** @param {any} e @returns {{ kind: 'login'|'card'|'identity', field: any } | null} */
+  function bindFillTarget(e) {
     const anchor = (e && e.currentTarget && e.currentTarget._anchor) || focusedField;
     const target = targetForAnchor(anchor);
     pendingFillTarget = target
       ? { kind: target.kind, field: target.field, expiresAt: clock() + FILL_TARGET_TTL_MS }
       : null;
+    return target;
+  }
+
+  function onIconClick(e) {
+    // No `isTrusted` read: the page's world decides nothing (see the header). Main's witness is the check.
+    const target = bindFillTarget(e);
     // Generate-in-picker gesture payload (Mission 21, Flight 4, Leg 3, DD5/AC7):
     // computed ONLY for a resolved LOGIN target — a card/identity/unresolved
-    // gesture stays bare ({}), exactly as every gesture did before this leg.
+    // gesture carries no `generate` info, exactly as every gesture did before this leg.
     // The ordinal is the CLICKED entry's own index (there is one
     // findAllLoginFields entry PER password field, so a multi-password scope
     // has one ordinal per field) — never re-derived from `anchor` (which may
     // be the entry's username field, not its password field).
-    /** @type {{ generate?: any }} */
+    /** @type {{ generate?: any, box?: any }} */
     let payload = {};
     if (target && target.kind === 'login') {
       const loginEntries = findAllLoginFields(doc);
@@ -412,6 +438,7 @@ function createVaultIconController({
         payload = { generate: generateGestureInfo(loginEntries, ordinal) };
       }
     }
+    payload.box = iconBox(e);
     try {
       ipcRenderer.send('guest-vault-gesture', payload); // NO secret — wcId derived in main
     } catch {
@@ -422,14 +449,16 @@ function createVaultIconController({
   // Right-click on the decorative fill icon (I8): request the NATIVE main-process
   // context menu, never a guest-DOM menu. preventDefault() suppresses BOTH the OS
   // default menu AND the app's page-context sheet; stopPropagation keeps a hostile
-  // page's bubble-phase listeners from observing it. Same captured-isTrusted guard
-  // as onIconClick. The IPC is BARE — main derives the trusted wcId from the sender.
+  // page's bubble-phase listeners from observing it. The fill target is bound here exactly as the
+  // click handler binds it, so the menu's "Fill login…" (which sends no click of its own) still fills.
+  // The message carries only the icon's box — main derives the trusted wcId from the sender and checks
+  // its own witnessed right-button press against the box.
   function onIconContextMenu(e) {
-    if (!readTrusted(e)) return; // synthetic/scripted contextmenu → ignored (no menu)
     e.preventDefault();
     e.stopPropagation();
+    bindFillTarget(e);
     try {
-      ipcRenderer.send('guest-vault-icon-menu'); // NO payload — wcId derived in main
+      ipcRenderer.send('guest-vault-icon-menu', { box: iconBox(e) }); // NO secret — wcId derived in main
     } catch {
       /* page navigated away mid-gesture */
     }
@@ -698,4 +727,12 @@ function createVaultIconController({
   };
 }
 
-module.exports = { SVG_NS, ICON_ATTR, buildVaultLockIcon, isFieldVisible, createVaultIconController };
+module.exports = {
+  SVG_NS,
+  ICON_ATTR,
+  ICON_WIDTH,
+  ICON_HEIGHT,
+  buildVaultLockIcon,
+  isFieldVisible,
+  createVaultIconController
+};

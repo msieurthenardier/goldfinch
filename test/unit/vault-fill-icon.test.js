@@ -13,7 +13,8 @@
 //   - an icon is placed on BOTH the username and password field;
 //   - the icon appears ONLY while its field is focused, and hides on blur
 //     (deferred so a click is never eaten; mousedown preventDefault keeps focus);
-//   - click / contextmenu stay isTrusted-guarded and send the BARE IPCs;
+//   - click / contextmenu send the two gesture IPCs carrying ONLY non-secret data (Mission 23 Flight 1: the
+//     icon's box; the page's world decides nothing about trust - main witnesses the real click);
 //   - the icon is decorative — it carries no credential value/text.
 
 const { test } = require('node:test');
@@ -25,6 +26,7 @@ const {
   createVaultIconController
 } = require('../../src/preload/vault-fill-icon');
 const { findAllLoginFields } = require('../../src/preload/vault-fill-fields');
+const { PICKER_TTL_MS } = require('../../src/shared/vault-picker-limits');
 
 // --- Fake DOM -------------------------------------------------------------
 
@@ -67,7 +69,11 @@ class FakeElement {
   }
   // Fire every registered listener for a synthetic event object.
   dispatch(type, evt) {
-    for (const fn of this.listeners[type] || []) fn(evt);
+    for (const fn of this.listeners[type] || []) fn({ currentTarget: this, ...evt });
+  }
+  // The icon's own measured box (Mission 23 Flight 1: the gesture messages carry it).
+  getBoundingClientRect() {
+    return { left: 210, top: 104, width: 30, height: 16 };
   }
 }
 
@@ -118,6 +124,9 @@ function makeDoc(forms) {
     }
   };
 }
+
+// What the fake icon measures (FakeElement.getBoundingClientRect): every gesture message carries it.
+const ICON_BOX = { x: 210, y: 104, width: 30, height: 16 };
 
 function makeController(doc, sends) {
   return createVaultIconController({
@@ -353,7 +362,7 @@ test('click on the icon keeps field focus (mousedown preventDefault) so the clic
 
 // --- F2 invariants: isTrusted guard + bare IPCs ---------------------------
 
-test('click: a trusted gesture sends the guest-vault-gesture IPC (no secret, wcId derived by main); a scripted click is ignored', () => {
+test('click: the gesture IPC carries the icon box and NO secret; the page world does not judge trust (a scripted click sends it too - main refuses it)', () => {
   const user = new FakeInput('text', 'username');
   const pass = new FakeInput('password', 'password');
   const doc = makeDoc([new FakeForm([user, pass])]);
@@ -363,23 +372,22 @@ test('click: a trusted gesture sends the guest-vault-gesture IPC (no secret, wcI
   ctl.handleFocusIn({ target: pass });
   const icon = bodyIcon(doc);
 
-  // Scripted iconEl.click() → isTrusted:false → ignored.
+  // Mission 23 Flight 1 (leg `vault-fill-trust`): the page-world `isTrusted` check is GONE - a page can spoof
+  // anything read here, so a scripted iconEl.click() / synthetic dispatch is sent exactly like a real one
+  // and main's witness (which sees real input only) refuses it (src/main/vault/gesture-verifier.js, with
+  // its own unit matrix and the live spec vault-gesture-trust).
   icon.dispatch('click', { isTrusted: false });
-  assert.deepEqual(sends, [], 'a synthetic/scripted click raises nothing');
-
-  // Genuine user gesture on a resolved login target → the AC7 { generate }
-  // payload (Mission 21, Flight 4, Leg 3 — generate-in-picker); this single
-  // sign-in-shaped field (no autocomplete/tokens) classifies 'sign-in', so
-  // `generate.passwordRole` is null — still no secret, no password, no DOM
-  // value anywhere on the wire.
+  assert.equal(sends.length, 1, 'a scripted click is SENT (the page world decides nothing)');
   icon.dispatch('click', { isTrusted: true });
-  assert.equal(sends.length, 1);
-  assert.equal(sends[0].channel, 'guest-vault-gesture');
-  assert.deepEqual(
-    sends[0].payload,
-    { generate: { passwordRole: null, constraints: null } },
-    'a resolved login target always carries a generate payload — main degrades a non-"new" role to bare {wcId} (AC8)'
-  );
+  assert.equal(sends.length, 2);
+  for (const send of sends) {
+    assert.equal(send.channel, 'guest-vault-gesture');
+    // A resolved login target carries the AC7 { generate } payload (this single sign-in-shaped field
+    // classifies 'sign-in', so `generate.passwordRole` is null) plus the icon's own box: no secret, no
+    // password, no DOM value anywhere on the wire.
+    assert.deepEqual(send.payload, { generate: { passwordRole: null, constraints: null }, box: ICON_BOX });
+  }
+  assert.deepEqual(Object.keys(sends[0].payload).sort(), ['box', 'generate']);
 });
 
 test("a trusted gesture binds the clicked form's password as the single-use, TTL-bound fill target (PR#112 finding 9)", () => {
@@ -413,19 +421,19 @@ test("a trusted gesture binds the clicked form's password as the single-use, TTL
   // Single-use: a second consume is null.
   assert.equal(ctl.consumeFillTarget(), null, 'the binding is single-use');
 
-  // A scripted click binds nothing (isTrusted:false ignored).
-  ctl.handleFocusIn({ target: passA });
-  bodyIcon(doc).dispatch('click', { isTrusted: false });
-  assert.equal(ctl.consumeFillTarget(), null, 'a scripted click never binds a target');
-
-  // TTL: a gesture whose binding has aged past the window is dropped → first-field fallback.
+  // TTL: ONE shared constant with main's picker context (120 s; it was 60 s). A binding 61 s old (an
+  // unlock that took a minute) still fills; one past the limit does not (human fills have no fallback).
   ctl.handleFocusIn({ target: passA });
   bodyIcon(doc).dispatch('click', { isTrusted: true });
-  clock += 61 * 1000; // past the 60s TTL
-  assert.equal(ctl.consumeFillTarget(), null, 'an expired binding is not returned');
+  clock += 61 * 1000;
+  assert.equal(ctl.consumeFillTarget(), passA, 'a 61 s old binding is still live inside the shared 120 s limit');
+  ctl.handleFocusIn({ target: passA });
+  bodyIcon(doc).dispatch('click', { isTrusted: true });
+  clock += PICKER_TTL_MS + 1000;
+  assert.equal(ctl.consumeFillTarget(), null, 'an expired binding is not returned (nothing is filled)');
 });
 
-test('contextmenu: a trusted right-click sends the BARE guest-vault-icon-menu IPC and suppresses defaults; scripted is ignored', () => {
+test('contextmenu: the right-click sends guest-vault-icon-menu with ONLY the icon box, suppresses defaults, and binds the fill target like the click does', () => {
   const user = new FakeInput('text', 'username');
   const pass = new FakeInput('password', 'password');
   const doc = makeDoc([new FakeForm([user, pass])]);
@@ -435,34 +443,30 @@ test('contextmenu: a trusted right-click sends the BARE guest-vault-icon-menu IP
   ctl.handleFocusIn({ target: user });
   const icon = bodyIcon(doc);
 
-  // Scripted contextmenu → ignored (no menu, no default suppression needed).
-  let prevented = false;
-  icon.dispatch('contextmenu', {
-    isTrusted: false,
-    preventDefault: () => {
-      prevented = true;
-    },
-    stopPropagation() {}
-  });
-  assert.deepEqual(sends, [], 'a synthetic contextmenu raises no native menu');
-  assert.equal(prevented, false);
-
-  // Genuine right-click → bare IPC (no payload) + default/page-menu suppression.
-  let prevented2 = false;
-  let stopped = false;
-  icon.dispatch('contextmenu', {
-    isTrusted: true,
-    preventDefault: () => {
-      prevented2 = true;
-    },
-    stopPropagation: () => {
-      stopped = true;
-    }
-  });
-  assert.equal(sends.length, 1);
-  assert.equal(sends[0].channel, 'guest-vault-icon-menu');
-  assert.equal(sends[0].payload, undefined, 'no payload — bare signal');
-  assert.ok(prevented2 && stopped, 'suppresses the OS/page menu and stops propagation');
+  // No `isTrusted` judgement here either (Mission 23 Flight 1): a scripted contextmenu is sent and main
+  // refuses it for want of a witnessed right-button press.
+  for (const isTrusted of [false, true]) {
+    const flags = { prevented: false, stopped: false };
+    icon.dispatch('contextmenu', {
+      isTrusted,
+      preventDefault: () => {
+        flags.prevented = true;
+      },
+      stopPropagation: () => {
+        flags.stopped = true;
+      }
+    });
+    assert.ok(flags.prevented && flags.stopped, 'suppresses the OS/page menu and stops propagation');
+  }
+  assert.equal(sends.length, 2);
+  for (const send of sends) {
+    assert.equal(send.channel, 'guest-vault-icon-menu');
+    assert.deepEqual(send.payload, { box: ICON_BOX }, 'the box only - no secret');
+  }
+  // The menu's "Fill login…" sends no click of its own, so the target is bound HERE (human fills have no
+  // first-form fallback): the form's password field, single-use.
+  assert.equal(ctl.consumeFillTarget('login'), pass, 'the right-click bound the login target');
+  assert.equal(ctl.consumeFillTarget('login'), null, 'single-use');
 });
 
 // --- decorative: no secret rides on the icon ------------------------------
@@ -766,7 +770,8 @@ test('AC7: a classified new-password field sends the login/new generate payload'
   assert.equal(sends.length, 1);
   assert.equal(sends[0].channel, 'guest-vault-gesture');
   assert.deepEqual(sends[0].payload, {
-    generate: { passwordRole: 'new', constraints: { minLength: 10, maxLength: null, passwordRules: null } }
+    generate: { passwordRole: 'new', constraints: { minLength: 10, maxLength: null, passwordRules: null } },
+    box: ICON_BOX
   });
 });
 
@@ -779,10 +784,10 @@ test('AC7: a sign-in field sends a generate payload with a null passwordRole (no
   ctl.handleFocusIn({ target: pass });
   bodyIcon(doc).dispatch('click', { isTrusted: true });
 
-  assert.deepEqual(sends[0].payload, { generate: { passwordRole: null, constraints: null } });
+  assert.deepEqual(sends[0].payload, { generate: { passwordRole: null, constraints: null }, box: ICON_BOX });
 });
 
-test('AC7: a card gesture stays bare — {} — never a generate payload', () => {
+test('AC7: a card gesture carries no generate payload (the box only)', () => {
   const number = new FakeInput('text', 'cc-number');
   const doc = makeDoc([new FakeForm([number])]);
   const sends = [];
@@ -793,10 +798,10 @@ test('AC7: a card gesture stays bare — {} — never a generate payload', () =>
   bodyIcon(doc).dispatch('click', { isTrusted: true });
 
   assert.equal(sends.length, 1);
-  assert.deepEqual(sends[0].payload, {});
+  assert.deepEqual(sends[0].payload, { box: ICON_BOX });
 });
 
-test('AC7: an identity gesture stays bare — {} — never a generate payload', () => {
+test('AC7: an identity gesture carries no generate payload (the box only)', () => {
   const street = new FakeInput('text', 'street');
   const doc = makeDoc([new FakeForm([street])]);
   const sends = [];
@@ -806,10 +811,10 @@ test('AC7: an identity gesture stays bare — {} — never a generate payload', 
   ctl.handleFocusIn({ target: street });
   bodyIcon(doc).dispatch('click', { isTrusted: true });
 
-  assert.deepEqual(sends[0].payload, {});
+  assert.deepEqual(sends[0].payload, { box: ICON_BOX });
 });
 
-test('AC7: an unresolved anchor (targetForAnchor returns null) stays bare — {}', () => {
+test('AC7: an unresolved anchor (targetForAnchor returns null) carries no generate payload (the box only)', () => {
   // A stale/foreign anchor that no detector recognises — resolveTarget always
   // returns null — models the "unresolved" branch (AC7's third listed case).
   const user = new FakeInput('text', 'username');
@@ -830,7 +835,7 @@ test('AC7: an unresolved anchor (targetForAnchor returns null) stays bare — {}
   bodyIcon(doc).dispatch('click', { isTrusted: true });
 
   assert.equal(sends.length, 1);
-  assert.deepEqual(sends[0].payload, {});
+  assert.deepEqual(sends[0].payload, { box: ICON_BOX });
 });
 
 // --- squawk 0163: scroll/resize reposition without re-detection --------------

@@ -28,6 +28,7 @@
 
 const { withOverlaySenderLookup } = require('../helpers/fake-overlay-registry');
 const { test } = require('node:test');
+const { makeTestGate } = require('../helpers/ipc-gate-fixture');
 const assert = require('node:assert/strict');
 
 const { registerOverlayIpc } = require('../../src/main/register-overlay-ipc');
@@ -55,7 +56,7 @@ function makeHarness({ previewResult, previewThrows } = {}) {
   const notifyCalls = [];
   const sheetSender = { id: 42, isDestroyed: () => false }; // the sheet's OWN overlay webContents
   const win = { id: 1 };
-  const currentMenu = { token: 7, menuType: 'vault-import' };
+  const currentMenu = { token: 7, menuType: 'vault-import-unlock' };
   const sheet = {
     getView: () => ({ webContents: sheetSender }),
     getCurrentMenu: () => currentMenu,
@@ -83,7 +84,7 @@ function makeHarness({ previewResult, previewThrows } = {}) {
   };
 
   registerOverlayIpc({
-    ipcMain,
+    gate: makeTestGate({ ipcMain, registry, autoFrame: true }),
     registry,
     chromeForAttachment: (w) => (w === win ? chrome : null),
     chromeForTab: () => null,
@@ -100,9 +101,10 @@ function makeHarness({ previewResult, previewThrows } = {}) {
 
 test('the import handler is GATED on the vaultImportPreview injection (offline overlay tests omit it)', () => {
   const ipcMain = makeIpc();
+  const gateRegistry = withOverlaySenderLookup({ records: () => [], getWindowForChrome: () => null });
   registerOverlayIpc({
-    ipcMain,
-    registry: withOverlaySenderLookup({ records: () => [], getWindowForChrome: () => null }),
+    gate: makeTestGate({ ipcMain, registry: gateRegistry, autoFrame: true }),
+    registry: gateRegistry,
     chromeForAttachment: () => null,
     chromeForTab: () => null,
     sanitizeActivatedValue: () => undefined
@@ -268,7 +270,7 @@ test('the injected notifier is the profile-wide BROADCAST path (every chrome + e
   const sheetSender = { id: 42, isDestroyed: () => false };
   const win1 = { id: 1 };
   const win2 = { id: 2 };
-  const currentMenu = { token: 7, menuType: 'vault-import' };
+  const currentMenu = { token: 7, menuType: 'vault-import-unlock' };
   const sheet = {
     getView: () => ({ webContents: sheetSender }),
     getCurrentMenu: () => currentMenu,
@@ -316,7 +318,7 @@ test('the injected notifier is the profile-wide BROADCAST path (every chrome + e
   const vaultImportPreview = async () => ({ ok: true });
 
   registerOverlayIpc({
-    ipcMain,
+    gate: makeTestGate({ ipcMain, registry, autoFrame: true }),
     registry,
     chromeForAttachment: (w) => (w === win1 ? chrome1 : w === win2 ? chrome2 : null),
     chromeForTab: () => null,

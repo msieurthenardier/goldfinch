@@ -10,6 +10,7 @@
 // Driven with a fake ipcMain + the REAL manager over fakes and the REAL registry sender lookup.
 
 const { test } = require('node:test');
+const { makeTestGate } = require('../helpers/ipc-gate-fixture');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -41,7 +42,11 @@ async function harness(saveResult = { saved: true }) {
   rec.savePrompt = h.manager;
   rec.activeTabWcId = 7;
   const human = { captureTabOf: (id) => (id === 'cap1' ? 7 : null) };
-  registerSavePromptIpc({ ipcMain, registry, getVaultHuman: () => human });
+  registerSavePromptIpc({
+    gate: makeTestGate({ ipcMain, registry, autoFrame: true }),
+    registry,
+    getVaultHuman: () => human
+  });
   await ipcMain.handlers.get('save-prompt:open')(
     { sender: chromeSender },
     { token: 7, captureId: 'cap1', wcId: 7, model: { ...OFFER_MODEL }, anchor: 900, queue: null }
@@ -108,9 +113,10 @@ test('DD8 gap closed: a KIND guard exists the old handler lacked - a result-stat
 
 test('the retired channel is GONE: neither register-overlay-ipc nor main.js registers menu-overlay:vault-capture-save or injects vaultCaptureSave', () => {
   const ipcMain = makeIpc();
+  const gateRegistry = { records: () => [], getWindowForChrome: () => null, recordForOverlaySender: () => null };
   registerOverlayIpc({
-    ipcMain,
-    registry: { records: () => [], getWindowForChrome: () => null, recordForOverlaySender: () => null },
+    gate: makeTestGate({ ipcMain, registry: gateRegistry, autoFrame: true }),
+    registry: gateRegistry,
     chromeForAttachment: () => null,
     chromeForTab: () => null,
     sanitizeActivatedValue: () => undefined,

@@ -165,3 +165,18 @@ test('buildRegisterRecord yields mime undefined when getMimeType accessor is abs
     startTime: 5
   });
 });
+
+// Mission 23 Flight 1 (leg `downloads`): the record carries the partition it was downloaded in.
+test('buildRegisterRecord carries a known partition and omits the key when there is none', () => {
+  const item = makeFakeItem();
+  const withPartition = buildRegisterRecord(item, {
+    url: 'https://e/x',
+    startTime: 5,
+    partition: 'persist:container:work'
+  });
+  assert.equal(withPartition.partition, 'persist:container:work');
+  for (const none of [undefined, '', null, 42]) {
+    const rec = buildRegisterRecord(item, { url: 'https://e/x', startTime: 5, partition: none });
+    assert.equal('partition' in rec, false, `partition ${String(none)}`);
+  }
+});

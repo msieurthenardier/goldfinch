@@ -49,7 +49,7 @@ test('settings registrar preserves bare chrome reads and guarded internal mutati
 
 test('shields isolation-state pair returns the read-only startup decision', async () => {
   const h = makeSettingsIpcHarness({ isolateEffective: false, operatorOverride: 'disabled' });
-  assert.deepEqual(await h.bare.get('shields-isolation-state')({}), {
+  assert.deepEqual(await h.invoke('shields-isolation-state'), {
     isolateEffective: false,
     operatorOverride: 'disabled'
   });
@@ -58,7 +58,7 @@ test('shields isolation-state pair returns the read-only startup decision', asyn
     operatorOverride: 'disabled'
   });
   const on = makeSettingsIpcHarness();
-  assert.deepEqual(await on.bare.get('shields-isolation-state')({}), {
+  assert.deepEqual(await on.invoke('shields-isolation-state'), {
     isolateEffective: true,
     operatorOverride: null
   });
@@ -139,6 +139,7 @@ test('chrome-welcome-set: homePage/searchEngine write through settings.set( and 
 
 test('chrome-welcome-set: a validator throw returns {ok:false, error} rather than propagating, with no broadcast', async () => {
   const { registerSettingsIpc } = require('../../src/main/register-settings-ipc');
+  const { eventFrom, makeTestGate, makeFakeRegistry } = require('../helpers/ipc-gate-fixture');
   const bare = new Map();
   const events = [];
   const settings = {
@@ -148,8 +149,11 @@ test('chrome-welcome-set: a validator throw returns {ok:false, error} rather tha
       throw new TypeError('invalid homePage');
     }
   };
+  const ipcMain = { handle: (c, fn) => bare.set(c, fn), on: () => {} };
+  const chromeSender = { id: 'chrome' };
   registerSettingsIpc({
-    ipcMain: { handle: (c, fn) => bare.set(c, fn), on: () => {} },
+    ipcMain,
+    gate: makeTestGate({ ipcMain, registry: makeFakeRegistry({ chromeSender }) }),
     registerInternalHandler: () => {},
     settings,
     shields: { get: () => ({}), set: () => ({}), setPaused: () => ({}) },
@@ -170,7 +174,7 @@ test('chrome-welcome-set: a validator throw returns {ok:false, error} rather tha
     getMcpServer: () => null,
     adminEnabled: () => false
   });
-  const result = await bare.get('chrome-welcome-set')({}, { key: 'homePage', value: 'not-a-url' });
+  const result = await bare.get('chrome-welcome-set')(eventFrom(chromeSender), { key: 'homePage', value: 'not-a-url' });
   assert.deepEqual(result, { ok: false, error: 'invalid homePage' });
   assert.deepEqual(events, []);
 });
@@ -391,3 +395,113 @@ for (const which of ['relaunch', 'quit']) {
     assert.deepEqual(names(h), ['releaseSingleInstanceLock', 'relaunch', 'quit']);
   });
 }
+
+// ---------------------------------------------------------------------------
+// Mission 23 Flight 1 (`ipc-gate`, DD13): the chrome never receives an automation key hash.
+// ---------------------------------------------------------------------------
+
+function seedKeys(h) {
+  h.values.automationKeyHashes = { personal: 'SECRET-HASH-1', work: 'SECRET-HASH-2' };
+  h.values.automationAdminKeyHash = 'SECRET-ADMIN-HASH';
+}
+
+test('settings-get (whole object) omits both hashes and carries the derived indicator state', () => {
+  const h = makeSettingsIpcHarness();
+  seedKeys(h);
+  const all = h.invoke('settings-get');
+  assert.equal('automationKeyHashes' in all, false);
+  assert.equal('automationAdminKeyHash' in all, false);
+  assert.deepEqual(all.automationKeyState, { jarIdsWithKey: ['personal', 'work'], adminKeyEnabled: true });
+  assert.doesNotMatch(JSON.stringify(all), /SECRET/);
+  // Everything else is still there.
+  assert.equal(all.bookmarksBarEnabled, false);
+  assert.deepEqual(all.toolbarPins, { media: true, shields: true, devtools: true });
+});
+
+test('settings-get naming either hash key answers undefined; other keys and the derived state still resolve', () => {
+  const h = makeSettingsIpcHarness();
+  seedKeys(h);
+  assert.equal(h.invoke('settings-get', 'automationKeyHashes'), undefined);
+  assert.equal(h.invoke('settings-get', 'automationAdminKeyHash'), undefined);
+  assert.equal(h.invoke('settings-get', 'bookmarksBarEnabled'), false);
+  assert.deepEqual(h.invoke('settings-get', 'automationKeyState'), {
+    jarIdsWithKey: ['personal', 'work'],
+    adminKeyEnabled: true
+  });
+  // No keys → the indicator state is empty/false (hidden indicator).
+  const none = makeSettingsIpcHarness();
+  assert.deepEqual(none.invoke('settings-get', 'automationKeyState'), { jarIdsWithKey: [], adminKeyEnabled: false });
+});
+
+test('settings-get with a non-string key (array / object) answers undefined, never a hash', () => {
+  const h = makeSettingsIpcHarness();
+  seedKeys(h);
+  assert.equal(h.invoke('settings-get', ['automationKeyHashes']), undefined);
+  assert.equal(h.invoke('settings-get', ['automationAdminKeyHash']), undefined);
+  assert.equal(h.invoke('settings-get', { toString: () => 'automationAdminKeyHash' }), undefined);
+  assert.equal(h.invoke('settings-get', 42), undefined);
+});
+
+test('the settings-changed broadcast carries the projection, not the hashes (every settings-mutating handler)', async () => {
+  const h = makeSettingsIpcHarness();
+  seedKeys(h);
+  h.send('toggle-bookmarks-bar');
+  await h.invokeInternal('internal-settings-set', 'spellcheck', true);
+  await h.invokeInternal('automation:jar-key-mint', 'personal');
+  const broadcasts = h.events.filter((e) => e[0] === 'broadcast' && e[1] === 'settings-changed');
+  assert.ok(broadcasts.length >= 3, `saw ${broadcasts.length} settings-changed broadcasts`);
+  for (const [, , payload] of broadcasts) {
+    assert.equal('automationKeyHashes' in payload, false);
+    assert.equal('automationAdminKeyHash' in payload, false);
+    assert.equal(payload.automationKeyState.adminKeyEnabled, true);
+    assert.doesNotMatch(JSON.stringify(payload), /SECRET/);
+  }
+});
+
+test('internal-settings-get and automation:list-keys are unchanged: internal pages still read the store as before', async () => {
+  const h = makeSettingsIpcHarness();
+  seedKeys(h);
+  const all = h.invokeInternal('internal-settings-get');
+  assert.deepEqual(all.automationKeyHashes, { personal: 'SECRET-HASH-1', work: 'SECRET-HASH-2' });
+  assert.equal(all.automationAdminKeyHash, 'SECRET-ADMIN-HASH');
+  assert.equal(h.invokeInternal('internal-settings-get', 'automationKeyHashes').personal, 'SECRET-HASH-1');
+  const listed = await h.invokeInternal('automation:list-keys');
+  assert.equal(listed.jars.find((j) => j.id === 'personal').hasKey, true);
+  assert.equal(listed.adminKeySet, true);
+});
+
+test('every migrated settings channel refuses a page sender and a null frame; the body never runs', async () => {
+  const h = makeSettingsIpcHarness();
+  seedKeys(h);
+  const page = { sender: { id: 'page' }, senderFrame: { origin: 'https://evil.test' } };
+  const nullFrame = { sender: h.chromeSender, senderFrame: null };
+  for (const [channel, args] of [
+    ['settings-get', []],
+    ['shields-get', []],
+    ['shields-isolation-state', []],
+    ['shields-set', [{ enabled: false }]],
+    ['shields-pause', [{ site: 'a.test', paused: true }]],
+    ['chrome-clipboard-write', ['x']],
+    ['chrome-welcome-set', [{ key: 'homePage', value: 'https://x.test/' }]],
+    ['automation:get-activity', []]
+  ]) {
+    assert.throws(() => h.invokeRaw(channel, page, ...args), /forbidden/, `${channel} page`);
+    assert.throws(() => h.invokeRaw(channel, nullFrame, ...args), /forbidden/, `${channel} null frame`);
+  }
+  for (const channel of ['unpin-toolbar-item', 'toggle-bookmarks-bar']) {
+    h.sendRaw(channel, page, 'media');
+    h.sendRaw(channel, nullFrame, 'media');
+  }
+  assert.deepEqual(h.events, [], 'no refused call set, broadcast or wrote the clipboard');
+  assert.equal(h.values.bookmarksBarEnabled, false);
+});
+
+test('automation:get-activity: a trusted internal page is admitted as well as the chrome (positive chrome-or-internal class)', () => {
+  const h = makeSettingsIpcHarness();
+  const internal = {
+    senderFrame: { origin: 'goldfinch://automation' },
+    sender: { id: 9, session: { __goldfinchInternal: true } }
+  };
+  assert.deepEqual(h.invokeRaw('automation:get-activity', internal), { sessions: [], log: [] });
+  assert.deepEqual(h.invoke('automation:get-activity'), { sessions: [], log: [] });
+});

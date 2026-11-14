@@ -24,6 +24,8 @@ const { isBurnerPartition } = require('../shared/burner');
 // established main-side CJS-of-ESM pattern (`settings-store.js:24` et al.).
 const { shouldRecordLoadFailure, isChromeErrorUrl, classifyCertError } = require('../shared/load-failure');
 const { effectiveUrl } = require('./tab-entry-url');
+// Leg `prompts-and-bounds`: what the chrome is SHOWN carries no user:pass@; navigation keeps the real URL.
+const { displayUrl, failureForChrome, crashForChrome, capTitle } = require('../shared/display-url');
 // Mission 20 Flight 2 Leg 2 (DD6/DD7): the security-state enum + pure
 // derivation, and the observer's durable-copy read seam.
 const { deriveSecurityState, SECURITY_STATES } = require('../shared/site-security');
@@ -51,6 +53,21 @@ function qualifiesAsPopupRequest({ url, frameName, features, disposition }, { is
     isSafeTabUrl(url) &&
     !isInternalOpener
   );
+}
+
+/**
+ * The contents' current main-frame frame token as a plain value, or `null` when it cannot be read (a
+ * torn-down frame). The media-proxy token is bound to this identity.
+ * @param {any} wc
+ * @returns {string | null}
+ */
+function mainFrameTokenOf(wc) {
+  try {
+    const token = wc.mainFrame.frameToken;
+    return typeof token === 'string' ? token : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -120,6 +137,14 @@ function createGuestWiring(deps) {
     // never force-constructs it merely by navigating. Optional-chained at
     // every call site; an offline harness that omits it is unaffected.
     vaultHuman,
+    // Mission 23 Flight 1 (leg `vault-fill-trust`, revised DD4): the per-tab witness of REAL pointer
+    // input (`src/main/vault/gesture-witness.js`, built once in main.js and shared with the fill
+    // icon's two gesture handlers). Optional: an offline harness that omits it is unaffected.
+    gestureWitness,
+    // Mission 23 Flight 1 (leg `jar-isolation`): the per-tab media-proxy token store. A cross-document
+    // main-frame commit invalidates the tab's token unless it was minted for the now-current document;
+    // destruction drops it. Optional: an offline harness that omits it is unaffected.
+    mediaProxyTokens,
     logger
   } = deps;
 
@@ -525,6 +550,27 @@ function createGuestWiring(deps) {
     // fields) or a torn-down/absent record both resolve `undefined`, never throw.
     const resolveEntry = () => registry.getWindowForGuest(wcId)?.tabViews?.get(wcId);
 
+    // Mission 23 Flight 1 (leg `vault-fill-trust`, revised DD4): main witnesses the guest's own REAL
+    // pointer input. `input-event` fires for real input only (an MCP `click` is injected below the
+    // page, so it counts; `element.click()` / `dispatchEvent` never reach it), ahead of the page, with
+    // no page code involved, and it cannot block delivery (`before-mouse-event` can - never use that
+    // one here). Only a tab web guest is wired (never a popup, never an internal tab). The witness
+    // keeps just the last real left press, left release and right press; every other event type
+    // returns on the first line. The record is cleared when the tab's contents is destroyed (tab
+    // close, window close) and follows the tab on a window move (same wcId).
+    if (gestureWitness && !isInternalContents(wc)) {
+      wc.on('input-event', (_event, input) => {
+        if (input.type !== 'mouseDown' && input.type !== 'mouseUp') return;
+        gestureWitness.onInput(wcId, input);
+      });
+      wc.once('destroyed', () => gestureWitness.forget(wcId));
+    }
+
+    // Mission 23 Flight 1 (leg `jar-isolation`): the media-proxy token follows the tab's DOCUMENT. It is
+    // dropped when the webContents is destroyed (tab close, window close); a move between windows keeps
+    // the same webContents and so the same token. The commit half is on `did-navigate` below.
+    if (mediaProxyTokens) wc.once('destroyed', () => mediaProxyTokens.forget(wcId));
+
     // M14 F1 L2 (DD2): navigation-away is a pending-auth-challenge RESOLUTION
     // trigger — main-frame, non-same-document navigations only (a hash change
     // or an in-page pushState must not cancel a live prompt; subframe
@@ -643,7 +689,7 @@ function createGuestWiring(deps) {
         // however many times the guest re-steals it. `chromeNavPending` clears
         // right below.
         entry.chromeNavPending = false;
-        sendToChrome('tab-load-failure', { wcId, failure: entry.loadFailure });
+        sendToChrome('tab-load-failure', { wcId, failure: failureForChrome(entry.loadFailure) });
         // Mission 20 Flight 2 Leg 4 (design review, HIGH): a tab that loaded
         // securely and then fails kept its STALE security value — no push
         // fired on failure, so the chip could read "secure" for a page that
@@ -699,7 +745,7 @@ function createGuestWiring(deps) {
           owner.findOverlay?.hide();
         }
         entry.security = SECURITY_STATES.NONE;
-        sendToChrome('tab-crash', { wcId, crash: entry.crash });
+        sendToChrome('tab-crash', { wcId, crash: crashForChrome(entry.crash) });
         if (wasHung) sendToChrome('tab-hung', { wcId, hung: false });
         sendToChrome('tab-security', { wcId, security: SECURITY_STATES.NONE });
         onCrash?.({
@@ -758,6 +804,14 @@ function createGuestWiring(deps) {
         // FAMILY, not one per tab — iterate the returned array and push one
         // vault-capture-offer per entry, preserving release order; the chrome
         // queues and presents them serially (never a model-replace).
+        // Mission 23 Flight 1 (`vault-fill-trust`): a cross-document main-frame commit (including a
+        // reload) ends the tab's picker context - the page the operator looked at is gone. Deliberately
+        // NOT done on `did-navigate-in-page` (same origin; the fill-time origin check covers it).
+        vaultHuman?.()?.dropContext(wcId);
+        // Leg `jar-isolation`: the commit ends the previous document's media-proxy token unless a list
+        // from THIS document already minted one (it can arrive before the commit event). The current main
+        // frame's frame token is read as a plain value; unreadable means invalidate (fail closed).
+        mediaProxyTokens?.onCommit(wcId, mainFrameTokenOf(wc));
         const gestureOffers = vaultHuman?.()?.captureRelease(wcId) || [];
         // Sortie 06 Leg 1 (DD5/AC12): the offer carries its tab's `wcId`, and is sent ONLY
         // while that tab is its window's ACTIVE tab; otherwise the held capture is dropped
@@ -770,7 +824,7 @@ function createGuestWiring(deps) {
           }
           sendToChrome('vault-capture-offer', { captureId: gestureOffer.captureId, model: gestureOffer.model, wcId });
         }
-        sendToChrome('tab-did-navigate', { wcId, url });
+        sendToChrome('tab-did-navigate', { wcId, url: displayUrl(url) });
         // Mission 20 Flight 2 Leg 2 (DD6/DD7, FD amendment to DD7): certificate +
         // security state at each main-frame commit. Its OWN owner-routed push
         // (`tab-security`), sent right after `tab-did-navigate` — never riding
@@ -831,7 +885,7 @@ function createGuestWiring(deps) {
     wc.on(
       'did-navigate-in-page',
       guard(() => {
-        sendToChrome('tab-did-navigate-in-page', { wcId, url: wc.getURL() });
+        sendToChrome('tab-did-navigate-in-page', { wcId, url: displayUrl(wc.getURL()) });
         sendToChrome('tab-nav-state', {
           wcId,
           canGoBack: wc.navigationHistory.canGoBack(),
@@ -845,7 +899,7 @@ function createGuestWiring(deps) {
     wc.on(
       'page-title-updated',
       guard((_event, title) => {
-        sendToChrome('tab-title', { wcId, title });
+        sendToChrome('tab-title', { wcId, title: capTitle(title) });
         getHistoryRecorder()?.handleTitleUpdated(wcId, title);
         if (registry.getWindowForGuest(wcId)?.activeTabWcId === wcId) broadcastMoveTargetsChanged();
       })

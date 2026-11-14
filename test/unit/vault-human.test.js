@@ -20,7 +20,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const vs = require('../../src/main/vault/vault-store');
-const { createVaultHuman } = require('../../src/main/vault/vault-human');
+const { createAutoContextHuman } = require('../helpers/auto-context-human');
 
 const FAST_SCRYPT = { algo: 'scrypt', N: 2 ** 12, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 const MASTER = 'correct horse battery staple';
@@ -68,7 +68,7 @@ async function makeHarness(dir) {
 
   const fillCalls = [];
   const fillGeneratedCalls = [];
-  const human = createVaultHuman({
+  const human = createAutoContextHuman({
     getVaultStore: () => store,
     fromId: (id) => (urls[id] != null ? { getURL: () => urls[id] } : null),
     getTabEntry: (id) => entries.get(id),
@@ -236,12 +236,13 @@ test('fillGenerated: a burner tab is ineligible (no persistent jar) — no deleg
   }
 });
 
-test('fillGenerated: a closed tab (no origin) is ineligible', async () => {
+test('fillGenerated: a closed tab (no origin) is refused', async () => {
   const dir = tmpDir();
   try {
     const { human, fillGeneratedCalls } = await makeHarness(dir);
     const res = human.fillGenerated({ wcId: 30, candidates: ['Abc123!!'] });
-    assert.deepEqual(res, { filled: false, reason: 'ineligible' });
+    // The picker-context origin check runs first now; a closed tab has no committed origin.
+    assert.deepEqual(res, { filled: false, reason: 'origin-changed' });
     assert.equal(fillGeneratedCalls.length, 0);
   } finally {
     rm(dir);
@@ -271,7 +272,7 @@ test('fillGenerated: the vault must be set up (no store row) -> ineligible', asy
   try {
     // A store that was never set up: isSetUp() is false regardless of jar/origin.
     const store = vs.load(dir, { scryptParams: FAST_SCRYPT, getAutoLockMinutes: () => 10, listJars: () => JARS });
-    const human = createVaultHuman({
+    const human = createAutoContextHuman({
       getVaultStore: () => store,
       fromId: (id) => (id === 10 ? { getURL: () => A + '/login' } : null),
       getTabEntry: (id) => (id === 10 ? { partition: 'persist:container:work', trusted: false } : null),
@@ -293,7 +294,7 @@ test('fillGenerated: an omitted fillGeneratedDelegate refuses rather than throwi
   try {
     const store = vs.load(dir, { scryptParams: FAST_SCRYPT, getAutoLockMinutes: () => 10, listJars: () => JARS });
     await store.setup({ masterPassword: MASTER });
-    const human = createVaultHuman({
+    const human = createAutoContextHuman({
       getVaultStore: () => store,
       fromId: (id) => (id === 10 ? { getURL: () => A + '/login' } : null),
       getTabEntry: (id) => (id === 10 ? { partition: 'persist:container:work', trusted: false } : null),

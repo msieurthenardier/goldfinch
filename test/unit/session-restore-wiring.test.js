@@ -71,7 +71,9 @@ function count(hay, needle) {
 // --- anchors (pure code; identical masked and unmasked) ---
 const WHENREADY = 'const ready = app.whenReady().then(() => {';
 const BEFORE_QUIT = "app.on('before-quit', () => {";
-const BOOT_CONFIG = "ipcMain.handle('window-boot-config', (event) => {";
+// Mission 23 Flight 1: registered through the gate (`gate.chrome.handle(channel, handler, refusal)`);
+// the anchor is the channel literal plus the handler's arrow opening (Prettier's stable wrap).
+const BOOT_CONFIG = "'window-boot-config',\n    (event) => {";
 const REBUILD_BRANCH = 'if (restoreSnapshot) {';
 const RENDERER_BRANCH = 'if (bootConfig && Array.isArray(bootConfig.restoreTabs) && bootConfig.restoreTabs.length) {';
 

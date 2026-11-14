@@ -34,6 +34,7 @@
 
 const { withOverlaySenderLookup } = require('../helpers/fake-overlay-registry');
 const { test } = require('node:test');
+const { makeTestGate } = require('../helpers/ipc-gate-fixture');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -126,9 +127,10 @@ function makeOverlayHarness(main, { menuType, onStash }) {
     closeMenuOverlay: () => {}
   };
   const rec = { sheet, win };
+  const gateRegistry = withOverlaySenderLookup({ records: () => [rec], getWindowForChrome: () => null });
   registerOverlayIpc({
-    ipcMain,
-    registry: withOverlaySenderLookup({ records: () => [rec], getWindowForChrome: () => null }),
+    gate: makeTestGate({ ipcMain, registry: gateRegistry, autoFrame: true }),
+    registry: gateRegistry,
     chromeForAttachment: (w) => (w === win ? { id: 100, send: () => {} } : null),
     chromeForTab: () => null,
     sanitizeActivatedValue: () => undefined,

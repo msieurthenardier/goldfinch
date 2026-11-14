@@ -1,6 +1,7 @@
 'use strict';
 
 const { registerJarIpc } = require('../../../src/main/jar-ipc');
+const { eventFrom, makeTestGate, makeFakeRegistry } = require('../../helpers/ipc-gate-fixture');
 const { origin } = require('../../../src/main/jar-data-helpers');
 // Required once for the file: cache-busting this singleton while jars.js holds
 // its own reference would recreate the store-order hazard this harness avoids.
@@ -173,8 +174,12 @@ function makeHarness(
   const ipcMain = {
     handle(channel, fn) {
       handlers.set(channel, fn);
-    }
+    },
+    on() {}
   };
+  // A REAL gate over this fake ipcMain: `chromeSender` is the one window's chrome view.
+  const chromeSender = { id: 'chrome-sender' };
+  const gate = makeTestGate({ ipcMain, registry: makeFakeRegistry({ chromeSender }) });
 
   const session = {
     fromPartition(partition) {
@@ -227,6 +232,7 @@ function makeHarness(
 
   const result = registerJarIpc({
     ipcMain,
+    gate,
     jars,
     session,
     rerollSeed,
@@ -240,7 +246,9 @@ function makeHarness(
     certObserver
   });
 
-  const invoke = (channel, payload) => handlers.get(channel)({}, payload);
+  const invoke = (channel, payload) => handlers.get(channel)(eventFrom(chromeSender), payload);
+  // A raw event straight at the registered handler (a page sender, a null frame, ...).
+  const invokeRaw = (channel, event, payload) => handlers.get(channel)(event, payload);
   const invokeInternal = (channel, payload) => handlers.get(channel)(trustedJarsEvent(), payload);
   const broadcasts = () => events.filter((event) => event.fn === 'broadcast');
 
@@ -253,7 +261,9 @@ function makeHarness(
     historyStore,
     bookmarksStore,
     broadcastJarsChanged: result.broadcastJarsChanged,
+    chromeSender,
     invoke,
+    invokeRaw,
     invokeInternal,
     broadcasts
   };

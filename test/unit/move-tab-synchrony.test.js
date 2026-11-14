@@ -130,7 +130,7 @@ const DEFINITION_RE = /(?:\basync\s+)?function\s+moveTabIntoWindow\s*\(/;
 // and the quoted form is what a registration must contain.
 const CHANNEL = "'tab-move-to-new-window'";
 const CHANNEL_RE = /'tab-move-to-new-window'/g;
-const REGISTRATION_RE = /\bipcMain\.handle\(\s*'tab-move-to-new-window'\s*,/;
+const REGISTRATION_RE = /\bgate\.owningChrome\.handle\(\s*'tab-move-to-new-window'\s*,/;
 
 // Receiver-qualified deliberately: `tabViews.delete(` alone also matches main.js's
 // unrelated owner.tabViews.delete(wcId) in the tab-close path.
@@ -241,6 +241,9 @@ function scanTree() {
   /** @type {string[]} */
   const violations = [];
   for (const file of files) {
+    // The IPC classification table (Mission 23 Flight 1) names every channel as DATA, not as a
+    // registration site; this net counts registration anchors only.
+    if (path.basename(file) === 'ipc-channel-table.js') continue;
     const res = scanSource(fs.readFileSync(file, 'utf8'), path.relative(REPO_ROOT, file));
     anchors += res.anchors;
     channels += res.channels;
@@ -439,10 +442,7 @@ test('guard (c) FAILS a renamed channel rather than passing on nothing', () => {
   const real = realSource();
   assert.equal(scanSource(real, 'main.js').channels, 1, 'real → exactly one channel anchor');
 
-  const mutated = real.replace(
-    "ipcMain.handle('tab-move-to-new-window',",
-    "ipcMain.handle('tab-move-to-other-window',"
-  );
+  const mutated = real.replace("'tab-move-to-new-window',", "'tab-move-to-other-window',");
   assertMutated(real, mutated, 'renamed-channel');
 
   const res = scanSource(mutated, 'main.js');

@@ -175,10 +175,10 @@ export function createWindowController(deps) {
     // always present here — the multi-window sync mechanism (Ctrl+Shift+B in one
     // window, or another window's Settings checkbox, reaches every window live).
     if (all && typeof all.bookmarksBarEnabled === 'boolean') applyBookmarksBar(all.bookmarksBarEnabled);
-    // F7 (Flight 3, Leg 6 HAT): settings-changed always carries the FULL settings
-    // object (settings.getAll()), so automationKeyHashes/automationAdminKeyHash are
-    // always present here — re-derive the enabled-key state on every broadcast
-    // (mint/revoke/admin-mint/admin-revoke all fire this channel).
+    // F7 (Flight 3, Leg 6 HAT): settings-changed always carries the full settings object —
+    // minus the key hashes (Mission 23 Flight 1, DD13), with main's derived
+    // `automationKeyState` in their place — so re-derive the enabled-key state on every
+    // broadcast (mint/revoke/admin-mint/admin-revoke all fire this channel).
     if (all) updateAutomationKeyState(all);
   });
 

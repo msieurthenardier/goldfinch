@@ -6,7 +6,7 @@ const { makeHarness } = require('./helpers/jar-ipc-harness');
 
 // Registration surface
 // ---------------------------------------------------------------------------
-test('registers exactly the fourteen chrome + fourteen internal jar channels, no others', (t) => {
+test('registers exactly the nine chrome + fourteen internal jar channels, no others', (t) => {
   const h = makeHarness(t);
   assert.deepEqual([...h.handlers.keys()].sort(), [
     'internal-jars-add',
@@ -25,16 +25,12 @@ test('registers exactly the fourteen chrome + fourteen internal jar channels, no
     'internal-jars-wipe',
     'jars-add',
     'jars-clear-data',
-    'jars-cookies-list',
-    'jars-cookies-remove',
     'jars-get-default',
     'jars-list',
     'jars-remove',
     'jars-rename',
     'jars-set-default',
     'jars-set-retention',
-    'jars-sitedata-list',
-    'jars-sitedata-remove-origin',
     'jars-wipe'
   ]);
 });

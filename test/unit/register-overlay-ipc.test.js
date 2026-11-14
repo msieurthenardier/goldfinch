@@ -2,6 +2,7 @@
 
 const { withOverlaySenderLookup } = require('../helpers/fake-overlay-registry');
 const { test } = require('node:test');
+const { makeTestGate } = require('../helpers/ipc-gate-fixture');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -66,7 +67,7 @@ test('overlay registrar preserves sender roles, token checks, and close-before-a
   });
 
   registerOverlayIpc({
-    ipcMain,
+    gate: makeTestGate({ ipcMain, registry, autoFrame: true }),
     registry,
     chromeForAttachment: () => chrome,
     chromeForTab: () => chrome,
@@ -139,7 +140,7 @@ function makeCertHarness({ menuType = 'cert-picker', certSelectFromSheet } = {})
   const rec = { win: {}, sheet };
   const registry = withOverlaySenderLookup({ records: () => [rec], getWindowForChrome: () => null });
   registerOverlayIpc({
-    ipcMain,
+    gate: makeTestGate({ ipcMain, registry, autoFrame: true }),
     registry,
     chromeForAttachment: () => chrome,
     chromeForTab: () => chrome,
@@ -241,7 +242,7 @@ function makeBookmarkEditHarness({ validateBookmarkEdit, list, jarId } = {}) {
   const rec = { win: {}, sheet };
   const registry = withOverlaySenderLookup({ records: () => [rec], getWindowForChrome: () => null });
   registerOverlayIpc({
-    ipcMain,
+    gate: makeTestGate({ ipcMain, registry, autoFrame: true }),
     registry,
     chromeForAttachment: () => chrome,
     chromeForTab: () => chrome,
@@ -260,7 +261,7 @@ test('the registrar never registers menu-overlay:bookmark-edit-submit when valid
   const ipcMain = makeIpcWithHandle();
   const registry = withOverlaySenderLookup({ records: () => [], getWindowForChrome: () => null });
   registerOverlayIpc({
-    ipcMain,
+    gate: makeTestGate({ ipcMain, registry, autoFrame: true }),
     registry,
     chromeForAttachment: () => null,
     chromeForTab: () => null,
@@ -481,7 +482,7 @@ function makeOverflowDropHarness({ menuType = 'bookmarks-overflow', token = 7 } 
   const rec = { win: {}, sheet };
   const registry = withOverlaySenderLookup({ records: () => [rec], getWindowForChrome: () => null });
   registerOverlayIpc({
-    ipcMain,
+    gate: makeTestGate({ ipcMain, registry, autoFrame: true }),
     registry,
     chromeForAttachment: () => chrome,
     chromeForTab: () => chrome,
@@ -581,7 +582,7 @@ function makeSheetDragHarness({ menuType = 'bookmarks-overflow', token = 7 } = {
   const rec = { win: {}, sheet };
   const registry = withOverlaySenderLookup({ records: () => [rec], getWindowForChrome: () => null });
   registerOverlayIpc({
-    ipcMain,
+    gate: makeTestGate({ ipcMain, registry, autoFrame: true }),
     registry,
     chromeForAttachment: () => chrome,
     chromeForTab: () => chrome,
@@ -702,7 +703,7 @@ test('menu-overlay:refocus is sheet-sender-gated and never steals focus from ano
     getWindowForGuest: () => null
   });
   registerOverlayIpc({
-    ipcMain,
+    gate: makeTestGate({ ipcMain, registry, autoFrame: true }),
     registry,
     chromeForAttachment: () => null,
     chromeForTab: () => null,
@@ -764,7 +765,7 @@ function makeOpenBoundsHarness({ activeEntry = null } = {}) {
     getWindowForGuest: () => null
   });
   registerOverlayIpc({
-    ipcMain,
+    gate: makeTestGate({ ipcMain, registry, autoFrame: true }),
     registry,
     chromeForAttachment: () => null,
     chromeForTab: () => null,
@@ -875,7 +876,7 @@ function makeCertOverrideHarness({
         }
       };
   registerOverlayIpc({
-    ipcMain,
+    gate: makeTestGate({ ipcMain, registry, autoFrame: true }),
     registry,
     chromeForAttachment: () => null,
     chromeForTab: () => null,
@@ -896,7 +897,7 @@ test('the registrar never registers menu-overlay:cert-override-proceed when cert
   const ipcMain = makeIpcWithHandle();
   const registry = withOverlaySenderLookup({ records: () => [], getWindowForChrome: () => null });
   registerOverlayIpc({
-    ipcMain,
+    gate: makeTestGate({ ipcMain, registry, autoFrame: true }),
     registry,
     chromeForAttachment: () => null,
     chromeForTab: () => null,
@@ -930,18 +931,20 @@ test('cert-override-proceed guard 2 (token): a non-number token resolves {ok:fal
   assert.deepEqual(h.allowCalls, []);
 });
 
-test('cert-override-proceed guard 2 (token): no menu open at all collapses into reason "token" — no fifth reason string', async () => {
+test('cert-override-proceed: no menu open at all is refused by the gate (menu-type rule) with the sender-refusal shape — no fifth reason string', async () => {
+  // Mission 23 Flight 1 (`ipc-gate-complete`): the sheet class owns the menu-type rule, so a call
+  // with no menu open never reaches the handler's own `token` guard.
   const h = makeCertOverrideHarness({ menu: null });
   const res = await certOverrideHandler(h)({ sender: h.sheetSender }, { token: 7 });
-  assert.deepEqual(res, { ok: false, reason: 'token' });
+  assert.deepEqual(res, { ok: false, reason: 'sender' });
   assert.deepEqual(h.allowCalls, []);
   assert.deepEqual(h.events, []);
 });
 
-test('cert-override-proceed guard 3 (menu-type): a different menu current (e.g. bookmark-edit) resolves {ok:false, reason:"menu-type"}', async () => {
+test('cert-override-proceed guard 3 (menu-type): a different menu current (e.g. bookmark-edit) is refused by the gate with the sender-refusal shape', async () => {
   const h = makeCertOverrideHarness({ menu: { token: 7, menuType: 'bookmark-edit' } });
   const res = await certOverrideHandler(h)({ sender: h.sheetSender }, { token: 7 });
-  assert.deepEqual(res, { ok: false, reason: 'menu-type' });
+  assert.deepEqual(res, { ok: false, reason: 'sender' });
   assert.deepEqual(h.allowCalls, []);
   assert.deepEqual(h.loadUrlCalls, []);
   assert.deepEqual(h.events, []);
@@ -1060,4 +1063,68 @@ test('AC3: chrome-preload.js exposes no certOverride*/cert-override* method (sou
   const masked = maskComments(fs.readFileSync(chromePreloadPath, 'utf8'));
   assert.equal(/certOverride/i.test(masked), false, 'chrome-preload.js must not expose any certOverride-named method');
   assert.equal(/cert-override/i.test(masked), false, 'chrome-preload.js must not reference the cert-override channel');
+});
+
+// ---------------------------------------------------------------------------
+// Mission 23 Flight 1 (`ipc-gate-complete`): the find / owning-chrome classes at the registrar.
+// ---------------------------------------------------------------------------
+
+test('find-overlay:open is OWNING-chrome (a tab of another window is refused); :query is the find overlay only; :close is the find overlay or a chrome', () => {
+  const ipcMain = makeIpc();
+  const events = [];
+  const chromeA = { id: 1 };
+  const chromeB = { id: 2 };
+  const findSender = { isDestroyed: () => false };
+  const guest = { id: 42 };
+  const findOverlay = {
+    getView: () => ({ webContents: findSender }),
+    getSessionTabWcId: () => 42,
+    openSession: (...args) => events.push(['find-open', ...args]),
+    closeSession: (opts) => events.push(['find-close', opts]),
+    query: (payload) => events.push(['find-query', payload])
+  };
+  const recA = {
+    win: { contentView: {} },
+    chromeView: { webContents: chromeA },
+    findOverlay,
+    tabViews: new Map([[42, {}]])
+  };
+  const recB = {
+    win: { contentView: {} },
+    chromeView: { webContents: chromeB },
+    findOverlay: null,
+    tabViews: new Map()
+  };
+  const registry = withOverlaySenderLookup({
+    records: () => [recA, recB],
+    getWindowForChrome: (sender) => (sender === chromeA ? recA : sender === chromeB ? recB : null),
+    getWindowForGuest: (wcId) => (wcId === 42 ? recA : null)
+  });
+  registerOverlayIpc({
+    gate: makeTestGate({ ipcMain, registry, autoFrame: true }),
+    registry,
+    chromeForAttachment: () => null,
+    chromeForTab: () => ({ send: (...a) => events.push(['send', ...a]) }),
+    sanitizeActivatedValue: () => undefined
+  });
+  const open = ipcMain.listeners.get('find-overlay:open');
+  open({ sender: chromeA }, { wcId: 42, findText: 'x' });
+  open({ sender: chromeB }, { wcId: 42, findText: 'x' }); // window B naming A's tab
+  open({ sender: guest }, { wcId: 42, findText: 'x' });
+  open({ sender: chromeA }, { wcId: 999, findText: 'x' }); // an id that is no tab
+  assert.deepEqual(events, [['find-open', 42, 'x']]);
+  events.length = 0;
+
+  const query = ipcMain.listeners.get('find-overlay:query');
+  query({ sender: findSender }, { text: 'q' });
+  query({ sender: chromeA }, { text: 'q' });
+  query({ sender: guest }, { text: 'q' });
+  assert.deepEqual(events, [['find-query', { text: 'q' }]]);
+  events.length = 0;
+
+  const close = ipcMain.listeners.get('find-overlay:close');
+  close({ sender: guest });
+  assert.deepEqual(events, [], 'a page cannot close the find session');
+  close({ sender: chromeA });
+  assert.deepEqual(events, [['find-close', { refocusGuest: false }]], 'a chrome closes without refocusing the guest');
 });

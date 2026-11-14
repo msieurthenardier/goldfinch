@@ -13,6 +13,7 @@ const assert = require('node:assert/strict');
 
 const { registerBrowserIpc } = require('../../src/main/register-browser-ipc');
 const { registerInternalHandler } = require('../../src/main/internal-ipc');
+const { makeTestGate } = require('../helpers/ipc-gate-fixture');
 
 // registerInternalHandler(ipcMain, channel, fn) calls ipcMain.handle(channel, wrapped).
 // We drive the WRAPPED handler directly, so build the harness with an ipcMain.handle that
@@ -21,8 +22,10 @@ function makeCapturingHarness() {
   const wrapped = new Map();
   const sends = [];
   const chrome = { send: (channel, payload) => sends.push([channel, payload]) };
+  const ipcMain = { handle: (channel, fn) => wrapped.set(channel, fn), on: () => {} };
   registerBrowserIpc({
-    ipcMain: { handle: (channel, fn) => wrapped.set(channel, fn), on: () => {} },
+    ipcMain,
+    gate: makeTestGate({ ipcMain, registry: { getWindowForChrome: () => null } }),
     webContents: { fromId: () => null },
     chromeForTab: (id) => (id === 5 ? chrome : null),
     getTabContents: () => null,
@@ -193,8 +196,10 @@ function makeImportHarness({ beginResult, commitResult, labelsResult } = {}) {
   const severDismissCalls = [];
   let clearCalls = 0;
   const chrome = { id: 5, send: (channel, payload) => sends.push([channel, payload]) };
+  const ipcMain = { handle: (channel, fn) => wrapped.set(channel, fn), on: () => {} };
   registerBrowserIpc({
-    ipcMain: { handle: (channel, fn) => wrapped.set(channel, fn), on: () => {} },
+    ipcMain,
+    gate: makeTestGate({ ipcMain, registry: { getWindowForChrome: () => null } }),
     webContents: { fromId: () => null },
     chromeForTab: (id) => (id === 5 ? chrome : null),
     getTabContents: () => null,

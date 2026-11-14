@@ -19,52 +19,49 @@ function removeTempDir(dir) {
 test('exports the data registrar', () => {
   assert.equal(typeof registerJarDataIpc, 'function');
 });
-test('data chrome/internal twins receive the same handler identity before the internal wrapper', () => {
-  const chrome = new Map();
-  const internal = new Map();
-  const ipcMain = { handle: (channel, handler) => chrome.set(channel, handler) };
-  registerJarDataIpc({
-    ipcMain,
-    registerInternal: (_ipcMain, channel, handler) => internal.set(channel, handler),
-    jars: {},
-    session: {},
-    historyStore: {},
-    cookieSeen: {},
-    retentionSweep: {},
-    wipeJarData() {},
-    broadcast() {},
-    broadcastJarsChanged() {}
-  });
-  for (const operation of [
-    'clear-data',
-    'wipe',
-    'set-retention',
-    'cookies-list',
-    'cookies-remove',
-    'sitedata-list',
-    'sitedata-remove-origin'
-  ]) {
-    assert.equal(internal.get(`internal-jars-${operation}`), chrome.get(`jars-${operation}`), operation);
+test('data chrome/internal twins run the same handler body (same answer for the same payload, through the gate)', async (t) => {
+  // The chrome channel is wrapped by the IPC gate, so identity of the registered function can no
+  // longer be compared; the same underlying handler is asserted by behaviour instead.
+  const h = makeHarness(t);
+  for (const operation of ['clear-data', 'wipe', 'set-retention']) {
+    for (const payload of [{ id: 'nope' }, { id: 'personal' }, 'nope']) {
+      const viaChrome = await h.invoke(`jars-${operation}`, structuredClone(payload));
+      const viaInternal = await h.invokeInternal(`internal-jars-${operation}`, structuredClone(payload));
+      assert.deepEqual(viaChrome, viaInternal, `${operation} ${JSON.stringify(payload)}`);
+    }
   }
 });
 
-test('squawk 0141: no bare jars-cookies-value channel is registered (value only via the gated twin)', () => {
-  const chrome = new Map();
-  const internal = new Map();
-  registerJarDataIpc({
-    ipcMain: { handle: (channel, handler) => chrome.set(channel, handler) },
-    registerInternal: (_ipcMain, channel, handler) => internal.set(channel, handler),
-    jars: {},
-    session: {},
-    historyStore: {},
-    cookieSeen: {},
-    retentionSweep: {},
-    wipeJarData() {},
-    broadcast() {},
-    broadcastJarsChanged() {}
-  });
-  assert.equal(chrome.has('jars-cookies-value'), false);
-  assert.equal(internal.has('internal-jars-cookies-value'), true);
+test('the bare twins with no caller are gone: cookies list/remove and site-data list/remove have only the internal channel', (t) => {
+  const h = makeHarness(t);
+  for (const operation of ['cookies-list', 'cookies-remove', 'sitedata-list', 'sitedata-remove-origin']) {
+    assert.equal(h.handlers.has(`jars-${operation}`), false, `jars-${operation}`);
+    assert.equal(h.handlers.has(`internal-jars-${operation}`), true, `internal-jars-${operation}`);
+  }
+});
+
+test('squawk 0141: no bare jars-cookies-value channel is registered (value only via the gated twin)', (t) => {
+  const h = makeHarness(t);
+  assert.equal(h.handlers.has('jars-cookies-value'), false);
+  assert.equal(h.handlers.has('internal-jars-cookies-value'), true);
+});
+
+test('data chrome channels refuse a page sender before the handler runs, and a null frame', async (t) => {
+  const h = makeHarness(t);
+  const page = { sender: { id: 'page' }, senderFrame: { origin: 'https://evil.test' } };
+  for (const channel of ['jars-clear-data', 'jars-wipe', 'jars-set-retention']) {
+    await assert.rejects(async () => h.invokeRaw(channel, page, { id: 'personal' }), /forbidden/, channel);
+    await assert.rejects(
+      async () => h.invokeRaw(channel, { sender: h.chromeSender, senderFrame: null }, { id: 'personal' }),
+      /forbidden/,
+      channel
+    );
+  }
+  assert.deepEqual(
+    h.events.filter((e) => e.fn === 'clearStorageData' || e.fn === 'cookiesRemove'),
+    [],
+    'a refused call reached no session'
+  );
 });
 
 test('data internal twins reject an untrusted sender before invoking their shared body', (t) => {
@@ -669,7 +666,7 @@ test('jars-cookies-list maps fields and strips `value` entirely (DD7 least-privi
   const h = makeHarness(t, {
     cookiesByPartition: { 'persist:container:personal': [COOKIE_HOST_ONLY, COOKIE_DOMAIN_ATTR] }
   });
-  const result = await h.invoke('jars-cookies-list', { id: 'personal' });
+  const result = await h.invokeInternal('internal-jars-cookies-list', { id: 'personal' });
   assert.equal(result.ok, true);
   assert.deepEqual(result.cookies, [
     {
@@ -697,7 +694,7 @@ test('jars-cookies-list maps fields and strips `value` entirely (DD7 least-privi
 
 test('jars-cookies-list: empty-name cookies list too (typeof check, not truthiness)', async (t) => {
   const h = makeHarness(t, { cookiesByPartition: { 'persist:container:personal': [COOKIE_EMPTY_NAME] } });
-  const result = await h.invoke('jars-cookies-list', { id: 'personal' });
+  const result = await h.invokeInternal('internal-jars-cookies-list', { id: 'personal' });
   assert.equal(result.ok, true);
   assert.equal(result.cookies.length, 1);
   assert.equal(result.cookies[0].name, '');
@@ -705,15 +702,15 @@ test('jars-cookies-list: empty-name cookies list too (typeof check, not truthine
 
 test('jars-cookies-list rejection matrix + session-failure, no session call on rejection', async (t) => {
   const h = makeHarness(t);
-  assert.deepEqual(await h.invoke('jars-cookies-list', 'nope'), {
+  assert.deepEqual(await h.invokeInternal('internal-jars-cookies-list', 'nope'), {
     ok: false,
     error: 'jars: cookies-list — malformed-payload'
   });
-  assert.deepEqual(await h.invoke('jars-cookies-list', { id: 'nope' }), {
+  assert.deepEqual(await h.invokeInternal('internal-jars-cookies-list', { id: 'nope' }), {
     ok: false,
     error: 'jars: cookies-list — unknown-jar'
   });
-  assert.deepEqual(await h.invoke('jars-cookies-list', { id: 'burner' }), {
+  assert.deepEqual(await h.invokeInternal('internal-jars-cookies-list', { id: 'burner' }), {
     ok: false,
     error: 'jars: cookies-list — unknown-jar'
   });
@@ -722,7 +719,7 @@ test('jars-cookies-list rejection matrix + session-failure, no session call on r
 
 test('jars-cookies-list: a throwing session call returns { ok: false, error }', async (t) => {
   const h = makeHarness(t, { cookiesGetThrows: true });
-  const result = await h.invoke('jars-cookies-list', { id: 'personal' });
+  const result = await h.invokeInternal('internal-jars-cookies-list', { id: 'personal' });
   assert.deepEqual(result, { ok: false, error: 'jars: cookies-list — session-failure: cookies.get failed' });
 });
 
@@ -735,7 +732,7 @@ test('internal-jars-cookies-list shares behavior with jars-cookies-list', async 
 
 test('jars-cookies-remove: host-only cookie reconstructs a dot-free URL (DD2, spike-verified)', async (t) => {
   const h = makeHarness(t);
-  const result = await h.invoke('jars-cookies-remove', {
+  const result = await h.invokeInternal('internal-jars-cookies-remove', {
     id: 'personal',
     name: 'sid',
     domain: 'host-only.test',
@@ -755,7 +752,7 @@ test('jars-cookies-remove: host-only cookie reconstructs a dot-free URL (DD2, sp
 
 test('jars-cookies-remove: domain-attribute cookie strips the leading dot (DD2, spike-verified)', async (t) => {
   const h = makeHarness(t);
-  await h.invoke('jars-cookies-remove', {
+  await h.invokeInternal('internal-jars-cookies-remove', {
     id: 'personal',
     name: 'pref',
     domain: '.domain-cookie.test',
@@ -767,7 +764,7 @@ test('jars-cookies-remove: domain-attribute cookie strips the leading dot (DD2, 
 
 test('jars-cookies-remove: empty-name cookie is a valid removal target', async (t) => {
   const h = makeHarness(t);
-  const result = await h.invoke('jars-cookies-remove', { id: 'personal', name: '', domain: 'x.test' });
+  const result = await h.invokeInternal('internal-jars-cookies-remove', { id: 'personal', name: '', domain: 'x.test' });
   assert.deepEqual(result, { ok: true });
   assert.deepEqual(h.events[0].args, { url: 'http://x.test/', name: '' });
 });
@@ -779,7 +776,11 @@ test("jars-cookies-remove clears the cookie's cookie_seen bookkeeping row (DD7 l
   const cookieSeen = appDb.createCookieSeenStore();
   cookieSeen.insertIfAbsent('personal', 'sid', 'x.test', '/', 1000);
   cookieSeen.insertIfAbsent('personal', 'other', 'x.test', '/', 1000); // a DIFFERENT identity — must survive
-  const result = await h.invoke('jars-cookies-remove', { id: 'personal', name: 'sid', domain: 'x.test' });
+  const result = await h.invokeInternal('internal-jars-cookies-remove', {
+    id: 'personal',
+    name: 'sid',
+    domain: 'x.test'
+  });
   assert.equal(result.ok, true);
   const remaining = cookieSeen.selectExpired('personal', Number.MAX_SAFE_INTEGER);
   assert.deepEqual(
@@ -792,7 +793,11 @@ test('jars-cookies-remove: a session-throw never touches bookkeeping (fails befo
   const h = makeHarness(t, { cookiesRemoveThrows: true });
   const cookieSeen = appDb.createCookieSeenStore();
   cookieSeen.insertIfAbsent('personal', 'sid', 'x.test', '/', 1000);
-  const result = await h.invoke('jars-cookies-remove', { id: 'personal', name: 'sid', domain: 'x.test' });
+  const result = await h.invokeInternal('internal-jars-cookies-remove', {
+    id: 'personal',
+    name: 'sid',
+    domain: 'x.test'
+  });
   assert.equal(result.ok, false);
   assert.equal(
     cookieSeen.selectExpired('personal', Number.MAX_SAFE_INTEGER).length,
@@ -812,14 +817,18 @@ test('jars-cookies-remove rejection matrix returns { ok: false, error }, no sess
     ['non-string name', { id: 'personal', name: 42, domain: 'y' }, 'jars: cookies-remove — malformed-payload']
   ];
   for (const [label, payload, error] of cases) {
-    assert.deepEqual(await h.invoke('jars-cookies-remove', payload), { ok: false, error }, label);
+    assert.deepEqual(await h.invokeInternal('internal-jars-cookies-remove', payload), { ok: false, error }, label);
   }
   assert.equal(h.sessions.length, 0);
 });
 
 test('jars-cookies-remove: a throwing session call returns { ok: false, error }', async (t) => {
   const h = makeHarness(t, { cookiesRemoveThrows: true });
-  const result = await h.invoke('jars-cookies-remove', { id: 'personal', name: 'sid', domain: 'x.test' });
+  const result = await h.invokeInternal('internal-jars-cookies-remove', {
+    id: 'personal',
+    name: 'sid',
+    domain: 'x.test'
+  });
   assert.deepEqual(result, { ok: false, error: 'jars: cookies-remove — session-failure: cookies.remove failed' });
 });
 
@@ -987,7 +996,7 @@ test('jars-sitedata-list: composite union — IndexedDB-confirmed origins tier "
   const h = makeHarness(t, { storagePaths: { 'persist:container:personal': storagePath } });
   h.historyStore.seedVisit('personal', 'https://visited-only.example/page', 1000);
 
-  const result = await h.invoke('jars-sitedata-list', { id: 'personal' });
+  const result = await h.invokeInternal('internal-jars-sitedata-list', { id: 'personal' });
   assert.equal(result.ok, true);
   assert.deepEqual(result.origins, [
     { origin: 'http://127.0.0.1:54321', tier: 'stored' },
@@ -1009,14 +1018,14 @@ test('jars-sitedata-list: an origin with BOTH IndexedDB data and history activit
   const h = makeHarness(t, { storagePaths: { 'persist:container:personal': storagePath } });
   h.historyStore.seedVisit('personal', 'https://example.com/', 1000);
 
-  const result = await h.invoke('jars-sitedata-list', { id: 'personal' });
+  const result = await h.invokeInternal('internal-jars-sitedata-list', { id: 'personal' });
   assert.deepEqual(result.origins, [{ origin: 'https://example.com', tier: 'stored' }]);
 });
 
 test('jars-sitedata-list: no storagePath yields an empty stored tier, not an error', async (t) => {
   const h = makeHarness(t); // no storagePaths entry -> ses.storagePath is null
   h.historyStore.seedVisit('personal', 'https://visited-only.example/', 1000);
-  const result = await h.invoke('jars-sitedata-list', { id: 'personal' });
+  const result = await h.invokeInternal('internal-jars-sitedata-list', { id: 'personal' });
   assert.equal(result.ok, true);
   assert.deepEqual(result.origins, [{ origin: 'https://visited-only.example', tier: 'visited' }]);
 });
@@ -1025,7 +1034,7 @@ test('jars-sitedata-list: a storagePath with no IndexedDB/ dir yields an empty s
   const root = makeTempDir(); // no IndexedDB/ subdir created at all
   t.after(() => removeTempDir(root));
   const h = makeHarness(t, { storagePaths: { 'persist:container:personal': root } });
-  const result = await h.invoke('jars-sitedata-list', { id: 'personal' });
+  const result = await h.invokeInternal('internal-jars-sitedata-list', { id: 'personal' });
   assert.deepEqual(result, { ok: true, origins: [] });
 });
 
@@ -1037,33 +1046,33 @@ test('jars-sitedata-list: unparseable IndexedDB dir entries are skipped, never t
   ]);
   t.after(() => removeTempDir(storagePath));
   const h = makeHarness(t, { storagePaths: { 'persist:container:personal': storagePath } });
-  const result = await h.invoke('jars-sitedata-list', { id: 'personal' });
+  const result = await h.invokeInternal('internal-jars-sitedata-list', { id: 'personal' });
   assert.deepEqual(result, { ok: true, origins: [{ origin: 'http://127.0.0.1:1', tier: 'stored' }] });
 });
 
 test('jars-sitedata-list: a jar with no storage path and no history yields an empty (not error) list', async (t) => {
   const h = makeHarness(t);
-  const result = await h.invoke('jars-sitedata-list', { id: 'personal' });
+  const result = await h.invokeInternal('internal-jars-sitedata-list', { id: 'personal' });
   assert.deepEqual(result, { ok: true, origins: [] });
 });
 
 test('jars-sitedata-list: a history-store throw is logged and fail-soft (treated as zero visited origins, still ok:true)', async (t) => {
   const h = makeHarness(t, { historyThrows: { originsForJar: true } });
-  const result = await h.invoke('jars-sitedata-list', { id: 'personal' });
+  const result = await h.invokeInternal('internal-jars-sitedata-list', { id: 'personal' });
   assert.deepEqual(result, { ok: true, origins: [] });
 });
 
 test('jars-sitedata-list rejection matrix', async (t) => {
   const h = makeHarness(t);
-  assert.deepEqual(await h.invoke('jars-sitedata-list', 'nope'), {
+  assert.deepEqual(await h.invokeInternal('internal-jars-sitedata-list', 'nope'), {
     ok: false,
     error: 'jars: sitedata-list — malformed-payload'
   });
-  assert.deepEqual(await h.invoke('jars-sitedata-list', { id: 'nope' }), {
+  assert.deepEqual(await h.invokeInternal('internal-jars-sitedata-list', { id: 'nope' }), {
     ok: false,
     error: 'jars: sitedata-list — unknown-jar'
   });
-  assert.deepEqual(await h.invoke('jars-sitedata-list', { id: 'burner' }), {
+  assert.deepEqual(await h.invokeInternal('internal-jars-sitedata-list', { id: 'burner' }), {
     ok: false,
     error: 'jars: sitedata-list — unknown-jar'
   });
@@ -1078,7 +1087,10 @@ test('internal-jars-sitedata-list shares behavior with jars-sitedata-list', asyn
 
 test('jars-sitedata-remove-origin: clears storage classes MINUS cookies, for the exact origin', async (t) => {
   const h = makeHarness(t);
-  const result = await h.invoke('jars-sitedata-remove-origin', { id: 'personal', origin: 'https://example.com' });
+  const result = await h.invokeInternal('internal-jars-sitedata-remove-origin', {
+    id: 'personal',
+    origin: 'https://example.com'
+  });
   assert.deepEqual(result, { ok: true });
   assert.deepEqual(h.events, [
     {
@@ -1104,14 +1116,21 @@ test('jars-sitedata-remove-origin rejection matrix, no session call', async (t) 
     ['burner', { id: 'burner', origin: 'https://x.test' }, 'jars: sitedata-remove-origin — unknown-jar']
   ];
   for (const [label, payload, error] of cases) {
-    assert.deepEqual(await h.invoke('jars-sitedata-remove-origin', payload), { ok: false, error }, label);
+    assert.deepEqual(
+      await h.invokeInternal('internal-jars-sitedata-remove-origin', payload),
+      { ok: false, error },
+      label
+    );
   }
   assert.equal(h.sessions.length, 0);
 });
 
 test('jars-sitedata-remove-origin: a throwing session call returns { ok: false, error }', async (t) => {
   const h = makeHarness(t, { storageThrows: true });
-  const result = await h.invoke('jars-sitedata-remove-origin', { id: 'personal', origin: 'https://x.test' });
+  const result = await h.invokeInternal('internal-jars-sitedata-remove-origin', {
+    id: 'personal',
+    origin: 'https://x.test'
+  });
   assert.deepEqual(result, {
     ok: false,
     error: 'jars: sitedata-remove-origin — session-failure: wipe failed'

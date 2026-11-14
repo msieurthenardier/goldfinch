@@ -304,6 +304,36 @@ test('the manager onClosed dep threads to notifySheetClosed closing over the win
   assert.deepEqual(events, [['sheet-closed', rec.win.id, 'auth-basic', 'blur']]);
 });
 
+test("the sheet onClosed drops THIS window's picker contexts for a dismissed vault-picker / vault-unlock, and for nothing else (Mission 23 Flight 1, vault-fill-trust)", () => {
+  const dropped = [];
+  const h = createHarness({ dropVaultPickerContexts: (wcIds) => dropped.push(wcIds) });
+  const rec = h.factory.createWindow();
+  rec.tabViews.set(101, {});
+  rec.tabViews.set(102, {});
+  const closed = h.managerDeps.sheet.onClosed;
+  // Dismissals of the two picker menu types: every tab of the window.
+  closed({ menuType: 'vault-picker', reason: 'escape' });
+  closed({ menuType: 'vault-unlock', reason: 'outside-click' });
+  closed({ menuType: 'vault-picker', reason: 'tab-switch' });
+  assert.deepEqual(dropped, [
+    [101, 102],
+    [101, 102],
+    [101, 102]
+  ]);
+  dropped.length = 0;
+  // Not dismissals: a pick or a successful unlock (activated), a replacement (superseded), a lock.
+  for (const reason of ['activated', 'superseded', 'vault-lock', 'toggle', 'input-empty', 'unknown'])
+    closed({ menuType: 'vault-picker', reason });
+  // Not the picker menu types: kebab, suggestions, auth, other vault sheets.
+  for (const menuType of ['kebab', 'suggestions', 'auth-basic', 'vault-set', 'vault-stepup', 'downloads', null])
+    closed({ menuType, reason: 'escape' });
+  assert.deepEqual(dropped, []);
+  // Optional dep: absent is tolerated.
+  const bare = createHarness();
+  bare.factory.createWindow();
+  assert.doesNotThrow(() => bare.managerDeps.sheet.onClosed({ menuType: 'vault-picker', reason: 'escape' }));
+});
+
 test('absent authChallenges dep is tolerated on every hook (optional-chained)', () => {
   const h = createHarness();
   const rec = h.factory.createWindow();

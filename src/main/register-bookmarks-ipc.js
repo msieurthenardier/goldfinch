@@ -33,7 +33,7 @@
 // require(esm)).
 const { matchBookmarks } = require('../shared/bookmark-suggest.js');
 
-function registerBookmarksIpc({ ipcMain, bookmarksStore, jars, broadcast }) {
+function registerBookmarksIpc({ gate, bookmarksStore, jars, broadcast }) {
   /** @param {unknown} jarId */
   function isKnownJar(jarId) {
     return typeof jarId === 'string' && jars.list().some((j) => j.id === jarId);
@@ -108,12 +108,12 @@ function registerBookmarksIpc({ ipcMain, bookmarksStore, jars, broadcast }) {
     return result;
   }
 
-  ipcMain.handle('bookmarks-get', handleGet);
-  ipcMain.handle('bookmark-add', handleAdd);
-  ipcMain.handle('bookmark-update', handleUpdate);
-  ipcMain.handle('bookmark-remove', handleRemove);
-  ipcMain.handle('bookmark-reorder', handleReorder);
-  ipcMain.handle('bookmarks-suggest', handleSuggest);
+  gate.chrome.handle('bookmarks-get', handleGet, 'throw');
+  gate.chrome.handle('bookmark-add', handleAdd, 'throw');
+  gate.chrome.handle('bookmark-update', handleUpdate, 'throw');
+  gate.chrome.handle('bookmark-remove', handleRemove, 'throw');
+  gate.chrome.handle('bookmark-reorder', handleReorder, 'throw');
+  gate.chrome.handle('bookmarks-suggest', handleSuggest, 'throw');
 }
 
 module.exports = { registerBookmarksIpc };

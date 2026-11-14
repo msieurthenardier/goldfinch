@@ -119,6 +119,32 @@ Two facts that bite every iteration on internal `goldfinch://` page code (e.g.
   admin tier) — `createTab('goldfinch://vault', null, { trusted: true })`, the same idiom
   the chrome itself uses to open `goldfinch://settings` (or `goldfinch://automation`).
 
+## Making the vault fill icon appear under automation
+
+The fill icon (`[data-goldfinch-vault-lock]`) is injected on `focusin` of a login / card /
+identity field, and **no `focusin` fires unless the guest holds OS focus** — an MCP `click` alone
+leaves the focus with the chrome view, so the icon never appears and a positive case cannot run.
+Recipe (admin key; vault set up, locked or unlocked — a raised unlock sheet counts as "the sheet
+rose"; never type a master password):
+
+1. `openTab` on the page with an explicit persistent `jarId` (the dev profile restores earlier
+   tabs; take the wcId from the return value). The icon exists only for a persistent jar.
+2. On the chrome target (`getChromeTarget`) `evaluate` `window.goldfinch.focusActiveGuest()`
+   (the chrome's own guest-focus call). If the page needs the preload's IPC object (the
+   `vault-gesture-trust` fixture does), also `window.goldfinch.rescanMedia({ wcId })` once.
+3. MCP `click` on the field, then `evaluate` `document.hasFocus()` on the tab as the **positive
+   control** — it must be `true`. After any tab switch or sheet close, repeat step 2 first.
+4. Read the icon's box with `getBoundingClientRect()` (viewport CSS pixels) and click its centre.
+   At zoom `z` the **driver coordinates are the CSS coordinates times `z`** (main sees
+   `clientX x zoomFactor`; measured identical at 1, 1.5 and 0.67).
+
+The icon is removed when the field loses focus but its listeners stay on the kept element;
+`GOLDFINCH_IPC_TRACE=1` prints the gesture decisions (`[vault-gesture] accepted` / `refused
+reason=...`, `[vault-icon-menu] ...`, `[vault-gesture] context-refused reason=...`; decisions
+only). A right-button click on the icon opens a **native menu nothing can dismiss** — restart the
+app after that check. Fixture: `tests/behavior/fixtures/page-containment-probe/pages/gesture.html`
+(`node tests/behavior/fixtures/page-containment-probe/server.cjs 8231`).
+
 ## a11y audit (`npm run a11y`)
 
 axe-core audit (`scripts/a11y-audit.mjs`) against the RUNNING app over the MCP surface
@@ -192,6 +218,30 @@ Logs each step (tagged `[vault-capture]`) to the main process's console via `log
 What it prints is bounded **by construction** to non-secrets — the opaque main-minted
 `captureId`, the tab's `wcId`, the disposition mode, and the finalize outcome — **never** a
 password, a username, or an origin.
+
+### `GOLDFINCH_IPC_TRACE`
+
+Opt-in trace of IPC-gate refusals (`src/main/ipc-gate.js`, Mission 23 Flight 1). OFF by default.
+
+```bash
+GOLDFINCH_IPC_TRACE=1 npm run dev:automation
+```
+
+Prints ONE line per refused call to the main process's console:
+`[ipc-gate] refused channel=<channel> required=<class> sender=<kind>` — the class the channel
+requires (`chrome`, `owning-chrome`, `tab-guest`, `sheet`, `find`, `save-prompt`, …) and the
+sender KIND (`chrome` / `tab` / `overlay` / `other`). Never an argument, URL or title. A refused
+**invoke** additionally makes Electron print its own `Error occurred in handler for '<channel>'`
+block (channel name and source path, no arguments) whether or not the trace is on; that is not a
+trace line.
+
+The same switch also prints the vault fill-icon decisions (`src/main/vault/gesture-witness.js`,
+leg `vault-fill-trust`): one line per gesture message — `[vault-gesture] accepted`,
+`[vault-gesture] refused reason=<origin|no-real-input|bad-box|outside-box|rate>`,
+`[vault-icon-menu] accepted|refused reason=...` — and one per refused picker context at the three
+chrome-facing vault channels, `[vault-gesture] context-refused reason=<missing|stale|origin>`. A
+decision only: no URL, title, coordinate or item data. Recipe: *Making the vault fill icon appear
+under automation*.
 
 ## Crash records and dumps
 

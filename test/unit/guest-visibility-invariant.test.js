@@ -64,7 +64,7 @@ test('the helper name appears at >= 3 call sites across the two files combined',
 // refusal is now the shared `guestTakenOver(entry)` predicate (a load failure
 // OR a crash), not a bare `loadFailure` read.
 test("register-tab-ipc.js: tab-focus-guest's body references guestTakenOver (the widened focus-axis refusal)", () => {
-  const start = registerTabIpcSrc.indexOf("ipcMain.handle('tab-focus-guest'");
+  const start = registerTabIpcSrc.indexOf("'tab-focus-guest',");
   assert.ok(start !== -1, 'tab-focus-guest handler not found');
   const end = registerTabIpcSrc.indexOf('});', start);
   const body = registerTabIpcSrc.slice(start, end);
@@ -75,7 +75,7 @@ test("register-tab-ipc.js: tab-focus-guest's body references guestTakenOver (the
 });
 
 test('register-tab-ipc.js: the tab-set-active incoming-focus re-arm is gated on guestTakenOver', () => {
-  const start = registerTabIpcSrc.indexOf("ipcMain.on('tab-set-active'");
+  const start = registerTabIpcSrc.indexOf("'tab-set-active',");
   assert.ok(start !== -1, 'tab-set-active handler not found');
   assert.match(
     registerTabIpcSrc.slice(start),

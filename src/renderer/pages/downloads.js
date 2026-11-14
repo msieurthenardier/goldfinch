@@ -19,7 +19,9 @@
  *   - Pause / Resume  → in-progress (progressing/paused) only.
  *   - Cancel          → in-progress only.
  *   - Remove          → terminal only (cancel an in-progress item first).
- *   - Retry           → failed/cancelled terminal records only.
+ *   - Retry           → failed/cancelled terminal records that main marks `retryable` (it
+ *                       re-requests through the jar the download came from); otherwise one plain
+ *                       line (`retryNote`, main-worded) says why not.
  *
  * The actionable savePath is resolved MAIN-SIDE by id — the page never sends a path.
  */
@@ -96,12 +98,22 @@
     bridge
       .downloadsAction(id, action)
       .then((res) => {
-        if (res && res.error && noticeEl) {
+        if (action === 'retry' && res && res.ok === false && noticeEl) {
+          // A refused Retry shows its reason (main-worded), not the open-failure text.
+          noticeEl.textContent =
+            typeof res.message === 'string' && res.message ? res.message : 'Cannot retry this download.';
+        } else if (res && res.error && noticeEl) {
           noticeEl.textContent = 'Could not open file (it may have been moved or deleted).';
         }
         // Pause/resume/cancel change live state via broadcasts; remove/retry/clear
         // change the persisted set with no broadcast, so re-fetch to stay correct.
-        if (action === 'remove' || action === 'retry' || (res && res.ok === false)) {
+        // A refused retry must not be wiped by the rebuild (the notice would vanish) — only re-fetch
+        // when the action changed the set.
+        if (
+          action === 'remove' ||
+          (action === 'retry' && !(res && res.ok === false)) ||
+          (res && res.ok === false && action !== 'retry')
+        ) {
           refresh();
         }
       })
@@ -183,7 +195,13 @@
       addBtn('Cancel', 'cancel');
     }
     if (RETRY_STATES.has(rec.state)) {
-      addBtn('Retry', 'retry');
+      if (rec.retryable === true) {
+        addBtn('Retry', 'retry');
+      } else {
+        // Main-derived verdict: say why in one plain line instead of offering a button that cannot work.
+        notice.textContent =
+          typeof rec.retryNote === 'string' && rec.retryNote ? rec.retryNote : 'Cannot retry this download.';
+      }
     }
     if (TERMINAL_STATES.has(rec.state)) {
       addBtn('Remove', 'remove');

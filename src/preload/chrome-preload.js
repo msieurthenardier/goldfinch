@@ -448,12 +448,17 @@ contextBridge.exposeInMainWorld('goldfinch', {
   // (metadata only — never a password) and the human fill dispatch (returns
   // { filled, reason? } — the password is resolved + sent ONLY in main). Both are
   // chrome-originated invokes; the wcId is the trusted, main-derived gesture tab id.
-  vaultReachableItems: (wcId) => ipcRenderer.invoke('vault-reachable-items', wcId),
+  // Mission 23 Flight 1 (`vault-fill-trust`): all three human-fill invokes (this pair and
+  // `vaultFillGenerated`) also carry `contextId`, the per-open picker context id main minted when it
+  // accepted the gesture and pushed on `vault-gesture`; main refuses without a live context for that tab
+  // and id. `vaultReachableItems` takes `{ wcId, contextId }` and still resolves to a plain array.
+  vaultReachableItems: (payload) => ipcRenderer.invoke('vault-reachable-items', payload),
   vaultFillHuman: (payload) => ipcRenderer.invoke('vault-fill-human', payload),
   // Generate-in-picker (Mission 21, Flight 4, Leg 3, AC12): the chosen "Generate
   // strong password" row's dispatch. Carries the (main-re-validated) field
   // constraints only — NEVER a password; returns { filled } only, no secret.
   vaultFillGenerated: (payload) => ipcRenderer.invoke('vault-fill-generated', payload),
+  vaultCertificateAcknowledge: (payload) => ipcRenderer.invoke('vault-certificate-acknowledge', payload),
   // Capture-save (M12 F2 Leg 4, DD7): main forwards a save/update offer as
   // { captureId, model } (model = origin/username/mode/defaultVaultId/choices — NO
   // password). The chrome presents it in the corner save prompt (Sortie 06; it was the

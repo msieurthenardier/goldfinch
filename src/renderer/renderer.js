@@ -88,7 +88,7 @@ const { els, tabs } = ctx;
  *   title: string,
  *   url: string,
  *   favicon: string | null,
- *   media: any[],
+ *   media: any[], mediaToken?: string | null,
  *   selected: Set<string>,
  *   wcId: number | null,
  *   privacy: { net: any, fp: { canvas: number, webgl: number, audio: number }, permissions: any[], cookies: any, reloadStale: boolean },
@@ -1193,7 +1193,7 @@ window.goldfinch.onTabDidNavigate(({ wcId, url }) => {
     // Close trigger: navigation of the active tab (flight DD5).
     closeSuggestions('navigation');
   }
-  tab.media = [];
+  Object.assign(tab, { media: [], mediaToken: null });
   tab.selected.clear();
   tab.privacy = blankPrivacy();
   if (tab.id === ctx.activeTabId) {
@@ -1308,10 +1308,10 @@ window.goldfinch.onTabDomReady(({ wcId }) => {
   }
 });
 
-window.goldfinch.onTabMediaList(({ wcId, mediaList }) => {
+window.goldfinch.onTabMediaList(({ wcId, mediaList, mediaToken }) => {
   const tab = findTabByWcId(wcId);
   if (!tab) return;
-  tab.media = mediaList || [];
+  Object.assign(tab, { media: mediaList || [], mediaToken: mediaToken || null });
   if (tab.id === ctx.activeTabId) renderMedia();
 });
 

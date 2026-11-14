@@ -1,0 +1,12 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>benign</title>
+<!-- Control page: same DOM as the hostile login page, no tampering script. -->
+<body style="margin: 0">
+  <button id="plain" style="position: absolute; left: 20px; top: 20px; width: 120px; height: 40px">plain</button>
+  <script>
+    document.getElementById('plain').addEventListener('click', function (e) {
+      document.title = 'plain:' + e.isTrusted;
+    });
+  </script>
+</body>

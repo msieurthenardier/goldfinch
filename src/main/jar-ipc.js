@@ -14,6 +14,7 @@ const { registerJarDataIpc } = require('./jar-data-ipc');
 /**
  * @param {{
  *   ipcMain: { handle: (channel: string, fn: (event: any, payload?: any) => any) => void },
+ *   gate: any,
  *   jars: typeof import('./jars'),
  *   session: { fromPartition: (partition: string) => any },
  *   rerollSeed: (ses: any) => void,
@@ -29,6 +30,7 @@ const { registerJarDataIpc } = require('./jar-data-ipc');
  */
 function registerJarIpc({
   ipcMain,
+  gate,
   jars,
   session,
   rerollSeed,
@@ -66,6 +68,7 @@ function registerJarIpc({
 
   registerJarRegistryIpc({
     ipcMain,
+    gate,
     jars,
     session,
     wipeJarData,
@@ -84,6 +87,7 @@ function registerJarIpc({
 
   registerJarDataIpc({
     ipcMain,
+    gate,
     jars,
     session,
     historyStore,

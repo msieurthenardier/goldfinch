@@ -551,3 +551,27 @@ test('migration: no row, no legacy file → empty defaults, no migration side ef
     removeTempDir(dir);
   }
 });
+
+// Mission 23 Flight 1 (leg `downloads`): the validator copies `partition` (an explicit field list), and a
+// record saved before the field existed loads with none.
+test('partition round-trips through the store; a pre-field record and a malformed partition load with none', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    let store = freshStore();
+    store.load(dir);
+    store.append(rec(1, { partition: 'persist:container:work' }));
+    store.append(rec(2)); // saved before the field existed
+    store.append(rec(3, { partition: 42 }));
+    store.append(rec(4, { partition: '' }));
+
+    store = freshStore();
+    store.load(dir);
+    const byId = Object.fromEntries(store.list().map((r) => [r.id, r]));
+    assert.equal(byId[1].partition, 'persist:container:work');
+    for (const id of [2, 3, 4]) assert.equal('partition' in byId[id], false, `record ${id}`);
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});

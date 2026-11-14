@@ -43,6 +43,7 @@ const { makeHarness } = require('./helpers/jar-ipc-harness');
 const { makeSettingsIpcHarness } = require('./helpers/settings-ipc-harness');
 const appDb = require('../../src/main/app-db');
 const { registerBookmarksIpc } = require('../../src/main/register-bookmarks-ipc');
+const { eventFrom, makeTestGate, makeFakeRegistry } = require('../helpers/ipc-gate-fixture');
 
 const MUTATION_MARKERS = ['settings.set(', 'mintJarKey(', 'revokeJarKey(', 'mintAdminKey(', 'revokeAdminKey('];
 const BROADCAST_MARKER = 'settings-changed';
@@ -198,7 +199,12 @@ function broadcastsSettingsChanged(slice, broadcastHelperNames) {
 // Inline-callback registration-site extraction (main.js's original shape, now
 // also the shape of six of the nine registrar modules — see REGISTRAR_FILES below).
 // ---------------------------------------------------------------------------
-const REGISTRATION_RE = /\bipcMain\.handle\(|\bipcMain\.on\(|\bregisterInternalHandler\(ipcMain,/g;
+// Mission 23 Flight 1 (`ipc-gate`): a migrated handler registers through `gate.<class>.handle(` /
+// `gate.<class>.on(` (chrome / owningChrome / chromeOrInternal); the slice runs from the call's
+// own '(' to its matching ')', so an inline handler body and the trailing refusal argument are
+// both inside it.
+const REGISTRATION_RE =
+  /\bipcMain\.handle\(|\bipcMain\.on\(|\bregisterInternalHandler\(ipcMain,|\bgate\.\w+\.(?:handle|on)\(/g;
 
 /**
  * @param {string} source
@@ -450,6 +456,33 @@ test('mutatesSettings/broadcastsSettingsChanged classify a synthetic mutating-wi
   assert.equal(broadcastsSettingsChanged(bad), false);
   assert.equal(mutatesSettings(good), true);
   assert.equal(broadcastsSettingsChanged(good), true);
+});
+
+// Mission 23 Flight 1 (`ipc-gate`): the net still sees every migrated handler. These plants are the
+// neuter check for the new registration shapes (a gate-registered settings mutator with its
+// broadcast removed must be flagged), alongside the real-source net above.
+test('the registration pattern recognises every gate call shape, handler inline, with the refusal argument', () => {
+  const src = `
+    gate.chrome.handle('a', (_e, v) => { settings.set('k', v); broadcastSettings(); }, 'throw');
+    gate.chrome.on('b', () => { settings.set('k', 1); });
+    gate.owningChrome.handle('c', (p) => p.wcId, (_e, p) => { return p; }, 'throw');
+    gate.chromeOrInternal.handle('d', () => 1, 'throw');
+  `;
+  const found = extractMainRegistrations(src);
+  assert.deepEqual(
+    found.map((f) => f.label),
+    ['a', 'b', 'c', 'd']
+  );
+  const helpers = new Set(['broadcastSettings']);
+  const byLabel = Object.fromEntries(found.map((f) => [f.label, f.slice]));
+  assert.equal(mutatesSettings(byLabel.a), true);
+  assert.equal(broadcastsSettingsChanged(byLabel.a, helpers), true);
+  assert.equal(mutatesSettings(byLabel.b), true);
+  assert.equal(
+    broadcastsSettingsChanged(byLabel.b, helpers),
+    false,
+    'a gate-registered mutator without a broadcast is flagged'
+  );
 });
 
 test('mutatesSettings credits a handler that mutates only indirectly, through a module-scope helper (squawk 0003)', () => {
@@ -781,15 +814,18 @@ function makeBookmarksIpcHarness() {
   const ipcMain = {
     handle: (channel, fn) => {
       handlers[channel] = fn;
-    }
+    },
+    on() {}
   };
   const broadcast = (channel, payload) => events.push({ channel, payload });
+  const chromeSender = { id: 'chrome-sender' };
+  const gate = makeTestGate({ ipcMain, registry: makeFakeRegistry({ chromeSender }) });
 
-  registerBookmarksIpc({ ipcMain, bookmarksStore, jars, broadcast });
+  registerBookmarksIpc({ gate, bookmarksStore, jars, broadcast });
 
   return {
     events,
-    invoke: (channel, payload) => handlers[channel](null, payload),
+    invoke: (channel, payload) => handlers[channel](eventFrom(chromeSender), payload),
     teardown: () => {
       appDb.close();
       fs.rmSync(dir, { recursive: true, force: true });

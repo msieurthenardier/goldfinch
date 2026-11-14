@@ -81,6 +81,7 @@ This is **outward-facing** — the prerelease is public — so only tag commits 
   unknown `enable-features` name is silently ignored and header stripping no longer backs it up, so
   a bump that drops the feature would make isolation fail open with no other signal. (Also re-run
   the full store suite for `node:sqlite`.)
+- **Downloaded-file safety on the installers (operator ruling, Mission 23)** — on the Windows and macOS installers, download a file and confirm it carries the internet-origin mark (Windows Mark-of-the-Web) or the quarantine attribute (macOS), and that the system warns before running a downloaded program. If the mark is missing, writing it becomes the fix; this is not checked from CI.
 - The Windows installer now registers Goldfinch as a browser (`build/installer.nsh`: `GoldfinchHTML`
   ProgID, `StartMenuInternet\Goldfinch` Capabilities, `RegisteredApplications`) so it appears under
   Settings → Apps → Default apps; the Linux `.deb` ships a `goldfinch.desktop` with the http/https

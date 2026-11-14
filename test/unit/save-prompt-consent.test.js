@@ -6,6 +6,7 @@
 
 const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
+const { makeTestGate } = require('../helpers/ipc-gate-fixture');
 const { registerSavePromptIpc, sanitizeSavePromptModel } = require('../../src/main/register-save-prompt-ipc');
 const { createWindowRegistry } = require('../../src/main/window-registry');
 const { makeHarness, OFFER_MODEL, assertNoLiveTimers } = require('../helpers/save-prompt-fakes');
@@ -48,7 +49,7 @@ function build({ model = LOCKED_MODEL, consentResult = { ok: true } } = {}) {
     }
   };
   registerSavePromptIpc({
-    ipcMain,
+    gate: makeTestGate({ ipcMain, registry, autoFrame: true }),
     registry,
     getVaultHuman: () => human,
     vaultTrace: (step, fields) => traces.push([step, fields])

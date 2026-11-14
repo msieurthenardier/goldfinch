@@ -1,0 +1,124 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>gesture-fixture</title>
+<head>
+  <script>
+    // Fixture for behavior spec vault-gesture-trust (Mission 23 Flight 1, leg vault-fill-trust). It first-runs in
+    // the page main world and keeps the preload's IPC object the way refusal.html does (a page-patched
+    // Array.prototype.push receives Electron's emit event, whose `.sender` is the object). The page then
+    // sends the fill icon's two gesture messages ITSELF, with no click, which is exactly what a hostile page
+    // can do. Three functions are called by `evaluate`:
+    //   sendGestureNoClick()    - sends `guest-vault-gesture` with the last-seen icon box (no click at all).
+    //   sendGestureWithBox(box) - sends `guest-vault-gesture` with the box the caller names.
+    //   sendIconMenuNoClick()   - sends `guest-vault-icon-menu` with the last-seen icon box.
+    // The page also keeps a reference to the fill icon element and its last box, because the icon is removed
+    // when the field loses focus (its listeners stay attached to the kept element). Nothing secret is here.
+    (function () {
+      'use strict';
+      var held = null;
+      var keptIcon = null;
+      var keptBox = null;
+      var status = { reached: false, sent: 0, lastKind: null, iconSeen: false };
+      var origPush = Array.prototype.push;
+      Array.prototype.push = function () {
+        try {
+          if (!held) {
+            for (var i = 0; i < arguments.length && i < 8; i++) {
+              var a = arguments[i];
+              var s = a && typeof a === 'object' ? a.sender : null;
+              if (s && typeof s.invoke === 'function' && typeof s.send === 'function' && typeof s.sendSync === 'function') {
+                held = s;
+                status.reached = true;
+              }
+            }
+          }
+        } catch (e) {}
+        return origPush.apply(this, arguments);
+      };
+      function boxOf(el) {
+        var r = el.getBoundingClientRect();
+        return { x: r.left, y: r.top, width: r.width, height: r.height };
+      }
+      // Remember the icon whenever it is in the DOM (a pointer-free poll; the icon only exists while a login
+      // field holds focus).
+      function watchIcon() {
+        var el = document.querySelector('[data-goldfinch-vault-lock]');
+        if (el) {
+          keptIcon = el;
+          keptBox = boxOf(el);
+          status.iconSeen = true;
+        }
+      }
+      setInterval(watchIcon, 100);
+      function render() {
+        var s = document.getElementById('status');
+        if (s) s.textContent = JSON.stringify(status);
+        document.title = 'gesture:' + (status.reached ? 'reached' : 'waiting');
+      }
+      window.addEventListener('DOMContentLoaded', render);
+      setInterval(render, 200);
+      function fallbackBox() {
+        return keptBox || { x: 0, y: 0, width: 30, height: 16 };
+      }
+      function send(channel, box, kind) {
+        if (!held) return false;
+        try {
+          held.send(channel, { box: box });
+          status.sent += 1;
+          status.lastKind = kind;
+          return true;
+        } catch (e) {
+          return false;
+        }
+      }
+      window.sendGestureNoClick = function () {
+        watchIcon();
+        return send('guest-vault-gesture', fallbackBox(), 'gesture-no-click');
+      };
+      window.sendGestureWithBox = function (box) {
+        return send('guest-vault-gesture', box, 'gesture-with-box');
+      };
+      window.sendIconMenuNoClick = function () {
+        watchIcon();
+        return send('guest-vault-icon-menu', fallbackBox(), 'icon-menu-no-click');
+      };
+      // Helpers for the spec's steps: the kept element and its box, and a way to reach the kept element's own
+      // listeners with script-synthesised events (spec step 4).
+      window.keptIconBox = function () {
+        return keptIcon ? boxOf(keptIcon) : keptBox;
+      };
+      window.synthesizeIconClicks = function () {
+        if (!keptIcon) return false;
+        keptIcon.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+        // The icon is an SVG-rooted node on some builds, and SVG elements have no .click(): try it, never throw.
+        try {
+          if (typeof keptIcon.click === 'function') keptIcon.click();
+        } catch (e) {}
+        return true;
+      };
+      // Generic one-way send over the held IPC object (leg-04 premise measurements use it to order the page's
+      // own handlers against main's input events).
+      window.sendRaw = function (channel, arg) {
+        if (!held) return false;
+        try {
+          held.send(channel, arg);
+          return true;
+        } catch (e) {
+          return false;
+        }
+      };
+      window.hasIpcObject = function () {
+        return !!held;
+      };
+    })();
+  </script>
+</head>
+<body style="margin: 0; font-family: sans-serif">
+  <h1 id="heading" style="margin: 20px 20px 0 20px; font-size: 28px; height: 60px">Sign in</h1>
+  <form id="f" onsubmit="return false" style="margin: 20px">
+    <input id="u" name="username" autocomplete="username" type="text" style="width: 320px; height: 30px; display: block; margin-bottom: 12px" />
+    <input id="p" name="password" autocomplete="current-password" type="password" style="width: 320px; height: 30px; display: block; margin-bottom: 12px" />
+    <button id="s" type="submit" style="width: 100px; height: 32px">go</button>
+  </form>
+  <pre id="status">{}</pre>
+</body>

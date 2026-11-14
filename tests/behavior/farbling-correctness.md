@@ -3,7 +3,7 @@
 **Slug**: `farbling-correctness`
 **Status**: draft
 **Created**: 2026-06-05
-**Last Run**: 2026-06-17-17-23-30 — [run log](./farbling-correctness/runs/2026-06-17-17-23-30.md) (**PASS** on the F9 eval-tool apparatus; promotion `draft→active` deferred to the next Electron upgrade per the note below, operator's call)
+**Last Run**: 2026-11-13-22-12-51 — [run log](./farbling-correctness/runs/2026-11-13-22-12-51.md) (**PASS**, 7/7 plus three run-specific checkpoints; dev-mode env-key apparatus; still `draft` — promotion is the operator's call)
 
 > **Draft — authored during Flight 4 (CI/CD hardening) planning as a Flight-3 carry-forward; apparatus migrated to the Goldfinch MCP `evaluate` tool in Flight 9 (DD5), not yet run on it.** Run and promote to `active` **before the next Electron major upgrade** — farbling is the largest privacy-unique feature with no unit or behavior coverage, and it rides on canvas/`navigator` prototype hooks installed at document-start that a Chromium bump could silently break. The formal Witnessed run + promotion is the Flight-9 verify-integration leg (leg 8).
 

@@ -164,7 +164,10 @@ function prepareStatements() {
   const d = /** @type {import('node:sqlite').DatabaseSync} */ (db);
   statements = {
     insertVisit: d.prepare('INSERT INTO visits (jar_id, url, title, visited_at) VALUES (?, ?, ?, ?)'),
-    setTitle: d.prepare('UPDATE visits SET title = ? WHERE id = ?'),
+    // The title belongs to ONE visit: id, jar, URL and recorded time must all match. A row id is
+    // reused by SQLite after deletes, so an id alone could land on another jar's (or a later) visit.
+    // Numbered parameters throughout (never mixed with a bare `?`).
+    setTitle: d.prepare('UPDATE visits SET title = ?1 WHERE id = ?2 AND jar_id = ?3 AND url = ?4 AND visited_at = ?5'),
     listRecentNoCursor: d.prepare(
       'SELECT id, url, title, visited_at FROM visits WHERE jar_id = ? ' + 'ORDER BY visited_at DESC, id DESC LIMIT ?'
     ),
@@ -313,13 +316,22 @@ function recordVisit({ jarId, url, title, visitedAt }) {
 }
 
 /**
- * @param {number} visitId
+ * Set the title of the visit `visit` names - and only that visit. The handle `recordVisit` callers keep
+ * is `{ visitId, jarId, url, visitedAt }`; a row whose id was reissued (after a clear, prune or delete)
+ * differs in jar, URL or time and is left alone, as is a malformed handle.
+ * @param {{ visitId: number, jarId: string, url: string, visitedAt: number }} visit
  * @param {string | null} title
- * @returns {boolean} whether a row existed and was updated
+ * @returns {boolean} whether the named visit existed and was updated
  */
-function setTitle(visitId, title) {
+function setTitle(visit, title) {
   assertOpen();
-  const result = /** @type {any} */ (statements.setTitle.run(title ?? null, visitId));
+  if (!visit || typeof visit !== 'object') return false;
+  const { visitId, jarId, url, visitedAt } = visit;
+  if (typeof visitId !== 'number' && typeof visitId !== 'bigint') return false;
+  if (typeof jarId !== 'string' || jarId.length === 0) return false;
+  if (typeof url !== 'string' || url.length === 0) return false;
+  if (typeof visitedAt !== 'number' || !Number.isFinite(visitedAt)) return false;
+  const result = /** @type {any} */ (statements.setTitle.run(title ?? null, visitId, jarId, url, visitedAt));
   return result.changes > 0;
 }
 
@@ -386,6 +398,11 @@ function listByPage(jarId, { page = 1, pageSize = 50 } = {}) {
 // search
 // ---------------------------------------------------------------------------
 
+/** Longest search query considered, in characters; the rest is cut. */
+const SEARCH_QUERY_MAX_CHARS = 256;
+/** Most tokens a search expression carries; the rest are cut. */
+const SEARCH_QUERY_MAX_TOKENS = 16;
+
 /**
  * Sanitize free-text search input into an FTS5 MATCH expression (DD3,
  * mandatory): split on whitespace, strip `"` from each token, drop empties;
@@ -395,11 +412,15 @@ function listByPage(jarId, { page = 1, pageSize = 50 } = {}) {
  * @returns {string | null} the FTS5 expression, or null if nothing survives
  */
 function sanitizeSearchQuery(query) {
+  // Bounded before the expression is built (leg `prompts-and-bounds`): an over-long query is CUT, not refused.
+  // A 2,000-token pasted query once took 8 s of full-text work. The address-bar suggestion path shares this.
   const tokens = query
+    .slice(0, SEARCH_QUERY_MAX_CHARS)
     .split(/\s+/)
     .map((t) => t.replace(/"/g, ''))
     .filter((t) => t.length > 0);
   if (tokens.length === 0) return null;
+  tokens.length = Math.min(tokens.length, SEARCH_QUERY_MAX_TOKENS);
   return tokens.map((t) => `"${t}"*`).join(' ');
 }
 
@@ -661,5 +682,8 @@ module.exports = {
   pruneExpired,
   pruneOneJar,
   originsForJar,
-  expiredOriginsForJar
+  expiredOriginsForJar,
+  sanitizeSearchQuery,
+  SEARCH_QUERY_MAX_CHARS,
+  SEARCH_QUERY_MAX_TOKENS
 };

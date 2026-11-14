@@ -4,9 +4,11 @@
 // registered from the same named handler object.
 
 const { registerInternalHandler } = require('./internal-ipc');
+const { projectSettingsForChrome } = require('./settings-chrome-view');
 
 function registerJarRegistryIpc({
   ipcMain,
+  gate,
   registerInternal = registerInternalHandler,
   jars,
   session,
@@ -136,17 +138,17 @@ function registerJarRegistryIpc({
     // key list (the revoke IPC path today doesn't broadcast; this delete path
     // closes that gap).
     revokeJarKey(removed.id, settings);
-    broadcast('settings-changed', settings.getAll());
+    broadcast('settings-changed', projectSettingsForChrome(settings.getAll()));
     broadcastJarsChanged();
     return { ok: true, removed, wiped, vaultRemoved };
   }
 
-  ipcMain.handle('jars-list', handleList);
-  ipcMain.handle('jars-add', handleAdd);
-  ipcMain.handle('jars-rename', handleRename);
-  ipcMain.handle('jars-set-default', handleSetDefault);
-  ipcMain.handle('jars-get-default', handleGetDefault);
-  ipcMain.handle('jars-remove', handleRemove);
+  gate.chrome.handle('jars-list', handleList, 'throw');
+  gate.chrome.handle('jars-add', handleAdd, 'throw');
+  gate.chrome.handle('jars-rename', handleRename, 'throw');
+  gate.chrome.handle('jars-set-default', handleSetDefault, 'throw');
+  gate.chrome.handle('jars-get-default', handleGetDefault, 'throw');
+  gate.chrome.handle('jars-remove', handleRemove, 'throw');
 
   registerInternal(ipcMain, 'internal-jars-list', handleList);
   registerInternal(ipcMain, 'internal-jars-add', handleAdd);

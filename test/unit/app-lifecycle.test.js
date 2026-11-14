@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { registerAppLifecycle } = require('../../src/main/app-lifecycle');
 const { extractLaunchUrls, filterLaunchUrls } = require('../../src/shared/launch-urls');
+const { eventFrom, makeTestGate } = require('../helpers/ipc-gate-fixture');
 
 // Mission 13 Flight 3 / Leg 3 (DD3, AC2/AC3): a minimal webContents double for the
 // web-contents-created catch-all tests — just enough EventEmitter + setWindowOpenHandler
@@ -95,6 +96,7 @@ function makeHarness({
   const getTabContentsFake = () => null;
   const isInternalContentsFake = () => false;
   const parseMediaProxyUrlFake = () => null;
+  const resolveMediaProxyTokenFake = () => null;
   // DD7 (Mission 13 Flight 1 / Leg 2): one-time default-session hygiene purge.
   // `hygieneMarker` seeds the fake appDb document row (null = fresh profile,
   // never purged); `hygieneDocStoreCreatedFor` and the clear-* events below
@@ -122,12 +124,25 @@ function makeHarness({
     // Mission 20 Flight 3 Leg 3 (DD8/AC7): pruneCrashDumps reads this at ready.
     getPath: (name) => `/profile/${name}`
   };
+  const ipcMain = {
+    handle: (channel, fn) => handlers.set(channel, fn),
+    on: (channel, fn) => ipcListeners.set(channel, fn)
+  };
+  const registry = {
+    records: () => records,
+    getLastFocused: () => records.find((r) => r.win.id === lastFocusedId) || records[0] || null,
+    noteFocus: (id) => {
+      raiseLog.push(['noteFocus', id]);
+      if (records.some((r) => r.win.id === id)) lastFocusedId = id;
+    },
+    getWindowForChrome: () => bootRecord,
+    isTabViewWcId: () => false,
+    isChromeContents: () => false
+  };
   const lifecycle = registerAppLifecycle({
     app,
-    ipcMain: {
-      handle: (channel, fn) => handlers.set(channel, fn),
-      on: (channel, fn) => ipcListeners.set(channel, fn)
-    },
+    ipcMain,
+    gate: makeTestGate({ ipcMain, registry }),
     sessionRuntime: { onSessionCreated: () => events.push('session-created') },
     // M18 F2 L4 (H2 resurface): optional post-boot-config hook — passed through so
     // the boot-config test pins its placement (after the queued-send flush).
@@ -146,7 +161,7 @@ function makeHarness({
       write: () => events.push('session-write')
     },
     getUserDataPath: () => '/profile',
-    createHistoryRecorder: () => ({ recorder: true }),
+    createHistoryRecorder: () => ({ recorder: true, cancelPendingTitles: () => events.push('cancel-titles') }),
     setHistoryRecorder: () => events.push('history-recorder'),
     listJars: () => [],
     broadcast: () => {},
@@ -197,6 +212,7 @@ function makeHarness({
       return mediaProxyHandlerFn;
     },
     parseMediaProxyUrl: parseMediaProxyUrlFake,
+    resolveMediaProxyToken: resolveMediaProxyTokenFake,
     // Mission 13 Flight 3 / Leg 3 (DD3, AC2): the web-contents-created catch-all's
     // scheme predicates. Mirrors the real url-safety module closely enough for the
     // catch-all tests below (http/https/about:blank safe; goldfinch://settings the
@@ -220,17 +236,7 @@ function makeHarness({
       chromeSends.push({ rec, channel, payload });
       raiseLog.push(['send', rec.win && rec.win.id]);
     },
-    registry: {
-      records: () => records,
-      getLastFocused: () => records.find((r) => r.win.id === lastFocusedId) || records[0] || null,
-      noteFocus: (id) => {
-        raiseLog.push(['noteFocus', id]);
-        if (records.some((r) => r.win.id === id)) lastFocusedId = id;
-      },
-      getWindowForChrome: () => bootRecord,
-      isTabViewWcId: () => false,
-      isChromeContents: () => false
-    },
+    registry,
     isMcpAutomationEnabled: () => dev,
     shouldBindAutomation: (decision) => {
       events.push(['bind-decision', decision]);
@@ -331,6 +337,7 @@ function makeHarness({
     getTabContentsFake,
     isInternalContentsFake,
     parseMediaProxyUrlFake,
+    resolveMediaProxyTokenFake,
     getHygieneDocStoreCreatedFor: () => hygieneDocStoreCreatedFor,
     hygieneWrites,
     getHygieneMarker: () => hygieneMarker,
@@ -553,6 +560,8 @@ test('media proxy handler is built with the threaded deps and registered on the 
   assert.equal(deps.getTabContents, h.getTabContentsFake);
   assert.equal(deps.isInternalContents, h.isInternalContentsFake);
   assert.equal(deps.parseMediaProxyUrl, h.parseMediaProxyUrlFake);
+  // Leg `jar-isolation`: the ONE resolver the handler asks (the token store), threaded unchanged.
+  assert.equal(deps.resolveToken, h.resolveMediaProxyTokenFake);
 
   // Registration: exactly one 'goldfinch-media' handler.handle call, on the DEFAULT
   // session's protocol (never the internal session's) — using the built handler.
@@ -637,7 +646,7 @@ test('restore topology and boot-config keep saved tabs and flush queued chrome s
     chromeView: { webContents: { isDestroyed: () => false, send: (...args) => sent.push(args) } }
   };
   h.setBootRecord(rec);
-  assert.deepEqual(h.handlers.get('window-boot-config')({ sender: {} }), {
+  assert.deepEqual(h.handlers.get('window-boot-config')(eventFrom({})), {
     bootTab: false,
     restoreTabs: [{ url: 'https://example.com' }]
   });
@@ -661,7 +670,7 @@ test('window-boot-config fires the optional onChromeBooted hook AFTER the queued
     chromeView: { webContents: { isDestroyed: () => false, send: (...args) => sent.push(args) } }
   };
   h.setBootRecord(rec);
-  h.handlers.get('window-boot-config')({ sender: {} });
+  h.handlers.get('window-boot-config')(eventFrom({}));
   assert.equal(booted.length, 1, 'the hook fired exactly once');
   assert.equal(booted[0].rec, rec, 'the hook receives the booted record');
   assert.equal(booted[0].flushedFirst, true, 'queued chrome sends were flushed BEFORE the hook');
@@ -669,7 +678,7 @@ test('window-boot-config fires the optional onChromeBooted hook AFTER the queued
   const bare = makeHarness({ restore: { windows: [{ tabs: [] }] } });
   await bare.lifecycle.ready;
   bare.setBootRecord({ ...rec, pendingChromeSends: [] });
-  assert.doesNotThrow(() => bare.handlers.get('window-boot-config')({ sender: {} }));
+  assert.doesNotThrow(() => bare.handlers.get('window-boot-config')(eventFrom({})));
 });
 
 // ---------------------------------------------------------------------------
@@ -699,7 +708,7 @@ test('recoverTabs: sends chromeRecovery adopts directly, THEN flushes the queue,
     chromeView: { webContents: { isDestroyed: () => false, send: (...args) => sent.push(args) } }
   };
   h.setBootRecord(rec);
-  const result = h.handlers.get('window-boot-config')({ sender: {} });
+  const result = h.handlers.get('window-boot-config')(eventFrom({}));
   assert.deepEqual(result, { bootTab: false });
   assert.equal(rec.recoverTabs, false, 'recoverTabs is consumed');
   assert.equal(rec.bootConfigServed, true);
@@ -733,7 +742,7 @@ test('recoverTabs wins over restoreTabs — restoreTabs is left INTACT but never
     chromeView: { webContents: { isDestroyed: () => false, send: () => {} } }
   };
   h.setBootRecord(rec);
-  const result = h.handlers.get('window-boot-config')({ sender: {} });
+  const result = h.handlers.get('window-boot-config')(eventFrom({}));
   assert.deepEqual(result, { bootTab: false }, 'recoverTabs wins — never { bootTab: false, restoreTabs }');
   assert.deepEqual(rec.restoreTabs, [{ url: 'https://saved.example/' }], 'restoreTabs is left INTACT, never nulled');
 });
@@ -752,7 +761,7 @@ test('recoverTabs with zero tabViews returns { bootTab: !noBootTab } instead of 
     chromeView: { webContents: { isDestroyed: () => false, send: () => {} } }
   };
   h.setBootRecord(rec);
-  assert.deepEqual(h.handlers.get('window-boot-config')({ sender: {} }), { bootTab: true });
+  assert.deepEqual(h.handlers.get('window-boot-config')(eventFrom({})), { bootTab: true });
   assert.equal(h.chromeRecoveryCalls.length, 0, 'buildRecoveryAdopts is never called for zero tabs');
 });
 
@@ -775,7 +784,7 @@ test('recoverTabs: the gap queue is deduped last-wins per (wcId, channel), survi
     chromeView: { webContents: { isDestroyed: () => false, send: (...args) => sent.push(args) } }
   };
   h.setBootRecord(rec);
-  h.handlers.get('window-boot-config')({ sender: {} });
+  h.handlers.get('window-boot-config')(eventFrom({}));
   assert.deepEqual(sent, [
     ['adopt-tab', { wcId: 1, active: true }],
     ['tab-title', { wcId: 1, title: 'first' }],
@@ -803,7 +812,7 @@ test('recoverTabs: two no-wcId gap messages both survive the dedupe, in order, i
     chromeView: { webContents: { isDestroyed: () => false, send: (...args) => sent.push(args) } }
   };
   h.setBootRecord(rec);
-  h.handlers.get('window-boot-config')({ sender: {} });
+  h.handlers.get('window-boot-config')(eventFrom({}));
   assert.deepEqual(sent, [
     ['adopt-tab', { wcId: 1, active: true }],
     ['toast-show', { message: 'first toast' }],
@@ -843,7 +852,7 @@ test('quit path snapshots and flushes before MCP stop, then closes stores at wil
   await h.lifecycle.ready;
   h.events.length = 0;
   h.appListeners.get('before-quit')();
-  assert.deepEqual(h.events, ['quitting:true', 'session-write', 'flush-downloads', 'stop-mcp']);
+  assert.deepEqual(h.events, ['quitting:true', 'cancel-titles', 'session-write', 'flush-downloads', 'stop-mcp']);
   h.events.length = 0;
   h.appListeners.get('window-all-closed')();
   assert.deepEqual(h.events, ['stop-mcp', 'quit']);
@@ -1051,4 +1060,20 @@ test('non-darwin zero-window post-ready intake: dropped and logged, no window cr
   assert.equal(h.created.length, before);
   assert.equal(openSends(h).length, 0);
   assert.equal(h.warnLog.length, 1);
+});
+
+// Mission 23 Flight 1 (`ipc-gate`): app-quit rides the gate's chrome class.
+test('app-quit quits for a window chrome and is dropped for a sender that is not one', async () => {
+  const h = makeHarness({});
+  const quits = () => h.events.filter((e) => e === 'quit').length;
+  const quit = h.ipcListeners.get('app-quit');
+  assert.equal(typeof quit, 'function');
+  h.setBootRecord(null);
+  quit(eventFrom({ id: 'page' }));
+  assert.equal(quits(), 0, 'no window record resolves for the sender: dropped');
+  h.setBootRecord({ win: { id: 1 }, tabViews: new Map() });
+  quit({ sender: { id: 'chrome' }, senderFrame: null });
+  assert.equal(quits(), 0, 'a null senderFrame is dropped');
+  quit(eventFrom({ id: 'chrome' }));
+  assert.equal(quits(), 1);
 });

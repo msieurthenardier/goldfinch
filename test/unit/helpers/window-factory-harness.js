@@ -244,6 +244,7 @@ function createHarness(options = {}) {
       : undefined,
     computeSavePromptBounds: options.computeSavePromptBounds,
     getVaultHuman: options.getVaultHuman,
+    dropVaultPickerContexts: options.dropVaultPickerContexts,
     // M14 F1 L1: resize/maximize/unmaximize call the fullscreen re-expand hook
     // with the in-scope record — logged for the ordering assertion.
     htmlFullscreen: options.htmlFullscreen || {

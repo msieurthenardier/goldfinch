@@ -265,6 +265,31 @@ test('menu keydown ArrowUp from item 0 wraps to the last item', () => {
   menuController.closeAll();
 });
 
+// Leg `vault-picker-controls`: the vault picker opens with focus on its list CONTAINER (nothing selected),
+// so the roving code sees idx -1. ArrowUp from there goes to the LAST item (idx - 1 = -2 used to wrap to the
+// second-to-last); ArrowDown goes to the first; Home / End are unaffected.
+test('menu keydown from "nothing focused" (idx -1): ArrowUp -> LAST item, ArrowDown -> first, Home/End unchanged', () => {
+  const a = makeFakeEntry({ withItems: true, itemCount: 4 });
+  menuController.open(a.entry);
+  documentStub.activeElement = { not: 'an item' }; // the list container, not a row
+  a.menu.handlers.keydown({ key: 'ArrowUp', preventDefault() {} });
+  assert.equal(a.items[3].focusCalls, 1, 'ArrowUp from nothing focused lands on the LAST row');
+  assert.equal(a.items[2].focusCalls, 0, 'not the second-to-last');
+
+  documentStub.activeElement = { not: 'an item' };
+  a.menu.handlers.keydown({ key: 'ArrowDown', preventDefault() {} });
+  assert.equal(a.items[0].focusCalls, 1, 'ArrowDown from nothing focused lands on the first row');
+
+  documentStub.activeElement = { not: 'an item' };
+  a.menu.handlers.keydown({ key: 'Home', preventDefault() {} });
+  a.menu.handlers.keydown({ key: 'End', preventDefault() {} });
+  assert.equal(a.items[0].focusCalls, 2, 'Home -> first');
+  assert.equal(a.items[3].focusCalls, 2, 'End -> last');
+
+  documentStub.activeElement = null;
+  menuController.closeAll();
+});
+
 // ---------------------------------------------------------------------------
 // focusItem directly: wrap math (negatives + overflow)
 // ---------------------------------------------------------------------------

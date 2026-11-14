@@ -32,6 +32,9 @@ export const BURNER = Object.freeze({ id: 'burner', name: 'Burner', color: '#ff8
 // IP-handling-policy call sites (register-tab-ipc.js's tab-create web branch,
 // guest-wiring.js's popup did-create-window path): both must agree on what
 // counts as "the burner branch" without duplicating the pinned format.
+// Mission 23 Flight 1 (`ipc-gate-complete`): tightened from a prefix test to the exact shape the
+// renderer mints (`burner:<digits>`, jars-client.js `makeBurner`) so the main-side `tab-create` /
+// `identity-new` partition predicate admits nothing a hostile string could ride in on.
 export function isBurnerPartition(partition) {
-  return typeof partition === 'string' && partition.startsWith('burner:');
+  return typeof partition === 'string' && /^burner:\d+$/.test(partition);
 }

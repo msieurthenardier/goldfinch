@@ -118,7 +118,7 @@ test('toolbar pins and settings broadcasts stay independent of active-tab type',
   h.callbacks.settings({
     homePage: 'https://home.test/',
     toolbarPins: { media: true, shields: true, devtools: true },
-    automationKeyHashes: []
+    automationKeyState: { jarIdsWithKey: [], adminKeyEnabled: false }
   });
   assert.ok(h.calls.some((item) => Array.isArray(item) && item[0] === 'home'));
   assert.ok(h.calls.some((item) => Array.isArray(item) && item[0] === 'keys'));

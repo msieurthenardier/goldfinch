@@ -6,6 +6,7 @@ const { guestTakenOver } = require('../shared/load-failure');
 // Sortie 06 Leg 3: the prompt view's trusted key decision + the shared guest-focus predicate.
 const { savePromptKeyAction } = require('./save-prompt-keys');
 const { focusActiveGuest } = require('./focus-active-guest');
+const { dismissesPickerContexts } = require('./vault/picker-dismissal');
 
 /**
  * Register the sole sanctioned Electron `closed` listener. The primitive id is
@@ -66,6 +67,9 @@ function createWindowFactory(deps) {
     faviconFetcher,
     popupRegistry,
     releaseVaultHoldsForWindow,
+    // Mission 23 Flight 1 (leg `vault-fill-trust`): drop the picker contexts of the given tabs (resolved
+    // through main's memoized vault-human; never force-constructs it). Optional.
+    dropVaultPickerContexts,
     defer,
     // Squawk 0073: arms the continuous session-snapshot debounce (built + owned in
     // main.js) on new-window creation — low-value on its own (a window with zero
@@ -346,7 +350,12 @@ function createWindowFactory(deps) {
       // bucket mapping. Closes over `record` so the store gets window identity
       // natively (it holds no tokens). Fires on BOTH manager emit paths
       // (closeMenuOverlay AND the model-replace 'superseded' branch).
-      onClosed: ({ menuType, reason }) => authChallenges?.notifySheetClosed(record, menuType, reason),
+      onClosed: ({ menuType, reason }) => {
+        authChallenges?.notifySheetClosed(record, menuType, reason);
+        // Mission 23 Flight 1 (`vault-fill-trust`): a dismissed vault picker / unlock sheet ends the open.
+        // Reads only the menu type and the reason (`onClosed` names no tab), so every tab of THIS window.
+        if (dismissesPickerContexts(menuType, reason)) dropVaultPickerContexts?.([...record.tabViews.keys()]);
+      },
       // Sortie 06 Leg 1 (AC16): the corner save prompt's `sheet` timer-pause input. Read via
       // `record.savePrompt` at CALL time (the prompt is constructed just below).
       onVisibilityChanged: (visible) => record.savePrompt?.setSheetVisible(visible)

@@ -5,6 +5,7 @@
 
 const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
+const { makeTestGate } = require('../helpers/ipc-gate-fixture');
 const { registerSavePromptIpc, sanitizeSavePromptModel } = require('../../src/main/register-save-prompt-ipc');
 const { createWindowRegistry } = require('../../src/main/window-registry');
 const { makeHarness, presentShown, OFFER_MODEL, assertNoLiveTimers } = require('../helpers/save-prompt-fakes');
@@ -31,7 +32,11 @@ function build({ captureTab = 7, activeTabWcId = 7 } = {}) {
       return this.tabs.has(id) ? this.tabs.get(id) : null;
     }
   };
-  registerSavePromptIpc({ ipcMain, registry, getVaultHuman: () => human });
+  registerSavePromptIpc({
+    gate: makeTestGate({ ipcMain, registry, autoFrame: true }),
+    registry,
+    getVaultHuman: () => human
+  });
   /** the page sender is the real manager's view webContents once created */
   const pageSender = () => h.manager.getView().webContents;
   return { h, rec, registry, handlers, listeners, chromeSender, human, pageSender };
@@ -312,8 +317,9 @@ test('presentShown helper sanity: a missing vault-human refuses an OFFER open (f
   const rec = registry.create({ win: { id: 1 }, chromeView: { webContents: chromeSender } });
   rec.savePrompt = h.manager;
   rec.activeTabWcId = 7;
+  const ipcMain = { handle: (c, f) => handlers.set(c, f), on() {} };
   registerSavePromptIpc({
-    ipcMain: { handle: (c, f) => handlers.set(c, f), on() {} },
+    gate: makeTestGate({ ipcMain, registry, autoFrame: true }),
     registry,
     getVaultHuman: () => null
   });

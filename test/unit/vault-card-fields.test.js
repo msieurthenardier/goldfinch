@@ -476,6 +476,22 @@ test('an out-of-range ordinal falls back to the first detected entry', () => {
   assert.equal(f.number.value, '4242424242424242');
 });
 
+test('requireOrdinal (human fills, Mission 23 Flight 1): no valid ordinal fills nothing; the default keeps the first-entry fallback', () => {
+  const a = cardForm();
+  const b = cardForm();
+  const doc = makeDoc([new FakeForm([a.number, a.csc]), new FakeForm([b.number, b.csc])]);
+  for (const ordinal of [null, undefined, 99, -1, 0.5]) {
+    assert.deepEqual(fillCardForm(doc, CARD, ordinal, { requireOrdinal: true }), { filled: false, fields: [] });
+  }
+  assert.equal(a.number.value, '');
+  assert.equal(b.number.value, '');
+  assert.equal(fillCardForm(doc, CARD, 1, { requireOrdinal: true }).filled, true);
+  assert.equal(b.number.value, '4242424242424242');
+  assert.equal(a.number.value, '');
+  fillCardForm(doc, CARD, 99); // default: first detected entry
+  assert.equal(a.number.value, '4242424242424242');
+});
+
 // --- squawk 0091: underscore-joined prefixes, WITHOUT the placeholder crutch --
 // The pre-existing Jostens test above supplies `placeholder: 'Name on Card'` /
 // 'Security Code' — the exact crutch squawk 0091 names as non-general (those

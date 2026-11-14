@@ -217,3 +217,22 @@ test('flushInterrupted tolerates a store.append throw (best-effort)', () => {
   mgr.register({ filename: 'a.bin' });
   assert.doesNotThrow(() => mgr.flushInterrupted(), 'a throwing append must not propagate');
 });
+
+// Mission 23 Flight 1 (leg `downloads`): the partition rides the record through every builder.
+test('partition is held on the in-progress record and copied to the terminal record and the interrupted flush', () => {
+  const store = makeFakeStore();
+  const m = createManager(store);
+  const withPartition = m.register({ url: 'https://e/a', filename: 'a', partition: 'persist:container:work' });
+  const without = m.register({ url: 'https://e/b', filename: 'b' });
+  const flushed = m.register({ url: 'https://e/c', filename: 'c', partition: 'burner:2' });
+  assert.equal(m.listAll().find((r) => r.id === withPartition).partition, 'persist:container:work');
+  assert.equal('partition' in m.listAll().find((r) => r.id === without), false);
+  m.finalize(withPartition, { state: 'completed' });
+  m.finalize(without, { state: 'completed' });
+  m.flushInterrupted();
+  const byId = Object.fromEntries(store._records().map((r) => [r.id, r]));
+  assert.equal(byId[withPartition].partition, 'persist:container:work');
+  assert.equal('partition' in byId[without], false);
+  assert.equal(byId[flushed].partition, 'burner:2');
+  assert.equal(byId[flushed].state, 'interrupted');
+});

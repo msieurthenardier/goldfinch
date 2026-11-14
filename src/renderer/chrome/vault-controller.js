@@ -1,7 +1,14 @@
 // @ts-check
 
 import { buildVaultIndicatorModel } from '../../shared/vault-indicator-model.js';
-import { parsePickIndex, MANAGE_ID, GENERATE_ID, UNLOCK_ID } from '../../shared/vault-picker-template.js';
+import {
+  parsePickIndex,
+  MANAGE_ID,
+  GENERATE_ID,
+  UNLOCK_ID,
+  CERTIFICATE_CONTINUE_ID,
+  CONFIRM_FILL_ID
+} from '../../shared/vault-picker-template.js';
 import { savePromptCloseEffects } from '../../shared/save-prompt-close-effects.js';
 import { createSavePromptClient } from './save-prompt-client.js';
 
@@ -48,7 +55,8 @@ export function createVaultController({
   openToolbarContextMenu = () => {}
 }) {
   // Human vault flow state machine (M12 F2 Leg 3 pick-and-fill, DD5/DD6). A TRUSTED
-  // lock-icon gesture arrives as { wcId } (main-derived, no secret). From there:
+  // lock-icon gesture arrives as { wcId, contextId, destination, certificate } (main-derived, no
+  // secret; Mission 23 Flight 1 leg `vault-fill-trust` added the last three). From there:
   //   gesture → (unlock if locked, via the Leg-2 vault-unlock sheet) → pick (the
   //   badged vault-picker sheet) → fill (F1's vault-fill channel, in MAIN only).
   // The chrome never sees a password: the picker model is metadata, the selection is
@@ -66,7 +74,22 @@ export function createVaultController({
   // (onVaultLockState below) can re-show the Generate row once the picker actually
   // opens, and the GENERATE_ID activation (handleActivation below) has the
   // constraints to hand to `vaultFillGenerated`.
-  /** @type {{ wcId: number, phase: 'unlocking' | 'picking', generate?: { canGenerate: boolean, constraints: any } | null } | null} */
+  //
+  // Mission 23 Flight 1 (`vault-fill-trust`): `contextId` is the per-open picker context main minted when
+  // it ACCEPTED the gesture; `destination` (the display string of the page the fill would go to) and
+  // `certificate` (the tab's navigation carries a certificate override) ride with it. All three travel
+  // through EVERY hop - the unlocked picker, the locked generate/unlock two-row picker, the unlock row,
+  // the picker that follows an unlock and the `locked` re-raise after a pick - because every
+  // chrome-facing vault channel (`vaultReachableItems`, `vaultFillHuman`, `vaultFillGenerated`) is refused
+  // by main without the live context id.
+  //
+  // Leg `vault-picker-controls`: `destination` is passed to EVERY picker open (a picker with no destination
+  // is not opened); `certificate` makes the gesture handler open the certificate WARNING view first on every
+  // branch (phase 'certificate'), and Continue acknowledges it in main before the branch runs; a card or
+  // identity on a site it has not been confirmed for comes back `confirm-needed` and the flow is restored
+  // in phase 'confirming' holding the picked row (`item`) while the confirmation view is up - the same way
+  // the `locked` answer restores it for the unlock sheet. Only that view's Fill sends `confirm: true`.
+  /** @type {{ wcId: number, contextId: string, destination: string, certificate: boolean, phase: 'unlocking' | 'picking' | 'certificate' | 'confirming', generate?: { canGenerate: boolean, constraints: any } | null, item?: any } | null} */
   let pendingVaultFlow = null;
   /** @type {any[]} the last picker model — the index→item source for dispatch. */
   let lastPickerModel = [];
@@ -117,12 +140,14 @@ export function createVaultController({
    * `generate` (Mission 21, Flight 4, Leg 3, AC10), when `canGenerate`, PREPENDS a
    * `{ action: 'generate' }` row ahead of every real item — the unlocked branch of
    * DD5's picker row.
-   * @param {number} wcId
-   * @param {{ canGenerate: boolean, constraints: any } | null} [generate] */
-  async function openVaultPicker(wcId, generate) {
+   * @param {{ wcId: number, contextId: string, destination?: string, generate?: { canGenerate: boolean, constraints: any } | null }} flow
+   *   the pending flow (its `contextId` is what main checks) */
+  async function openVaultPicker(flow) {
+    const { wcId, contextId, generate } = flow;
+    if (!hasDestination(flow)) return; // never open a picker that cannot say where a fill would go
     let model;
     try {
-      model = await goldfinch.vaultReachableItems(wcId);
+      model = await goldfinch.vaultReachableItems({ wcId, contextId });
     } catch {
       model = [];
     }
@@ -143,7 +168,42 @@ export function createVaultController({
     if (generate && generate.canGenerate) {
       lastPickerModel = [{ action: 'generate' }, ...lastPickerModel];
     }
-    openOverlayMenu('vault-picker', lastPickerModel, null, 0);
+    openPickerSheet(flow, lastPickerModel);
+  }
+
+  /** @param {{ destination?: string } | null} flow @returns {boolean} */
+  function hasDestination(flow) {
+    return !!flow && typeof flow.destination === 'string' && flow.destination !== '';
+  }
+
+  /**
+   * The ONE place the vault picker sheet is opened: it carries the flow's destination display string (the
+   * "Fill on ..." line) and refuses to open without one. Every picker view - the unlocked picker, the locked
+   * generate / unlock picker, the certificate warning and the confirmation - goes through here.
+   * @param {{ destination?: string }} flow
+   * @param {any[]} model
+   * @returns {boolean} whether the sheet was opened
+   */
+  function openPickerSheet(flow, model) {
+    if (!hasDestination(flow)) return false;
+    return openOverlayMenu('vault-picker', model, null, 0, { destination: flow.destination });
+  }
+
+  /** The confirmation view's model: the picked row's non-secret display fields, then Fill and Cancel.
+   * @param {any} item */
+  function confirmationModel(item) {
+    return [
+      {
+        action: 'confirm-summary',
+        type: item && item.type,
+        title: item && item.title,
+        brand: item && item.brand,
+        last4: item && item.last4,
+        fullName: item && item.fullName
+      },
+      { action: 'confirm-fill' },
+      { action: 'confirm-cancel' }
+    ];
   }
 
   // Dismiss a held capture in main (the user-declined / un-presentable path). Fire-and-forget.
@@ -391,7 +451,7 @@ export function createVaultController({
   /** The vault indicator's context-menu "Lock now" action: the SAME explicit
    * vault-lock path the goldfinch://vault page's inline "Lock now" button drives
    * (`bridge.lockVault()` there → `internal-vault-lock`; `goldfinch.vaultLock()` here →
-   * `vault-lock` — both bare `ipcMain.handle`s over the shared main-side `vaultLockNow()`,
+   * `vault-lock` — one IPC-gate chrome-class handler and one internal-gated handler over the shared main-side `vaultLockNow()`,
    * idempotent + global, Mission 12). No local state mutation: the store's `onLock` hook
    * already fires the `vault-lock-state` broadcast that re-renders the indicator. */
   function lockNow() {
@@ -447,31 +507,61 @@ export function createVaultController({
     });
   }
 
-  goldfinch.onVaultGesture(({ wcId, generate }) => {
-    if (!lockState.setUp) return; // manager not set up — no setup UI in F2 (DD; F3 owns setup).
+  /**
+   * Run the branch a gesture takes once any certificate warning is out of the way (unlocked -> the picker;
+   * locked with a Generate offer -> the generate / unlock picker; locked otherwise -> the unlock sheet).
+   * The lock state is read HERE, at the time the branch runs (after a Continue the vault may have changed).
+   * @param {{ wcId: number, contextId: string, destination: string, certificate: boolean, generate?: any }} flow
+   */
+  function runGestureBranch(flow) {
+    const { wcId, contextId, destination, certificate, generate } = flow;
     // Generate-in-picker (Mission 21, Flight 4, Leg 3 — generate-in-picker, DD5):
     // `generate` is main-validated ({ canGenerate, constraints } or absent/malformed).
     // canGenerate false/absent behaves EXACTLY as today, in both lock states.
     const canGenerate = !!(generate && generate.canGenerate);
     if (lockState.unlocked) {
-      pendingVaultFlow = { wcId, phase: 'picking', generate: canGenerate ? generate : null };
-      openVaultPicker(wcId, pendingVaultFlow.generate);
+      pendingVaultFlow = {
+        wcId,
+        contextId,
+        destination,
+        certificate,
+        phase: 'picking',
+        generate: canGenerate ? generate : null
+      };
+      openVaultPicker(pendingVaultFlow);
     } else if (canGenerate) {
       // Locked-vault branch, ONE state machine (DD5): show Generate + Unlock rows
       // WITHOUT unlocking and WITHOUT a store read — reachableItems is never even
       // invoked. Choosing Unlock (handleActivation's UNLOCK_ID case) enters the
       // SAME 'unlocking' phase a today's locked gesture would, so there remains one
       // unlock-then-pick entry point, not two.
-      pendingVaultFlow = { wcId, phase: 'picking', generate };
+      pendingVaultFlow = { wcId, contextId, destination, certificate, phase: 'picking', generate };
       lastPickerModel = [{ action: 'generate' }, { action: 'unlock' }];
-      openOverlayMenu('vault-picker', lastPickerModel, null, 0);
+      openPickerSheet(pendingVaultFlow, lastPickerModel);
     } else {
       // Locked → raise the Leg-2 unlock prompt first; onVaultLockState continues to the
       // picker on a successful unlock. openOverlayMenu is POSITIONAL (menuType, model,
       // anchor, startIndex, opts); the vault-unlock card is centered (anchor ignored).
-      pendingVaultFlow = { wcId, phase: 'unlocking', generate: null };
+      pendingVaultFlow = { wcId, contextId, destination, certificate, phase: 'unlocking', generate: null };
       openOverlayMenu('vault-unlock', [], null, 0);
     }
+  }
+
+  goldfinch.onVaultGesture(({ wcId, contextId, destination, certificate, generate }) => {
+    if (!lockState.setUp) return; // manager not set up — no setup UI in F2 (DD; F3 owns setup).
+    const flow = { wcId, contextId, destination, certificate, generate };
+    if (certificate === true) {
+      // The tab's navigation carries a certificate override: the WARNING view comes first on EVERY branch
+      // (including the locked one that would otherwise raise the unlock sheet) - no items, no generate row,
+      // no footer. Main refuses every operation for this context until the operator acknowledges it.
+      // `generate` is KEPT on the flow (the warning view itself offers no generate row): Continue runs the branch
+      // the gesture would have run, including the locked generate / unlock picker.
+      pendingVaultFlow = { ...flow, certificate: true, phase: 'certificate' };
+      lastPickerModel = [{ action: 'certificate-continue' }];
+      if (!openPickerSheet(pendingVaultFlow, lastPickerModel)) pendingVaultFlow = null;
+      return;
+    }
+    runGestureBranch(flow);
   });
 
   // First-run setup cross-renderer triggers (M12 F3 Leg 4 first-run-setup, DD5). The
@@ -612,7 +702,7 @@ export function createVaultController({
       // `pendingVaultFlow.generate` (AC10) survives the unlock — a Generate row
       // opened while locked, then routed through Unlock, re-shows on the now-
       // unlocked full picker rather than being lost.
-      openVaultPicker(pendingVaultFlow.wcId, pendingVaultFlow.generate);
+      openVaultPicker(pendingVaultFlow);
     }
     // Unlock-to-save continuation (M21 F3 L2, DD1's amendment): a login/card-form
     // submit into a LOCKED vault held the credential(s) and raised the unlock prompt;
@@ -791,6 +881,38 @@ export function createVaultController({
   // vault-change-master, vault-recover, vault-compromise-recover) — those fall through
   // exactly as they did when `dispatchOverlayActivation`'s switch had no case for them
   // (unchanged behavior).
+  /**
+   * Dispatch a human fill for a picked row (and, with `confirm`, the confirmation view's Fill). The answer
+   * restores the flow where the operator has to act again: `locked` -> the unlock sheet (the context survives
+   * the lock; after the unlock the PLAIN picker reopens, so a re-pick asks for confirmation again because
+   * only the confirmation view sends `confirm: true`), `confirm-needed` -> the confirmation view.
+   * @param {{ wcId: number, contextId: string, destination: string, certificate: boolean }} flow
+   * @param {any} item  the picked row (metadata only)
+   * @param {boolean} confirm
+   */
+  function dispatchFill(flow, item, confirm) {
+    const { wcId, contextId } = flow;
+    /** @type {any} */
+    const payload = { wcId, vaultId: item.vaultId, itemId: item.id, contextId };
+    if (confirm) payload.confirm = true;
+    Promise.resolve(goldfinch.vaultFillHuman(payload))
+      .then((/** @type {any} */ r) => {
+        if (r && r.reason === 'locked') {
+          // The context survives a lock (main keeps it); the re-raised unlock sheet continues the SAME
+          // open, so the id, destination and certificate flag stay with the flow.
+          pendingVaultFlow = { ...flow, phase: 'unlocking', generate: null, item: undefined };
+          openOverlayMenu('vault-unlock', [], null, 0);
+        } else if (r && r.reason === 'confirm-needed') {
+          // A card / identity on a site it has not been confirmed for: reopen the picker as the
+          // confirmation view, holding the picked row so its Fill can send the explicit confirm.
+          pendingVaultFlow = { ...flow, phase: 'confirming', generate: null, item };
+          lastPickerModel = confirmationModel(item);
+          if (!openPickerSheet(pendingVaultFlow, lastPickerModel)) pendingVaultFlow = null;
+        }
+      })
+      .catch(() => {});
+  }
+
   /** @param {{ menuType: string, id: string, value?: string }} payload */
   function handleActivation(payload) {
     if (!payload || typeof payload.menuType !== 'string') return false;
@@ -815,16 +937,41 @@ export function createVaultController({
       // Generate-in-picker action rows (Mission 21, Flight 4, Leg 3, AC11).
       if (id === GENERATE_ID) {
         const genWcId = pendingVaultFlow ? pendingVaultFlow.wcId : null;
+        const genContextId = pendingVaultFlow ? pendingVaultFlow.contextId : null;
         const constraints =
           pendingVaultFlow && pendingVaultFlow.generate ? pendingVaultFlow.generate.constraints : null;
         pendingVaultFlow = null;
-        if (genWcId == null || !constraints) return true;
+        if (genWcId == null || genContextId == null || !constraints) return true;
         // Main re-validates + re-resolves the constraints (never trusting what it
         // itself handed the chrome earlier) and generates + fills entirely main-side
         // — the chrome never receives or holds the generated password. A resolved
         // { filled:false } (a page mutation raced the fill, or the gate refused)
         // shows no sheet — the operator can simply click the badge again.
-        Promise.resolve(goldfinch.vaultFillGenerated({ wcId: genWcId, constraints })).catch(() => {});
+        Promise.resolve(goldfinch.vaultFillGenerated({ wcId: genWcId, contextId: genContextId, constraints })).catch(
+          () => {}
+        );
+        return true;
+      }
+      // Leg `vault-picker-controls`: Continue on the certificate warning view. Acknowledge in MAIN first (the
+      // context refuses everything until then), and only if this is still the same flow run the branch the
+      // gesture would have run.
+      if (id === CERTIFICATE_CONTINUE_ID) {
+        const flow = pendingVaultFlow;
+        if (!flow || flow.phase !== 'certificate') return true;
+        Promise.resolve(goldfinch.vaultCertificateAcknowledge({ wcId: flow.wcId, contextId: flow.contextId }))
+          .then((/** @type {any} */ r) => {
+            if (r && r.ok && pendingVaultFlow === flow) runGestureBranch(flow);
+          })
+          .catch(() => {});
+        return true;
+      }
+      // The confirmation view's Fill: the ONE sender of `confirm: true`. Cancel never reaches here (it is a
+      // dismissal in the sheet).
+      if (id === CONFIRM_FILL_ID) {
+        const flow = pendingVaultFlow;
+        if (!flow || flow.phase !== 'confirming' || !flow.item) return true;
+        pendingVaultFlow = null;
+        dispatchFill(flow, flow.item, true);
         return true;
       }
       if (id === UNLOCK_ID) {
@@ -837,17 +984,10 @@ export function createVaultController({
       }
       const idx = parsePickIndex(id);
       const item = idx != null ? lastPickerModel[idx] : null;
-      const wcId = pendingVaultFlow ? pendingVaultFlow.wcId : null;
+      const flow = pendingVaultFlow;
       pendingVaultFlow = null;
-      if (!item || wcId == null) return true;
-      Promise.resolve(goldfinch.vaultFillHuman({ wcId, vaultId: item.vaultId, itemId: item.id }))
-        .then((/** @type {any} */ r) => {
-          if (r && r.reason === 'locked') {
-            pendingVaultFlow = { wcId, phase: 'unlocking' };
-            openOverlayMenu('vault-unlock', [], null, 0);
-          }
-        })
-        .catch(() => {});
+      if (!item || !flow) return true;
+      dispatchFill(flow, item, false);
       return true;
     }
     if (menuType === 'vault-compromise') {
@@ -893,7 +1033,19 @@ export function createVaultController({
   // `lockState` and both guards moved together into this module, so the gating logic
   // itself was never touched, only relocated).
   /** @param {{ menuType: string, reason: string }} args */
-  function handleClosed({ menuType }) {
+  function handleClosed({ menuType, reason }) {
+    // Leg `vault-picker-controls`: the certificate warning or the confirmation view was dismissed (Escape,
+    // the header X, Cancel, the backdrop, a blur, a tab switch ...) - abandon the flow. An activation
+    // (Continue / Fill / a pick) and a model replace (`superseded`) are NOT abandonment.
+    if (
+      menuType === 'vault-picker' &&
+      reason !== 'activated' &&
+      reason !== 'superseded' &&
+      pendingVaultFlow &&
+      (pendingVaultFlow.phase === 'certificate' || pendingVaultFlow.phase === 'confirming')
+    ) {
+      pendingVaultFlow = null;
+    }
     // Human vault flow (M12 F2 Leg 3): the user dismissed the unlock prompt (Cancel/
     // Escape/outside-click) without unlocking — abandon the flow so a later unrelated
     // unlock (recovery/admin, or another tab) can't spring the picker on this stale

@@ -21,10 +21,11 @@ const {
   LOGIN_ROLES,
   CARD_ROLES
 } = require('./vault-gesture-policy');
-const { planCaptures } = require('./vault-capture-plan');
+const { planCaptures, sendPlannedCapture } = require('./vault-capture-plan');
 const { createGestureDetachWatch } = require('./vault-gesture-detach-watch');
 const { createBookmarkDropListeners } = require('./guest-bookmark-drop');
 const { tabBoundary } = require('../shared/tab-boundary');
+const { FP_KINDS } = require('../shared/privacy-fp');
 
 // The isolated-world id the entry-tracker's observer is installed into (Mission
 // 21, Flight 1, Leg 3, DD3f/DD3g — see vault-entry-observer-bootstrap.js). No
@@ -328,14 +329,15 @@ const isTrustedGet = (() => {
 })();
 
 // The decorative fill-icon subsystem (SVG glyph, both-field placement, focus
-// gating, isTrusted-guarded click/contextmenu → bare IPCs) lives in the
+// gating, click/contextmenu → the two gesture IPCs carrying the icon's box) lives in the
 // electron-free `vault-fill-icon` core so it unit-tests headlessly. All DOM /
-// electron coupling is injected here; F2 invariants are enforced inside it.
+// electron coupling is injected here; F2 invariants are enforced inside it. It no longer reads
+// `isTrusted` (Mission 23 Flight 1: main witnesses the real click); `isTrustedGet` above still serves
+// the capture classifier.
 const vaultIcons = createVaultIconController({
   document,
   window,
   ipcRenderer,
-  isTrustedGet,
   findAllLoginFields,
   findAllCardFields,
   findAllIdentityFields,
@@ -437,21 +439,44 @@ ipcRenderer.on('rescan-media', () => send());
 // and is filled into the TOP-FRAME login form; fillLoginForm (now running
 // INSIDE the isolated world, not here) guards `window.top === window`, and
 // webContents.send targets the main frame, so a cross-origin iframe is never
-// filled. page JS cannot register a rogue 'vault-fill' listener — the guest
-// runs nodeIntegration:false, so it has no ipcRenderer (DD7).
+// filled.
+//
+// What a page CAN do here (Mission 23 Flight 1, leg 1's probes, measured in the
+// product build): the guest runs `nodeIntegration:false`, so the page has no
+// `require` and no direct `ipcRenderer` global, but a page-patched
+// `Array.prototype.push` receives Electron's emit event, whose `.sender` is this
+// preload's IpcRenderer object. A page that obtains it can register its OWN
+// `vault-fill*` listener (it then sees the credential main just sent to ITS
+// OWN tab) and can send any guest-class message. That does not change who can
+// receive a fill - a fill is only ever sent to the page the operator was
+// looking at when the picker rose (main's per-open picker context, checked at
+// fill time) - but "page JS cannot listen" is NOT a property to rely on, and
+// nothing here does. What is relied on: main decides who may raise the picker
+// (witnessed real input) and what gets filled where.
+//
 // The fill itself executes in the isolated world (DD3h: fill and grant happen
 // in ONE realm, so there is no main-world-node-identity-crosses-the-boundary
 // correlation problem to solve). `consumeFillTarget('login')`'s bound field
-// (PR#112 finding 9) is now resolved to an INTEGER ordinal via the SAME
+// (PR#112 finding 9) is resolved to an INTEGER ordinal via the SAME
 // `resolveOrdinalInFamily` the capture gesture already uses (DD9 — no new
 // helper) — an integer crosses the isolated-world boundary freely, unlike the
-// node reference DD3g forbids — and passed alongside the credential. A
-// null/stale/out-of-range ordinal falls back to fillLoginForm's own
-// first-detected-entry behaviour (the same path MCP/no-gesture fills use).
-ipcRenderer.on('vault-fill', (_e, cred) => {
-  const target = vaultIcons.consumeFillTarget('login');
+// node reference DD3g forbids — and passed alongside the credential.
+//
+// HUMAN vs AUTOMATION (Mission 23 Flight 1, leg `vault-fill-trust`): main marks
+// each HUMAN fill message `{ human: true }` (main-to-guest: a page cannot forge
+// it). A human fill fills ONLY the field its own gesture bound (`strict`): a
+// null/stale/out-of-range ordinal fills NOTHING, never the first-detected
+// entry - after a navigation the message reaches a document whose preload holds
+// no target. An automation fill (unmarked) keeps today's first-detected-entry
+// behaviour byte for byte and never consumes a human's pending target.
+/** @param {any} meta */
+const isHumanFill = (meta) => !!meta && meta.human === true;
+
+ipcRenderer.on('vault-fill', (_e, cred, meta) => {
+  const human = isHumanFill(meta);
+  const target = human ? vaultIcons.consumeFillTarget('login') : null;
   const ordinal = resolveOrdinalInFamily(target, findAllLoginFields(document), LOGIN_ROLES);
-  entryTracker.fillLogin({ cred, ordinal });
+  entryTracker.fillLogin({ cred, ordinal, strict: human });
 });
 
 // Vault CARD fill (issue #152; routed in-world M21 F1 Leg 3, DD3h; ordinal
@@ -460,27 +485,29 @@ ipcRenderer.on('vault-fill', (_e, cred) => {
 // stays login-only) and is filled into the TOP-FRAME card form inside the
 // isolated world; `fillCardForm` there guards `window.top === window` and
 // `webContents.send` targets the main frame, so a cross-origin iframe is
-// never filled. Same ordinal-resolution shape as the login path above.
-ipcRenderer.on('vault-fill-card', (_e, card) => {
-  const target = vaultIcons.consumeFillTarget('card');
+// never filled. Same ordinal-resolution and human/strict shape as the login path above.
+ipcRenderer.on('vault-fill-card', (_e, card, meta) => {
+  const human = isHumanFill(meta);
+  const target = human ? vaultIcons.consumeFillTarget('card') : null;
   const ordinal = resolveOrdinalInFamily(target, findAllCardFields(document), CARD_ROLES);
-  entryTracker.fillCard({ card, ordinal });
+  entryTracker.fillCard({ card, ordinal, strict: human });
 });
 
 // Vault IDENTITY fill (M21 F3 Leg 3, DD7/DD8/DD9): the identity twin of
 // `vault-fill`/`vault-fill-card`. The resolved identity arrives ONLY here
 // (never over the MCP wire, which stays login-only per DD7) and is filled
 // into the TOP-FRAME identity form inside the isolated world; `fillIdentityForm`
-// there guards `window.top === window`. Same ordinal-resolution shape as the
+// there guards `window.top === window`. Same ordinal-resolution and human/strict shape as the
 // other two families — `consumeFillTarget('identity')`'s bound field is always
 // the entry's postal anchor (DD8: `targetForAnchor` resolves either of the
 // entry's two icon fields to the postal anchor), which is itself one of the
 // eleven `IDENTITY_ROLES` fields, so `resolveOrdinalInFamily`'s step 1 always
 // resolves for a real gesture.
-ipcRenderer.on('vault-fill-identity', (_e, identity) => {
-  const target = vaultIcons.consumeFillTarget('identity');
+ipcRenderer.on('vault-fill-identity', (_e, identity, meta) => {
+  const human = isHumanFill(meta);
+  const target = human ? vaultIcons.consumeFillTarget('identity') : null;
   const ordinal = resolveOrdinalInFamily(target, findAllIdentityFields(document), IDENTITY_ROLES);
-  entryTracker.fillIdentity({ identity, ordinal });
+  entryTracker.fillIdentity({ identity, ordinal, strict: human });
 });
 
 // Generate-in-picker fill (Mission 21, Flight 4, Leg 3 — generate-in-picker,
@@ -492,7 +519,8 @@ ipcRenderer.on('vault-fill-identity', (_e, identity) => {
 // for `vault-fill`. The fill itself (which of `new`/`confirm` to write, and
 // which candidate to choose against the field's `pattern`) runs entirely in
 // the isolated world's `fillGeneratedForm` — this listener never reads a
-// field or a candidate itself.
+// field or a candidate itself. Generated fills were already strict (no
+// first-field fallback on a stale ordinal) and are human-only by construction.
 ipcRenderer.on('vault-fill-generated', (_e, { candidates } = {}) => {
   const target = vaultIcons.consumeFillTarget('login');
   const ordinal = resolveOrdinalInFamily(target, findAllLoginFields(document), LOGIN_ROLES);
@@ -605,7 +633,7 @@ if (IS_TOP_FRAME && vaultEligible) {
 
     for (const c of plan) {
       try {
-        ipcRenderer.send(c.channel, c.payload);
+        sendPlannedCapture(ipcRenderer, c);
         armGestureDetachWatch(c.kind, c.watchFields);
       } catch {
         /* page navigated away mid-send for THIS family — nothing was held for
@@ -676,7 +704,7 @@ if (typeof window !== 'undefined') {
 // page's MAIN world (contextIsolation=no), so we can wrap the fingerprinting-
 // prone APIs directly — CSP-immune and reliable, unlike injecting a script.
 // ---------------------------------------------------------------------------
-const fpCounts = { canvas: 0, webgl: 0, audio: 0 };
+const fpCounts = Object.fromEntries(FP_KINDS.map((kind) => [kind, 0]));
 /** @type {ReturnType<typeof setTimeout> | null} */
 let fpTimer = null;
 function bumpFp(kind) {

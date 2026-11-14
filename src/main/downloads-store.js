@@ -28,7 +28,7 @@
 //   { version: 1, nextId: <int>, records: [ <terminal record>, ... ] }
 //
 // Record schema (TERMINAL ONLY — in-progress lives in the manager's memory, DD3):
-//   { id, url, filename, savePath, state, received, total, mime?, startTime, endTime, error? }
+//   { id, url, filename, savePath, state, received, total, mime?, partition?, startTime, endTime, error? }
 //   where state ∈ {'completed','cancelled','interrupted'}.
 
 const fs = require('fs');
@@ -86,7 +86,7 @@ function validateRecord(r) {
   // Coerce/clamp the rest to sane shapes; missing/odd values get safe defaults.
   const received = Number.isFinite(r.received) && r.received >= 0 ? r.received : 0;
   const total = Number.isFinite(r.total) && r.total >= 0 ? r.total : 0;
-  /** @type {{ id: number, url: string, filename: string, savePath: string | null, state: string, received: number, total: number, startTime: number, endTime: number, mime?: string, error?: string }} */
+  /** @type {{ id: number, url: string, filename: string, savePath: string | null, state: string, received: number, total: number, startTime: number, endTime: number, mime?: string, partition?: string, error?: string }} */
   const out = {
     id: r.id,
     url: typeof r.url === 'string' ? r.url : '',
@@ -99,6 +99,7 @@ function validateRecord(r) {
     endTime: Number.isFinite(r.endTime) ? r.endTime : 0
   };
   if (typeof r.mime === 'string') out.mime = r.mime;
+  if (typeof r.partition === 'string' && r.partition) out.partition = r.partition;
   if (typeof r.error === 'string') out.error = r.error;
   return out;
 }

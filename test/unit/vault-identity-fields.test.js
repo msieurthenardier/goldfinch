@@ -657,6 +657,27 @@ test('fillIdentityForm: a null/out-of-range ordinal falls back to entry 0', () =
   assert.equal(streetB.value, '', 'the non-fallback entry is never filled');
 });
 
+test('requireOrdinal (human fills, Mission 23 Flight 1): no valid ordinal fills nothing; the default keeps the entry-0 fallback', () => {
+  const streetA = new FakeInput({ name: 'billingAddress1' });
+  const emailA = new FakeInput({ name: 'email', type: 'email' });
+  const streetB = new FakeInput({ name: 'shippingAddress1' });
+  const emailB = new FakeInput({ name: 'shippingEmail', type: 'email' });
+  const doc = makeDoc([new FakeForm([streetA, emailA]), new FakeForm([streetB, emailB])]);
+  for (const ordinal of [null, undefined, 99, -1, 0.5]) {
+    assert.deepEqual(fillIdentityForm(doc, { street: 'x' }, ordinal, { requireOrdinal: true }), {
+      filled: false,
+      fields: []
+    });
+  }
+  assert.equal(streetA.value, '');
+  assert.equal(streetB.value, '');
+  assert.equal(fillIdentityForm(doc, { street: '2 Second Ave' }, 1, { requireOrdinal: true }).filled, true);
+  assert.equal(streetB.value, '2 Second Ave');
+  assert.equal(streetA.value, '');
+  fillIdentityForm(doc, { street: 'auto' }, 99);
+  assert.equal(streetA.value, 'auto');
+});
+
 // --- AC3b sanity: the exported IDENTITY_ROLES union -------------------------
 
 test('IDENTITY_ROLES is the eleven roles, derived from POSTAL_ROLES + NON_POSTAL_ROLES', () => {

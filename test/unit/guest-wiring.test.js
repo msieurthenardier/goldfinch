@@ -71,7 +71,7 @@ class FakeContents extends EventEmitter {
   }
 }
 
-function setup({ vaultHuman, realShortcutPipeline } = {}) {
+function setup({ vaultHuman, realShortcutPipeline, gestureWitness, mediaProxyTokens } = {}) {
   const sends = [];
   const calls = [];
   // Mission 20 Flight 1 (AC3): a THIRD, independent log — additive only, so no
@@ -200,6 +200,8 @@ function setup({ vaultHuman, realShortcutPipeline } = {}) {
     // is unaffected: `vaultHuman?.()?.captureRelease(...)` optional-chains to
     // nothing). Tests that care pass it explicitly via `setup({ vaultHuman })`.
     vaultHuman,
+    gestureWitness,
+    mediaProxyTokens,
     logger: { warn() {} }
   });
   return {
@@ -765,6 +767,7 @@ test('did-navigate releases a held gesture capture via vaultHuman().captureRelea
   const releaseCalls = [];
   const h = setup({
     vaultHuman: () => ({
+      dropContext: () => {},
       captureRelease: (wcId) => {
         releaseCalls.push(wcId);
         return [{ captureId: 'cap1', model: { origin: 'https://a.example', username: 'me', mode: 'save' } }];
@@ -791,6 +794,7 @@ test('did-navigate releases a held gesture capture via vaultHuman().captureRelea
 test('AC4: did-navigate sends ONE vault-capture-offer per entry captureRelease returns, preserving release order, all before tab-did-navigate', () => {
   const h = setup({
     vaultHuman: () => ({
+      dropContext: () => {},
       captureRelease: () => [
         { captureId: 'cap-login', model: { origin: 'https://a.example', username: 'me', mode: 'save' } },
         { captureId: 'cap-card', model: { kind: 'card', origin: 'https://a.example', mode: 'save' } }
@@ -825,6 +829,7 @@ test('Sortie 06 AC12: did-navigate for a NON-ACTIVE tab dismisses each released 
   const dismissed = [];
   const h = setup({
     vaultHuman: () => ({
+      dropContext: () => {},
       captureRelease: () => [
         { captureId: 'cap-a', model: { origin: 'https://a.example', username: 'me', mode: 'save' } },
         { captureId: 'cap-b', model: { kind: 'card', origin: 'https://a.example', mode: 'save' } }
@@ -849,6 +854,7 @@ test('did-navigate calls captureRelease every time, but forwards NOTHING when it
   const releaseCalls = [];
   const h = setup({
     vaultHuman: () => ({
+      dropContext: () => {},
       captureRelease: (wcId) => {
         releaseCalls.push(wcId);
         return [];
@@ -1913,6 +1919,19 @@ test('edge case: did-navigate for a chrome-error: commit defensively reports sec
 // clearing crash/hung/killRequested.
 // ---------------------------------------------------------------------------
 
+test('C4: the tab-crash push carries the credential-free address; the entry keeps the real one', () => {
+  const h = setup();
+  const wc = new FakeContents(100);
+  wc.url = 'https://user:pw@crashed.test/x';
+  const view = { webContents: wc };
+  const entry = { view, active: true, loadFailure: null, hung: false, lastRequestedUrl: null };
+  makeFailureRecord(h, 100, entry);
+  h.wiring.wireTabViewEvents(view, 100, 'persist:jar-a');
+  wc.emit('render-process-gone', {}, { reason: 'crashed', exitCode: 139 });
+  assert.equal(entry.crash.url, 'https://user:pw@crashed.test/x');
+  assert.equal(h.sends.find((s) => s[0] === 'tab-crash')[1].crash.url, 'https://crashed.test/x');
+});
+
 test('AC1: render-process-gone with reason !== clean-exit hides the guest, stamps entry.crash, clears loadFailure/hung, and pushes tab-crash on its own channel', () => {
   const h = setup();
   const wc = new FakeContents(100);
@@ -2256,4 +2275,128 @@ test('AC4 source-scan: wireTabViewEvents contains zero chromeForTab(wcId)?.send 
     'wireTabViewEvents must route every per-tab push through sendOrQueue, never chromeForTab(wcId)?.send directly'
   );
   assert.ok(body.includes('sendOrQueue(wcId, channel, payload)'), 'sendToChrome must be sendOrQueue-backed');
+});
+
+// --- Mission 23 Flight 1 (leg `vault-fill-trust`, revised DD4): the witness of real pointer input -----
+
+function witnessFake() {
+  const calls = [];
+  return {
+    calls,
+    onInput: (wcId, input) => calls.push(['input', wcId, input.type]),
+    forget: (wcId) => calls.push(['forget', wcId])
+  };
+}
+
+test('witness: a tab web guest gets ONE input-event listener; only mouse presses/releases reach the witness; destroyed forgets the tab', () => {
+  const witness = witnessFake();
+  const h = setup({ gestureWitness: witness });
+  const wc = new FakeContents(70);
+  h.wiring.wireTabViewEvents({ webContents: wc }, 70, 'persist:jar-a');
+  assert.equal(wc.listenerCount('input-event'), 1);
+  for (const type of ['mouseMove', 'mouseWheel', 'keyDown', 'char', 'mouseEnter', 'rawKeyDown'])
+    wc.emit('input-event', {}, { type });
+  assert.deepEqual(witness.calls, [], 'every other event type returns on the first line');
+  wc.emit('input-event', {}, { type: 'mouseDown', button: 'left', x: 1, y: 2 });
+  wc.emit('input-event', {}, { type: 'mouseUp', button: 'left', x: 1, y: 2 });
+  assert.deepEqual(witness.calls, [
+    ['input', 70, 'mouseDown'],
+    ['input', 70, 'mouseUp']
+  ]);
+  wc.emit('destroyed');
+  assert.deepEqual(
+    witness.calls.at(-1),
+    ['forget', 70],
+    'the record is cleared when the tab is destroyed (tab or window close)'
+  );
+});
+
+test('witness: the preventable before-mouse-event is never used; an internal tab and an absent witness add no listener', () => {
+  const witness = witnessFake();
+  const h = setup({ gestureWitness: witness });
+  const tab = new FakeContents(71);
+  h.wiring.wireTabViewEvents({ webContents: tab }, 71, 'persist:jar-a');
+  assert.equal(
+    tab.listenerCount('before-mouse-event'),
+    0,
+    "before-mouse-event can suppress the page's events - never wired"
+  );
+  const internal = new FakeContents(72, true);
+  h.wiring.wireTabViewEvents({ webContents: internal }, 72, 'goldfinch-internal');
+  assert.equal(internal.listenerCount('input-event'), 0, 'internal tabs are not witnessed');
+  const bare = setup();
+  const wc = new FakeContents(73);
+  bare.wiring.wireTabViewEvents({ webContents: wc }, 73, 'persist:jar-a');
+  assert.equal(wc.listenerCount('input-event'), 0);
+  // A popup is wired through wireGuestContents only (never wireTabViewEvents): no witness there.
+  const pop = new FakeContents(74);
+  h.wiring.wireGuestContents(pop);
+  assert.equal(pop.listenerCount('input-event'), 0);
+});
+
+test("picker context: did-navigate (a cross-document commit, incl. a reload) drops the tab's context; did-navigate-in-page deliberately does not", () => {
+  const dropped = [];
+  const h = setup({
+    vaultHuman: () => ({ captureRelease: () => [], dropContext: (wcId) => dropped.push(wcId) })
+  });
+  const wc = new FakeContents(75);
+  h.records.set(75, { activeTabWcId: 75 });
+  h.wiring.wireTabViewEvents({ webContents: wc }, 75, 'persist:jar-a');
+  wc.emit('did-navigate-in-page');
+  assert.deepEqual(dropped, [], 'same-origin in-page navigation keeps it (the fill-time origin check covers it)');
+  wc.emit('did-navigate');
+  assert.deepEqual(dropped, [75]);
+  wc.emit('did-navigate'); // a reload commits as did-navigate too
+  assert.deepEqual(dropped, [75, 75]);
+});
+
+// Mission 23 Flight 1 (leg `jar-isolation`): the media-proxy token follows the tab's document.
+
+test('media-proxy token: did-navigate hands main frame token to onCommit; destroyed forgets the tab', () => {
+  const calls = [];
+  const tokens = {
+    onCommit: (wcId, frameToken) => calls.push(['commit', wcId, frameToken]),
+    forget: (wcId) => calls.push(['forget', wcId])
+  };
+  const h = setup({ mediaProxyTokens: tokens });
+  const wc = new FakeContents(80);
+  wc.mainFrame = { frameToken: 'doc-B' };
+  h.records.set(80, { activeTabWcId: 80 });
+  h.wiring.wireTabViewEvents({ webContents: wc }, 80, 'persist:jar-a');
+  wc.emit('did-navigate');
+  assert.deepEqual(calls, [['commit', 80, 'doc-B']]);
+  wc.emit('did-navigate-in-page');
+  assert.equal(calls.length, 1, 'a same-document navigation changes nothing');
+  wc.emit('destroyed');
+  assert.deepEqual(calls.at(-1), ['forget', 80]);
+});
+
+test('media-proxy token: an unreadable main frame at commit invalidates (fails closed, never throws); did-start-navigation is not used', () => {
+  const calls = [];
+  const h = setup({
+    mediaProxyTokens: { onCommit: (...a) => calls.push(a), forget() {} }
+  });
+  const wc = new FakeContents(81);
+  Object.defineProperty(wc, 'mainFrame', {
+    get() {
+      throw new Error('frame gone');
+    }
+  });
+  h.records.set(81, { activeTabWcId: 81 });
+  h.wiring.wireTabViewEvents({ webContents: wc }, 81, 'persist:jar-a');
+  wc.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false });
+  assert.deepEqual(calls, [], 'a navigation that merely STARTED never touches the token');
+  assert.doesNotThrow(() => wc.emit('did-navigate'));
+  assert.deepEqual(calls, [[81, null]]);
+});
+
+test('media-proxy token: with the dependency omitted the wiring is unaffected', () => {
+  const h = setup();
+  const wc = new FakeContents(82);
+  h.records.set(82, { activeTabWcId: 82 });
+  h.wiring.wireTabViewEvents({ webContents: wc }, 82, 'persist:jar-a');
+  assert.doesNotThrow(() => {
+    wc.emit('did-navigate');
+    wc.emit('destroyed');
+  });
 });

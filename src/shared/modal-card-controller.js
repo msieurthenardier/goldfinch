@@ -31,20 +31,31 @@
  * `lastStimulus` is the dismissal flavor (defaults to / resets to 'blur' — the flavor
  * chrome's re-click suppress window keys on). Extracted so the state machine is unit-
  * testable against a fake bridge without a live sheet.
+ *
+ * ARMING (Mission 23 Flight 1, leg `vault-picker-controls`): `begin(token, delayMs)` also records an
+ * "armed until" instant from the injected clock; an activation before that instant returns false WITHOUT
+ * setting the one-shot latch, so nothing closes and a later activation still works. A timestamp gate, not
+ * a timer. A zero (default) delay behaves exactly as before. Dismissals do not pass through it.
  * @param {{ sendActivated: (payload: any) => void, sendDismissed: (payload: any) => void }} bridge
+ * @param {() => number} [now]  the clock (injected so the gate is unit-testable)
  */
-export function createSheetReport(bridge) {
+export function createSheetReport(bridge, now = () => Date.now()) {
   /** @type {number | null} */
   let token = null;
   let sent = false;
   let lastStimulus = 'blur';
+  // Wall-clock time is deliberate: a clock step can only lengthen or shorten one open's arming by its own size.
+  let armedUntil = -Infinity;
 
   return {
-    /** Begin a new open: adopt the token, reset the once-guard + flavor. */
-    begin(/** @type {number} */ t) {
+    /** Begin a new open: adopt the token, reset the once-guard + flavor, and (re)start arming. Every init
+     * - a fresh open and a same-menu-type model replace alike - goes through here.
+     * @param {number} t  @param {number} [delayMs]  the opening menu type's arming delay (0 = none) */
+    begin(t, delayMs = 0) {
       token = t;
       sent = false;
       lastStimulus = 'blur';
+      armedUntil = delayMs > 0 ? now() + delayMs : -Infinity;
     },
     /** Null the live token (the pre-render null-out): a closing entry's onClose then
      * reports nothing — the superseded menu's channel-7 was already emitted by main. */
@@ -88,6 +99,7 @@ export function createSheetReport(bridge) {
      * @param {{ id: string, value?: string }} payload @returns {boolean} */
     sendActivatedOnce(payload) {
       if (sent || token == null) return false;
+      if (now() < armedUntil) return false; // still arming: swallowed, latch left unset
       sent = true;
       bridge.sendActivated(Object.assign({}, payload, { token }));
       return true;

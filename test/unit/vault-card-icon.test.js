@@ -59,7 +59,11 @@ class FakeElement {
     this.isConnected = false;
   }
   dispatch(type, evt) {
-    for (const fn of this.listeners[type] || []) fn(evt);
+    for (const fn of this.listeners[type] || []) fn({ currentTarget: this, ...evt });
+  }
+  // The icon's own measured box (Mission 23 Flight 1: the gesture messages carry it).
+  getBoundingClientRect() {
+    return { left: 210, top: 104, width: 30, height: 16 };
   }
 }
 
@@ -220,7 +224,7 @@ test('without the findAllCardFields injection there are no card anchors at all',
 
 // --- the F2 invariants, unchanged on the card path -------------------------
 
-test('a trusted click on a card icon still sends the BARE guest-vault-gesture IPC', () => {
+test('a click on a card icon sends the guest-vault-gesture IPC with the icon box only (no field kind, no secret, no generate); the page world does not judge trust', () => {
   const f = makeCardForm();
   const doc = makeDoc([new FakeForm([f.number, f.csc])]);
   const sends = [];
@@ -229,23 +233,14 @@ test('a trusted click on a card icon still sends the BARE guest-vault-gesture IP
   ctl.handleFocusIn({ target: f.number });
   const icon = bodyIcon(doc);
   icon.dispatch('click', { isTrusted: true, currentTarget: icon });
-
-  assert.equal(sends.length, 1);
-  assert.equal(sends[0].channel, 'guest-vault-gesture');
-  assert.deepEqual(sends[0].payload, {}, 'bare payload — no field kind, no secret');
-});
-
-test('a scripted click on a card icon is ignored', () => {
-  const f = makeCardForm();
-  const doc = makeDoc([new FakeForm([f.number, f.csc])]);
-  const sends = [];
-  const ctl = makeController(doc, sends);
-
-  ctl.handleFocusIn({ target: f.number });
-  const icon = bodyIcon(doc);
+  // A scripted click is sent too (Mission 23 Flight 1): main's witness is the check, not this module.
   icon.dispatch('click', { isTrusted: false, currentTarget: icon });
 
-  assert.deepEqual(sends, [], 'synthetic dispatch never raises the prompt');
+  assert.equal(sends.length, 2);
+  for (const send of sends) {
+    assert.equal(send.channel, 'guest-vault-gesture');
+    assert.deepEqual(send.payload, { box: { x: 210, y: 104, width: 30, height: 16 } });
+  }
 });
 
 // --- kind-tagged fill target ----------------------------------------------

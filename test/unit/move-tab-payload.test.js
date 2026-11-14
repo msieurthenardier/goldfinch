@@ -167,3 +167,11 @@ test('favicon and container ride the snapshot verbatim — renderer-only facts m
   assert.equal(adopt.favicon, null);
   assert.deepEqual(adopt.container, burner);
 });
+
+test('C4: the adopt payload shows no credentials, from the live wc and from the snapshot fallback', () => {
+  const p = validateMoveTabPayload({ ...GOOD, url: 'https://u:p@a.example/snap' });
+  assert.equal(buildAdoptPayload(p, liveWc('https://u:p@a.example/deep', 'T')).url, 'https://a.example/deep');
+  assert.equal(buildAdoptPayload(p, null).url, 'https://a.example/snap');
+  // the validated snapshot itself is untouched (main keeps the real address)
+  assert.equal(p.url, 'https://u:p@a.example/snap');
+});

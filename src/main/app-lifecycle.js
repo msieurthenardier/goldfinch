@@ -11,7 +11,7 @@ const HYGIENE_PURGE_MARKER = 'default-session-purge-v1';
 
 function registerAppLifecycle({
   app,
-  ipcMain,
+  gate,
   sessionRuntime,
   initProfileAndStores,
   profileStores,
@@ -41,6 +41,7 @@ function registerAppLifecycle({
   isInternalContents,
   createMediaProxyHandler,
   parseMediaProxyUrl,
+  resolveMediaProxyToken,
   isSafeTabUrl,
   isInternalPageUrl,
   createWindow,
@@ -257,77 +258,89 @@ function registerAppLifecycle({
     intakeLaunchUrls([url]);
   });
 
-  ipcMain.handle('window-boot-config', (event) => {
-    const rec = registry.getWindowForChrome(event.sender);
-    if (!rec) return { bootTab: true };
-    rec.bootConfigServed = true;
-    // Squawk 0073: timestamp the boot-config serve so isRestorePending's settle timeout
-    // (session-snapshot-scheduler.js) has a reference point — a saved URL that never
-    // arrives (rejected by isSafeTabUrl at tab-create) must not gate the continuous
-    // snapshot forever.
-    rec.bootConfigServedAt = Date.now();
+  // Mission 23 Flight 1 (`ipc-gate-complete`): chrome class; a refused caller gets today's
+  // default answer (never a throw — the chrome awaits this at boot).
+  gate.chrome.handle(
+    'window-boot-config',
+    (event) => {
+      const rec = gate.requireChrome(event);
+      if (!rec) return { bootTab: true };
+      rec.bootConfigServed = true;
+      // Squawk 0073: timestamp the boot-config serve so isRestorePending's settle timeout
+      // (session-snapshot-scheduler.js) has a reference point — a saved URL that never
+      // arrives (rejected by isSafeTabUrl at tab-create) must not gate the continuous
+      // snapshot forever.
+      rec.bootConfigServedAt = Date.now();
 
-    // Mission 20 Flight 3 Leg 3 (DD5): chrome reload-and-reconcile. Checked
-    // and consumed BEFORE the queue flush below, and BEFORE the `restoreTabs`
-    // branch — `recoverTabs` wins when both are set, and `restoreTabs` is
-    // left INTACT either way (never nulled: `isRestorePending` still needs
-    // it for the boot-restore hazard gate).
-    let recovered = false;
-    if (rec.recoverTabs) {
-      rec.recoverTabs = false;
-      recovered = true;
-      if (rec.tabViews.size > 0) {
-        for (const [channel, payload] of chromeRecovery.buildRecoveryAdopts(rec, {
-          jarsList: listJars(),
-          defaultJar: getDefaultJar(),
-          buildAdoptPayload
-        })) {
-          if (rec.chromeView.webContents.isDestroyed()) break;
-          rec.chromeView.webContents.send(channel, payload);
+      // Mission 20 Flight 3 Leg 3 (DD5): chrome reload-and-reconcile. Checked
+      // and consumed BEFORE the queue flush below, and BEFORE the `restoreTabs`
+      // branch — `recoverTabs` wins when both are set, and `restoreTabs` is
+      // left INTACT either way (never nulled: `isRestorePending` still needs
+      // it for the boot-restore hazard gate).
+      let recovered = false;
+      if (rec.recoverTabs) {
+        rec.recoverTabs = false;
+        recovered = true;
+        if (rec.tabViews.size > 0) {
+          for (const [channel, payload] of chromeRecovery.buildRecoveryAdopts(rec, {
+            jarsList: listJars(),
+            defaultJar: getDefaultJar(),
+            buildAdoptPayload
+          })) {
+            if (rec.chromeView.webContents.isDestroyed()) break;
+            rec.chromeView.webContents.send(channel, payload);
+          }
         }
       }
-    }
 
-    // The gap queue: built first (every thunk invoked exactly once), then
-    // deduped LAST-WINS per (payload.wcId, channel) — the survivor takes the
-    // LAST occurrence's position (a `Map` re-set after `delete` moves a key
-    // to the end); a message with no `wcId` gets a unique key so it is never
-    // collapsed and keeps its original relative order.
-    const queued = rec.pendingChromeSends.splice(0);
-    const built = queued.map((buildMessage) => buildMessage());
-    const orderMap = new Map();
-    let anonSeq = 0;
-    for (const [channel, payload] of built) {
-      const hasWcId = payload && typeof payload === 'object' && 'wcId' in payload;
-      const key = hasWcId ? `${payload.wcId}:${channel}` : `__no-wcid-${anonSeq++}`;
-      if (orderMap.has(key)) orderMap.delete(key);
-      orderMap.set(key, [channel, payload]);
-    }
-    const chrome = rec.chromeView.webContents;
-    for (const [channel, payload] of orderMap.values()) {
-      if (chrome.isDestroyed()) break;
-      chrome.send(channel, payload);
-    }
-    // M18 F2 L4 (H2 resurface): the chrome document's subscriptions are provably
-    // live here (this invoke is issued from module tail code, past every onVault*
-    // registration), so this is the earliest safe point to re-open an orphaned
-    // pending compromise reveal's recovery-show sheet on the new window.
-    onChromeBooted?.(rec);
-    if (recovered) {
-      // A rebooted chrome with zero adoptable tabs boots a home/welcome tab
-      // through the normal path instead of an empty chrome (leg edge case).
-      return { bootTab: rec.tabViews.size === 0 ? !rec.noBootTab : false };
-    }
-    return rec.restoreTabs ? { bootTab: false, restoreTabs: rec.restoreTabs } : { bootTab: !rec.noBootTab };
-  });
-  ipcMain.on('app-quit', () => app.quit());
+      // The gap queue: built first (every thunk invoked exactly once), then
+      // deduped LAST-WINS per (payload.wcId, channel) — the survivor takes the
+      // LAST occurrence's position (a `Map` re-set after `delete` moves a key
+      // to the end); a message with no `wcId` gets a unique key so it is never
+      // collapsed and keeps its original relative order.
+      const queued = rec.pendingChromeSends.splice(0);
+      const built = queued.map((buildMessage) => buildMessage());
+      const orderMap = new Map();
+      let anonSeq = 0;
+      for (const [channel, payload] of built) {
+        const hasWcId = payload && typeof payload === 'object' && 'wcId' in payload;
+        const key = hasWcId ? `${payload.wcId}:${channel}` : `__no-wcid-${anonSeq++}`;
+        if (orderMap.has(key)) orderMap.delete(key);
+        orderMap.set(key, [channel, payload]);
+      }
+      const chrome = rec.chromeView.webContents;
+      for (const [channel, payload] of orderMap.values()) {
+        if (chrome.isDestroyed()) break;
+        chrome.send(channel, payload);
+      }
+      // M18 F2 L4 (H2 resurface): the chrome document's subscriptions are provably
+      // live here (this invoke is issued from module tail code, past every onVault*
+      // registration), so this is the earliest safe point to re-open an orphaned
+      // pending compromise reveal's recovery-show sheet on the new window.
+      onChromeBooted?.(rec);
+      if (recovered) {
+        // A rebooted chrome with zero adoptable tabs boots a home/welcome tab
+        // through the normal path instead of an empty chrome (leg edge case).
+        return { bootTab: rec.tabViews.size === 0 ? !rec.noBootTab : false };
+      }
+      return rec.restoreTabs ? { bootTab: false, restoreTabs: rec.restoreTabs } : { bootTab: !rec.noBootTab };
+    },
+    { value: { bootTab: true } }
+  );
+  gate.chrome.on('app-quit', () => app.quit());
+
+  // The recorder's pending title timers must not fire after `historyStore.close()` at will-quit, so
+  // `before-quit` cancels them (the same quiesce idiom as the snapshot scheduler's flush).
+  /** @type {{ cancelPendingTitles?: () => void } | null} */
+  let historyRecorderForQuit = null;
 
   const ready = app.whenReady().then(() => {
     initProfileAndStores(app, profileStores);
     const userDataPath = getUserDataPath();
     historyStore.open(userDataPath);
     sessionStore.load(userDataPath);
-    setHistoryRecorder(createHistoryRecorder({ store: historyStore, listJars, broadcast }));
+    historyRecorderForQuit = createHistoryRecorder({ store: historyStore, listJars, broadcast });
+    setHistoryRecorder(historyRecorderForQuit);
 
     // Mission 20 Flight 3 Leg 3 (DD8/AC7): prune old minidumps to the newest
     // 20 at every ready — after initProfileAndStores, so `app.getPath(
@@ -363,7 +376,12 @@ function registerAppLifecycle({
     // seek smoke against this handler (electron/electron#38749, #51442).
     defaultSession.protocol.handle(
       'goldfinch-media',
-      createMediaProxyHandler({ getTabContents, isInternalContents, parseMediaProxyUrl })
+      createMediaProxyHandler({
+        getTabContents,
+        isInternalContents,
+        parseMediaProxyUrl,
+        resolveToken: resolveMediaProxyToken
+      })
     );
 
     setCreatingInternalSession(true);
@@ -434,14 +452,15 @@ function registerAppLifecycle({
         },
         isKnownJar
       });
-      ipcMain.handle('automation:dev-invoke', async (event, payload) => {
-        if (!registry.getWindowForChrome(event.sender)) {
-          throw new Error('automation: dev-seam is chrome-renderer-only');
-        }
-        const { op, args } = payload || {};
-        if (typeof engine[op] !== 'function') throw new Error('automation: unknown op ' + op);
-        return engine[op](...(Array.isArray(args) ? args : []));
-      });
+      gate.chrome.handle(
+        'automation:dev-invoke',
+        async (_event, payload) => {
+          const { op, args } = payload || {};
+          if (typeof engine[op] !== 'function') throw new Error('automation: unknown op ' + op);
+          return engine[op](...(Array.isArray(args) ? args : []));
+        },
+        'throw'
+      );
     }
 
     if (
@@ -504,6 +523,11 @@ function registerAppLifecycle({
       flushSessionSnapshotScheduler();
     } catch (error) {
       logger.error('[session-snapshot-scheduler] before-quit flush failed:', error);
+    }
+    try {
+      historyRecorderForQuit?.cancelPendingTitles?.();
+    } catch (error) {
+      logger.error('[history] before-quit title-timer cancel failed:', error);
     }
     try {
       if (settings.get('restoreSession') === true && registry.records().length) {

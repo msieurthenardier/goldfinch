@@ -926,6 +926,11 @@ body {
   overflow-y: auto;
   overflow-x: hidden;
   padding: 8px;
+  /* The list holds focus at open with NO row selected (picker + cert picker, programmatic
+     focus). The UA :focus-visible ring would box every row and read as "all selected";
+     the open sheet is the context, so the container shows no indicator. Rows keep
+     .cm-item:focus-visible. */
+  outline: none;
 }
 .vault-picker-row {
   /* .cm-item gives the flex/hover/focus base. Modern password-manager row: a credential
@@ -1038,6 +1043,32 @@ body {
 }
 .vault-picker-manage-label {
   color: inherit;
+}
+/* Leg vault-picker-controls: the destination line between the header and the list, the certificate and
+   confirmation blocks, and the arming dimming. Colors come from existing tokens only. */
+.vault-picker-destination {
+  color: var(--fg-dim);
+  font-size: 12px;
+  padding: 8px 12px 0;
+  overflow-wrap: anywhere;
+}
+.vault-picker-certificate,
+.vault-picker-confirm {
+  color: var(--fg);
+  font-size: 12px;
+  padding: 10px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-wrap: anywhere;
+}
+.vault-picker-confirm-prompt {
+  color: var(--fg-dim);
+}
+/* Arming: while the picker ignores activation (src/shared/sheet-arming.js) its rows look inert. The gate is
+   a timestamp in the activation sender; this class is cosmetic and is cleared by a timer. */
+#sheet-vault-picker.vault-picker-arming .cm-item {
+  opacity: 0.55;
 }
 
 /* ---------- suggestions template (address-bar, M08 Flight 4 Leg 2) ----------

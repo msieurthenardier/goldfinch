@@ -53,6 +53,10 @@ class El {
     return child;
   }
   insertAdjacentHTML() {}
+  removeAttribute(name) {
+    if (name === 'src') this.src = '';
+    this.attributes.delete(name);
+  }
   setAttribute(name, value) {
     this.attributes.set(name, String(value));
   }
@@ -150,7 +154,7 @@ function harness() {
       onDownloadDone: () => {}
     }
   };
-  const tab = { id: 'tab', wcId: 7, media: [], selected: new Set(), internal: false };
+  const tab = { id: 'tab', wcId: 7, mediaToken: 'tok7', media: [], selected: new Set(), internal: false };
   const toasts = [];
   const deps = {
     window,
@@ -162,7 +166,8 @@ function harness() {
     closePrivacyPanel: () => {},
     sendActiveBounds: () => {},
     isSafePosterUrl: (url) => /^https:/.test(url || ''),
-    toMediaProxyUrl: (wcId, url) => `proxy:${wcId}:${url}`,
+    // Same contract as the real builder: null unless a token and an http(s) url.
+    toMediaProxyUrl: (token, url) => (token && /^https?:/.test(url || '') ? `proxy:${token}:${url}` : null),
     toast: (...x) => toasts.push(x),
     persistentToast: () => new El('toast'),
     escapeHtml: String,
@@ -226,6 +231,49 @@ test('single and bulk download state share completion accounting', async (t) => 
   assert.equal(controller.isBulkDownload(item.url), false);
 });
 
+// Mission 23 Flight 1 (`ipc-gate-complete`): the gate REFUSES a download that names a tab the
+// sender window does not own (a tab closed mid-batch), so the invoke rejects. The pump must count
+// the item failed and keep going, and nothing may surface as an unhandled rejection.
+test('bulk download: a rejected downloadMedia marks the item failed and the pump continues (no unhandled rejection)', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const h = harness();
+  const controller = await create(h);
+  const unhandled = [];
+  const onUnhandled = (reason) => unhandled.push(reason);
+  process.on('unhandledRejection', onUnhandled);
+  try {
+    h.deps.window.goldfinch.downloadMedia = (x) => {
+      h.calls.push(['download', x]);
+      return x.url.endsWith('/a.png') ? Promise.reject(new Error('forbidden')) : Promise.resolve({ ok: true });
+    };
+    const a = { type: 'image', url: 'https://x/a.png', name: 'a.png' };
+    const b = { type: 'image', url: 'https://x/b.png', name: 'b.png' };
+    h.tab.media = [a, b];
+    h.tab.selected.add(a.url);
+    h.tab.selected.add(b.url);
+    await controller.downloadSelected();
+    // Let the rejection handler run (promise jobs only; no timers needed).
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(controller.isBulkDownload(a.url), false, 'the rejected item is no longer pending');
+    assert.equal(controller.isBulkDownload(b.url), true, 'the other item is still in flight (the pump continued)');
+    assert.equal(controller.consumeDownloadDone({ url: b.url, state: 'completed' }), true);
+    assert.equal(controller.isBulkDownload(b.url), false);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(unhandled, []);
+  } finally {
+    process.off('unhandledRejection', onUnhandled);
+  }
+});
+
+test('single download: a rejected downloadMedia toasts a failure instead of throwing', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const h = harness();
+  const controller = await create(h);
+  h.deps.window.goldfinch.downloadMedia = () => Promise.reject(new Error('forbidden'));
+  await controller.downloadItem({ type: 'image', url: 'https://x/a.png', name: 'a.png' }, h.tab);
+  assert.equal(h.els.toasts.children.length, 1, 'one failure toast was shown');
+});
+
 test('audio playlist navigation follows the active tab media order', async () => {
   const h = harness();
   const controller = await create(h);
@@ -233,11 +281,11 @@ test('audio playlist navigation follows the active tab media order', async () =>
   const two = { type: 'audio', url: 'https://x/two.mp3', name: 'Two' };
   h.tab.media = [one, two];
   controller.playAudio(one);
-  assert.equal(h.els.playerAudio.src, `proxy:${h.tab.wcId}:${one.url}`);
+  assert.equal(h.els.playerAudio.src, `proxy:${h.tab.mediaToken}:${one.url}`);
   controller.playNext();
-  assert.equal(h.els.playerAudio.src, `proxy:${h.tab.wcId}:${two.url}`);
+  assert.equal(h.els.playerAudio.src, `proxy:${h.tab.mediaToken}:${two.url}`);
   controller.playPrev();
-  assert.equal(h.els.playerAudio.src, `proxy:${h.tab.wcId}:${one.url}`);
+  assert.equal(h.els.playerAudio.src, `proxy:${h.tab.mediaToken}:${one.url}`);
 });
 
 test('image thumb, poster, inline player, lightbox, and docked audio all route through the media proxy (Mission 13 F1 Leg 2 / DD2/AC3)', async () => {
@@ -255,15 +303,15 @@ test('image thumb, poster, inline player, lightbox, and docked audio all route t
   assert.equal(cards.length, 2);
 
   const imgEl = cards[0].children[0].children[1]; // card -> thumb -> [pick, img]
-  assert.equal(imgEl.src, `proxy:${h.tab.wcId}:${image.url}`);
+  assert.equal(imgEl.src, `proxy:${h.tab.mediaToken}:${image.url}`);
 
   const videoThumb = cards[1].children[0]; // card -> thumb
-  assert.equal(videoThumb.style.backgroundImage, `url("proxy:${h.tab.wcId}:${video.poster}")`);
+  assert.equal(videoThumb.style.backgroundImage, `url("proxy:${h.tab.mediaToken}:${video.poster}")`);
 
   // Lightbox and inline player resolve activeTab() at call time.
   controller.openLightbox(image);
   const lightboxImg = h.els.lightboxStage.children[0];
-  assert.equal(lightboxImg.src, `proxy:${h.tab.wcId}:${image.url}`);
+  assert.equal(lightboxImg.src, `proxy:${h.tab.mediaToken}:${image.url}`);
 });
 
 // Squawk 0032: toast auto-dismiss must pause on hover/focus and resume with the
@@ -320,4 +368,58 @@ test('squawk 0032: both toast auto-dismiss sites route through the shared armDis
   const src = fs.readFileSync(path.join(__dirname, '../../src/renderer/chrome/media-controller.js'), 'utf8');
   const sites = src.match(/armDismiss\(el, \d+\)/g) || [];
   assert.equal(sites.length, 2, 'expected the bulk-download and single toast() sites to both call armDismiss');
+});
+
+// Mission 23 Flight 1 (leg `jar-isolation`): every sink handles a null proxy address by assigning nothing,
+// an inline data: image is assigned directly at the two image sinks only, and the docked player keeps the
+// token it started with.
+
+test('no token (or a non-web url): thumbnail, poster, inline player, lightbox and docked audio assign nothing', async () => {
+  const h = harness();
+  const controller = await create(h);
+  h.tab.mediaToken = null;
+  const image = { type: 'image', url: 'https://x/pic.png', name: 'pic.png' };
+  const video = { type: 'video', url: 'https://x/vid.mp4', poster: 'https://x/poster.png', name: 'vid.mp4' };
+  const audio = { type: 'audio', url: 'https://x/a.mp3', name: 'a.mp3' };
+  h.tab.media = [image, video, audio];
+  controller.renderMedia();
+  const cards = h.els.mediaList.children;
+  assert.ok(!cards[0].children[0].children[1].src, 'thumbnail has no src');
+  assert.ok(!String(cards[1].children[0].style.backgroundImage || '').includes('null'), 'no null poster url');
+  assert.ok(!String(cards[1].children[0].style.backgroundImage || '').includes('proxy'));
+  controller.openLightbox(image);
+  assert.ok(!h.els.lightboxStage.children[0].src);
+  h.els.playerAudio.src = 'stale';
+  controller.playAudio(audio);
+  assert.ok(!h.els.playerAudio.src, 'docked audio loads nothing and clears the old address');
+});
+
+test('an inline data: image is assigned directly at the thumbnail and the lightbox, never wrapped', async () => {
+  const h = harness();
+  const controller = await create(h);
+  const data = { type: 'image', url: 'data:image/png;base64,AAAA', name: 'image.png' };
+  h.tab.media = [data];
+  h.tab.mediaToken = null; // not needed for an inline image
+  controller.renderMedia();
+  assert.equal(h.els.mediaList.children[0].children[0].children[1].src, data.url);
+  controller.openLightbox(data);
+  assert.equal(h.els.lightboxStage.children[0].src, data.url);
+  // ...but the same string on a non-image item is not an inline image.
+  const video = { type: 'video', url: 'data:image/png;base64,AAAA', name: 'v' };
+  h.tab.media = [video];
+  h.tab.mediaToken = 'tok7';
+  controller.renderMedia();
+  assert.ok(!String(h.els.mediaList.children[0].children[0].style.backgroundImage || '').includes('data:'));
+});
+
+test('the docked player uses the token captured when playback began, not the active tab at seek time', async () => {
+  const h = harness();
+  const controller = await create(h);
+  const one = { type: 'audio', url: 'https://x/one.mp3', name: 'One' };
+  const two = { type: 'audio', url: 'https://x/two.mp3', name: 'Two' };
+  h.tab.media = [one, two];
+  controller.playAudio(one);
+  h.tab.mediaToken = 'tok-new-document'; // the tab navigated; the player's token is now stale
+  controller.playNext();
+  assert.equal(h.els.playerAudio.src, `proxy:tok7:${two.url}`);
 });

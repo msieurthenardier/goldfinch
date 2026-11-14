@@ -65,7 +65,14 @@ import {
   certPickId,
   CERT_CANCEL_ID
 } from '../shared/cert-picker-template.js';
-import { buildVaultPickerCard, renderVaultPickerRows, activationIdFor } from '../shared/vault-picker-template.js';
+import {
+  buildVaultPickerCard,
+  renderVaultPickerRows,
+  activationIdFor,
+  setVaultPickerDestination,
+  CONFIRM_CANCEL_ID
+} from '../shared/vault-picker-template.js';
+import { armingDelayFor } from '../shared/sheet-arming.js';
 import { buildVaultSetCard } from '../shared/vault-set-template.js';
 import { buildVaultRecoveryCard } from '../shared/vault-recovery-template.js';
 import { buildVaultStepupCard } from '../shared/vault-stepup-template.js';
@@ -1024,14 +1031,37 @@ import {
   const pickerEntry = sheet({
     node: pickerNode,
     items: pickerItems,
-    /** @param {number} [startIndex] */
-    onOpen(startIndex = 0) {
+    // Leg `vault-picker-controls`: the picker opens with NOTHING selected, in every view. The start index
+    // is deliberately ignored (no sentinel: a negative index wraps in `focusItem`), focus goes to the list
+    // container, and the first Arrow key picks a row (ArrowUp from here goes to the LAST - menu-controller).
+    // Enter and Space on the container do nothing. This is the picker's OWN open handler; the shared open
+    // path (menuController.open / focusItem) is unchanged for every other menu.
+    onOpen() {
       pickerNode.classList.remove('hidden');
-      const list = pickerItems();
-      if (list.length) focusItem(list, startIndex === -1 ? list.length - 1 : startIndex);
-      else pickerList.focus(); // empty (note) state — focus the list so Escape/Tab work
+      pickerList.focus();
+    },
+    onClose() {
+      clearPickerArming();
     }
   });
+
+  // The cosmetic half of arming: one style hook (`vault-picker-arming`, dimmed rows) cleared by a timer. The
+  // GATE itself is the timestamp in `report.sendActivatedOnce`; this timer can be throttled or dropped and
+  // nothing but the dimming is affected.
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let pickerArmingTimer = null;
+  function clearPickerArming() {
+    if (pickerArmingTimer !== null) clearTimeout(pickerArmingTimer);
+    pickerArmingTimer = null;
+    pickerNode.classList.remove('vault-picker-arming');
+  }
+  /** @param {number} delayMs */
+  function startPickerArming(delayMs) {
+    clearPickerArming();
+    if (!(delayMs > 0)) return;
+    pickerNode.classList.add('vault-picker-arming');
+    pickerArmingTimer = setTimeout(clearPickerArming, delayMs);
+  }
 
   // The header's close (X) is a deliberate dismiss — parity with Escape/backdrop. A mouse
   // affordance the empty state previously lacked; keyboard users still use Escape.
@@ -1053,6 +1083,14 @@ import {
         // can never silently fall through to MANAGE_ID. Activation wins over the onClose
         // dismissal (one report per token). The password is NEVER on this path.
         const id = activationIdFor(btn.dataset);
+        // The confirmation view's Cancel is a DISMISSAL, not an activation: it closes the sheet exactly as
+        // the header close control does (so main's dismissal consumer drops the picker context and no new
+        // channel exists), and it is never delayed by arming (it does not pass through the sender).
+        if (id === CONFIRM_CANCEL_ID) {
+          report.lastStimulus = 'escape';
+          menuController.close(pickerEntry);
+          return;
+        }
         if (sendActivatedOnce({ id })) menuController.close(pickerEntry);
       });
     });
@@ -1102,12 +1140,13 @@ import {
   const certPickerEntry = sheet({
     node: certPickerNode,
     items: certPickerItems,
-    /** @param {number} [startIndex] */
-    onOpen(startIndex = 0) {
+    // Leg `prompts-and-bounds`: like the vault picker, the certificate picker opens with NOTHING selected - a
+    // stray Enter or Space must never send a certificate to the requesting server. The start index is ignored,
+    // focus goes to the list container, and the first Arrow key picks a row (menu-controller). Activation is
+    // additionally ignored for the arming delay (`cert-picker` in the shared arming table).
+    onOpen() {
       certPickerNode.classList.remove('hidden');
-      const list = certPickerItems();
-      if (list.length) focusItem(list, startIndex === -1 ? list.length - 1 : startIndex);
-      else certPickerList.focus(); // defensive empty (note) state
+      certPickerList.focus();
     }
   });
 
@@ -1138,6 +1177,15 @@ import {
         // Activation wins over the onClose dismissal (one report per token).
         const ci = btn.dataset.certIndex;
         const id = ci != null && ci !== '' ? certPickId(Number(ci)) : CERT_CANCEL_ID;
+        // Cancel is a DISMISSAL (reason 'escape', a RESOLUTION reason: the store resolves the pending
+        // certificate request exactly once, continuing without a certificate), the same pattern as the
+        // vault picker's confirmation-view Cancel. It never passes the arming-gated sender, so it is
+        // not delayed; no new channel.
+        if (id === CERT_CANCEL_ID) {
+          report.lastStimulus = 'escape';
+          menuController.close(certPickerEntry);
+          return;
+        }
         if (sendActivatedOnce({ id })) menuController.close(certPickerEntry);
       });
     });
@@ -2920,7 +2968,9 @@ import {
     // emitted by main, and a late page-side dismissed would be stale anyway.
     report.silence();
     menuController.closeAll();
-    report.begin(token);
+    // Arming (leg `vault-picker-controls`): every init - fresh open and same-type replace alike - restarts it.
+    const armingDelay = armingDelayFor(menuType);
+    report.begin(token, armingDelay);
     // Keep-focus opt-in for THIS render (see the blur listener at the bottom of the
     // file). Assigned unconditionally so a keep-focus menu's flag can never leak into
     // the next, ordinary one.
@@ -2973,13 +3023,15 @@ import {
       // open through the controller so roving/outside-click/blur apply uniformly.
       // An empty model → the non-focusable note; onOpen focuses the card instead.
       renderPicker(model);
-      menuController.open(pickerEntry, typeof startIndex === 'number' ? startIndex : 0);
+      setVaultPickerDestination(picker, payload.destination);
+      startPickerArming(armingDelay);
+      menuController.open(pickerEntry, 0);
     } else if (template === 'cert-picker') {
       // Roving list of subject/issuer rows + the Cancel row, centered via CSS —
       // the anchor is ignored. Build FIRST (the items getter reads the rows at
       // open), then open through the controller (vault-picker discipline).
       renderCertPicker(model);
-      menuController.open(certPickerEntry, typeof startIndex === 'number' ? startIndex : 0);
+      menuController.open(certPickerEntry, 0);
     } else if (template === 'vault-set') {
       // Fixed layout (password + confirm + error + Set up/Cancel), centered via CSS — the
       // anchor is ignored, model is an empty array. onOpen clears + focuses the password

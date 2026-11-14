@@ -19,7 +19,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const vs = require('../../src/main/vault/vault-store');
-const { createVaultHuman } = require('../../src/main/vault/vault-human');
+const { createAutoContextHuman } = require('../helpers/auto-context-human');
 
 const FAST_SCRYPT = { algo: 'scrypt', N: 2 ** 12, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 const MASTER = 'correct horse battery staple';
@@ -74,7 +74,7 @@ async function makeHarness(dir) {
 
   const fillCalls = [];
   const cardCalls = [];
-  const human = createVaultHuman({
+  const human = createAutoContextHuman({
     getVaultStore: () => store,
     fromId: (id) => (urls[id] != null ? { getURL: () => urls[id] } : null),
     getTabEntry: (id) => entries.get(id),
@@ -197,7 +197,7 @@ test('a closed tab refuses a card fill', async () => {
     const { human, cardCalls, workCard } = await makeHarness(dir);
     assert.deepEqual(human.fillHuman({ wcId: 30, vaultId: 'work', itemId: workCard.id }), {
       filled: false,
-      reason: 'ineligible'
+      reason: 'origin-changed' // the picker-context origin check now runs first; a closed tab has no committed origin
     });
     assert.equal(cardCalls.length, 0);
   } finally {
@@ -211,7 +211,7 @@ test('an omitted fillCardDelegate refuses rather than silently dropping the fill
     const store = vs.load(dir, { scryptParams: FAST_SCRYPT, getAutoLockMinutes: () => 10, listJars: () => JARS });
     await store.setup({ masterPassword: MASTER });
     const card = store.saveItem('work', CARD);
-    const human = createVaultHuman({
+    const human = createAutoContextHuman({
       getVaultStore: () => store,
       fromId: () => ({ getURL: () => SHOP + '/checkout' }),
       getTabEntry: () => ({ partition: 'persist:container:work', trusted: false }),
