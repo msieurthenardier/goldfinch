@@ -55,6 +55,7 @@ const { createChromeRecovery } = require('./chrome-recovery');
 const { parseMediaProxyUrl } = require('../shared/media-proxy');
 const { INTERNAL_PARTITION } = require('../shared/internal-page');
 const { createMediaProxyHandler } = require('./media-proxy-handler');
+const { createMediaProxyTokens } = require('./media-proxy-tokens');
 const { initProfileAndStores } = require('./init-profile');
 const { sanitizeFilename, isWithinDir } = require('./download-path');
 const { createResolver } = require('./internal-assets');
@@ -92,6 +93,8 @@ const {
 // the credential to F1's fill delegate (in main only; the password never returns
 // to chrome). Constructed once from the vault-store singleton + registry idioms.
 const { createVaultHuman } = require('./vault/vault-human');
+// Mission 23 Flight 1 (leg `vault-fill-trust`): main's witness of real pointer input on each tab guest.
+const { createGestureWitness } = require('./vault/gesture-witness');
 const { runVaultLockTeardown } = require('./vault-lock-teardown');
 const { routeCaptureDropped } = require('./save-prompt-drop-router');
 const { createSavePromptManager } = require('./save-prompt-manager');
@@ -202,6 +205,7 @@ const {
 // former mainWindow/chromeView/tabViews/activeTabWcId singletons. Pure module;
 // Electron wiring stays here.
 const { createWindowRegistry } = require('./window-registry');
+const { createIpcGate } = require('./ipc-gate');
 // M09 F6 Leg 4 (DD5 / review H2): pure move-to-new-window payload rules — the
 // source renderer's strip-snapshot shape validation + the adopt-tab payload
 // builder (main-authoritative url/title at send time; favicon/container are
@@ -436,6 +440,17 @@ async function handleInternal(request) {
 // stay module-scope; everything per-window-in-nature lives in the record.
 const registry = createWindowRegistry();
 
+// Mission 23 Flight 1 (`ipc-gate`): the ONE registration path for a main-process IPC channel
+// that names a caller class (ipc-gate.js; classification in ipc-channel-table.js). Constructed
+// once here and handed to the registrar modules. `popupRegistry` is declared further down:
+// the closure is only read when a refusal is traced, long after module load.
+const gate = createIpcGate({
+  ipcMain,
+  registry,
+  logger: console,
+  isPopupWcId: (id) => popupRegistry.isPopupWcId(id)
+});
+
 // M09 Flight 9 / DD3 two-writer coordination: flipped true by `before-quit` (which
 // fires FIRST on menu-Exit / Cmd+Q, full registry alive) so the per-window `close`
 // writes are SUPPRESSED and never shrink the terminal snapshot window-by-window. On
@@ -553,6 +568,22 @@ function popupTabRows() {
     }
   }
   return rows;
+}
+
+// Does a partition still have a live tab or popup? (leg `downloads`: a Burner download is retryable only
+// while its session exists — `session.fromPartition` on a burner with nothing open would resolve a fresh
+// empty session.) Derived at call time from the registry's tab views and the popup registry's
+// eagerly-captured partitions.
+function isPartitionLive(partition) {
+  for (const rec of registry.records()) {
+    for (const entry of rec.tabViews.values()) {
+      if (entry && entry.partition === partition) return true;
+    }
+    for (const entry of popupRegistry.listForRecord(rec)) {
+      if (entry.partition === partition) return true;
+    }
+  }
+  return false;
 }
 
 // F7 DD1's seam: the REGISTRY is the ownership authority for the all-windows tab
@@ -1465,6 +1496,16 @@ function vaultImportSeverDismiss() {
 // fillDelegate is F1's exact channel: webContents.send targets the TOP frame only,
 // so a cross-origin iframe is never reached, and the credential built inside
 // vault-human is never returned to chrome.
+// Mission 23 Flight 1 (leg `vault-fill-trust`, revised DD4): ONE witness instance, fed by each tab guest's
+// `input-event` (guest-wiring.js) and consulted by the fill icon's two gesture handlers
+// (register-browser-ipc.js). One trace line per gesture decision when GOLDFINCH_IPC_TRACE=1 (the same
+// switch as the gate's refusal trace); decisions only - no URL, title, coordinate or item data.
+const gestureTrace = process.env.GOLDFINCH_IPC_TRACE === '1' ? (line) => console.log(line) : () => {};
+const gestureWitness = createGestureWitness({ trace: gestureTrace });
+// Mission 23 Flight 1 (leg `jar-isolation`): per-tab, per-document media-proxy tokens - minted when a
+// tab's media list arrives (register-browser-ipc.js), invalidated at navigation / destruction
+// (guest-wiring.js) and resolved by the proxy handler (app-lifecycle.js). Never logged.
+const mediaProxyTokens = createMediaProxyTokens();
 let _vaultHuman = null;
 function getVaultHuman() {
   if (_vaultHuman === null) {
@@ -1473,15 +1514,19 @@ function getVaultHuman() {
       fromId: (id) => webContents.fromId(id),
       getTabEntry: (id) => registry.getWindowForGuest(id)?.tabViews.get(id),
       listJars: () => jars.list(),
+      // Mission 23 Flight 1 (`vault-fill-trust`): every message on this HUMAN deps block carries a
+      // `{ human: true }` marker (main-to-guest, so a page cannot forge it): the guest then fills only
+      // the field its own gesture bound - never the page's first form - and an automation fill (the
+      // other deps block, unmarked) never consumes that pending target.
       fillDelegate: ({ wcId, credential }) => {
-        webContents.fromId(wcId)?.send('vault-fill', credential);
+        webContents.fromId(wcId)?.send('vault-fill', credential, { human: true });
       },
       // Card fill (issue #152): the same shape and the same trust boundary as
       // fillDelegate above — webContents.send targets the TOP frame only, so a
       // cross-origin iframe is never reached, and the card is never returned to
       // chrome. A distinct channel because it lands on different DOM anchors.
       fillCardDelegate: ({ wcId, card }) => {
-        webContents.fromId(wcId)?.send('vault-fill-card', card);
+        webContents.fromId(wcId)?.send('vault-fill-card', card, { human: true });
       },
       // Identity fill (M21 F3 Leg 3, DD7/AC19): the same shape and the same
       // trust boundary as fillDelegate/fillCardDelegate above — webContents.send
@@ -1489,7 +1534,7 @@ function getVaultHuman() {
       // and the identity is never returned to chrome. A distinct channel
       // because it lands on different DOM anchors.
       fillIdentityDelegate: ({ wcId, identity }) => {
-        webContents.fromId(wcId)?.send('vault-fill-identity', identity);
+        webContents.fromId(wcId)?.send('vault-fill-identity', identity, { human: true });
       },
       // Generate-in-picker fill (Mission 21, Flight 4, Leg 3, AC13): the same
       // trust boundary as fillDelegate/fillCardDelegate/fillIdentityDelegate
@@ -1501,6 +1546,8 @@ function getVaultHuman() {
       fillGeneratedDelegate: ({ wcId, candidates }) => {
         webContents.fromId(wcId)?.send('vault-fill-generated', { candidates });
       },
+      // Mission 23 Flight 1 (`vault-fill-trust`): the picker-context refusal trace line.
+      gestureTrace,
       // Leg 4 (capture-save): the held-record safety-drop timer, injected so the
       // ~2-min timeout is unit-testable (mirrors the vault-store idle timer).
       setTimeout: (fn, ms) => setTimeout(fn, ms),
@@ -1933,6 +1980,10 @@ const { createWindow } = createWindowFactory({
   // hold-and-resurface) — only its hold is released; the reveal re-keys and
   // re-holds at the next chrome boot.
   releaseVaultHoldsForWindow,
+  // Mission 23 Flight 1 (leg `vault-fill-trust`): a dismissed vault picker / unlock sheet drops its
+  // window's picker contexts. The MEMOIZED reference (never getVaultHuman()): a sheet close in a session
+  // that never raised a picker must not force-construct vault-human.
+  dropVaultPickerContexts: (wcIds) => _vaultHuman?.dropContextsForTabs(wcIds),
   defer: setImmediate,
   scheduleSnapshot: scheduleSessionSnapshot,
   chromeRecovery,
@@ -1981,6 +2032,10 @@ const { wireGuestContents, wireTabViewEvents } = createGuestWiring({
   // never touches the vault feature never force-constructs it merely by
   // navigating.
   vaultHuman: () => _vaultHuman,
+  // Mission 23 Flight 1 (leg `vault-fill-trust`): the per-tab witness of real pointer input.
+  gestureWitness,
+  // Mission 23 Flight 1 (leg `jar-isolation`): the media-proxy token store (commit + destroy hooks).
+  mediaProxyTokens,
   // Mission 20 Flight 1 (DD1/AC7): the ONE two-axis visibility helper, owned by
   // register-tab-ipc.js — threaded here so guest-wiring's own failure/clear
   // transitions call the SAME helper every other guest-show site does.
@@ -2010,8 +2065,9 @@ const { wireGuestContents, wireTabViewEvents } = createGuestWiring({
 /** @type {ReturnType<typeof createManager> | null} */
 let downloadsManager = null;
 
-const { wireDownloadHandler } = registerDownloadIpc({
+const { wireDownloadHandler, noteSessionPartition } = registerDownloadIpc({
   ipcMain,
+  gate,
   registry,
   getTabContents,
   path,
@@ -2027,14 +2083,20 @@ const { wireDownloadHandler } = registerDownloadIpc({
   buildDonePayload,
   broadcast: broadcastToChromeAndInternal,
   registerInternalHandler,
-  getChromeContents,
+  // Retry goes through the session the download came from (leg `downloads`).
+  sessionFromPartition: (partition) => session.fromPartition(partition),
+  getJars: () => jars.list(),
+  partitionFromStoragePath,
+  isPartitionLive: (partition) => isPartitionLive(partition),
   now: () => Date.now(),
   logger: console
 });
 
 // Settings read channel. INTENTIONALLY NOT behind the internal-sender guard — trust domain
-// is the file:// chrome (window.goldfinch surface in chrome-preload.js), same as shields-get.
-// Web webviews have no ipcRenderer.invoke, so only the chrome + internal guest can reach IPC.
+// is the file:// chrome (window.goldfinch surface in chrome-preload.js), same as shields-get;
+// it is registered with the IPC gate's chrome class (register-settings-ipc.js), and answers
+// the chrome WITHOUT the automation key hashes. A web page is not trusted to be unable to
+// reach IPC (probe Q1) — the gate's sender check is the boundary.
 // Settings, Shields, automation preferences, and clipboard IPC register after
 // sessionRuntime construction so the live spellcheck applier is available.
 
@@ -2087,20 +2149,18 @@ const { wireDownloadHandler } = registerDownloadIpc({
 // Fixed here to match jar-key-mint's existing broadcast, needed for the F7
 // indicator to react live to a revoke.
 
-// Read-only automation activity snapshot (Flight 5, Leg 4 / SC10 / DD6).
-// INTENTIONALLY a bare ipcMain.handle — NOT registerInternalHandler — for the SAME
-// reason as `settings-get`/`shields-get` above: BOTH the file:// chrome toolbar
-// indicator AND the goldfinch://settings audit viewer read it. The chrome's file://
-// origin fails the internal-origin check, so wrapping this in registerInternalHandler
-// would silently break the chrome indicator. Do NOT "fix" it that way. This is safe:
-// the payload is non-secret operator-facing audit state (sessions + an action log; it
-// carries NO key or hash), and only the chrome + internal preloads can reach IPC at
-// all — a web webview has no ipcRenderer. The sibling automation:* handlers above ARE
-// origin-checked because only the settings page calls them; this one is the deliberate
-// exception because the chrome also reads it.
+// Read-only automation activity snapshot (Flight 5, Leg 4 / SC10 / DD6). Registered in
+// register-settings-ipc.js through the IPC gate's CHROME-OR-INTERNAL class (Mission 23
+// Flight 1): BOTH the file:// chrome toolbar indicator AND the goldfinch://settings audit
+// viewer read it, and the chrome's file:// origin fails the internal-origin check, so it
+// cannot be a plain registerInternalHandler channel. A web page is refused too — a page in
+// a tab can come to hold the guest preload's IPC object (probe Q1), so "only the chrome and
+// internal preloads can reach IPC" is NOT a boundary; the class is. The payload is
+// non-secret operator-facing audit state (sessions + an action log; no key or hash).
 
 const { rerollSeed } = registerBrowserIpc({
   ipcMain,
+  gate,
   webContents,
   chromeForTab,
   getTabContents,
@@ -2145,6 +2205,8 @@ const { rerollSeed } = registerBrowserIpc({
   // M12 F5 HAT batch 1 (I8): pop the NATIVE fill-icon context menu (Menu.popup) over the owning
   // window — never a guest-DOM menu. Gated — offline register-browser-ipc tests omit it.
   popupVaultIconMenu,
+  gestureWitness,
+  mediaProxyTokens,
   popupRegistry,
   random: Math.random,
   logger: console
@@ -2186,7 +2248,7 @@ const { rerollSeed } = registerBrowserIpc({
 
 // Tab lifecycle and move IPC are registered as one ownership domain.
 registerTabIpc({
-  ipcMain,
+  gate,
   WebContentsView,
   // M17 F1 L1 (DD5): the trusted/internal branch now loads its BUNDLE too — the
   // guest tab-boundary signal gives internal-preload.js its first relative
@@ -2219,6 +2281,7 @@ registerTabIpc({
   broadcastMoveTargetsChanged,
   getTabContents,
   popupRegistry,
+  noteSessionPartition,
   schedule: setTimeout,
   cancelScheduled: clearTimeout,
   scheduleSnapshot: scheduleSessionSnapshot,
@@ -2236,10 +2299,10 @@ registerTabIpc({
 
 // Sortie 06 Leg 1: the corner save-prompt channels (chrome->main open/anchor; page->main
 // pointer/focus/height/dismiss/save). getVaultHuman resolves at CALL time.
-registerSavePromptIpc({ ipcMain, registry, getVaultHuman });
+registerSavePromptIpc({ gate, registry, getVaultHuman });
 
 registerOverlayIpc({
-  ipcMain,
+  gate,
   registry,
   chromeForAttachment,
   chromeForTab,
@@ -2482,20 +2545,20 @@ registerOverlayIpc({
   isSafeTabUrl
 });
 
-// DD10: chrome init-time lock-state query (bare ipcMain.handle — file:// chrome
-// trust domain; non-secret boolean projection only, per the bare-handle rule).
+// DD10: chrome init-time lock-state query (IPC-gate chrome class — file:// chrome trust
+// domain; non-secret boolean projection only).
 // The indicator subscribes to the `vault-lock-state` broadcast FIRST, then calls
 // this once for the initial state; a push that already arrived wins.
-ipcMain.handle('vault-lock-state-get', () => computeVaultLockState());
+gate.chrome.handle('vault-lock-state-get', () => computeVaultLockState(), 'throw');
 
-// Sortie 07: init-time query for the "an automation session holds vault keys" cue. Bare
-// ipcMain.handle (chrome trust, one non-secret boolean). Computed LIVE - never answered from
+// Sortie 07: init-time query for the "an automation session holds vault keys" cue. IPC-gate
+// chrome class (one non-secret boolean). Computed LIVE - never answered from
 // `lastPushedHeld`, which is only the push gate.
-ipcMain.handle('vault-automation-held-get', () => ({ held: mcpServer?.isVaultHeld() === true }));
+gate.chrome.handle('vault-automation-held-get', () => ({ held: mcpServer?.isVaultHeld() === true }), 'throw');
 
 // Explicit global LOCK — chrome-trust surface (M12 F5 HAT batch 1, I8). The fill-icon
 // native context menu's "Lock now" runs in the chrome/main trust domain (it can't reach the
-// internal-origin `internal-vault-lock` channel), so this bare `ipcMain.handle` mirrors
+// internal-origin `internal-vault-lock` channel), so this IPC-gate chrome-class handler mirrors
 // `vault-lock-state-get` (file:// chrome trust; no secret in or out). `lockNow()` is global
 // + idempotent and its onLock hook ALREADY broadcasts `vault-lock-state` — so this must NOT
 // re-broadcast. `vaultLockNow` is the shared body the native icon menu's Lock-now item calls.
@@ -2503,16 +2566,20 @@ function vaultLockNow() {
   getVaultStore().lockNow();
   return { ok: true };
 }
-ipcMain.handle('vault-lock', () => vaultLockNow());
+gate.chrome.handle('vault-lock', () => vaultLockNow(), 'throw');
 
 // Native OS context menu for the guest-injected fill icon (M12 F5 HAT batch 1, I8). The icon
 // is a decorative, spoofable guest-DOM `<div>`; its menu MUST be a native main-process `Menu`
 // popped via `menu.popup` — NEVER DOM injected into the guest page (a page-DOM menu would be
 // spoofable/readable by a hostile page). `guest-vault-icon-menu` (bare, no payload) arrives in
 // register-browser-ipc, which derives the trusted wcId + owning window and calls this. Top row
-// is the required global "Lock now"; a "Fill login…" shortcut mirrors the left-click gesture
-// (the same bare vault-gesture forward). Both act only on main-trusted data.
-function popupVaultIconMenu({ wcId, win }) {
+// is the required global "Lock now"; a "Fill login…" shortcut mirrors the left-click gesture.
+// Mission 23 Flight 1 (`vault-fill-trust`): the registrar admits the right-click against main's own
+// witnessed input first, then hands this delegate the committed origin and a `raise` closure; the
+// "Fill login…" item calls `raise()`, which re-checks that the tab is alive, still its window's active
+// tab and still at that origin before minting a picker context and pushing `vault-gesture`. Both items
+// act only on main-trusted data.
+function popupVaultIconMenu({ win, raise }) {
   if (!win || (typeof win.isDestroyed === 'function' && win.isDestroyed())) return;
   const menu = Menu.buildFromTemplate([
     {
@@ -2525,7 +2592,7 @@ function popupVaultIconMenu({ wcId, win }) {
     {
       label: 'Fill login…',
       click: () => {
-        chromeForTab(wcId)?.send('vault-gesture', { wcId });
+        raise?.();
       }
     }
   ]);
@@ -2538,42 +2605,78 @@ function popupVaultIconMenu({ wcId, win }) {
 // derived it from the main-forwarded gesture); trust lives in main + chrome, never
 // the guest. `vault-reachable-items` returns metadata only; `vault-fill-human`
 // returns `{ filled, reason? }` — NEVER the password (built + consumed in main).
-ipcMain.handle('vault-reachable-items', (_event, wcId) => {
-  if (typeof wcId !== 'number') return [];
-  return getVaultHuman().reachableItems(wcId);
-});
-ipcMain.handle('vault-fill-human', (_event, payload) => {
-  const { wcId, vaultId, itemId } = /** @type {any} */ (payload || {});
-  if (typeof wcId !== 'number' || typeof vaultId !== 'string' || typeof itemId !== 'string') {
-    return { filled: false, reason: 'ineligible' };
-  }
-  return getVaultHuman().fillHuman({ wcId, vaultId, itemId });
-});
+// Mission 23 Flight 1: owning-chrome class — the tab id (the bare first argument here,
+// `payload.wcId` there) must belong to the SENDER's window.
+// Mission 23 Flight 1 (leg `vault-fill-trust`): all three human-fill channels (this pair and
+// `vault-fill-generated` below) now also carry the picker CONTEXT ID main minted when it accepted the
+// gesture (`{ wcId, contextId }` here; `contextId` joins the other payloads) and are refused without a
+// live context for that tab and id; a fill additionally needs the tab to still be at the context's
+// committed origin (vault-human.js). `vault-reachable-items` still returns a plain array.
+gate.owningChrome.handle(
+  'vault-reachable-items',
+  (payload) => (payload && typeof payload === 'object' ? payload.wcId : undefined),
+  (_event, payload) => {
+    const { wcId, contextId } = /** @type {any} */ (payload || {});
+    if (typeof wcId !== 'number') return [];
+    return getVaultHuman().reachableItems(wcId, contextId);
+  },
+  'throw'
+);
+gate.owningChrome.handle(
+  'vault-fill-human',
+  (payload) => (payload && typeof payload === 'object' ? payload.wcId : undefined),
+  (_event, payload) => {
+    const { wcId, vaultId, itemId, contextId, confirm } = /** @type {any} */ (payload || {});
+    if (typeof wcId !== 'number' || typeof vaultId !== 'string' || typeof itemId !== 'string') {
+      return { filled: false, reason: 'ineligible' };
+    }
+    // A missing or non-string `contextId` is judged (and traced) by the context gate itself. `confirm` is
+    // the explicit second call of a card / identity confirmation (leg `vault-picker-controls`): only the
+    // value `true` counts, and main still requires the context's pending record to match this item.
+    return getVaultHuman().fillHuman({ wcId, vaultId, itemId, contextId, confirm: confirm === true });
+  },
+  'throw'
+);
+
+// Leg `vault-picker-controls`: the operator clicked Continue on the certificate warning view of a picker
+// open. Sets the acknowledged bit on the main-held context for that tab and id; until it is set, the three
+// channels above refuse a context whose tab's navigation carries a certificate override. Owning-chrome class,
+// payload `{ wcId, contextId }`; the answer carries no data beyond `{ ok }`.
+gate.owningChrome.handle(
+  'vault-certificate-acknowledge',
+  (payload) => (payload && typeof payload === 'object' ? payload.wcId : undefined),
+  (_event, payload) => {
+    const { wcId, contextId } = /** @type {any} */ (payload || {});
+    if (typeof wcId !== 'number') return { ok: false };
+    return getVaultHuman().acknowledgeCertificate(wcId, contextId);
+  },
+  { value: { ok: false } }
+);
 
 // Generate-in-picker (Mission 21, Flight 4, Leg 3 — generate-in-picker, DD5/AC13):
 // the chosen "Generate strong password" row's dispatch. FD ruling (design review
-// round 1 HIGH): this channel is deliberately STRICTER than vault-fill-human /
-// vault-reachable-items above (no owner check on either) — a write into a guest
-// from chrome-supplied input needs the owner check those two lack; retrofitting
-// them is out of scope here (squawk candidate, logged at flight end). The sender
-// must be the OWNING window's chrome for wcId (the register-tab-ipc.js `ownsTab`
-// shape, reimplemented here since it is closure-local there). Re-runs
+// round 1 HIGH): a write into a guest from chrome-supplied input needs the owner
+// check. Since Mission 23 Flight 1 (leg `ipc-gate`) this channel and its siblings
+// above all share the owning-chrome class: the sender must be the OWNING window's
+// chrome for wcId, enforced by the gate (`gate.owningChrome`, `ownsTab` is
+// `gate.ownsTab`), not by a per-channel check. Re-runs
 // sanitizeGenerateConstraints + generateCandidates on the chrome-supplied
 // constraints — never trusting the earlier canGenerate a gesture handed the
 // chrome — and delegates the actual generate+fill entirely to vault-human, which
 // never returns a candidate.
-ipcMain.handle('vault-fill-generated', (event, payload) => {
-  const { wcId, constraints: rawConstraints } = /** @type {any} */ (payload || {});
-  if (typeof wcId !== 'number') return { filled: false, reason: 'ineligible' };
-  const ownerRec = registry.getWindowForChrome(event.sender);
-  if (!ownerRec || ownerRec !== registry.getWindowForGuest(wcId)) {
-    return { filled: false, reason: 'ineligible' };
-  }
-  const constraints = sanitizeGenerateConstraints(rawConstraints);
-  if (!constraints) return { filled: false, reason: 'unsatisfiable' };
-  const candidates = generateCandidates(constraints);
-  return getVaultHuman().fillGenerated({ wcId, candidates });
-});
+gate.owningChrome.handle(
+  'vault-fill-generated',
+  (payload) => (payload && typeof payload === 'object' ? payload.wcId : undefined),
+  (_event, payload) => {
+    const { wcId, constraints: rawConstraints, contextId } = /** @type {any} */ (payload || {});
+    if (typeof wcId !== 'number') return { filled: false, reason: 'ineligible' };
+    const constraints = sanitizeGenerateConstraints(rawConstraints);
+    if (!constraints) return { filled: false, reason: 'unsatisfiable' };
+    const candidates = generateCandidates(constraints);
+    return getVaultHuman().fillGenerated({ wcId, candidates, contextId });
+  },
+  { value: { filled: false, reason: 'ineligible' } }
+);
 
 // Guest media-list / privacy-fp forwarding from webview-preload to chrome renderer.
 // Web <WebContentsView> tabs send via ipcRenderer.send (not sendToHost).
@@ -2637,11 +2740,12 @@ ipcMain.handle('vault-fill-generated', (event, payload) => {
 // --- cookie jars / container identities ---
 // The six jar-registry channels (list/add/rename/remove/set-default/get-default) live in
 // jar-ipc.js (M06 F1 Leg 3) — unit-testable via injected deps, and they don't feed this file.
-// The mutating channels are deliberately chrome-trusted (bare ipcMain.handle, same domain as
+// The mutating channels are deliberately chrome-trusted (IPC-gate chrome class, same domain as
 // new-container-create); Flight 3 adds internal-origin-gated variants for the management page (DD7).
 // broadcastJarsChanged is reused by new-container-create above (the picker's add entry point).
 const { broadcastJarsChanged } = registerJarIpc({
   ipcMain,
+  gate,
   jars,
   session,
   rerollSeed,
@@ -2693,6 +2797,7 @@ const retentionSweep = createRetentionSweep({
 // property that lets registerJarIpc run before jars.load().
 registerHistoryIpc({
   ipcMain,
+  gate,
   historyStore,
   jars,
   broadcast: broadcastToChromeAndInternal
@@ -2705,7 +2810,7 @@ registerHistoryIpc({
 // (and jars, for the registry-rejection guard) at invoke time, always after
 // boot.
 registerBookmarksIpc({
-  ipcMain,
+  gate,
   bookmarksStore,
   jars,
   broadcast: broadcastToChromeAndInternal
@@ -2761,13 +2866,13 @@ const { applySpellcheck, applyShields, pruneAllJars } = sessionRuntime;
 
 registerSettingsIpc({
   ipcMain,
+  gate,
   registerInternalHandler,
   settings,
   shields,
   isolateEffective,
   operatorOverride: isolateOperatorOverride,
   app,
-  registry,
   env: process.env,
   broadcast: broadcastToChromeAndInternal,
   applyAutomationEnabledChange,
@@ -2831,7 +2936,7 @@ registerVaultIpc({
 
 registerAppLifecycle({
   app,
-  ipcMain,
+  gate,
   extractLaunchUrls,
   filterLaunchUrls,
   queueChromeSend,
@@ -2874,6 +2979,8 @@ registerAppLifecycle({
   isInternalContents,
   createMediaProxyHandler,
   parseMediaProxyUrl,
+  // Mission 23 Flight 1 (leg `jar-isolation`): the ONE resolver the proxy handler asks - the token store.
+  resolveMediaProxyToken: (token) => mediaProxyTokens.resolve(token),
   // Mission 13 Flight 3 / Leg 3 (DD3): threaded so the web-contents-created
   // catch-all can apply the same session-aware URL-safety predicates as the
   // explicit guest wiring, without app-lifecycle.js gaining a require() of

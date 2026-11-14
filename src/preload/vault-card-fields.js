@@ -419,6 +419,8 @@ function formatCombinedExpiry(field, exp) {
  * @param {any} doc
  * @param {{ number?: string|null, cardholder?: string|null, expiry?: string|null, cvv?: string|null } | null | undefined} card
  * @param {number | null} [ordinal]  an index into `findAllCardFields(doc)`.
+ * @param {{ requireOrdinal?: boolean }} [options]  `requireOrdinal: true` (off by default) turns the
+ *   first-entry fallback OFF: an invalid ordinal fills nothing (Mission 23 Flight 1, human fills).
  * @returns {{ filled: boolean, fields: Array<{ field: any, value: string }> }}
  *   `fields` carries the exact string WRITTEN to each field that was actually
  *   filled, keyed by the field's own node reference (M21 F1 Leg 3, DD3h) — the
@@ -426,17 +428,17 @@ function formatCombinedExpiry(field, exp) {
  *   carries whatever `setChoiceValue` actually wrote, which can differ from the
  *   requested candidate; a select with no matching option contributes no entry.
  */
-function fillCardForm(doc, card, ordinal) {
+function fillCardForm(doc, card, ordinal, options) {
   // `typeof window` is 'undefined' under the headless unit test (which drives this
   // pure helper directly); in the guest main world it is the page window.
   if (typeof window !== 'undefined' && window.top !== window) return { filled: false, fields: [] };
   if (!card) return { filled: false, fields: [] };
 
   const all = findAllCardFields(doc);
-  const entry =
-    typeof ordinal === 'number' && Number.isInteger(ordinal) && ordinal >= 0 && ordinal < all.length
-      ? all[ordinal]
-      : findCardFields(doc);
+  const validOrdinal = typeof ordinal === 'number' && Number.isInteger(ordinal) && ordinal >= 0 && ordinal < all.length;
+  // Mission 23 Flight 1 (`vault-fill-trust`): a HUMAN fill fills only the gesture-bound entry.
+  if (!validOrdinal && options && options.requireOrdinal === true) return { filled: false, fields: [] };
+  const entry = validOrdinal ? all[ordinal] : findCardFields(doc);
   if (!entry || !entry.number) return { filled: false, fields: [] };
 
   const written = [];

@@ -234,10 +234,10 @@ export function createPrivacyController(deps) {
 
   // The last automation KEY state (F7, Flight 3 Leg 6 HAT — distinct from the activity
   // snapshot above: this is which keys are ENABLED, not which connections are live).
-  // Populated from settings.getAll() (settings-get at boot, settings-changed live) —
-  // automationKeyHashes/automationAdminKeyHash are non-secret hash digests already
-  // broadcast to chrome on every settings-changed (jar-key-mint et al broadcast the
-  // full settings object today), so no new IPC channel is needed.
+  // Populated from the settings object (settings-get at boot, settings-changed live). The chrome
+  // never receives the key HASHES (Mission 23 Flight 1, DD13); main sends a derived, non-secret
+  // `automationKeyState` ({ jarIdsWithKey, adminKeyEnabled }) in their place, so no new IPC
+  // channel is needed.
   let lastKeyState = { enabledJarKeyCount: 0, adminKeyEnabled: false };
 
   /**
@@ -253,17 +253,17 @@ export function createPrivacyController(deps) {
   }
 
   /**
-   * Derive { enabledJarKeyCount, adminKeyEnabled } from a settings.getAll() payload.
-   * Defensive against a missing/malformed automationKeyHashes (never throws).
-   * @param {{ automationKeyHashes?: any, automationAdminKeyHash?: any }} all
+   * Derive { enabledJarKeyCount, adminKeyEnabled } from a settings payload's main-computed
+   * `automationKeyState`. Defensive against a missing/malformed field (never throws).
+   * @param {{ automationKeyState?: any }} all
    * @returns {{ enabledJarKeyCount: number, adminKeyEnabled: boolean }}
    */
   function computeAutomationKeyState(all) {
-    const hashes =
-      all && all.automationKeyHashes && typeof all.automationKeyHashes === 'object' ? all.automationKeyHashes : {};
+    const state =
+      all && all.automationKeyState && typeof all.automationKeyState === 'object' ? all.automationKeyState : {};
     return {
-      enabledJarKeyCount: Object.keys(hashes).length,
-      adminKeyEnabled: !!(all && all.automationAdminKeyHash)
+      enabledJarKeyCount: Array.isArray(state.jarIdsWithKey) ? state.jarIdsWithKey.length : 0,
+      adminKeyEnabled: state.adminKeyEnabled === true
     };
   }
 
@@ -342,8 +342,8 @@ export function createPrivacyController(deps) {
 
   /**
    * Update the cached automation KEY state (enabled jar-key count / admin-key
-   * enabled) from a settings.getAll()-shaped payload and re-render.
-   * @param {{ automationKeyHashes?: any, automationAdminKeyHash?: any }} all
+   * enabled) from a settings payload carrying `automationKeyState` and re-render.
+   * @param {{ automationKeyState?: any }} all
    */
   function updateAutomationKeyState(all) {
     lastKeyState = computeAutomationKeyState(all);

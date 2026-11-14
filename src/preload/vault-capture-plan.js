@@ -310,4 +310,21 @@ function planCaptures({ resolved, entriesByKind, snapshot }) {
   return plan;
 }
 
-module.exports = { planCaptures };
+/**
+ * Send ONE planned capture to main (Mission 23 Flight 1, leg `ipc-gate-complete`, DD3): a
+ * per-kind dispatch with ONE string-LITERAL channel per kind, so the set of channels the guest
+ * preload can name is readable from source (`ipc-channel-table` / `preload-channel-literals`
+ * tests). The plan keeps its own `channel` field (the unit tests and the save-moment helpers read
+ * it); a drift test pins each literal below equal to the planner's channel. An unrecognised kind
+ * sends nothing (fail closed — never a login fallback). A literal send is hardening only: a page
+ * that reaches the IPC object can still name a channel; the main-side class check is the boundary.
+ * @param {{ send: (channel: string, payload: any) => void }} ipcRenderer
+ * @param {{ kind: string, payload: any }} planned
+ */
+function sendPlannedCapture(ipcRenderer, planned) {
+  if (planned.kind === 'login') ipcRenderer.send('guest-vault-capture', planned.payload);
+  else if (planned.kind === 'card') ipcRenderer.send('guest-vault-capture-card', planned.payload);
+  else if (planned.kind === 'identity') ipcRenderer.send('guest-vault-capture-identity', planned.payload);
+}
+
+module.exports = { planCaptures, sendPlannedCapture };

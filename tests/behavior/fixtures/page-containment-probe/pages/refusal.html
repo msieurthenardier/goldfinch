@@ -1,0 +1,120 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>refusal-fixture</title>
+<head>
+  <script>
+    // Fixture for behavior spec guest-ipc-refusal (Mission 23 Flight 1). It first-runs in the page main
+    // world and records the preload's IPC object the way probe Q1 observed it reaching a page: a
+    // page-patched Array.prototype.push receives Electron's emit event, whose `.sender` is the object.
+    // runCalls() then makes exactly two calls with it and reports what happened. Nothing else is sent.
+    // runOverlayCalls() (added by leg ipc-gate-complete, spec step 8) makes three more: one sheet-class
+    // invoke (menu-overlay:vault-unlock, carrying dummy secret bytes), one find-class send
+    // (find-overlay:query) and one save-prompt-class send (save-prompt:dismiss), recording the outcomes
+    // under status.overlay / status.overlayDone and leaving runCalls()'s own fields alone.
+    (function () {
+      'use strict';
+      var held = null;
+      var status = { reached: false, done: false, settingsGet: null, toggleSend: null, overlay: null, overlayDone: false };
+      var origPush = Array.prototype.push;
+      Array.prototype.push = function () {
+        try {
+          if (!held) {
+            for (var i = 0; i < arguments.length && i < 8; i++) {
+              var a = arguments[i];
+              var s = a && typeof a === 'object' ? a.sender : null;
+              if (s && typeof s.invoke === 'function' && typeof s.send === 'function' && typeof s.sendSync === 'function') {
+                held = s;
+                status.reached = true;
+              }
+            }
+          }
+        } catch (e) {}
+        return origPush.apply(this, arguments);
+      };
+      function render() {
+        var el = document.getElementById('status');
+        if (el) el.textContent = JSON.stringify(status);
+        document.title = 'refusal:' + (status.done ? 'done' : status.reached ? 'reached' : 'waiting');
+      }
+      window.addEventListener('DOMContentLoaded', render);
+      setInterval(render, 200);
+      window.runCalls = function () {
+        if (!held) {
+          status.done = true;
+          return false;
+        }
+        // Call 1: an invoke of settings-get. Record the outcome shape only, never the object itself.
+        var p;
+        try {
+          p = held.invoke('settings-get');
+        } catch (e) {
+          p = Promise.reject(e);
+        }
+        Promise.resolve(p).then(
+          function (v) {
+            var keys = v && typeof v === 'object' ? Object.keys(v) : [];
+            status.settingsGet = { outcome: 'resolved', type: typeof v, keyCount: keys.length, hasKeyHashes: keys.some(function (k) { return /KeyHash/.test(k); }) };
+          },
+          function (e) {
+            status.settingsGet = { outcome: 'rejected', error: String(e && e.message ? e.message : e).slice(0, 160) };
+          }
+        ).then(function () {
+          // Call 2: a one-way send of toggle-bookmarks-bar (no result to observe; the chrome shows the effect).
+          try {
+            held.send('toggle-bookmarks-bar');
+            status.toggleSend = 'issued';
+          } catch (e) {
+            status.toggleSend = 'threw: ' + String(e && e.message ? e.message : e).slice(0, 120);
+          }
+          status.done = true;
+          render();
+        });
+        return true;
+      };
+      window.runOverlayCalls = function () {
+        var overlay = { vaultUnlock: null, findQuery: null, savePromptDismiss: null };
+        status.overlay = overlay;
+        if (!held) {
+          status.overlayDone = true;
+          render();
+          return false;
+        }
+        // Sheet class: an invoke with a dummy secret byte array. Record the outcome shape only.
+        var p;
+        try {
+          p = held.invoke('menu-overlay:vault-unlock', { token: 1, secret: new Uint8Array([1, 2, 3]) });
+        } catch (e) {
+          p = Promise.reject(e);
+        }
+        Promise.resolve(p).then(
+          function (v) {
+            overlay.vaultUnlock = { outcome: 'resolved', refused: !(v && v.ok === true), ok: !!(v && v.ok === true) };
+          },
+          function (e) {
+            overlay.vaultUnlock = { outcome: 'rejected', refused: true, error: String(e && e.message ? e.message : e).slice(0, 160) };
+          }
+        ).then(function () {
+          // Find class and save-prompt class: one-way sends (no result; the trace lines carry the proof).
+          try {
+            held.send('find-overlay:query', { text: 'x' });
+            overlay.findQuery = 'issued';
+          } catch (e) {
+            overlay.findQuery = 'threw: ' + String(e && e.message ? e.message : e).slice(0, 120);
+          }
+          try {
+            held.send('save-prompt:dismiss', { token: 1 });
+            overlay.savePromptDismiss = 'issued';
+          } catch (e) {
+            overlay.savePromptDismiss = 'threw: ' + String(e && e.message ? e.message : e).slice(0, 120);
+          }
+          status.overlayDone = true;
+          render();
+        });
+        return true;
+      };
+    })();
+  </script>
+</head>
+<body>
+  <pre id="status">{}</pre>
+</body>

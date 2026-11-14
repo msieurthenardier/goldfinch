@@ -154,7 +154,7 @@ const KEEP_FOCUS_MAX = 5;
  * @typedef {{ menuType: string, model: Array<{id: string, label: string}>,
  *   anchor: any, startIndex?: number, token: number, noFocus?: boolean,
  *   dismissible?: boolean, jarId?: string, keepFocus?: boolean,
- *   survivesBlur?: boolean }} MenuOpenPayload
+ *   survivesBlur?: boolean, destination?: string }} MenuOpenPayload
  * @typedef {{ contentView: ContentViewLike, win?: any, bounds?: (Bounds | null) }} Attachment
  */
 

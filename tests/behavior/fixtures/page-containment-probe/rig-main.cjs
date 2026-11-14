@@ -413,6 +413,10 @@ app.whenReady().then(async () => {
     await sleep(500);
     if (PHASES.includes('q1')) await phaseQ1(base).catch((e) => ((rigFailed = true), probe('Q1a.RIGERROR', { error: String(e && e.stack).slice(0, 500) })));
     if (PHASES.includes('q2')) await phaseQ2(base, server.port).catch((e) => ((rigFailed = true), probe('Q2.RIGERROR', { error: String(e && e.stack).slice(0, 500) })));
+    if (PHASES.some((p) => /^g[1-8]?$/.test(p))) {
+      const { runGesture } = require('./gesture-phase.cjs');
+      await runGesture({ newGuest, iso, click, sleep, rectOf, settle, probe, base, port: server.port, VAULT_WORLD, RIG_PRELOAD, getView: () => view, phases: PHASES }).catch((e) => ((rigFailed = true), probe('G.RIGERROR', { error: String(e && e.stack).slice(0, 700) })));
+    }
     if (PHASES.includes('q3')) await phaseQ3(base).catch((e) => ((rigFailed = true), probe('Q3.RIGERROR', { error: String(e && e.stack).slice(0, 500) })));
   } catch (e) {
     rigFailed = true;

@@ -35,10 +35,10 @@ function createManager(store) {
   /**
    * Register a newly started download. Assigns a persisted id, stores a
    * 'progressing' record in memory, and returns the id.
-   * @param {{ url?: string, filename: string, savePath?: string|null, mime?: string, startTime?: number }} info
+   * @param {{ url?: string, filename: string, savePath?: string|null, mime?: string, startTime?: number, partition?: string }} info
    * @returns {number}
    */
-  function register({ url, filename, savePath, mime, startTime }) {
+  function register({ url, filename, savePath, mime, startTime, partition }) {
     const id = store.getNextId();
     /** @type {object} */
     const rec = {
@@ -53,6 +53,8 @@ function createManager(store) {
       startTime: startTime ?? Date.now()
     };
     if (typeof mime === 'string') /** @type {any} */ (rec).mime = mime;
+    // The session the download came from (leg `downloads`); absent for the browser's own session.
+    if (typeof partition === 'string' && partition) /** @type {any} */ (rec).partition = partition;
     inProgress.set(id, rec);
     return id;
   }
@@ -95,6 +97,7 @@ function createManager(store) {
       endTime: endTime ?? Date.now()
     };
     if (typeof r.mime === 'string') /** @type {any} */ (terminal).mime = r.mime;
+    if (typeof r.partition === 'string') /** @type {any} */ (terminal).partition = r.partition;
     if (typeof error === 'string') /** @type {any} */ (terminal).error = error;
     store.append(terminal);
     inProgress.delete(id);
@@ -156,6 +159,7 @@ function createManager(store) {
           endTime: now
         };
         if (typeof r.mime === 'string') /** @type {any} */ (terminal).mime = r.mime;
+        if (typeof r.partition === 'string') /** @type {any} */ (terminal).partition = r.partition;
         store.append(terminal);
       } catch {
         // best-effort: a failed flush is tolerated (the gap is accepted, DD3).

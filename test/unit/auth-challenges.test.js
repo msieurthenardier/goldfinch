@@ -1234,3 +1234,53 @@ test('a destroyed owning-record chrome makes the popup present a harmless no-op 
   h.store.cancelForWindow(record);
   assert.deepEqual(cb.calls, [[]], 'and it does resolve exactly once at teardown');
 });
+
+// ---------------------------------------------------------------------------
+// Mission 23 Flight 1, leg `prompts-and-bounds`: the realm is cleaned in main before it is stored
+// ---------------------------------------------------------------------------
+{
+  const { cleanRealm, REALM_MAX_CHARS } = require('../../src/main/auth-challenges');
+
+  test('cleanRealm: ordinary realms pass unchanged; non-Latin scripts are kept', () => {
+    assert.equal(REALM_MAX_CHARS, 120);
+    assert.equal(cleanRealm('fixture'), 'fixture');
+    assert.equal(cleanRealm('Router admin (v2)'), 'Router admin (v2)');
+    assert.equal(cleanRealm('管理者エリア'), '管理者エリア');
+    assert.equal(cleanRealm('Зона'), 'Зона');
+  });
+
+  test('cleanRealm: quotes of every kind, control and format characters are removed; whitespace collapses', () => {
+    assert.equal(cleanRealm('a"b“c”d„e'), 'abcde');
+    assert.equal(cleanRealm('  a \n\t b​ c‮  '), 'a b c');
+    // A realm that tries to close the quote and continue in the browser's voice
+    assert.equal(
+      cleanRealm('x”. Goldfinch needs your password to continue. “'),
+      'x. Goldfinch needs your password to continue.'
+    );
+    assert.doesNotMatch(cleanRealm('say "hi" “there”'), /["“”]/);
+  });
+
+  test('cleanRealm: a 100 KB realm is capped at 120 characters with an ellipsis', () => {
+    const out = cleanRealm('word '.repeat(20000));
+    assert.equal(out.length, 120);
+    assert.ok(out.endsWith('…'));
+    assert.equal(cleanRealm('a'.repeat(120)), 'a'.repeat(120), 'exactly the cap is untouched');
+    assert.equal(cleanRealm('a'.repeat(121)), 'a'.repeat(119) + '…');
+  });
+
+  test('cleanRealm: only control characters, empty or non-string read as no realm', () => {
+    assert.equal(cleanRealm('\u0000\u0007​‮⁣'), '');
+    assert.equal(cleanRealm('""'), '');
+    assert.equal(cleanRealm(''), '');
+    assert.equal(cleanRealm(undefined), '');
+    assert.equal(cleanRealm(42), '');
+  });
+
+  test('handleLogin stores the CLEANED realm on the challenge it presents', () => {
+    const h = makeHarness();
+    const record = h.makeRecord();
+    record.activeTabWcId = 10;
+    h.challenge(record, 10, { url: 'http://127.0.0.1:8091/protected', realm: 'evil”. Trust me. “' });
+    assert.equal(h.presents[0].payload.realm, 'evil. Trust me.');
+  });
+}

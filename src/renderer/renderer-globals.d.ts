@@ -305,6 +305,9 @@ interface GoldfinchBridge {
      * (overlay-menus.js's open(), against the vault-blur-survival.js allowlist) — never
      * hand-set at an individual vault-controller.js call site. */
     survivesBlur?: boolean;
+    /** Leg `vault-picker-controls`: the vault picker's destination display string (the page a fill
+     * would go to); rendered as the "Fill on ..." line. Any other menu type ignores it. */
+    destination?: string;
   }): void;
   /** Channel 2: programmatic close — reason allowlisted main-side ('toggle' | 'superseded' |
    * 'escape' | 'blur' | 'navigation' | 'input-empty' | 'activated'). */
@@ -524,12 +527,18 @@ interface GoldfinchBridge {
   // `crash: null` and `hung: false` are the clear transitions.
   onTabCrash(cb: (d: { wcId: number; crash: { reason: string; exitCode: number; url: string } | null }) => void): void;
   onTabHung(cb: (d: { wcId: number; hung: boolean }) => void): void;
-  onTabMediaList(cb: (d: { wcId: number; mediaList: any[] }) => void): void;
+  onTabMediaList(cb: (d: { wcId: number; mediaList: any[]; mediaToken?: string }) => void): void;
   onTabPrivacyFp(cb: (d: { wcId: number; fpCounts: any }) => void): void;
   onTabSelfClose(cb: (d: { wcId: number; historyLength: number }) => void): void;
   onVaultGesture(
     cb: (d: {
       wcId: number;
+      /** Mission 23 Flight 1 (`vault-fill-trust`): the per-open picker context id, the destination
+       * display string (`example.com`, `host:8443`, `http://host`) and whether the tab's navigation
+       * carries a certificate override. Carried through the flow; rendered/enforced by the picker. */
+      contextId: string;
+      destination: string;
+      certificate: boolean;
       generate?: {
         canGenerate: boolean;
         constraints: { minLength: number | null; maxLength: number | null; passwordRules: string | null };
@@ -587,7 +596,7 @@ interface GoldfinchBridge {
   // Human pick-and-fill (M12 F2 Leg 3, DD5/DD6): the origin-filtered, metadata-only
   // picker read and the origin/scope-rechecked human fill dispatch. Neither carries
   // a password — it is resolved and sent to the guest ONLY in main.
-  vaultReachableItems(wcId: number): Promise<
+  vaultReachableItems(payload: { wcId: number; contextId: string }): Promise<
     Array<{
       vaultId: string;
       id: string;
@@ -602,12 +611,20 @@ interface GoldfinchBridge {
     wcId: number;
     vaultId: string;
     itemId: string;
+    contextId: string;
+    /** Leg `vault-picker-controls`: sent ONLY by the confirmation view's Fill action (a card / identity
+     * on a site it has not been confirmed for); main still requires its own pending record to match. */
+    confirm?: boolean;
   }): Promise<{ filled: boolean; reason?: string }>;
+  /** Leg `vault-picker-controls`: the operator clicked Continue on the certificate warning view; sets the
+   * acknowledged bit on the main-held context. Owning-chrome. */
+  vaultCertificateAcknowledge(payload: { wcId: number; contextId: string }): Promise<{ ok: boolean }>;
   /** Generate-in-picker (Mission 21, Flight 4, Leg 3, AC12/AC13): main re-validates the
    * constraints, generates the candidates, and fills main->guest entirely in main — the
    * chrome never receives or holds the generated password. */
   vaultFillGenerated(payload: {
     wcId: number;
+    contextId: string;
     constraints: { minLength: number | null; maxLength: number | null; passwordRules: string | null };
   }): Promise<{ filled: boolean; reason?: string }>;
   // Capture-save (M12 F2 Leg 4, DD7): the save/update offer subscriber (model is
@@ -705,7 +722,10 @@ interface GoldfinchInternalBridge {
   offAutomationActivity(h: number): void;
   // --- downloads surface (Flight 5, Leg 2) ---
   downloadsList(): Promise<Array<any>>;
-  downloadsAction(id: number, action: string): Promise<{ ok: boolean; error?: string }>;
+  downloadsAction(
+    id: number,
+    action: string
+  ): Promise<{ ok: boolean; error?: string; reason?: string; message?: string }>;
   downloadsClear(): Promise<{ ok: boolean }>;
   onDownloadsChanged(cb: (payload: any) => void): number[];
   offDownloadsChanged(handles: number[]): void;

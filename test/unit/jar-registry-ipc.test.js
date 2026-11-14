@@ -1,6 +1,7 @@
 'use strict';
 
 const { test } = require('node:test');
+const { projectSettingsForChrome } = require('../../src/main/settings-chrome-view');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -35,24 +36,47 @@ test('exports the registry registrar', () => {
   assert.equal(typeof registerJarRegistryIpc, 'function');
 });
 
-test('registry chrome/internal twins receive the same handler identity before the internal wrapper', () => {
-  const chrome = new Map();
-  const internal = new Map();
-  const ipcMain = { handle: (channel, handler) => chrome.set(channel, handler) };
-  registerJarRegistryIpc({
-    ipcMain,
-    registerInternal: (_ipcMain, channel, handler) => internal.set(channel, handler),
-    jars: {},
-    session: {},
-    wipeJarData() {},
-    revokeJarKey() {},
-    settings: {},
-    broadcast() {},
-    broadcastJarsChanged() {}
-  });
-  for (const operation of ['list', 'add', 'rename', 'set-default', 'get-default', 'remove']) {
-    assert.equal(internal.get(`internal-jars-${operation}`), chrome.get(`jars-${operation}`), operation);
+test('registry chrome/internal twins run the same handler body (same answer for the same payload, through the gate)', async (t) => {
+  // The chrome channel is wrapped by the IPC gate, so identity of the registered function can
+  // no longer be compared; the same underlying handler is asserted by behaviour instead.
+  const h = makeHarness(t);
+  for (const [operation, payloads] of [
+    ['list', [undefined]],
+    ['get-default', [undefined]],
+    ['rename', [{ id: 'nope', name: 'x' }]],
+    ['set-default', [{ id: 'nope' }]],
+    ['remove', [{ id: 'nope' }]],
+    ['add', ['nope']]
+  ]) {
+    for (const payload of payloads) {
+      const viaChrome = await h.invoke(`jars-${operation}`, structuredClone(payload));
+      const viaInternal = await h.invokeInternal(`internal-jars-${operation}`, structuredClone(payload));
+      assert.deepEqual(viaChrome, viaInternal, operation);
+    }
   }
+});
+
+test('registry chrome channels refuse a page sender and a null frame, before touching the registry', async (t) => {
+  const h = makeHarness(t);
+  const page = { sender: { id: 'page' }, senderFrame: { origin: 'https://evil.test' } };
+  const before = JSON.stringify(h.jars.list());
+  for (const channel of [
+    'jars-list',
+    'jars-add',
+    'jars-rename',
+    'jars-set-default',
+    'jars-get-default',
+    'jars-remove'
+  ]) {
+    await assert.rejects(async () => h.invokeRaw(channel, page, { id: 'personal', name: 'x' }), /forbidden/, channel);
+    await assert.rejects(
+      async () => h.invokeRaw(channel, { sender: h.chromeSender, senderFrame: null }, { id: 'personal' }),
+      /forbidden/,
+      channel
+    );
+  }
+  assert.equal(JSON.stringify(h.jars.list()), before);
+  assert.deepEqual(h.events, []);
 });
 
 test('registry internal twins reject an untrusted sender before invoking their shared body', (t) => {
@@ -283,9 +307,11 @@ test('jars-remove composes remove → wipe → reroll → revoke → settings-ch
   // Revoke got the removed id and the injected settings object.
   assert.equal(h.events[3].jarId, 'personal');
   assert.equal(h.events[3].settings, h.settings);
-  // settings-changed carries getAll()'s payload…
+  // settings-changed carries the CHROME-SAFE projection of getAll() (DD13: no key hashes)…
   assert.equal(h.events[4].channel, 'settings-changed');
-  assert.deepEqual(h.events[4].payload, h.settings.getAll());
+  assert.deepEqual(h.events[4].payload, projectSettingsForChrome(h.settings.getAll()));
+  assert.equal('automationKeyHashes' in h.events[4].payload, false);
+  assert.equal('automationAdminKeyHash' in h.events[4].payload, false);
   // …then jars-changed reflects the NEW default (the removed jar held the flag).
   assert.equal(h.events[5].channel, 'jars-changed');
   assert.equal(h.events[5].payload.defaultId, 'work');

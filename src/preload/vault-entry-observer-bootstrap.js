@@ -52,21 +52,23 @@ if (!window[VAULT_ENTRY_OBSERVER_HANDLE]) {
     // gesture-bound anchor's ordinal — never a node reference (DD3g). A
     // null/out-of-range ordinal falls back to today's first-detected-entry
     // behaviour, exactly as before this leg.
-    /** @param {{ cred?: any, ordinal?: number|null }} [arg] */
+    // `strict: true` (Mission 23 Flight 1, human fills) turns that first-entry fallback OFF: no valid
+    // ordinal fills nothing. Absent (automation) = the fallback above, unchanged.
+    /** @param {{ cred?: any, ordinal?: number|null, strict?: boolean }} [arg] */
     fillLogin(arg = {}) {
-      const result = fillLoginForm(document, arg.cred, arg.ordinal);
+      const result = fillLoginForm(document, arg.cred, arg.ordinal, { requireOrdinal: arg.strict === true });
       observer.grantForFill(result);
       return { filled: !!result.filled };
     },
-    /** @param {{ card?: any, ordinal?: number|null }} [arg] */
+    /** @param {{ card?: any, ordinal?: number|null, strict?: boolean }} [arg] */
     fillCard(arg = {}) {
-      const result = fillCardForm(document, arg.card, arg.ordinal);
+      const result = fillCardForm(document, arg.card, arg.ordinal, { requireOrdinal: arg.strict === true });
       observer.grantForFill(result);
       return { filled: !!result.filled };
     },
-    /** @param {{ identity?: any, ordinal?: number|null }} [arg] */
+    /** @param {{ identity?: any, ordinal?: number|null, strict?: boolean }} [arg] */
     fillIdentity(arg = {}) {
-      const result = fillIdentityForm(document, arg.identity, arg.ordinal);
+      const result = fillIdentityForm(document, arg.identity, arg.ordinal, { requireOrdinal: arg.strict === true });
       observer.grantForFill(result);
       return { filled: !!result.filled };
     },

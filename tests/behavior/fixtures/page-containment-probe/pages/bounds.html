@@ -1,0 +1,42 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>bounds</title>
+<!-- Bounds probe page: three functions the behavior spec address-and-history-bounds calls by evaluate. -->
+<body>
+  <script>
+    // Sets document.title to a fresh 100 KB string in a tight loop for `ms`, then once to the short marker
+    // `bounds:done`; resolves with the number of changes made. Yields to the event loop between short bursts so
+    // the evaluate call can resolve and title events are delivered while the loop runs.
+    window.titleFlood = function (ms) {
+      return new Promise(function (resolve) {
+        var end = Date.now() + ms;
+        var n = 0;
+        function burst() {
+          var burstEnd = Date.now() + 20;
+          while (Date.now() < burstEnd) {
+            n++;
+            document.title = 'f' + n + ':' + 'x'.repeat(100 * 1024);
+          }
+          if (Date.now() < end) {
+            setTimeout(burst, 0);
+          } else {
+            document.title = 'bounds:done';
+            resolve(n);
+          }
+        }
+        burst();
+      });
+    };
+    // history.pushState with an address `n` characters long (path of 'a's).
+    window.longPush = function (n) {
+      var prefix = '/' + 'long-';
+      history.pushState(null, '', prefix + 'a'.repeat(Math.max(0, n - prefix.length)));
+      return Promise.resolve(location.href.length);
+    };
+    // history.pushState with a short address containing `tag`.
+    window.shortPush = function (tag) {
+      history.pushState(null, '', '/short-' + String(tag).replace(/[^\w-]/g, ''));
+      return Promise.resolve(location.href);
+    };
+  </script>
+</body>

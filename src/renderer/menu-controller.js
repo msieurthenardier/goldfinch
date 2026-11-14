@@ -81,7 +81,10 @@ const menuController = (() => {
           focusItem(items, idx + 1);
         } else if (e.key === 'ArrowUp') {
           e.preventDefault();
-          focusItem(items, idx - 1);
+          // From "nothing focused" (idx -1: the vault picker opens with focus on its list container, not
+          // on a row) ArrowUp goes to the LAST item; idx - 1 would be -2 and wrap to the second-to-last.
+          // Every other menu always has an item focused, so this branch changes nothing for them.
+          focusItem(items, idx === -1 ? items.length - 1 : idx - 1);
         } else if (e.key === 'Home') {
           e.preventDefault();
           focusItem(items, 0);

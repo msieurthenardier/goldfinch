@@ -13,6 +13,7 @@
 
 const { withOverlaySenderLookup } = require('../helpers/fake-overlay-registry');
 const { test } = require('node:test');
+const { makeTestGate } = require('../helpers/ipc-gate-fixture');
 const assert = require('node:assert/strict');
 
 const { registerOverlayIpc } = require('../../src/main/register-overlay-ipc');
@@ -48,7 +49,7 @@ function baseHarness(extraInjections, menuType) {
   const chrome = { send: (channel, payload) => chromeSends.push([channel, payload]) };
 
   registerOverlayIpc({
-    ipcMain,
+    gate: makeTestGate({ ipcMain, registry, autoFrame: true }),
     registry,
     chromeForAttachment: (w) => (w === win ? chrome : null),
     chromeForTab: () => null,

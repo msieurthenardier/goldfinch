@@ -1,12 +1,17 @@
 // @ts-check
 'use strict';
 
-// Media proxy protocol.handle body (Mission 13 Flight 1 / Leg 2 — DD2/AC2).
+// Media proxy protocol.handle body (Mission 13 Flight 1 / Leg 2 — DD2/AC2; token addressing: Mission 23
+// Flight 1, leg `jar-isolation`).
 //
 // ELECTRON-FREE, injected-deps module (house exemplars: favicon-fetch.js,
 // settings-store.js): does NOT require('electron'). getTabContents,
-// isInternalContents, and parseMediaProxyUrl are all injected so the handler
+// isInternalContents, parseMediaProxyUrl and resolveToken are all injected so the handler
 // body is testable with plain fakes — no Electron runtime needed.
+//
+// The address names a per-tab, per-document TOKEN, never a tab number. `resolveToken` is the one
+// authority (main's media-proxy-tokens store): an unknown token, a replaced token and a decimal tab
+// number all resolve to nothing and answer 404 - no request is made. The token is never logged here.
 //
 // Follows handleInternal's discipline (src/main/main.js:194-217): never
 // throws (an unhandled throw inside protocol.handle yields a failed load with
@@ -26,11 +31,12 @@ const FORWARDED_REQUEST_HEADERS = ['Range', 'Accept'];
  * @param {{
  *   getTabContents: (wcId: number) => any,
  *   isInternalContents: (wc: any) => boolean,
- *   parseMediaProxyUrl: (raw: string) => { wcId: number, url: string } | null,
+ *   parseMediaProxyUrl: (raw: string) => { token: string, url: string } | null,
+ *   resolveToken: (token: string) => number | null,
  * }} deps
  * @returns {(request: Request) => Promise<Response>}
  */
-function createMediaProxyHandler({ getTabContents, isInternalContents, parseMediaProxyUrl }) {
+function createMediaProxyHandler({ getTabContents, isInternalContents, parseMediaProxyUrl, resolveToken }) {
   return async function handleMediaProxy(request) {
     if (request.method !== 'GET') {
       return new Response(null, { status: 405 });
@@ -41,7 +47,8 @@ function createMediaProxyHandler({ getTabContents, isInternalContents, parseMedi
       return new Response(null, { status: 400 });
     }
 
-    const wc = getTabContents(parsed.wcId);
+    const wcId = resolveToken(parsed.token);
+    const wc = wcId == null ? null : getTabContents(wcId);
     if (!wc || isInternalContents(wc)) {
       return new Response(null, { status: 404 });
     }

@@ -624,19 +624,21 @@ function findIdentityFields(doc) {
  * @param {any} doc
  * @param {any} identity  a plain object keyed by IDENTITY_ROLES' role names.
  * @param {number | null} [ordinal]
+ * @param {{ requireOrdinal?: boolean }} [options]  `requireOrdinal: true` (off by default) turns the
+ *   entry-0 fallback OFF: an invalid ordinal fills nothing (Mission 23 Flight 1, human fills).
  * @returns {{ filled: boolean, fields: Array<{ field: any, value: string }> }}
  */
-function fillIdentityForm(doc, identity, ordinal) {
+function fillIdentityForm(doc, identity, ordinal, options) {
   // `typeof window` is 'undefined' under the headless unit test (which drives
   // this pure helper directly); in the guest main world it is the page window.
   if (typeof window !== 'undefined' && window.top !== window) return { filled: false, fields: [] };
   if (!identity) return { filled: false, fields: [] };
 
   const all = findAllIdentityFields(doc);
-  const entry =
-    typeof ordinal === 'number' && Number.isInteger(ordinal) && ordinal >= 0 && ordinal < all.length
-      ? all[ordinal]
-      : all[0];
+  const validOrdinal = typeof ordinal === 'number' && Number.isInteger(ordinal) && ordinal >= 0 && ordinal < all.length;
+  // Mission 23 Flight 1 (`vault-fill-trust`): a HUMAN fill fills only the gesture-bound entry.
+  if (!validOrdinal && options && options.requireOrdinal === true) return { filled: false, fields: [] };
+  const entry = validOrdinal ? all[ordinal] : all[0];
   if (!entry) return { filled: false, fields: [] };
 
   const written = [];

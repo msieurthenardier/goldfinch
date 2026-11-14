@@ -164,6 +164,40 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (pathname === '/hostile') {
+    // Hostile-list page (step 8). `victim` is a tab number and must be digits;
+    // anything else is refused so the fixture never reflects free text into markup.
+    const victim = url.searchParams.get('victim') ?? '';
+    appendLog({
+      ts: new Date().toISOString(),
+      path: fullPath,
+      cookie: incomingCookie,
+      range: null,
+      setCookie: null,
+    });
+    if (!/^\d{1,9}$/.test(victim)) {
+      res.writeHead(400, { 'Content-Type': 'text/plain' });
+      res.end('victim must be digits');
+      return;
+    }
+    const probeTarget = `http://127.0.0.1:${port}/pixel.png?probe=xjar`;
+    const proxied = `goldfinch-media://proxy/${victim}/${encodeURIComponent(probeTarget)}`;
+    const page = `<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>cross-jar-fetch hostile list fixture</title></head>
+<body>
+  <img src="/pixel.png?b=${BOOT_NONCE}&amp;ordinary=1" alt="ordinary">
+  <img src="${proxied}" alt="proxy">
+  <img src="file:///tmp/gfx-hostile-probe.png" alt="file">
+  <a href="ftp://127.0.0.1/hostile-probe.mp3">ftp track</a>
+</body>
+</html>
+`;
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(page);
+    return;
+  }
+
   if (pathname === '/favicon.ico' || pathname === '/pixel.png') {
     const setCookie = issueCookie(pathname);
     appendLog({

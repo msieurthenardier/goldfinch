@@ -59,7 +59,8 @@ function assertMutated(before, after, what) {
 /** The masked body of an ipcMain.handle/ipcMain.on callback, by channel literal. */
 function ipcBody(source, register, channel) {
   const masked = maskComments(source);
-  const reg = masked.indexOf(`ipcMain.${register}('${channel}',`);
+  // Mission 23 Flight 1: registered through the gate — `gate.<class>.<on|handle>('<channel>', …)`.
+  const reg = masked.search(new RegExp(`\\bgate\\.\\w+\\.${register}\\(\\s*'${channel}',`));
   assert.notEqual(reg, -1, `the ${channel} registration is gone — re-anchor this pin`);
   const brace = masked.indexOf('{', reg);
   const end = findMatchingBracket(masked, brace, '{', '}');

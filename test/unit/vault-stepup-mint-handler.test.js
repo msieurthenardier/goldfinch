@@ -11,6 +11,7 @@
 
 const { withOverlaySenderLookup } = require('../helpers/fake-overlay-registry');
 const { test } = require('node:test');
+const { makeTestGate } = require('../helpers/ipc-gate-fixture');
 const assert = require('node:assert/strict');
 const os = require('node:os');
 const path = require('node:path');
@@ -70,7 +71,7 @@ function makeHarness({ mintResult, mintThrows, injectBroadcast = true } = {}) {
   // Squawk 0059: count re-broadcasts of vault-lock-state (the page-refresh seam).
   const broadcasts = { count: 0 };
   registerOverlayIpc({
-    ipcMain,
+    gate: makeTestGate({ ipcMain, registry, autoFrame: true }),
     registry,
     chromeForAttachment: (w) => (w === win ? chrome : null),
     chromeForTab: () => null,
@@ -91,9 +92,10 @@ function makeHarness({ mintResult, mintThrows, injectBroadcast = true } = {}) {
 
 test('the mint handler is GATED on the vaultMintAccessKey injection (offline overlay tests omit it)', () => {
   const ipcMain = makeIpc();
+  const gateRegistry = withOverlaySenderLookup({ records: () => [], getWindowForChrome: () => null });
   registerOverlayIpc({
-    ipcMain,
-    registry: withOverlaySenderLookup({ records: () => [], getWindowForChrome: () => null }),
+    gate: makeTestGate({ ipcMain, registry: gateRegistry, autoFrame: true }),
+    registry: gateRegistry,
     chromeForAttachment: () => null,
     chromeForTab: () => null,
     sanitizeActivatedValue: () => undefined
@@ -307,9 +309,10 @@ async function makeRealStoreHarness() {
   const rec = { sheet, win };
   // Squawk 0059: count re-broadcasts of vault-lock-state (the page-refresh seam).
   const broadcasts = { count: 0 };
+  const gateRegistry = withOverlaySenderLookup({ records: () => [rec], getWindowForChrome: () => null });
   registerOverlayIpc({
-    ipcMain,
-    registry: withOverlaySenderLookup({ records: () => [rec], getWindowForChrome: () => null }),
+    gate: makeTestGate({ ipcMain, registry: gateRegistry, autoFrame: true }),
+    registry: gateRegistry,
     chromeForAttachment: (w) =>
       w === win ? { send: (channel, payload) => chromeSends.push([channel, payload]) } : null,
     chromeForTab: () => null,

@@ -40,6 +40,28 @@ export const MANAGE_ID = 'manage-passwords';
 export const GENERATE_ID = 'generate-password';
 export const UNLOCK_ID = 'unlock-saved-logins';
 
+// Mission 23 Flight 1 (leg `vault-picker-controls`): the picker's two extra VIEWS. Both are the same menu
+// type and the same flat-array model, told apart by the entries they carry (never by a mode field):
+//   - the CERTIFICATE WARNING view: `[{ action: 'certificate-continue' }]` - a notice plus one action;
+//   - the CONFIRMATION view: `[{ action: 'confirm-summary', ...item metadata }, { action: 'confirm-fill' },
+//     { action: 'confirm-cancel' }]` - what is about to be filled plus Fill and Cancel.
+// Their action ids are fixed like GENERATE_ID/UNLOCK_ID so a click can never be mistaken for a credential
+// index or for "Manage passwords" (which navigates to the vault page).
+export const CERTIFICATE_CONTINUE_ID = 'certificate-continue';
+export const CONFIRM_FILL_ID = 'confirm-fill';
+export const CONFIRM_CANCEL_ID = 'confirm-cancel';
+
+// The one-line copy of the two views (plain language, see the flight log for review at the HAT).
+export const CERTIFICATE_NOTICE =
+  "This site's security certificate could not be verified, and you chose to open it anyway. It may not be the site it claims to be.";
+export const CONFIRM_PROMPT = "You haven't filled this on this site before.";
+const CERTIFICATE_CONTINUE_LABEL = 'Continue';
+const CONFIRM_FILL_LABEL = 'Fill';
+const CONFIRM_CANCEL_LABEL = 'Cancel';
+
+/** Longest destination the sheet will show (a hostile host name cannot grow the card). */
+export const DESTINATION_MAX_CHARS = 80;
+
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 // The empty-picker note (AC4, Mission 21 Flight 3 Leg 1; text updated Flight 3
@@ -252,7 +274,8 @@ export function parsePickIndex(id) {
  * pick-index-or-MANAGE_ID fallback would silently route BOTH Generate-in-
  * picker action rows to "Manage passwords" (a navigation), since neither
  * carries `data-pick-index`. Only the two exported action ids
- * (GENERATE_ID/UNLOCK_ID) are honoured as `data-action-id` values — any
+ * (GENERATE_ID/UNLOCK_ID) and the three leg `vault-picker-controls` ids (certificate continue,
+ * confirm fill, confirm cancel) are honoured as `data-action-id` values — any
  * OTHER `data-action-id` (defensive: none is ever produced today) falls
  * through to the existing pick-index-or-MANAGE_ID rule, never silently
  * mis-routed to an action.
@@ -261,7 +284,15 @@ export function parsePickIndex(id) {
  */
 export function activationIdFor(dataset) {
   const actionId = dataset && dataset.actionId;
-  if (actionId === GENERATE_ID || actionId === UNLOCK_ID) return actionId;
+  if (
+    actionId === GENERATE_ID ||
+    actionId === UNLOCK_ID ||
+    actionId === CERTIFICATE_CONTINUE_ID ||
+    actionId === CONFIRM_FILL_ID ||
+    actionId === CONFIRM_CANCEL_ID
+  ) {
+    return actionId;
+  }
   const pi = dataset && dataset.pickIndex;
   return pi != null && pi !== '' ? pickId(Number(pi)) : MANAGE_ID;
 }
@@ -287,7 +318,7 @@ export function badgeLabelFor(item) {
  * title and an OBVIOUS close affordance (the empty state previously offered only a non-obvious
  * click-outside). menu-overlay.js wires the returned `close` button.
  * @param {Document} document
- * @returns {{ node: HTMLElement, card: HTMLElement, list: HTMLElement, close: HTMLButtonElement }}
+ * @returns {{ node: HTMLElement, card: HTMLElement, list: HTMLElement, close: HTMLButtonElement, destination: HTMLElement }}
  */
 export function buildVaultPickerCard(document) {
   const node = document.createElement('div');
@@ -304,16 +335,53 @@ export function buildVaultPickerCard(document) {
   const { header, close } = buildVaultSheetHeader(document, 'Fill from vault');
   card.appendChild(header);
 
+  // The destination line (leg `vault-picker-controls`): where a fill from this card would go. A node of its
+  // own BETWEEN the header and the list - not inside the header, whose structure other tests pin. Written
+  // with textContent by `setVaultPickerDestination` on every init; the list's `aria-describedby` names it so
+  // a screen reader announces it when focus lands on the list at open.
+  const destination = document.createElement('div');
+  destination.id = 'vault-picker-destination';
+  destination.className = 'vault-picker-destination';
+  card.appendChild(destination);
+
   // The roving list host carries the menu semantics (moved off the card so the fixed header
   // is not a menuitem and does not scroll away). Rows render here via renderVaultPickerRows.
   const list = document.createElement('div');
   list.className = 'vault-picker-list';
   list.setAttribute('role', 'menu');
   list.setAttribute('aria-label', 'Choose a saved item to fill');
+  list.setAttribute('aria-describedby', destination.id);
   list.tabIndex = -1;
   card.appendChild(list);
 
-  return { node, card, list, close };
+  return { node, card, list, close, destination };
+}
+
+/**
+ * The destination line's text for a picker open: `Fill on <destination>`, the destination capped at
+ * DESTINATION_MAX_CHARS by keeping a short head and the END (the registrable domain is the right end). Empty string when there is no usable destination.
+ * @param {unknown} destination
+ * @returns {string}
+ */
+export function destinationLineText(destination) {
+  if (typeof destination !== 'string' || destination.length === 0) return '';
+  if (destination.length <= DESTINATION_MAX_CHARS) return `Fill on ${destination}`;
+  // Over the cap: keep a short head and the TAIL, never drop the end. The registrable domain is
+  // the right end of a host, so a long hostile host that begins with a familiar name must not
+  // display only that familiar part.
+  const keep = DESTINATION_MAX_CHARS - 1;
+  const head = Math.floor(keep / 4);
+  const tail = keep - head;
+  return `Fill on ${destination.slice(0, head)}…${destination.slice(destination.length - tail)}`;
+}
+
+/**
+ * Write the destination line on every init (textContent only).
+ * @param {{ destination: HTMLElement }} picker  the `buildVaultPickerCard` result
+ * @param {unknown} destination
+ */
+export function setVaultPickerDestination(picker, destination) {
+  picker.destination.textContent = destinationLineText(destination);
 }
 
 /**
@@ -414,7 +482,22 @@ function buildRowBadges(document, item) {
  * @returns {boolean}
  */
 function isActionEntry(item) {
-  return !!item && (item.action === 'generate' || item.action === 'unlock');
+  return !!item && (ACTION_ENTRIES.has(item.action) || FLOW_ENTRIES.has(item.action));
+}
+
+// Leg `vault-picker-controls`: the entries of the two extra views. A model carrying any of them is a
+// certificate-warning or confirmation view: it shows no "nothing to fill here" note and no "Manage
+// passwords" footer (the third and fourth template choke points beside `activationIdFor` and this
+// predicate).
+const ACTION_ENTRIES = new Set(['generate', 'unlock']);
+const FLOW_ENTRIES = new Set(['certificate-continue', 'confirm-summary', 'confirm-fill', 'confirm-cancel']);
+
+/**
+ * @param {any} item
+ * @returns {boolean}
+ */
+function isFlowEntry(item) {
+  return !!item && FLOW_ENTRIES.has(item.action);
 }
 
 export function renderVaultPickerRows(document, card, model) {
@@ -431,7 +514,8 @@ export function renderVaultPickerRows(document, card, model) {
   // itself an affordance to reach real items).
   const hasUnlockRow = rows.some((r) => r && r.action === 'unlock');
   const itemRowCount = rows.filter((r) => !isActionEntry(r)).length;
-  if (itemRowCount === 0 && !hasUnlockRow) {
+  const flowView = rows.some(isFlowEntry);
+  if (itemRowCount === 0 && !hasUnlockRow && !flowView) {
     const note = document.createElement('div');
     note.className = 'cm-item vault-picker-note';
     note.setAttribute('aria-disabled', 'true');
@@ -469,15 +553,52 @@ export function renderVaultPickerRows(document, card, model) {
     // always prepends action entries ahead of real items, this already keeps
     // roving order = visual order with no extra bookkeeping.
     if (isActionEntry(item)) {
+      // The two extra views' read-only blocks (notice / what is about to be filled): text, never a button.
+      if (item.action === 'confirm-summary') {
+        const kindEntry = KIND_TABLE[kindOf(item)];
+        const block = document.createElement('div');
+        block.className = 'vault-picker-confirm';
+        const prompt = document.createElement('span');
+        prompt.className = 'vault-picker-confirm-prompt';
+        prompt.textContent = CONFIRM_PROMPT;
+        block.appendChild(prompt);
+        const secondary = secondaryLineFor(item);
+        const title = document.createElement('span');
+        title.className = 'vault-picker-title';
+        title.textContent = String(
+          item.title != null && item.title !== '' ? item.title : secondary !== '' ? secondary : kindEntry.fallbackTitle
+        );
+        block.appendChild(title);
+        const sub = document.createElement('span');
+        sub.className = 'vault-picker-username';
+        sub.textContent = secondary;
+        block.appendChild(sub);
+        card.appendChild(block);
+        return;
+      }
+      if (item.action === 'certificate-continue') {
+        const notice = document.createElement('div');
+        notice.className = 'vault-picker-certificate';
+        notice.textContent = CERTIFICATE_NOTICE;
+        card.appendChild(notice);
+      }
       const btn = document.createElement('button');
       btn.className = 'cm-item vault-picker-action';
       btn.type = 'button';
       btn.setAttribute('role', 'menuitem');
       btn.tabIndex = -1;
-      btn.dataset.actionId = item.action === 'generate' ? GENERATE_ID : UNLOCK_ID;
+      const ACTION_VIEW = {
+        generate: [GENERATE_ID, 'Generate strong password'],
+        unlock: [UNLOCK_ID, 'Unlock to fill a saved login'],
+        'certificate-continue': [CERTIFICATE_CONTINUE_ID, CERTIFICATE_CONTINUE_LABEL],
+        'confirm-fill': [CONFIRM_FILL_ID, CONFIRM_FILL_LABEL],
+        'confirm-cancel': [CONFIRM_CANCEL_ID, CONFIRM_CANCEL_LABEL]
+      };
+      const [actionId, actionLabel] = ACTION_VIEW[item.action];
+      btn.dataset.actionId = actionId;
       const label = document.createElement('span');
       label.className = 'vault-picker-action-label';
-      label.textContent = item.action === 'generate' ? 'Generate strong password' : 'Unlock to fill a saved login';
+      label.textContent = actionLabel;
       btn.appendChild(label);
       card.appendChild(btn);
       buttons.push(btn);
@@ -530,10 +651,14 @@ export function renderVaultPickerRows(document, card, model) {
     buttons.push(btn);
   });
 
-  const { separator, btn: manageBtn } = buildManageFooter(document);
-  card.appendChild(separator);
-  card.appendChild(manageBtn);
-  buttons.push(manageBtn);
+  // No "Manage passwords" footer in the certificate-warning or confirmation view: leaving to the vault page
+  // from either would abandon (and read as skipping) the question being asked.
+  if (!flowView) {
+    const { separator, btn: manageBtn } = buildManageFooter(document);
+    card.appendChild(separator);
+    card.appendChild(manageBtn);
+    buttons.push(manageBtn);
+  }
 
   return buttons;
 }

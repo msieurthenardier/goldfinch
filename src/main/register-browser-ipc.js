@@ -1,6 +1,11 @@
 'use strict';
 
 const { resolvePersistJar } = require('./persist-jar-gate');
+const { isAdmissibleTabPartition } = require('./tab-create-validate');
+const { sanitizeFpCounts } = require('../shared/privacy-fp');
+const { committedOriginOf } = require('./vault/committed-origin');
+const { destinationDisplay } = require('../shared/vault-destination');
+const { validateMediaList } = require('./media-list');
 // Generate-in-picker gesture payload validation (Mission 21, Flight 4, Leg 3 —
 // generate-in-picker, DD5/AC8). Real ES module, loaded via Node's synchronous
 // require(esm) — the settings-store.js / search-engines.js precedent.
@@ -8,6 +13,8 @@ const { sanitizeGenerateConstraints, resolvePolicy } = require('../shared/passwo
 
 const PAGE_CONTEXT_ACTIONS = new Set(['cut', 'copy', 'paste', 'undo', 'redo']);
 const EMPTY_COOKIES = Object.freeze({ firstParty: null, first: 0, third: 0, total: 0, list: [] });
+// The refusal value for `privacy-cookies` (frozen: the gate hands the same object to every refusal).
+const EMPTY_COOKIES_REFUSAL = Object.freeze({ ...EMPTY_COOKIES, list: Object.freeze([]) });
 
 /**
  * Validate the page-influenced `generate` sub-payload a `guest-vault-gesture`
@@ -32,6 +39,7 @@ function validateGenerateGesture(payload) {
 
 function registerBrowserIpc({
   ipcMain,
+  gate,
   webContents,
   chromeForTab,
   getTabContents,
@@ -50,6 +58,7 @@ function registerBrowserIpc({
   hostnameOf,
   shields,
   getVaultHuman,
+  mediaProxyTokens,
   isVaultUnlocked,
   vaultImportBegin,
   clearPendingVaultImport,
@@ -66,6 +75,10 @@ function registerBrowserIpc({
   browserImportCancel,
   browserImportCommit,
   popupVaultIconMenu,
+  // Mission 23 Flight 1 (leg `vault-fill-trust`): the per-tab witness of real pointer input
+  // (`vault/gesture-witness.js`). Optional only for offline harnesses that never raise a picker; a
+  // registrar built without it refuses every gesture (fail-closed).
+  gestureWitness,
   popupRegistry,
   random = Math.random,
   logger = console,
@@ -81,16 +94,16 @@ function registerBrowserIpc({
         logger.info('[vault-capture]', step, JSON.stringify(fields))
     : () => {}
 }) {
-  // Leg 2 (F3 DD2) sender-identity gate. Resolves the SENDER's own window record
-  // via identity-compare against every record's chromeView — a non-chrome sender
-  // (a guest, a forged/absent sender) resolves null. Added AHEAD of each
-  // channel's existing target/internal guard below, never replacing it — the
-  // self-scoped channels (vault-*, guest-*, shields-farble, guest-media-list,
-  // guest-privacy-fp), which resolve identity from event.sender.id and are
-  // already caller-bound, are deliberately left untouched.
-  function requireChrome(event) {
-    return registry.getWindowForChrome(event.sender);
-  }
+  // Mission 23 Flight 1 (`ipc-gate-complete`): every channel below registers through the gate,
+  // which names WHO may call it and refuses everyone else before the handler runs; a handler that
+  // needs the window record calls `gate.requireChrome(event)` (single source of the comparison).
+  // The page-influenced channels are the TAB-GUEST class (the sender's own main frame, a web tab
+  // — see ipc-gate.js); a tab id the chrome names is the OWNING-CHROME class.
+  /** The webContentsId a chrome payload names (defensive: any payload shape; none → `undefined`). */
+  const webContentsIdOfPayload = (/** @type {any} */ payload) =>
+    payload && typeof payload === 'object' ? payload.webContentsId : undefined;
+  const wcIdOfPayload = (/** @type {any} */ payload) =>
+    payload && typeof payload === 'object' ? payload.wcId : undefined;
 
   const farbleSeeds = new WeakMap();
   function seedForSession(sess) {
@@ -105,43 +118,62 @@ function registerBrowserIpc({
     farbleSeeds.set(sess, Math.floor(random() * 0xffffffff) >>> 0);
   }
 
-  ipcMain.on('shields-farble', (event, url) => {
-    const site = registrableDomain(hostnameOf(url || ''));
-    event.returnValue = {
-      farble: shields.active('farble', site),
-      seed: seedForSession(event.sender.session)
-    };
-  });
+  // SYNCHRONOUS (the guest preload blocks its page's load on this reply), so the gate's sync form
+  // always answers. Popups are admitted (a script-opened popup farbles too). A refused sender —
+  // not a tab or popup main frame — gets farbling ON with a per-call random seed: never an
+  // un-farbled surface, never the session's seed. That is NOT a protection against the page
+  // itself: an admitted main-frame page can read its own session's seed.
+  gate.tabGuest.sync(
+    'shields-farble',
+    { popups: true },
+    (event, url) => {
+      const site = registrableDomain(hostnameOf(url || ''));
+      return {
+        farble: shields.active('farble', site),
+        seed: seedForSession(event.sender.session)
+      };
+    },
+    { produce: () => ({ farble: true, seed: Math.floor(random() * 0xffffffff) >>> 0 }) }
+  );
 
-  ipcMain.on('window-minimize', (event) => {
-    registry.getWindowForChrome(event.sender)?.win.minimize();
+  gate.chrome.on('window-minimize', (event) => {
+    gate.requireChrome(event)?.win.minimize();
   });
-  ipcMain.on('window-toggle-maximize', (event) => {
-    const rec = registry.getWindowForChrome(event.sender);
+  gate.chrome.on('window-toggle-maximize', (event) => {
+    const rec = gate.requireChrome(event);
     if (!rec) return;
     if (rec.win.isMaximized()) rec.win.unmaximize();
     else rec.win.maximize();
   });
-  ipcMain.on('window-close', (event) => {
-    registry.getWindowForChrome(event.sender)?.win.close();
+  gate.chrome.on('window-close', (event) => {
+    gate.requireChrome(event)?.win.close();
   });
-  ipcMain.handle('window-is-maximized', (event) => {
-    const rec = registry.getWindowForChrome(event.sender);
-    return !!(rec && rec.win.isMaximized());
-  });
-  ipcMain.handle('window-create', (event) => {
-    if (!registry.getWindowForChrome(event.sender)) return null;
-    return createWindow().win.id;
-  });
-  ipcMain.handle('new-container-create', async (event, payload) => {
-    // Leg 2 (F3 DD2, AC2): chrome-trust gate — a non-chrome sender refuses.
-    if (!requireChrome(event)) return null;
-    const name = payload && payload.name;
-    if (!name || typeof name !== 'string') return null;
-    const container = jars.add(name);
-    broadcastJarsChanged();
-    return container;
-  });
+  gate.chrome.handle(
+    'window-is-maximized',
+    (event) => {
+      const rec = gate.requireChrome(event);
+      return !!(rec && rec.win.isMaximized());
+    },
+    { value: false }
+  );
+  gate.chrome.handle(
+    'window-create',
+    () => {
+      return createWindow().win.id;
+    },
+    { value: null }
+  );
+  gate.chrome.handle(
+    'new-container-create',
+    async (_event, payload) => {
+      const name = payload && payload.name;
+      if (!name || typeof name !== 'string') return null;
+      const container = jars.add(name);
+      broadcastJarsChanged();
+      return container;
+    },
+    { value: null }
+  );
 
   // Vault lock-icon eligibility (M12 F2 Leg 1, DD9): the guest preload queries this
   // synchronously at init (shields-farble idiom) to decide whether to inject the
@@ -149,32 +181,80 @@ function registerBrowserIpc({
   // PERSISTENT jar (resolvePersistJar) — burner/non-persistent tabs are not
   // eligible, so no icon, no gesture wiring. The wcId is the trusted sender id; we
   // resolve the tab entry from the registry, never from renderer-supplied data.
-  ipcMain.on('vault-eligible', (event) => {
-    const entry = registry.getWindowForGuest(event.sender.id)?.tabViews.get(event.sender.id);
-    const eligible = Boolean(entry && resolvePersistJar(entry, jars.list()));
-    // Return { eligible, unlocked } so the preload can also seed the lock-icon glyph's
-    // state (open/green when unlocked, closed/amber when locked). The boolean is non-secret
-    // (the chrome indicator already shows it). `isVaultUnlocked` is injection-gated — absent
-    // (offline tests) → unlocked:false, the safe/locked default.
-    const unlocked = typeof isVaultUnlocked === 'function' ? isVaultUnlocked() === true : false;
-    event.returnValue = { eligible, unlocked };
-  });
+  // SYNCHRONOUS — the gate's sync form always answers; popups are admitted (they are simply never
+  // eligible: not in tabViews). A refused sender is answered "not eligible, locked".
+  gate.tabGuest.sync(
+    'vault-eligible',
+    { popups: true },
+    (event) => {
+      const entry = registry.getWindowForGuest(event.sender.id)?.tabViews.get(event.sender.id);
+      const eligible = Boolean(entry && resolvePersistJar(entry, jars.list()));
+      // Return { eligible, unlocked } so the preload can also seed the lock-icon glyph's
+      // state (open/green when unlocked, closed/amber when locked). The boolean is non-secret
+      // (the chrome indicator already shows it). `isVaultUnlocked` is injection-gated — absent
+      // (offline tests) → unlocked:false, the safe/locked default.
+      const unlocked = typeof isVaultUnlocked === 'function' ? isVaultUnlocked() === true : false;
+      return { eligible, unlocked };
+    },
+    { value: { eligible: false, unlocked: false } }
+  );
 
-  // Vault gesture (M12 F2 Leg 1, DD1/DD3; extended M21 F4 Leg 3 — generate-in-
-  // picker, DD5/AC8): a TRUSTED click on the injected lock icon arrives here
-  // carrying NO secret — either bare ({}) or a small, page-influenced, non-
-  // secret `{ generate: { passwordRole, constraints } }` sub-payload. Derive
-  // the trusted wcId from event.sender.id (never a renderer-supplied id);
-  // re-validate `generate` (never trust the guest to have kept it honest) via
-  // `validateGenerateGesture`, and forward EITHER `{ wcId, generate:
-  // { canGenerate, constraints } }` (a valid `passwordRole: 'new'` gesture) or
-  // today's bare `{ wcId }` (everything else — card/identity/sign-in/
-  // malformed) to the owning window's chrome — mirrors the guest-media-list →
-  // chromeForTab idiom.
-  ipcMain.on('guest-vault-gesture', (event, payload) => {
+  // Vault gesture (M12 F2 Leg 1, DD1/DD3; extended M21 F4 Leg 3 — generate-in-picker, DD5/AC8;
+  // rebuilt by Mission 23 Flight 1, leg `vault-fill-trust`, revised DD4). The page-side message is only
+  // a HINT: a page holding the preload's IPC object can send it with no click at all, from any tab. It
+  // is honoured only when (the tab-guest class has already required an ACTIVE web tab) MAIN itself
+  // witnessed a real left-button click on this tab, inside the box the message reports (scaled by the
+  // tab's live zoom), recently, at most once per click and per interval - `vault/gesture-verifier.js`
+  // has the ordered rules, `gesture-witness.js` consumes the click on acceptance only. The box is
+  // page-supplied: the stated residual (docs/vault.md) is that a page that sends the message itself can
+  // claim a box around a real click the operator made on that page; the picker's own controls (next
+  // leg) are the defence against a misdirected click.
+  //
+  // On acceptance main mints a per-open PICKER CONTEXT (picker-context.js: the tab, its COMMITTED
+  // origin, the certificate-override flag) and pushes `vault-gesture` to the owning chrome carrying its
+  // id, the destination display string and the certificate flag next to today's fields. wcId comes only
+  // from event.sender.id; `generate` is re-validated (`validateGenerateGesture`) and forwarded as
+  // `{ canGenerate, constraints }` for a valid `passwordRole: 'new'` gesture, else absent.
+  /** The committed origin of a tab's guest, or `null` (derived read - see vault/committed-origin.js). */
+  const committedOriginFor = (/** @type {any} */ wc) =>
+    wc && !wc.isDestroyed?.() && typeof wc.getURL === 'function' ? committedOriginOf(wc.getURL()) : null;
+  const zoomFor = (/** @type {any} */ wc) => (wc && typeof wc.getZoomFactor === 'function' ? wc.getZoomFactor() : 1);
+
+  /**
+   * Mint the context and send the enriched push. The caller has ALREADY admitted the gesture (or, for
+   * "Fill login...", is re-checking the live tab). `generate` is the validated sub-payload or null.
+   * @param {number} wcId
+   * @param {string} origin
+   * @param {{ canGenerate: boolean, constraints: any } | null} generate
+   */
+  function raisePicker(wcId, origin, generate) {
+    if (!getVaultHuman) return;
+    const entry = registry.getWindowForGuest(wcId)?.tabViews?.get(wcId);
+    const ctx = getVaultHuman().mintContext({ wcId, origin, certOverride: !!entry && entry.security === 'overridden' });
+    const push = { wcId, contextId: ctx.id, destination: destinationDisplay(origin), certificate: ctx.certOverride };
+    chromeForTab(wcId)?.send('vault-gesture', generate ? { ...push, generate } : push);
+  }
+
+  /** @param {'gesture' | 'icon-menu'} kind @param {any} event @param {unknown} payload */
+  function admitIconMessage(kind, event, payload) {
+    if (!gestureWitness) return null;
     const wcId = event.sender.id;
-    const generate = validateGenerateGesture(payload);
-    chromeForTab(wcId)?.send('vault-gesture', generate ? { wcId, generate } : { wcId });
+    const wc = getTabContents ? getTabContents(wcId) : event.sender;
+    const origin = committedOriginFor(wc);
+    const decision = gestureWitness.admit({
+      kind,
+      wcId,
+      message: payload,
+      zoom: zoomFor(wc),
+      origin
+    });
+    return decision.ok ? { origin: /** @type {string} */ (origin) } : null;
+  }
+
+  gate.tabGuest.on('guest-vault-gesture', { activeOnly: true }, (event, payload) => {
+    const admitted = admitIconMessage('gesture', event, payload);
+    if (!admitted) return;
+    raisePicker(event.sender.id, admitted.origin, validateGenerateGesture(payload));
   });
 
   // Guest tab-boundary signal (M17 Flight 1 Leg 1, DD2): the guest preload's
@@ -185,25 +265,41 @@ function registerBrowserIpc({
   // wcId that isn't its own), and `direction` is validated against the two
   // literals before forwarding — an unrecognized value is silently dropped,
   // never forwarded as-is.
-  ipcMain.on('guest-tab-boundary', (event, payload) => {
+  gate.tabGuest.on('guest-tab-boundary', { internalTabs: true, activeOnly: true }, (event, payload) => {
     const direction = payload && payload.direction;
     if (direction !== 'forward' && direction !== 'backward') return;
     const wcId = event.sender.id;
     chromeForTab(wcId)?.send('tab-boundary', { direction });
   });
 
-  // Vault fill-icon CONTEXT menu (M12 F5 HAT batch 1, I8): a TRUSTED right-click on the
-  // injected lock icon arrives here carrying NO payload (bare — no secret). Derive the trusted
-  // wcId from event.sender.id (never renderer-supplied) and resolve the owning window from the
-  // registry, then hand off to the injected delegate which builds a NATIVE Electron Menu and
-  // pops it over that window (Menu.popup). NO menu DOM is ever injected into the guest page — a
-  // page-DOM menu would be spoofable/readable by a hostile page. The delegate is injected so
-  // this module stays Electron-free (offline tests may omit it → the icon menu no-ops). Nothing
-  // is sent back to the guest wc.
-  ipcMain.on('guest-vault-icon-menu', (event) => {
+  // Vault fill-icon CONTEXT menu (M12 F5 HAT batch 1, I8; admission Mission 23 Flight 1, leg
+  // `vault-fill-trust`): a right-click on the injected lock icon arrives here carrying only the icon's box.
+  // Honoured only on the same terms as the gesture above, with the RIGHT-button PRESS as the witnessed
+  // input (press only - the platform decides whether `contextmenu` fires on press or release). The wcId
+  // is event.sender.id; the owning window comes from the registry; the injected delegate builds a NATIVE
+  // Electron Menu (never DOM in the guest) and pops it over that window. The committed origin captured
+  // at admission goes to the delegate with a `raise` closure: the "Fill login..." item's click re-checks
+  // that the tab is still alive, still its window's ACTIVE tab and still at that origin, and only then
+  // mints a context and sends the enriched push. The delegate is injected so this module stays
+  // Electron-free (offline tests may omit it -> the icon menu no-ops).
+  gate.tabGuest.on('guest-vault-icon-menu', { activeOnly: true }, (event, payload) => {
+    const admitted = admitIconMessage('icon-menu', event, payload);
+    if (!admitted) return;
     const wcId = event.sender.id;
     const win = registry.getWindowForGuest(wcId)?.win;
-    popupVaultIconMenu?.({ wcId, win });
+    const { origin } = admitted;
+    popupVaultIconMenu?.({
+      wcId,
+      win,
+      origin,
+      raise: () => {
+        const wc = getTabContents ? getTabContents(wcId) : event.sender;
+        const owner = registry.getWindowForGuest(wcId);
+        if (!wc || wc.isDestroyed?.() || !owner || owner.activeTabWcId !== wcId) return;
+        if (committedOriginFor(wc) !== origin) return;
+        raisePicker(wcId, origin, null);
+      }
+    });
   });
 
   // Vault capture — GESTURE-TIME HOLD (Mission 21 F1 Leg 5, broadened-capture,
@@ -219,7 +315,7 @@ function registerBrowserIpc({
   // SETTLE (guest-wiring.js's did-navigate hook, or the guest-vault-gesture-
   // settle handler below for the SPA/detachment case) — DD3f/DD4. Gated on the
   // getVaultHuman injection (offline tests omit it).
-  ipcMain.on('guest-vault-capture', (event, payload) => {
+  gate.tabGuest.on('guest-vault-capture', {}, (event, payload) => {
     if (!getVaultHuman) return;
     const wcId = event.sender.id;
     // `currentPassword` (Mission 21, Flight 4, Leg 2 — password-field-roles,
@@ -240,7 +336,7 @@ function registerBrowserIpc({
   // above. { number, cvv } (both Uint8Array) + the non-secret cardholder /
   // expiry strings. Same trust shape: wcId from event.sender.id, origin
   // derived + frozen main-side, held (never disposed) here.
-  ipcMain.on('guest-vault-capture-card', (event, payload) => {
+  gate.tabGuest.on('guest-vault-capture-card', {}, (event, payload) => {
     if (!getVaultHuman) return;
     const wcId = event.sender.id;
     const { number, cvv, cardholder, expiry } = /** @type {any} */ (payload || {});
@@ -260,7 +356,7 @@ function registerBrowserIpc({
   // plain string (the one non-secret field). Same trust shape: wcId from
   // event.sender.id, origin derived + frozen main-side (never guest-supplied),
   // held (never disposed/offered) here — the offer is raised only at SETTLE.
-  ipcMain.on('guest-vault-capture-identity', (event, payload) => {
+  gate.tabGuest.on('guest-vault-capture-identity', {}, (event, payload) => {
     if (!getVaultHuman) return;
     const wcId = event.sender.id;
     const { identitySecrets, fullName } = /** @type {any} */ (payload || {});
@@ -285,7 +381,7 @@ function registerBrowserIpc({
   // family whose fields detached (a `kind` on the payload would let a
   // guest-supplied value steer which held record releases, against this
   // channel's own documented no-payload trust shape).
-  ipcMain.on('guest-vault-gesture-settle', (event) => {
+  gate.tabGuest.on('guest-vault-gesture-settle', {}, (event) => {
     if (!getVaultHuman) return;
     const wcId = event.sender.id;
     const offers = getVaultHuman().captureRelease(wcId);
@@ -310,12 +406,17 @@ function registerBrowserIpc({
   // Vault capture DISMISS (M12 F2 Leg 4, DD7): the chrome invokes this when the
   // corner save prompt closes WITHOUT a save (and when an offer cannot be presented) (Cancel / Escape / outside-click / a
   // lifecycle close), so main drops+zeroizes the held record immediately rather than
-  // waiting for the 2-min safety timeout. Chrome-trust bare handle (the same class as
-  // vault-fill-human); the captureId is an opaque main-minted handle, not a secret.
-  ipcMain.handle('vault-capture-dismiss', (_event, captureId) => {
-    vaultTrace('dismiss', { captureId });
-    if (getVaultHuman && typeof captureId === 'string') getVaultHuman().captureDismiss(captureId);
-  });
+  // waiting for the 2-min safety timeout. The captureId is an opaque main-minted
+  // handle, not a secret. Mission 23 Flight 1: chrome class (the argument is an opaque capture id, never a tab id,
+  // and a late dismiss of an expired capture must still be accepted from the chrome).
+  gate.chrome.handle(
+    'vault-capture-dismiss',
+    (_event, captureId) => {
+      vaultTrace('dismiss', { captureId });
+      if (getVaultHuman && typeof captureId === 'string') getVaultHuman().captureDismiss(captureId);
+    },
+    'throw'
+  );
 
   // Vault capture FINALIZE (unlock-to-save continuation): after a login-form submit into a
   // LOCKED vault, capture() held the credential (mode 'locked') and the chrome raised an
@@ -332,32 +433,36 @@ function registerBrowserIpc({
   // no write); (2) ACTIVE TAB - the capture's tab must be that window's active tab (else the record
   // is dropped and `tab-changed` returned, no write). Unknown / non-string ids stay `expired` /
   // null as before.
-  ipcMain.handle('vault-capture-finalize', (event, captureId) => {
-    if (!getVaultHuman || typeof captureId !== 'string') return null;
-    const vh = getVaultHuman();
-    const wcId = vh.captureTabOf(captureId);
-    if (wcId == null) {
-      vaultTrace('finalize', { captureId, outcome: 'expired' });
-      return { reason: 'expired' };
-    }
-    const owner = registry.getWindowForGuest(wcId);
-    const caller = registry.getWindowForChrome(event.sender);
-    if (!owner || !caller || owner !== caller) {
-      vaultTrace('finalize', { captureId, outcome: 'refused' });
-      return { reason: 'refused' };
-    }
-    if (owner.activeTabWcId !== wcId) {
-      vh.captureDismiss(captureId);
-      vaultTrace('finalize', { captureId, outcome: 'tab-changed' });
-      return { reason: 'tab-changed' };
-    }
-    const res = vh.captureFinalize(captureId);
-    vaultTrace('finalize', {
-      captureId,
-      outcome: res && res.saved ? 'saved' : res && res.model ? `offer:${res.model.mode}` : res && res.reason
-    });
-    return res;
-  });
+  gate.chrome.handle(
+    'vault-capture-finalize',
+    (event, captureId) => {
+      if (!getVaultHuman || typeof captureId !== 'string') return null;
+      const vh = getVaultHuman();
+      const wcId = vh.captureTabOf(captureId);
+      if (wcId == null) {
+        vaultTrace('finalize', { captureId, outcome: 'expired' });
+        return { reason: 'expired' };
+      }
+      const owner = registry.getWindowForGuest(wcId);
+      const caller = gate.requireChrome(event);
+      if (!owner || !caller || owner !== caller) {
+        vaultTrace('finalize', { captureId, outcome: 'refused' });
+        return { reason: 'refused' };
+      }
+      if (owner.activeTabWcId !== wcId) {
+        vh.captureDismiss(captureId);
+        vaultTrace('finalize', { captureId, outcome: 'tab-changed' });
+        return { reason: 'tab-changed' };
+      }
+      const res = vh.captureFinalize(captureId);
+      vaultTrace('finalize', {
+        captureId,
+        outcome: res && res.saved ? 'saved' : res && res.model ? `offer:${res.model.mode}` : res && res.reason
+      });
+      return res;
+    },
+    { value: { reason: 'refused' } }
+  );
 
   // Vault cross-renderer triggers (M12 F3 Leg 4, first-run-setup, DD5). The internal
   // goldfinch://vault page cannot call chrome-trust menuOverlay.* directly, so its
@@ -530,12 +635,31 @@ function registerBrowserIpc({
     return { ok: true };
   });
 
-  ipcMain.on('guest-media-list', (event, mediaList) => {
+  // Mission 23 Flight 1 (leg `jar-isolation`): the list is page-controlled, so it is rebuilt in main
+  // (`validateMediaList`) and pushed with the tab's proxy token. A token belongs to a document: the
+  // sender frame must be the tab's CURRENT main frame (both frame tokens read as plain values here),
+  // otherwise the list is dropped and nothing is pushed - a late list from a replaced document is never
+  // handed the new document's token. The token is delivered to the chrome only and is never logged.
+  gate.tabGuest.on('guest-media-list', {}, (event, mediaList) => {
     const wcId = event.sender.id;
-    chromeForTab(wcId)?.send('tab-media-list', { wcId, mediaList });
+    let senderFrameToken;
+    let mainFrameToken;
+    try {
+      senderFrameToken = event.senderFrame?.frameToken;
+      mainFrameToken = event.sender.mainFrame?.frameToken;
+    } catch {
+      return;
+    }
+    const mediaToken = mediaProxyTokens.issue(wcId, senderFrameToken, mainFrameToken);
+    if (!mediaToken) return;
+    chromeForTab(wcId)?.send('tab-media-list', { wcId, mediaList: validateMediaList(mediaList), mediaToken });
   });
-  ipcMain.on('guest-privacy-fp', (event, fpCounts) => {
+  gate.tabGuest.on('guest-privacy-fp', {}, (event, rawFpCounts) => {
     const wcId = event.sender.id;
+    // NF8: the counts are page-influenced — forward only a validated object (fixed key set,
+    // non-negative integers clamped to a ceiling); anything else is dropped whole.
+    const fpCounts = sanitizeFpCounts(rawFpCounts);
+    if (!fpCounts) return;
     chromeForTab(wcId)?.send('tab-privacy-fp', { wcId, fpCounts });
   });
   // window.close() from a web guest (issue #119 — the webview-preload shim).
@@ -545,7 +669,7 @@ function registerBrowserIpc({
   // event time; a non-tab sender resolves no chrome and no-ops. historyLength
   // is guest-supplied — sanitized to a number, and only ever used to decide the
   // SENDER'S own close, so a forged value cannot affect any other tab.
-  ipcMain.on('guest-window-close', (event, payload) => {
+  gate.tabGuest.on('guest-window-close', { popups: true }, (event, payload) => {
     const wcId = event.sender.id;
     // M14 F2 L1 (DD1d): popup-registry lookup FIRST — a popup's window.close()
     // destroys its own BrowserWindow (the chrome path below structurally
@@ -563,9 +687,7 @@ function registerBrowserIpc({
     const historyLength = typeof raw === 'number' && Number.isFinite(raw) ? raw : 1;
     chromeForTab(wcId)?.send('tab-self-close', { wcId, historyLength });
   });
-  ipcMain.on('rescan-media', (event, payload) => {
-    // Leg 2 (F3 DD2, AC2): chrome-trust gate ahead of the existing target lookup.
-    if (!requireChrome(event)) return;
+  gate.owningChrome.on('rescan-media', wcIdOfPayload, (event, payload) => {
     const { wcId } = /** @type {any} */ (payload || {});
     if (wcId == null) return;
     const wc = getTabContents(wcId);
@@ -579,52 +701,70 @@ function registerBrowserIpc({
     return wc && !wc.isDestroyed() && !isInternalContents(wc) ? wc : null;
   }
 
-  // Leg 2 (F3 DD2, AC2): every handler below gates on requireChrome AHEAD of its
-  // existing externalContents/target guard — the target guard is not replaced.
-  ipcMain.on('zoom-apply', (event, payload) => {
-    if (!requireChrome(event)) return;
+  // Mission 23 Flight 1 (`ipc-gate-complete`, NF7): every handler below is OWNING-CHROME — the
+  // tab id it names must belong to the sender's window — AHEAD of its existing
+  // externalContents/target guard (which is not replaced, and still refuses internal tabs).
+  gate.owningChrome.on('zoom-apply', webContentsIdOfPayload, (event, payload) => {
     const wc = externalContents(payload);
     if (wc) applyZoom(wc, payload.action);
   });
-  ipcMain.handle('get-zoom', (event, payload) =>
-    requireChrome(event) ? (externalContents(payload)?.getZoomFactor() ?? null) : null
+  gate.owningChrome.handle(
+    'get-zoom',
+    webContentsIdOfPayload,
+    (_event, payload) => externalContents(payload)?.getZoomFactor() ?? null,
+    { value: null }
   );
-  ipcMain.on('print', (event, payload) => {
-    if (!requireChrome(event)) return;
+  gate.owningChrome.on('print', webContentsIdOfPayload, (event, payload) => {
     const wc = externalContents(payload);
     if (!wc) return;
     wc.print({}, (ok, reason) => {
       if (!ok) logger.warn('print failed:', reason);
     });
   });
-  ipcMain.handle('toggle-devtools', (event, payload) => {
-    if (!requireChrome(event)) return false;
-    const wc = externalContents(payload);
-    return wc ? toggleDevTools(wc) : false;
-  });
-  ipcMain.handle('is-devtools-open', (event, payload) => {
-    if (!requireChrome(event)) return false;
-    const wc = externalContents(payload);
-    return wc ? wc.isDevToolsOpened() : false;
-  });
-  ipcMain.handle('page-context-correct', (event, payload) => {
-    if (!requireChrome(event)) return;
-    const wc = externalContents(payload);
-    if (!wc) return;
-    const word = payload && payload.word;
-    if (typeof word === 'string' && word) {
-      wc.focus();
-      wc.replaceMisspelling(word);
-    }
-  });
-  ipcMain.handle('page-context-action', (event, payload) => {
-    if (!requireChrome(event)) return;
-    const wc = externalContents(payload);
-    if (!wc) return;
-    const action = payload && payload.action;
-    if (!PAGE_CONTEXT_ACTIONS.has(action)) return;
-    wc[action]();
-  });
+  gate.owningChrome.handle(
+    'toggle-devtools',
+    webContentsIdOfPayload,
+    (event, payload) => {
+      const wc = externalContents(payload);
+      return wc ? toggleDevTools(wc) : false;
+    },
+    { value: false }
+  );
+  gate.owningChrome.handle(
+    'is-devtools-open',
+    webContentsIdOfPayload,
+    (event, payload) => {
+      const wc = externalContents(payload);
+      return wc ? wc.isDevToolsOpened() : false;
+    },
+    { value: false }
+  );
+  gate.owningChrome.handle(
+    'page-context-correct',
+    webContentsIdOfPayload,
+    (event, payload) => {
+      const wc = externalContents(payload);
+      if (!wc) return;
+      const word = payload && payload.word;
+      if (typeof word === 'string' && word) {
+        wc.focus();
+        wc.replaceMisspelling(word);
+      }
+    },
+    { value: undefined }
+  );
+  gate.owningChrome.handle(
+    'page-context-action',
+    webContentsIdOfPayload,
+    (event, payload) => {
+      const wc = externalContents(payload);
+      if (!wc) return;
+      const action = payload && payload.action;
+      if (!PAGE_CONTEXT_ACTIONS.has(action)) return;
+      wc[action]();
+    },
+    { value: undefined }
+  );
 
   registerInternalHandler(ipcMain, 'internal-open-tab-in-jar', (_event, payload) => {
     if (payload === null || typeof payload !== 'object') {
@@ -639,91 +779,105 @@ function registerBrowserIpc({
     return { ok: true };
   });
 
-  ipcMain.handle('identity-new', async (event, payload) => {
-    // Leg 2 (F3 DD2, AC2): chrome-trust gate.
-    if (!requireChrome(event)) return { ok: false };
-    const partition = payload && payload.partition;
-    if (!partition) return { ok: false };
-    const sess = session.fromPartition(partition);
-    if (sess.__goldfinchInternal) return { ok: false };
-    try {
-      await sess.clearStorageData();
-      await sess.clearCache();
-      rerollSeed(sess);
-      return { ok: true };
-    } catch (error) {
-      return { ok: false, error: String(error && error.message ? error.message : error) };
-    }
-  });
-
-  ipcMain.handle('privacy-cookies', async (event, payload) => {
-    // Leg 2 (F3 DD2, AC2): chrome-trust gate ahead of the existing target lookup.
-    if (!requireChrome(event)) return { ...EMPTY_COOKIES, list: [] };
-    const { webContentsId, url } = /** @type {any} */ (payload || {});
-    const wc = webContentsId != null ? webContents.fromId(webContentsId) : null;
-    if (!wc || wc.session.__goldfinchInternal) return { ...EMPTY_COOKIES, list: [] };
-    const firstParty = registrableDomain(hostnameOf(url || wc.getURL() || ''));
-    const all = await wc.session.cookies.get({});
-    let first = 0;
-    let third = 0;
-    const list = all
-      .map((cookie) => {
-        const domain = registrableDomain(cookie.domain.replace(/^\./, ''));
-        const isThird = !!firstParty && domain !== firstParty;
-        if (isThird) third++;
-        else first++;
-        return {
-          name: cookie.name,
-          domain: cookie.domain,
-          third: isThird,
-          secure: cookie.secure,
-          session: !cookie.expirationDate
-        };
-      })
-      .sort((a, b) => (a.third === b.third ? 0 : a.third ? 1 : -1));
-    return { firstParty, first, third, total: all.length, list: list.slice(0, 300) };
-  });
-
-  ipcMain.handle('privacy-clear-cookies', async (event, payload) => {
-    // Leg 2 (F3 DD2, AC2): chrome-trust gate ahead of the existing target lookup.
-    if (!requireChrome(event)) return { removed: 0 };
-    const { webContentsId, scope, url } = /** @type {any} */ (payload || {});
-    const wc = webContentsId != null ? webContents.fromId(webContentsId) : null;
-    if (!wc || wc.session.__goldfinchInternal) return { removed: 0 };
-    const firstParty = registrableDomain(hostnameOf(url || wc.getURL() || ''));
-    const all = await wc.session.cookies.get({});
-    let removed = 0;
-    for (const cookie of all) {
-      const isThird = !!firstParty && registrableDomain(cookie.domain.replace(/^\./, '')) !== firstParty;
-      if (scope !== 'all' && !(scope === 'third' && isThird)) continue;
-      const host = cookie.domain.replace(/^\./, '');
+  gate.chrome.handle(
+    'identity-new',
+    async (event, payload) => {
+      const partition = payload && payload.partition;
+      // Mission 23 Flight 1 (22c): the SAME partition predicate `tab-create` uses — a registered
+      // jar's partition or a burner by exact shape — so this can neither create nor wipe an
+      // arbitrary partition.
+      if (!isAdmissibleTabPartition(partition, jars.list())) return { ok: false };
+      const sess = session.fromPartition(partition);
+      if (sess.__goldfinchInternal) return { ok: false };
       try {
-        await wc.session.cookies.remove(
-          `${cookie.secure ? 'https' : 'http'}://${host}${cookie.path || '/'}`,
-          cookie.name
-        );
-        removed++;
-      } catch {
-        // Individual cookie removal failures do not abort the bounded sweep.
+        await sess.clearStorageData();
+        await sess.clearCache();
+        rerollSeed(sess);
+        return { ok: true };
+      } catch (error) {
+        return { ok: false, error: String(error && error.message ? error.message : error) };
       }
-    }
-    return { removed };
-  });
+    },
+    { value: { ok: false } }
+  );
 
-  ipcMain.handle('privacy-clear-storage', async (event, payload) => {
-    // Leg 2 (F3 DD2, AC2): chrome-trust gate ahead of the existing target lookup.
-    if (!requireChrome(event)) return { ok: false, error: 'no-tab' };
-    const { url, webContentsId } = /** @type {any} */ (payload || {});
-    const wc = webContentsId != null ? webContents.fromId(webContentsId) : null;
-    if (!wc || wc.session.__goldfinchInternal) return { ok: false, error: 'no-tab' };
-    try {
-      const origin = new URL(url).origin;
-      await wc.session.clearStorageData({ origin });
-      return { ok: true, origin };
-    } catch (error) {
-      return { ok: false, error: String(error && error.message ? error.message : error) };
-    }
-  });
+  gate.owningChrome.handle(
+    'privacy-cookies',
+    webContentsIdOfPayload,
+    async (event, payload) => {
+      const { webContentsId, url } = /** @type {any} */ (payload || {});
+      const wc = webContentsId != null ? webContents.fromId(webContentsId) : null;
+      if (!wc || wc.session.__goldfinchInternal) return { ...EMPTY_COOKIES, list: [] };
+      const firstParty = registrableDomain(hostnameOf(url || wc.getURL() || ''));
+      const all = await wc.session.cookies.get({});
+      let first = 0;
+      let third = 0;
+      const list = all
+        .map((cookie) => {
+          const domain = registrableDomain(cookie.domain.replace(/^\./, ''));
+          const isThird = !!firstParty && domain !== firstParty;
+          if (isThird) third++;
+          else first++;
+          return {
+            name: cookie.name,
+            domain: cookie.domain,
+            third: isThird,
+            secure: cookie.secure,
+            session: !cookie.expirationDate
+          };
+        })
+        .sort((a, b) => (a.third === b.third ? 0 : a.third ? 1 : -1));
+      return { firstParty, first, third, total: all.length, list: list.slice(0, 300) };
+    },
+    { value: EMPTY_COOKIES_REFUSAL }
+  );
+
+  gate.owningChrome.handle(
+    'privacy-clear-cookies',
+    webContentsIdOfPayload,
+    async (event, payload) => {
+      const { webContentsId, scope, url } = /** @type {any} */ (payload || {});
+      const wc = webContentsId != null ? webContents.fromId(webContentsId) : null;
+      if (!wc || wc.session.__goldfinchInternal) return { removed: 0 };
+      const firstParty = registrableDomain(hostnameOf(url || wc.getURL() || ''));
+      const all = await wc.session.cookies.get({});
+      let removed = 0;
+      for (const cookie of all) {
+        const isThird = !!firstParty && registrableDomain(cookie.domain.replace(/^\./, '')) !== firstParty;
+        if (scope !== 'all' && !(scope === 'third' && isThird)) continue;
+        const host = cookie.domain.replace(/^\./, '');
+        try {
+          await wc.session.cookies.remove(
+            `${cookie.secure ? 'https' : 'http'}://${host}${cookie.path || '/'}`,
+            cookie.name
+          );
+          removed++;
+        } catch {
+          // Individual cookie removal failures do not abort the bounded sweep.
+        }
+      }
+      return { removed };
+    },
+    { value: { removed: 0 } }
+  );
+
+  gate.owningChrome.handle(
+    'privacy-clear-storage',
+    webContentsIdOfPayload,
+    async (event, payload) => {
+      const { url, webContentsId } = /** @type {any} */ (payload || {});
+      const wc = webContentsId != null ? webContents.fromId(webContentsId) : null;
+      if (!wc || wc.session.__goldfinchInternal) return { ok: false, error: 'no-tab' };
+      try {
+        const origin = new URL(url).origin;
+        await wc.session.clearStorageData({ origin });
+        return { ok: true, origin };
+      } catch (error) {
+        return { ok: false, error: String(error && error.message ? error.message : error) };
+      }
+    },
+    { value: { ok: false, error: 'no-tab' } }
+  );
 
   return { rerollSeed };
 }

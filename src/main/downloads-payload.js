@@ -41,19 +41,22 @@ function displayFilename(acc) {
 }
 
 /**
- * The manager.register({ url, filename, savePath, mime, startTime }) arg shape.
+ * The manager.register({ url, filename, savePath, mime, startTime, partition }) arg shape.
+ * `partition` (the session the download came from) is present only when known; the browser's own
+ * session records none.
  * `mime` uses optional-call semantics (absent accessor → undefined), which register drops via
  * its `typeof mime === 'string'` guard — byte-identical to today's `item.getMimeType?.()`.
  * @param {DownloadItemAccessors} acc
- * @param {{ url: string, startTime: number }} fixed
+ * @param {{ url: string, startTime: number, partition?: string }} fixed
  */
-function buildRegisterRecord(acc, { url, startTime }) {
+function buildRegisterRecord(acc, { url, startTime, partition }) {
   return {
     url,
     filename: displayFilename(acc),
     savePath: acc.getSavePath(),
     mime: acc.getMimeType ? acc.getMimeType() : undefined,
-    startTime
+    startTime,
+    ...(typeof partition === 'string' && partition ? { partition } : {})
   };
 }
 

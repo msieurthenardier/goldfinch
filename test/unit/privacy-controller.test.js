@@ -370,11 +370,35 @@ test('privacy badge and automation cache reconciliation derive from authoritativ
   assert.equal(h.els.togglePrivacy.attributes.get('aria-label'), 'Shields, 3 blocked');
 
   controller.updateAutomationIndicator({ sessions: [{ jarId: 'jar-a', kind: 'jar' }] });
-  controller.updateAutomationKeyState({ automationKeyHashes: ['one'], automationAdminKeyHash: 'admin' });
+  controller.updateAutomationKeyState({ automationKeyState: { jarIdsWithKey: ['jar-a'], adminKeyEnabled: true } });
   const last = h.state.models.at(-1);
   assert.deepEqual(last.activeJarIds, ['jar-a']);
   assert.equal(last.enabledJarKeyCount, 1);
   assert.equal(last.adminKeyEnabled, true);
+});
+
+test('the automation key state is read from main-derived automationKeyState only (DD13): hashes are never consulted, a malformed field is zero/false', async () => {
+  const h = harness();
+  const controller = await create(h);
+  const model = () => h.state.models.at(-1);
+  controller.updateAutomationKeyState({ automationKeyState: { jarIdsWithKey: ['a', 'b'], adminKeyEnabled: false } });
+  assert.equal(model().enabledJarKeyCount, 2);
+  assert.equal(model().adminKeyEnabled, false);
+  // The pre-DD13 shape (hash fields) no longer drives the indicator.
+  controller.updateAutomationKeyState({ automationKeyHashes: { a: 'x' }, automationAdminKeyHash: 'y' });
+  assert.equal(model().enabledJarKeyCount, 0);
+  assert.equal(model().adminKeyEnabled, false);
+  for (const bad of [
+    undefined,
+    null,
+    {},
+    { automationKeyState: null },
+    { automationKeyState: { jarIdsWithKey: 'x', adminKeyEnabled: 'yes' } }
+  ]) {
+    controller.updateAutomationKeyState(bad);
+    assert.equal(model().enabledJarKeyCount, 0);
+    assert.equal(model().adminKeyEnabled, false);
+  }
 });
 
 // ---------------------------------------------------------------------------

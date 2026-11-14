@@ -39,6 +39,7 @@ const { EventEmitter } = require('node:events');
 const vs = require('../../src/main/vault/vault-store');
 const { createVaultHuman } = require('../../src/main/vault/vault-human');
 const { registerTabIpc } = require('../../src/main/register-tab-ipc');
+const { eventFrom, makeTestGate } = require('../helpers/ipc-gate-fixture');
 
 const FAST_SCRYPT = { algo: 'scrypt', N: 2 ** 12, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 const MASTER = 'correct horse battery staple';
@@ -477,7 +478,7 @@ class FakeIpc {
     this.listeners.set(channel, fn);
   }
   send(channel, sender, ...args) {
-    return this.listeners.get(channel)({ sender }, ...args);
+    return this.listeners.get(channel)(eventFrom(sender), ...args);
   }
 }
 
@@ -528,6 +529,7 @@ function setupTabCloseHarness({ vaultHuman } = {}) {
   }
   const deps = {
     ipcMain,
+    gate: makeTestGate({ ipcMain, registry }),
     registry,
     getHistoryRecorder: () => null,
     schedule: setTimeout,

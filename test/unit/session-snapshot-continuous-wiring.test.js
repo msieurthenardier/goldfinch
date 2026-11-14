@@ -121,13 +121,13 @@ const TAB_SET_ACTIVE_ARM_RE = /(owner\.activeTabWcId\s*=\s*wcId;)\s*\/\/[^\n]*\n
 // boundary, so a scan starting inside moveTabIntoWindow can never run past its own body
 // into a sibling handler's arm site.
 const MOVE_ARM_RE =
-  /(target\.tabViews\.set\(\s*p\.wcId,\s*entry\s*\);)(?:(?!\n\s*(?:function\s|ipcMain\.))[\s\S])*?scheduleSnapshot\?\.\(\);/;
+  /(target\.tabViews\.set\(\s*p\.wcId,\s*entry\s*\);)(?:(?!\n\s*(?:function\s|ipcMain\.|gate\.))[\s\S])*?scheduleSnapshot\?\.\(\);/;
 
 test('tab-create arms the snapshot scheduler after the new tab lands in tabViews', () => {
   // Non-greedy up to the FIRST `) => {` — `[^{]*` would stop at the destructured
   // `{ url, partition, trusted, restoreHistory }` parameter's own brace instead of the
   // arrow function's body brace.
-  const anchor = /ipcMain\.handle\(\s*'tab-create',[\s\S]*?\)\s*=>\s*\{/;
+  const anchor = /gate\.chrome\.handle\(\s*'tab-create',[\s\S]*?\)\s*=>\s*\{/;
   const masked = maskComments(read(REGISTER_TAB_IPC));
   const body = bodyAfterRe(masked, anchor, 'tab-create');
   assert.equal(body.includes(CALL), true, 'real → tab-create arms the scheduler');
@@ -143,7 +143,7 @@ test('tab-create arms the snapshot scheduler after the new tab lands in tabViews
 });
 
 test('tab-close arms the snapshot scheduler after the closed tab leaves tabViews', () => {
-  const anchor = /ipcMain\.on\(\s*'tab-close',[^{]*\{/;
+  const anchor = /gate\.owningChrome\.on\(\s*'tab-close',[^{]*\{/;
   const masked = maskComments(read(REGISTER_TAB_IPC));
   const body = bodyAfterRe(masked, anchor, 'tab-close');
   assert.equal(body.includes(CALL), true, 'real → tab-close arms the scheduler');
@@ -159,7 +159,7 @@ test('tab-close arms the snapshot scheduler after the closed tab leaves tabViews
 });
 
 test('tab-hide arms the snapshot scheduler (the active flag changed)', () => {
-  const anchor = /ipcMain\.on\(\s*'tab-hide',[^{]*\{/;
+  const anchor = /gate\.owningChrome\.on\(\s*'tab-hide',[^{]*\{/;
   const masked = maskComments(read(REGISTER_TAB_IPC));
   const body = bodyAfterRe(masked, anchor, 'tab-hide');
   assert.equal(body.includes(CALL), true, 'real → tab-hide arms the scheduler');
@@ -179,7 +179,7 @@ test('tab-hide arms the snapshot scheduler (the active flag changed)', () => {
 test('tab-set-active arms the snapshot scheduler (the active flag changed)', () => {
   // Non-greedy up to the FIRST `) => {` — `[^{]*` would stop at the destructured
   // `{ wcId, bounds }` parameter's own brace instead of the arrow function's body brace.
-  const anchor = /ipcMain\.on\(\s*'tab-set-active',[\s\S]*?\)\s*=>\s*\{/;
+  const anchor = /gate\.owningChrome\.on\(\s*'tab-set-active',[\s\S]*?\)\s*=>\s*\{/;
   const masked = maskComments(read(REGISTER_TAB_IPC));
   const body = bodyAfterRe(masked, anchor, 'tab-set-active');
   assert.equal(body.includes(CALL), true, 'real → tab-set-active arms the scheduler');
@@ -338,7 +338,7 @@ test('before-quit calls flushSessionSnapshotScheduler before the existing uncond
 });
 
 test('window-boot-config timestamps rec.bootConfigServedAt (the settle-timeout reference point)', () => {
-  const anchor = /ipcMain\.handle\(\s*'window-boot-config',\s*\(event\)\s*=>\s*\{/;
+  const anchor = /gate\.chrome\.handle\(\s*'window-boot-config',\s*\(event\)\s*=>\s*\{/;
   const masked = maskComments(read(APP_LIFECYCLE));
   const body = bodyAfterRe(masked, anchor, 'window-boot-config');
   assert.equal(body.includes('rec.bootConfigServedAt = Date.now();'), true, 'real → the timestamp is stamped');

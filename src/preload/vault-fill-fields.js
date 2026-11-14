@@ -119,6 +119,9 @@ function findAllLoginFields(doc) {
  * @param {any} doc
  * @param {{ username?: string|null, password?: string|null } | null | undefined} cred
  * @param {number | null} [ordinal]  an index into `findAllLoginFields(doc)`.
+ * @param {{ requireOrdinal?: boolean }} [options]  `requireOrdinal: true` (off by default, so the
+ *   automation path and every existing caller are unchanged) turns the first-form fallback OFF: an
+ *   invalid ordinal fills nothing (Mission 23 Flight 1, human fills).
  * @returns {{ filled: boolean, fields: Array<{ field: any, value: string }> }}
  *   `fields` carries the exact string WRITTEN to each field that was actually
  *   filled, keyed by the field's own node reference (M21 F1 Leg 3, DD3h) — this is
@@ -126,15 +129,18 @@ function findAllLoginFields(doc) {
  *   provenance for exactly what a Goldfinch fill wrote, with no read-back and no
  *   cross-world correlation. Empty when nothing was filled.
  */
-function fillLoginForm(doc, cred, ordinal) {
+function fillLoginForm(doc, cred, ordinal, options) {
   // `typeof window` is 'undefined' under the headless unit test (which drives
   // this pure helper directly); in the guest main world it is the page window.
   if (typeof window !== 'undefined' && window.top !== window) return { filled: false, fields: [] };
   const all = findAllLoginFields(doc);
-  const fields =
-    typeof ordinal === 'number' && Number.isInteger(ordinal) && ordinal >= 0 && ordinal < all.length
-      ? all[ordinal] // the gesture-bound entry, by ordinal
-      : findLoginFields(doc); // first-password-field fallback (MCP / no-gesture / stale ordinal)
+  const validOrdinal = typeof ordinal === 'number' && Number.isInteger(ordinal) && ordinal >= 0 && ordinal < all.length;
+  // Mission 23 Flight 1 (`vault-fill-trust`): a HUMAN fill (`options.requireOrdinal`) fills only the
+  // gesture-bound entry - no live target means NOTHING is filled, never the first form on the page.
+  if (!validOrdinal && options && options.requireOrdinal === true) return { filled: false, fields: [] };
+  const fields = validOrdinal
+    ? all[ordinal] // the gesture-bound entry, by ordinal
+    : findLoginFields(doc); // first-password-field fallback (MCP / no-gesture / stale ordinal)
   if (!fields || !fields.password) return { filled: false, fields: [] };
   const written = [];
   if (fields.username && cred && cred.username != null) {

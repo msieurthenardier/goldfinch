@@ -3,9 +3,10 @@
 
 // IPC surface over the per-jar history store (flight DD9, M08 Flight 1 Leg 3).
 //
-// Twin-registered exactly like jar-ipc.js (M06 F1 Leg 3 / DD6): every handler
-// body is defined ONCE and registered TWICE — bare `ipcMain.handle` on the
-// chrome-trusted channel, and `registerInternalHandler` on the
+// Twin-registered like jar-ipc.js (M06 F1 Leg 3 / DD6): every handler
+// body is defined ONCE. Mission 23 Flight 1 (`ipc-gate`): only `history-suggest` (the omnibox
+// source) keeps a chrome-gated channel, registered through the IPC gate; the five other
+// handlers are reached ONLY through `registerInternalHandler` on the
 // internal-origin-gated `internal-history-*` twin (reached only by the
 // goldfinch://jars page, which hosts the history UI in Flights 2-3 — no new
 // internal origin this flight). Extract-don't-fork: a behavior fix here fixes
@@ -39,12 +40,13 @@ const { registerInternalHandler } = require('./internal-ipc');
  *
  * @param {{
  *   ipcMain: { handle: (channel: string, fn: (event: any, payload?: any) => any) => void },
+ *   gate: any,
  *   historyStore: typeof import('./history-store'),
  *   jars: typeof import('./jars'),
  *   broadcast: (channel: string, payload: unknown) => void
  * }} deps
  */
-function registerHistoryIpc({ ipcMain, historyStore, jars, broadcast }) {
+function registerHistoryIpc({ ipcMain, gate, historyStore, jars, broadcast }) {
   // Payload guard, shared shape (jar-ipc.js precedent): renderer payloads are
   // untrusted input — a missing/undefined/primitive payload must return the
   // channel's failure value, never throw. The explicit object check runs
@@ -179,13 +181,10 @@ function registerHistoryIpc({ ipcMain, historyStore, jars, broadcast }) {
     }
   }
 
-  // Chrome-trusted channels.
-  ipcMain.handle('history-page', handlePage);
-  ipcMain.handle('history-search', handleSearch);
-  ipcMain.handle('history-delete', handleDelete);
-  ipcMain.handle('history-clear', handleClear);
-  ipcMain.handle('history-count', handleCount);
-  ipcMain.handle('history-suggest', handleSuggest);
+  // Chrome-gated channel. Only the omnibox suggest source has a chrome caller; the other five
+  // handlers are reached through their `internal-history-*` twins alone (the bare twins had no
+  // sender anywhere and were removed in Mission 23 Flight 1 rather than gated).
+  gate.chrome.handle('history-suggest', handleSuggest, 'throw');
 
   // Internal-origin-gated twins — same handler bodies, reached only by an
   // allowlisted goldfinch:// internal page (the jars/history management page).

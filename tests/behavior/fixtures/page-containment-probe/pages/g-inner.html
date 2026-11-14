@@ -1,0 +1,14 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>g-inner</title>
+<body style="margin: 0">
+  <button id="icon" style="position: absolute; left: 50px; top: 30px; width: 40px; height: 20px">i</button>
+  <script>
+    window.__pg = [];
+    ['mousedown', 'mouseup', 'click'].forEach(function (t) {
+      document.getElementById('icon').addEventListener(t, function (e) {
+        window.__pg[window.__pg.length] = e.type + ':trusted=' + e.isTrusted + ':client=' + e.clientX + ',' + e.clientY;
+      });
+    });
+  </script>
+</body>

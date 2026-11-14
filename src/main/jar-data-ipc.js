@@ -11,6 +11,7 @@ const { cookieUrl, originFromIndexedDbDirname, mergeOriginTiers } = require('./j
 
 function registerJarDataIpc({
   ipcMain,
+  gate,
   registerInternal = registerInternalHandler,
   jars,
   session,
@@ -419,15 +420,13 @@ function registerJarDataIpc({
     return { ok: true };
   }
 
-  ipcMain.handle('jars-clear-data', handleClearData);
-  ipcMain.handle('jars-wipe', handleWipe);
-  ipcMain.handle('jars-set-retention', handleSetRetention);
-  ipcMain.handle('jars-cookies-list', handleCookiesList);
-  ipcMain.handle('jars-cookies-remove', handleCookiesRemove);
+  gate.chrome.handle('jars-clear-data', handleClearData, 'throw');
+  gate.chrome.handle('jars-wipe', handleWipe, 'throw');
+  gate.chrome.handle('jars-set-retention', handleSetRetention, 'throw');
   // NOTE (squawk 0141): there is deliberately NO bare 'jars-cookies-value' —
-  // a cookie value is secret, so its ONLY channel is the internal-gated twin below.
-  ipcMain.handle('jars-sitedata-list', handleSiteDataList);
-  ipcMain.handle('jars-sitedata-remove-origin', handleSiteDataRemoveOrigin);
+  // a cookie value is secret, so its ONLY channel is the internal-gated twin below. The bare
+  // cookie-list / cookie-remove / site-data twins were removed in Mission 23 Flight 1: nothing
+  // called them, and an ungated twin is reachable by a page holding the guest preload's IPC object.
 
   registerInternal(ipcMain, 'internal-jars-clear-data', handleClearData);
   registerInternal(ipcMain, 'internal-jars-wipe', handleWipe);

@@ -71,6 +71,8 @@ const { identityProfileOf } = require('./identity-profile');
 
 // Sortie 04 DD2/DD3: the pure cross-vault copy planner `copyItem` consumes.
 const { planCopy, allowedFor } = require('./copy-plan');
+// Leg `vault-picker-controls` (M23 F1): the confirmed-sites list on card/identity items.
+const { readConfirmedOrigins, appendConfirmedOrigin, withoutConfirmedOrigins } = require('./confirmed-origins');
 
 // Fill matcher (M12 F4 Leg 4 / DD5) — exact-origin by default, optionally widened to
 // the registrable domain for `matchMode:'registrable-domain'` items behind the
@@ -892,7 +894,10 @@ function mergeVaultItems(existing, incoming) {
   for (const item of incoming) {
     const current = byId.get(item.id);
     const isIdenticalIdentityUpdate =
-      /** @type {any} */ (item) && item.type === 'identity' && current !== undefined && deepValueEqual(current, item);
+      /** @type {any} */ (item) &&
+      item.type === 'identity' &&
+      current !== undefined &&
+      deepValueEqual(withoutConfirmedOrigins(current), withoutConfirmedOrigins(item));
     if (item && item.type === 'identity' && hasIdentity && !isIdenticalIdentityUpdate) {
       // A different identity profile (disjoint id) or a diverged same-id one —
       // LD2 refuses both the same way merge refuses any second profile.
@@ -906,7 +911,9 @@ function mergeVaultItems(existing, incoming) {
       if (item && item.type === 'identity') hasIdentity = true;
       continue;
     }
-    if (deepValueEqual(current, item)) {
+    // `confirmedOrigins` is per-vault bookkeeping, not item content: an item that differs only there is
+    // identical (the destination keeps its own list), so import-merge / restore-merge never duplicate it.
+    if (deepValueEqual(withoutConfirmedOrigins(current), withoutConfirmedOrigins(item))) {
       skippedIdentical++;
       continue;
     }
@@ -3317,8 +3324,11 @@ class VaultStore {
     if (sourceDoc === null) throw new VaultStateError('vault-store: copyItem source vault has no items');
     const sourceKey = this._vaultKeyFromDoc(sourceId, sourceDoc);
     const sourceItems = /** @type {any[]} */ (vc.decryptItems(sourceDoc.items, sourceKey));
-    const source = sourceItems.find((it) => it && it.id === itemId);
-    if (!source) throw new VaultStateError('vault-store: copyItem item not found');
+    const sourceWithOrigins = sourceItems.find((it) => it && it.id === itemId);
+    if (!sourceWithOrigins) throw new VaultStateError('vault-store: copyItem item not found');
+    // A copy forgets the confirmed sites (leg `vault-picker-controls`): the copy is a new item in another
+    // vault and asks again on every site, on BOTH write branches below (replace and keep-both / new).
+    const source = withoutConfirmedOrigins(sourceWithOrigins);
     if (!ITEM_TYPES.has(source.type)) {
       throw new VaultStateError(`vault-store: copyItem cannot copy an item of type "${source.type}"`);
     }
@@ -3413,6 +3423,60 @@ class VaultStore {
       });
     }
     return reply;
+  }
+
+  /**
+   * Record that the operator confirmed filling a CARD or IDENTITY item on `origin` (leg
+   * `vault-picker-controls`, DD6). A dedicated operation, written DIRECTLY - decrypt, change the one item in
+   * place, encrypt, write - and deliberately NOT through `_normalizeItem`, so `updatedAt` is untouched (a
+   * confirmation is bookkeeping, not an edit). An origin already listed is a no-op with no write; the list is
+   * capped (oldest dropped). There is no change broadcast from the store, so an open vault page is not
+   * re-rendered. Synchronous, so two confirmations of one item in quick succession serialise and both are
+   * kept. Returns `{ recorded }`; an unknown / non-card-or-identity item records nothing.
+   * @param {string} target  `'global'` or a persistent jar id.
+   * @param {string} itemId
+   * @param {string} origin
+   * @returns {{ recorded: boolean }}
+   */
+  recordConfirmedOrigin(target, itemId, origin) {
+    // GATED (leg `vault-picker-controls`) - the FOURTEENTH gated op (test/unit/vault-rekey-gate.test.js).
+    // Fully synchronous - entry-check + drain suffice; see saveItem.
+    const releaseOp = this._enterGatedOp();
+    try {
+      return this._recordConfirmedOrigin(target, itemId, origin);
+    } finally {
+      releaseOp();
+    }
+  }
+
+  /**
+   * @param {string} target
+   * @param {string} itemId
+   * @param {string} origin
+   * @returns {{ recorded: boolean }}
+   */
+  _recordConfirmedOrigin(target, itemId, origin) {
+    this._requireMrk();
+    if (typeof itemId !== 'string' || typeof origin !== 'string' || origin.length === 0) return { recorded: false };
+    const vaultId = this._resolveTarget(target);
+    this._touch();
+    const doc = this._readVault(vaultId);
+    if (doc === null) return { recorded: false };
+    const vaultKey = this._vaultKeyFromDoc(vaultId, doc);
+    const items = /** @type {any[]} */ (vc.decryptItems(doc.items, vaultKey));
+    const idx = items.findIndex((it) => it && it.id === itemId);
+    if (idx < 0) return { recorded: false };
+    const item = items[idx];
+    if (item.type !== 'card' && item.type !== 'identity') return { recorded: false };
+    const { list, changed } = appendConfirmedOrigin(readConfirmedOrigins(item), origin);
+    if (!changed) return { recorded: false };
+    items[idx] = { ...item, confirmedOrigins: list };
+    this._writeVault(vaultId, {
+      kdf: doc.kdf,
+      envelopes: doc.envelopes,
+      items: vc.encryptItems(items, vaultKey)
+    });
+    return { recorded: true };
   }
 
   /**
@@ -3577,13 +3641,20 @@ class VaultStore {
       if (unchanged.length > 0) {
         throw new VaultStateError('vault-store: cannot preserve secrets on a new item (create-defense)');
       }
-      return this.saveItem(target, item);
+      // `confirmedOrigins` is main-side bookkeeping the page must never set: a page-supplied value on a
+      // new item is deleted (leg `vault-picker-controls`).
+      return this.saveItem(target, withoutConfirmedOrigins(item));
     }
 
     const merged = { ...item };
     for (const name of unchanged) {
       merged[name] = existing[name];
     }
+    // The stored list is carried over REGARDLESS of what the page sent (it never holds it as editable
+    // state, and a reveal's copy of it must not be a way to set it).
+    const stored = /** @type {any} */ (existing).confirmedOrigins;
+    if (stored === undefined) delete merged.confirmedOrigins;
+    else merged.confirmedOrigins = stored;
     return this.saveItem(target, merged);
   }
 

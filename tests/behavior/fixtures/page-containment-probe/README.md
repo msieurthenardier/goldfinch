@@ -33,6 +33,35 @@ Output is `PROBE {json}` lines:
 | `Q3.inputControl`, `Q3.clean`, `Q3.suppress-*`, `Q3.hit-*`, `Q3.pageRemoveAttempt`, `Q3.productIcon`         | isolated-world listener trust (`isTrusted` as read in the world), suppression, hit-testing, and the product's own icon                        |
 | `console`                                                                                                    | guest console errors (rig diagnostics)                                                                                                        |
 
+## Gesture-transport probes (G1-G8)
+
+```
+node tests/behavior/fixtures/page-containment-probe/run-rig.mjs --phases=g          # all of G1-G8
+node tests/behavior/fixtures/page-containment-probe/run-rig.mjs --phases=g3,g6      # a subset
+```
+
+Implemented in `gesture-phase.cjs` (loaded by `rig-main.cjs`; the q1/q2/q3 phases are untouched). Pages:
+`g-page.html` (Q2 counting wrappers + `g-argscan.js`, an argument scanner that records only a label when
+any argument/receiver contains the inert substring `INERT`/`inert`; icon stand-in `#icon`, plain control
+`#plain`, field `#f`), `g-frame.html` + `g-inner.html` (stand-in in a same-site / cross-site iframe),
+`g6.html` + `g6-hooks.js` (`?mode=A|B|C`: `Object.prototype.then` getter / `Promise.prototype.then`
+wrapper / `Object.prototype.toJSON` getter that try to substitute an inert marker in a reply).
+
+| id                                                            | meaning                                                                                                      |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `G1.inputControl`, `G1.realClick`, `G1.syntheticClick`        | `input-event` / `before-mouse-event` for a `sendInputEvent` click vs page-script clicks; page counter deltas |
+| `G2`                                                          | main-side x/y vs isolated-world `getBoundingClientRect` under zoom 1 / scroll / zoom 1.5 / device emulation  |
+| `G3.idle`, `G3.pageMainThreadBlocked`                         | ordering and gap, main event vs DOM mousedown/click in the isolated world                                    |
+| `G4.keyboard`, `G4.contextMenu`                               | `before-input-event` for Enter/Space on a focused stand-in; `context-menu` real vs synthetic                 |
+| `G5.same-site iframe`, `G5.cross-site iframe` (+`.contextMenu`) | main-side events with the stand-in inside an iframe; what the inner page received                            |
+| `G6.modeA/B/C`                                                | can page hooks alter the reply of a main-initiated isolated-world call                                       |
+| `G7`, `G7.attribution`                                        | is the outbound code text / the reply visible to page wrappers                                               |
+| `G8a`, `G8b`, `G8b.counterControl`                            | `webContents.debugger` Runtime.evaluate into world 745821; `webContents.insertText`                          |
+
+The host can only deliver input via `webContents.sendInputEvent` (no physical pointer); timing is read from
+`Date.now()` in both processes (the `performance.timeOrigin` clocks of the two processes are skewed by
+~187 ms here, so only same-clock `Date.now()` gaps are meaningful).
+
 ## Product harness (Q1b, Q4, apparatus smoke)
 
 Launch the product in dev mode with a minted key (port 8231 must be free; the harness serves

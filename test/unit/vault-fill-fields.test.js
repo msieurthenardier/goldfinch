@@ -269,6 +269,29 @@ test('a null / out-of-range ordinal falls back to the first-field heuristic (MCP
   assert.equal(passB.value, '', 'the non-fallback entry is never filled');
 });
 
+test('requireOrdinal (human fills, Mission 23 Flight 1): no valid ordinal fills NOTHING; a valid one fills that entry; the default stays the fallback', () => {
+  const userA = new FakeInput('text', 'user-a');
+  const passA = new FakeInput('password', 'pass-a');
+  const passB = new FakeInput('password', 'pass-b');
+  const doc = makeDoc([new FakeForm([userA, passA]), new FakeForm([passB])]);
+  const strict = { requireOrdinal: true };
+  for (const ordinal of [null, undefined, 99, -1, 1.5, '0']) {
+    const result = fillLoginForm(doc, { username: 'alice', password: 'pw' }, ordinal, strict);
+    assert.deepEqual(result, { filled: false, fields: [] }, `ordinal ${String(ordinal)} fills nothing`);
+  }
+  assert.equal(passA.value, '');
+  assert.equal(passB.value, '');
+  assert.equal(fillLoginForm(doc, { username: 'alice', password: 'pw' }, 1, strict).filled, true);
+  assert.equal(passB.value, 'pw', 'the bound entry is filled');
+  assert.equal(passA.value, '', 'the first form is not');
+  // Off by default and when false: today's first-field fallback (automation) is byte-identical.
+  fillLoginForm(doc, { username: 'alice', password: 'auto' }, null);
+  assert.equal(passA.value, 'auto');
+  passA.value = '';
+  fillLoginForm(doc, { username: 'alice', password: 'auto2' }, 99, { requireOrdinal: false });
+  assert.equal(passA.value, 'auto2');
+});
+
 test('top-frame guard: never fills inside an iframe (window.top !== window)', () => {
   const user = new FakeInput('text', 'username');
   const pass = new FakeInput('password', 'password');

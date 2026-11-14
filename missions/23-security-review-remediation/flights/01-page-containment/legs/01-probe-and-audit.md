@@ -1,6 +1,6 @@
 # Leg: probe-and-audit
 
-**Status**: landed
+**Status**: completed
 **Flight**: [Page Containment](../flight.md)
 
 ## Objective

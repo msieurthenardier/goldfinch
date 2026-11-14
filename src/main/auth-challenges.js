@@ -102,6 +102,38 @@ const RESOLUTION_REASONS = new Set(['escape', 'outside-click', 'activated', 'tab
 // across navigation-away (or ignore its close-reason buckets entirely).
 const AUTH_MENU_TYPES = new Set(['auth-basic', 'cert-picker']);
 
+/** Longest realm shown on the sign-in card, in characters (ellipsis included). */
+const REALM_MAX_CHARS = 120;
+
+/**
+ * The realm is the SERVER's text, rendered on the sign-in card inside the browser's own sentence
+ * (`The server <host> says: "<realm>"`). Clean it in main before it is stored on the challenge (leg
+ * `prompts-and-bounds`): whitespace (including line breaks) becomes single spaces, control and format
+ * characters (bidi overrides, zero-width) and every double-quote form are removed so a realm cannot close
+ * the quote and continue in the browser's voice, and the result is capped with an ellipsis. Anything
+ * that cleans to nothing reads as no realm (the card's existing no-realm wording). Other scripts are kept.
+ * @param {unknown} realm
+ * @returns {string}
+ */
+function cleanRealm(realm) {
+  if (typeof realm !== 'string' || realm.length === 0) return '';
+  // Bound the work first: nothing past a generous window can survive the cap anyway.
+  const cleaned = realm
+    .slice(0, REALM_MAX_CHARS * 8)
+    .replace(/\s+/gu, ' ')
+    .replace(
+      /[\p{Cc}\p{Cf}\p{Cs}"\u201C\u201D\u201E\u201F\u2033\u2036\u275D\u275E\u301D\u301E\u301F\uFF02\u00AB\u00BB]/gu,
+      ''
+    )
+    .replace(/\s+/gu, ' ')
+    .trim();
+  if (cleaned.length <= REALM_MAX_CHARS) return cleaned;
+  let end = REALM_MAX_CHARS - 1;
+  const last = cleaned.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) end -= 1;
+  return cleaned.slice(0, end).trimEnd() + '\u2026';
+}
+
 /**
  * Display identity for the basic-auth presentation payload (M14 F3 HAT fix,
  * Validator finding D1): `host:port` whenever the challenge carries a port
@@ -354,7 +386,7 @@ function createAuthChallenges({ registry, chromeForTab, popupRegistry = null, lo
       // NOTE: authInfo.scheme is the AUTH scheme ('basic'), NOT the URL scheme —
       // display/bookkeeping only; origin derivation must use `url` (DD3).
       scheme: (authInfo && authInfo.scheme) || null,
-      realm: (authInfo && authInfo.realm) || '',
+      realm: cleanRealm(authInfo && authInfo.realm),
       url: (details && details.url) || '',
       callback,
       resolved: false
@@ -647,4 +679,4 @@ function createAuthChallenges({ registry, chromeForTab, popupRegistry = null, lo
   };
 }
 
-module.exports = { createAuthChallenges };
+module.exports = { createAuthChallenges, cleanRealm, REALM_MAX_CHARS };

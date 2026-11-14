@@ -21,6 +21,7 @@
 
 const { withOverlaySenderLookup } = require('../helpers/fake-overlay-registry');
 const { test } = require('node:test');
+const { makeTestGate } = require('../helpers/ipc-gate-fixture');
 const assert = require('node:assert/strict');
 
 const { registerOverlayIpc } = require('../../src/main/register-overlay-ipc');
@@ -103,7 +104,7 @@ function harness({ vaultCompromiseRotate, menuType = 'vault-compromise', surfaci
   const chrome = { id: 100, send: (channel, payload) => events.push(['send', channel, payload]) };
 
   registerOverlayIpc({
-    ipcMain,
+    gate: makeTestGate({ ipcMain, registry, autoFrame: true }),
     registry,
     chromeForAttachment: (w) => (w === win && !win.destroyed ? chrome : null),
     chromeForTab: () => null,
@@ -127,9 +128,10 @@ const OK_RESULT = {
 
 test('both compromise channels are GATED on the vaultCompromiseRotate injection', () => {
   const ipcMain = makeIpc();
+  const gateRegistry = withOverlaySenderLookup({ records: () => [], getWindowForChrome: () => null });
   registerOverlayIpc({
-    ipcMain,
-    registry: withOverlaySenderLookup({ records: () => [], getWindowForChrome: () => null }),
+    gate: makeTestGate({ ipcMain, registry: gateRegistry, autoFrame: true }),
+    registry: gateRegistry,
     chromeForAttachment: () => null,
     chromeForTab: () => null,
     sanitizeActivatedValue: () => undefined
@@ -430,9 +432,10 @@ function ackHarness() {
   }
   const a = makeWindow(1, 100);
   const b = makeWindow(2, 200);
+  const gateRegistry = withOverlaySenderLookup({ records: () => [a.rec, b.rec], getWindowForChrome: () => null });
   registerOverlayIpc({
-    ipcMain,
-    registry: withOverlaySenderLookup({ records: () => [a.rec, b.rec], getWindowForChrome: () => null }),
+    gate: makeTestGate({ ipcMain, registry: gateRegistry, autoFrame: true }),
+    registry: gateRegistry,
     chromeForAttachment: (w) => (w === a.rec.win ? a.chrome : w === b.rec.win ? b.chrome : null),
     chromeForTab: () => null,
     sanitizeActivatedValue: (v) => (typeof v === 'string' && v.length <= 24 ? v : undefined),

@@ -4,6 +4,7 @@
 // Sender identity is resolved from live registry/view ownership on every message.
 
 const { bookmarkUrlsMatch } = require('../shared/bookmark-url');
+const { SHEET_MENU_TYPES } = require('./ipc-channel-table');
 
 const MENU_CLOSE_REASONS = new Set([
   'toggle',
@@ -52,7 +53,7 @@ function parseCertPickIndex(id) {
 }
 
 function registerOverlayIpc({
-  ipcMain,
+  gate,
   registry,
   chromeForAttachment,
   chromeForTab,
@@ -131,7 +132,7 @@ function registerOverlayIpc({
   const recordForSheetSender = (sender) => recordForOverlaySender(sender, 'sheet');
   const recordForFindSender = (sender) => recordForOverlaySender(sender, 'findOverlay');
 
-  ipcMain.on('menu-overlay:open', (event, payload) => {
+  gate.chrome.on('menu-overlay:open', (event, payload) => {
     const rec = registry.getWindowForChrome(event.sender);
     if (!rec || !rec.sheet) return;
     const activeEntry = rec.activeTabWcId != null ? rec.tabViews.get(rec.activeTabWcId) : null;
@@ -153,14 +154,14 @@ function registerOverlayIpc({
     rec.sheet.openMenu(menuPayload, { contentView: rec.win.contentView, win: rec.win, bounds });
   });
 
-  ipcMain.on('menu-overlay:close', (event, payload) => {
+  gate.chrome.on('menu-overlay:close', (event, payload) => {
     const rec = registry.getWindowForChrome(event.sender);
     if (!rec || !rec.sheet) return;
     const reason = payload && payload.reason;
     rec.sheet.closeMenuOverlay(MENU_CLOSE_REASONS.has(reason) ? reason : 'superseded');
   });
 
-  ipcMain.on('menu-overlay:activated', (event, payload) => {
+  gate.sheet.on('menu-overlay:activated', SHEET_MENU_TYPES['menu-overlay:activated'], (event, payload) => {
     const rec = recordForSheetSender(event.sender);
     if (!rec || !rec.sheet) return;
     const { id, token, value } = payload || {};
@@ -202,7 +203,7 @@ function registerOverlayIpc({
     chromeForAttachment(rec.win)?.send('menu-overlay-activated', out);
   });
 
-  ipcMain.on('menu-overlay:dismissed', (event, payload) => {
+  gate.sheet.on('menu-overlay:dismissed', SHEET_MENU_TYPES['menu-overlay:dismissed'], (event, payload) => {
     const rec = recordForSheetSender(event.sender);
     if (!rec || !rec.sheet) return;
     const { reason, token } = payload || {};
@@ -220,7 +221,7 @@ function registerOverlayIpc({
   // from another application would be far worse than the flicker it prevents (that case
   // is also already closed main-side by window-factory's win.on('blur')). The manager
   // re-checks the menu's own opt-in, so a sheet with no keep-focus menu open is a no-op.
-  ipcMain.on('menu-overlay:refocus', (event) => {
+  gate.sheet.on('menu-overlay:refocus', SHEET_MENU_TYPES['menu-overlay:refocus'], (event) => {
     const rec = recordForSheetSender(event.sender);
     if (!rec || !rec.sheet || !rec.win) return;
     if (rec.win.isDestroyed?.() || !rec.win.isFocused?.()) return;
@@ -238,28 +239,33 @@ function registerOverlayIpc({
   // identity + open-token discipline mirrors the activated handler; `secret` is a
   // Uint8Array (the deserialized typed array — a separate main-heap allocation).
   if (vaultUnlock) {
-    ipcMain.handle('menu-overlay:vault-unlock', async (event, payload) => {
-      const rec = recordForSheetSender(event.sender);
-      if (!rec || !rec.sheet) return { ok: false };
-      const { token, secret } = payload || {};
-      if (typeof token !== 'number' || !(secret instanceof Uint8Array)) return { ok: false };
-      const current = rec.sheet.getCurrentMenu();
-      if (!current || token !== current.token) return { ok: false };
-      // Copy into a zeroizable Buffer (deriveMasterKey, via vaultStore.unlock,
-      // accepts string | Buffer). Zeroize BOTH the copy AND the incoming
-      // Uint8Array in finally — whether unlock succeeds OR throws — because
-      // Buffer.from() COPIES, leaving the deserialized array as a lingering
-      // separate allocation.
-      const buf = Buffer.from(secret);
-      try {
-        const ok = await vaultUnlock(buf);
-        if (ok) rec.sheet.closeMenuOverlay('activated', current.token);
-        return { ok };
-      } finally {
-        buf.fill(0);
-        secret.fill?.(0);
-      }
-    });
+    gate.sheet.handle(
+      'menu-overlay:vault-unlock',
+      SHEET_MENU_TYPES['menu-overlay:vault-unlock'],
+      async (event, payload) => {
+        const rec = recordForSheetSender(event.sender);
+        if (!rec || !rec.sheet) return { ok: false };
+        const { token, secret } = payload || {};
+        if (typeof token !== 'number' || !(secret instanceof Uint8Array)) return { ok: false };
+        const current = rec.sheet.getCurrentMenu();
+        if (!current || token !== current.token) return { ok: false };
+        // Copy into a zeroizable Buffer (deriveMasterKey, via vaultStore.unlock,
+        // accepts string | Buffer). Zeroize BOTH the copy AND the incoming
+        // Uint8Array in finally — whether unlock succeeds OR throws — because
+        // Buffer.from() COPIES, leaving the deserialized array as a lingering
+        // separate allocation.
+        const buf = Buffer.from(secret);
+        try {
+          const ok = await vaultUnlock(buf);
+          if (ok) rec.sheet.closeMenuOverlay('activated', current.token);
+          return { ok };
+        } finally {
+          buf.fill(0);
+          secret.fill?.(0);
+        }
+      },
+      { value: { ok: false } }
+    );
   }
 
   // (Sortie 06, DD8: the `menu-overlay:vault-capture-save` handler is RETIRED. Capture Save now
@@ -276,28 +282,33 @@ function registerOverlayIpc({
   // invoke; the sheet catches → surfaces an error and re-prompts. The vaultSetup delegate
   // (main.js) fires the lock-state broadcast on success, so the page moves to unlocked.
   if (vaultSetup) {
-    ipcMain.handle('menu-overlay:vault-setup', async (event, payload) => {
-      const rec = recordForSheetSender(event.sender);
-      if (!rec || !rec.sheet) return { ok: false };
-      const { token, secret } = payload || {};
-      if (typeof token !== 'number' || !(secret instanceof Uint8Array)) return { ok: false };
-      const current = rec.sheet.getCurrentMenu();
-      if (!current || token !== current.token) return { ok: false };
-      const buf = Buffer.from(secret);
-      try {
-        const res = await vaultSetup(buf); // { recoveryKeyDisplay, adminPrivateKeyB64 }
-        rec.sheet.closeMenuOverlay('activated', current.token);
-        // Recovery key ONLY — main→chrome→sheet (channel-3 init carries the model). The
-        // admin key is NOT surfaced here (F4's from-scratch admin-provision path owns it).
-        chromeForAttachment(rec.win)?.send('vault-recovery-show', {
-          recoveryKey: res && res.recoveryKeyDisplay
-        });
-        return { ok: true };
-      } finally {
-        buf.fill(0);
-        secret.fill?.(0);
-      }
-    });
+    gate.sheet.handle(
+      'menu-overlay:vault-setup',
+      SHEET_MENU_TYPES['menu-overlay:vault-setup'],
+      async (event, payload) => {
+        const rec = recordForSheetSender(event.sender);
+        if (!rec || !rec.sheet) return { ok: false };
+        const { token, secret } = payload || {};
+        if (typeof token !== 'number' || !(secret instanceof Uint8Array)) return { ok: false };
+        const current = rec.sheet.getCurrentMenu();
+        if (!current || token !== current.token) return { ok: false };
+        const buf = Buffer.from(secret);
+        try {
+          const res = await vaultSetup(buf); // { recoveryKeyDisplay, adminPrivateKeyB64 }
+          rec.sheet.closeMenuOverlay('activated', current.token);
+          // Recovery key ONLY — main→chrome→sheet (channel-3 init carries the model). The
+          // admin key is NOT surfaced here (F4's from-scratch admin-provision path owns it).
+          chromeForAttachment(rec.win)?.send('vault-recovery-show', {
+            recoveryKey: res && res.recoveryKeyDisplay
+          });
+          return { ok: true };
+        } finally {
+          buf.fill(0);
+          secret.fill?.(0);
+        }
+      },
+      { value: { ok: false } }
+    );
   }
 
   // M12 F3 Leg 5 (access-keys): the vault-stepup sheet's step-up MINT channel, mirroring
@@ -313,43 +324,48 @@ function registerOverlayIpc({
   // ONCE (never in the invoke reply, never in the page DOM). Gated on the vaultMintAccessKey
   // injection so offline overlay tests never register it.
   if (vaultMintAccessKey) {
-    ipcMain.handle('menu-overlay:vault-stepup-mint', async (event, payload) => {
-      const rec = recordForSheetSender(event.sender);
-      if (!rec || !rec.sheet) return { ok: false };
-      const { token, secret, target } = payload || {};
-      if (typeof token !== 'number' || !(secret instanceof Uint8Array)) return { ok: false };
-      const current = rec.sheet.getCurrentMenu();
-      if (!current || token !== current.token) return { ok: false };
-      const buf = Buffer.from(secret);
-      try {
-        const res = await vaultMintAccessKey(buf, target); // { ok, secret?, keyId? }
-        if (res && res.ok) {
-          // Squawk 0059: the mint just wrote a durable access envelope, but the vault
-          // page refreshes ONLY off vault-lock-state — re-broadcast it so an open vault
-          // page re-lists the jar's access keys immediately (the compromise-completion
-          // idiom; chrome treats the duplicate unlocked state as inert). Fired FIRST in
-          // the success branch — post-write, before any sheet/window handle is touched —
-          // so a window that died during the scrypt await can never skip the refresh.
-          broadcastVaultLockState?.();
-          rec.sheet.closeMenuOverlay('activated', current.token);
-          // The minted secret + keyId — main→chrome→sheet (channel-3 init carries the
-          // model). Shown ONCE on the dismiss-locked vault-accesskey-show sheet.
-          chromeForAttachment(rec.win)?.send('vault-accesskey-show', {
-            secret: res.secret,
-            keyId: res.keyId
-          });
-          return { ok: true };
+    gate.sheet.handle(
+      'menu-overlay:vault-stepup-mint',
+      SHEET_MENU_TYPES['menu-overlay:vault-stepup-mint'],
+      async (event, payload) => {
+        const rec = recordForSheetSender(event.sender);
+        if (!rec || !rec.sheet) return { ok: false };
+        const { token, secret, target } = payload || {};
+        if (typeof token !== 'number' || !(secret instanceof Uint8Array)) return { ok: false };
+        const current = rec.sheet.getCurrentMenu();
+        if (!current || token !== current.token) return { ok: false };
+        const buf = Buffer.from(secret);
+        try {
+          const res = await vaultMintAccessKey(buf, target); // { ok, secret?, keyId? }
+          if (res && res.ok) {
+            // Squawk 0059: the mint just wrote a durable access envelope, but the vault
+            // page refreshes ONLY off vault-lock-state — re-broadcast it so an open vault
+            // page re-lists the jar's access keys immediately (the compromise-completion
+            // idiom; chrome treats the duplicate unlocked state as inert). Fired FIRST in
+            // the success branch — post-write, before any sheet/window handle is touched —
+            // so a window that died during the scrypt await can never skip the refresh.
+            broadcastVaultLockState?.();
+            rec.sheet.closeMenuOverlay('activated', current.token);
+            // The minted secret + keyId — main→chrome→sheet (channel-3 init carries the
+            // model). Shown ONCE on the dismiss-locked vault-accesskey-show sheet.
+            chromeForAttachment(rec.win)?.send('vault-accesskey-show', {
+              secret: res.secret,
+              keyId: res.keyId
+            });
+            return { ok: true };
+          }
+          // Squawk 0058: forward the delegate's NON-SECRET failure reason (the vault-import
+          // idiom) so the sheet can branch its copy — 'state' (no vault for the jar yet) and
+          // 'busy' (a rotation in progress) instead of the collapsed wrong-password copy. A
+          // plain auth refusal keeps its bare { ok:false } shape (no reason key).
+          return res && res.reason ? { ok: false, reason: res.reason } : { ok: false };
+        } finally {
+          buf.fill(0);
+          secret.fill?.(0);
         }
-        // Squawk 0058: forward the delegate's NON-SECRET failure reason (the vault-import
-        // idiom) so the sheet can branch its copy — 'state' (no vault for the jar yet) and
-        // 'busy' (a rotation in progress) instead of the collapsed wrong-password copy. A
-        // plain auth refusal keeps its bare { ok:false } shape (no reason key).
-        return res && res.reason ? { ok: false, reason: res.reason } : { ok: false };
-      } finally {
-        buf.fill(0);
-        secret.fill?.(0);
-      }
-    });
+      },
+      { value: { ok: false } }
+    );
   }
 
   // M12 F4 Leg 1 (export-import); RESHAPED M18 F3 Leg 3 / DD2 rulings 2/3(c): the
@@ -370,38 +386,43 @@ function registerOverlayIpc({
   // injected `notifyVaultImportLabelsReady` (the broadcastVaultLockState precedent) instead.
   // Gated on the vaultImportPreview injection so offline overlay tests never register it.
   if (vaultImportPreview) {
-    ipcMain.handle('menu-overlay:vault-import', async (event, payload) => {
-      const rec = recordForSheetSender(event.sender);
-      if (!rec || !rec.sheet) return { ok: false };
-      const { token, secret, secretKind } = payload || {};
-      if (typeof token !== 'number' || !(secret instanceof Uint8Array)) return { ok: false };
-      const current = rec.sheet.getCurrentMenu();
-      if (!current || token !== current.token) return { ok: false };
-      const kind = secretKind === 'recovery' ? 'recovery' : 'master';
-      const buf = Buffer.from(secret);
-      try {
-        // PR#112 finding 5: THIS window's held record. The secret sheet is its OWN overlay
-        // webContents (distinct from the chrome), so we key by the window's CHROME contents id
-        // — chromeForAttachment(rec.win) — which is the SAME object the page's pick step keyed
-        // under (chromeForTab(pageTabId)). A window can only ever preview its own picked bundle.
-        const chrome = chromeForAttachment(rec.win);
-        const chromeId = chrome?.id;
-        const res = await vaultImportPreview(chromeId, buf, kind); // { ok, reason? }
-        if (res && res.ok) {
-          rec.sheet.closeMenuOverlay('activated', current.token);
-          // DD2 ruling 3(c): a broadcast, payload-FREE notification — the page fetches its own
-          // record's labels via a window-scoped invoke rather than trusting an inline payload.
-          notifyVaultImportLabelsReady?.();
-          return { ok: true };
+    gate.sheet.handle(
+      'menu-overlay:vault-import',
+      SHEET_MENU_TYPES['menu-overlay:vault-import'],
+      async (event, payload) => {
+        const rec = recordForSheetSender(event.sender);
+        if (!rec || !rec.sheet) return { ok: false };
+        const { token, secret, secretKind } = payload || {};
+        if (typeof token !== 'number' || !(secret instanceof Uint8Array)) return { ok: false };
+        const current = rec.sheet.getCurrentMenu();
+        if (!current || token !== current.token) return { ok: false };
+        const kind = secretKind === 'recovery' ? 'recovery' : 'master';
+        const buf = Buffer.from(secret);
+        try {
+          // PR#112 finding 5: THIS window's held record. The secret sheet is its OWN overlay
+          // webContents (distinct from the chrome), so we key by the window's CHROME contents id
+          // — chromeForAttachment(rec.win) — which is the SAME object the page's pick step keyed
+          // under (chromeForTab(pageTabId)). A window can only ever preview its own picked bundle.
+          const chrome = chromeForAttachment(rec.win);
+          const chromeId = chrome?.id;
+          const res = await vaultImportPreview(chromeId, buf, kind); // { ok, reason? }
+          if (res && res.ok) {
+            rec.sheet.closeMenuOverlay('activated', current.token);
+            // DD2 ruling 3(c): a broadcast, payload-FREE notification — the page fetches its own
+            // record's labels via a window-scoped invoke rather than trusting an inline payload.
+            notifyVaultImportLabelsReady?.();
+            return { ok: true };
+          }
+          // Forward the NON-SECRET failure reason (format/busy/state) so the sheet can branch its
+          // copy. A plain wrong-secret refusal keeps its bare { ok:false } shape (no reason key).
+          return res && res.reason ? { ok: false, reason: res.reason } : { ok: false };
+        } finally {
+          buf.fill(0);
+          secret.fill?.(0);
         }
-        // Forward the NON-SECRET failure reason (format/busy/state) so the sheet can branch its
-        // copy. A plain wrong-secret refusal keeps its bare { ok:false } shape (no reason key).
-        return res && res.reason ? { ok: false, reason: res.reason } : { ok: false };
-      } finally {
-        buf.fill(0);
-        secret.fill?.(0);
-      }
-    });
+      },
+      { value: { ok: false } }
+    );
   }
 
   // M12 F4 Leg 2 (key-rotation): the vault-stepup sheet's RECOVERY-ROTATION step-up channel,
@@ -415,37 +436,42 @@ function registerOverlayIpc({
   // vault-recovery-show sheet with the NEW recovery key (POST-write ordering) — shown ONCE (never
   // in the invoke reply, never in the page DOM). Gated on the vaultRotateRecovery injection.
   if (vaultRotateRecovery) {
-    ipcMain.handle('menu-overlay:vault-rotate-recovery', async (event, payload) => {
-      const rec = recordForSheetSender(event.sender);
-      if (!rec || !rec.sheet) return { ok: false };
-      const { token, secret } = payload || {};
-      if (typeof token !== 'number' || !(secret instanceof Uint8Array)) return { ok: false };
-      const current = rec.sheet.getCurrentMenu();
-      if (!current || token !== current.token) return { ok: false };
-      const buf = Buffer.from(secret);
-      try {
-        const res = await vaultRotateRecovery(buf); // { ok, recoveryKeyDisplay? }
-        if (res && res.ok) {
-          rec.sheet.closeMenuOverlay('activated', current.token);
-          // The new one-time recovery key — main→chrome→sheet (channel-3 init carries the model).
-          // Shown ONCE on the dismiss-locked vault-recovery-show sheet, opened AFTER the write.
-          // `replacing: true` (rotate-only; the setup send omits it) tells the sheet to reveal
-          // the "this replaces your previous recovery key" line — the rotation INVALIDATES the
-          // old key, a footgun if unstated (HAT I9). NON-SECRET flag; the key rides as before.
-          chromeForAttachment(rec.win)?.send('vault-recovery-show', {
-            recoveryKey: res.recoveryKeyDisplay,
-            replacing: true
-          });
-          return { ok: true };
+    gate.sheet.handle(
+      'menu-overlay:vault-rotate-recovery',
+      SHEET_MENU_TYPES['menu-overlay:vault-rotate-recovery'],
+      async (event, payload) => {
+        const rec = recordForSheetSender(event.sender);
+        if (!rec || !rec.sheet) return { ok: false };
+        const { token, secret } = payload || {};
+        if (typeof token !== 'number' || !(secret instanceof Uint8Array)) return { ok: false };
+        const current = rec.sheet.getCurrentMenu();
+        if (!current || token !== current.token) return { ok: false };
+        const buf = Buffer.from(secret);
+        try {
+          const res = await vaultRotateRecovery(buf); // { ok, recoveryKeyDisplay? }
+          if (res && res.ok) {
+            rec.sheet.closeMenuOverlay('activated', current.token);
+            // The new one-time recovery key — main→chrome→sheet (channel-3 init carries the model).
+            // Shown ONCE on the dismiss-locked vault-recovery-show sheet, opened AFTER the write.
+            // `replacing: true` (rotate-only; the setup send omits it) tells the sheet to reveal
+            // the "this replaces your previous recovery key" line — the rotation INVALIDATES the
+            // old key, a footgun if unstated (HAT I9). NON-SECRET flag; the key rides as before.
+            chromeForAttachment(rec.win)?.send('vault-recovery-show', {
+              recoveryKey: res.recoveryKeyDisplay,
+              replacing: true
+            });
+            return { ok: true };
+          }
+          // Squawk 0058: forward the delegate's NON-SECRET failure reason ('busy' — the
+          // second-wall refusal during a compromise rotation) so the sheet's copy is truthful.
+          return res && res.reason ? { ok: false, reason: res.reason } : { ok: false };
+        } finally {
+          buf.fill(0);
+          secret.fill?.(0);
         }
-        // Squawk 0058: forward the delegate's NON-SECRET failure reason ('busy' — the
-        // second-wall refusal during a compromise rotation) so the sheet's copy is truthful.
-        return res && res.reason ? { ok: false, reason: res.reason } : { ok: false };
-      } finally {
-        buf.fill(0);
-        secret.fill?.(0);
-      }
-    });
+      },
+      { value: { ok: false } }
+    );
   }
 
   // M12 F4 Leg 3 (admin-key-provision): the vault-stepup sheet's ADMIN-KEY ROTATION step-up channel,
@@ -459,33 +485,38 @@ function registerOverlayIpc({
   // with the NEW admin private key (POST-write ordering) — shown ONCE (never in the invoke reply, never
   // in the page DOM). Gated on the vaultRotateAdminKey injection.
   if (vaultRotateAdminKey) {
-    ipcMain.handle('menu-overlay:vault-rotate-admin', async (event, payload) => {
-      const rec = recordForSheetSender(event.sender);
-      if (!rec || !rec.sheet) return { ok: false };
-      const { token, secret } = payload || {};
-      if (typeof token !== 'number' || !(secret instanceof Uint8Array)) return { ok: false };
-      const current = rec.sheet.getCurrentMenu();
-      if (!current || token !== current.token) return { ok: false };
-      const buf = Buffer.from(secret);
-      try {
-        const res = await vaultRotateAdminKey(buf); // { ok, adminPrivateKeyB64? }
-        if (res && res.ok) {
-          rec.sheet.closeMenuOverlay('activated', current.token);
-          // The new one-time admin private key — main→chrome→sheet (channel-3 init carries the model).
-          // Shown ONCE on the dismiss-locked vault-adminkey-show sheet, opened AFTER the write.
-          chromeForAttachment(rec.win)?.send('vault-adminkey-show', {
-            adminPrivateKey: res.adminPrivateKeyB64
-          });
-          return { ok: true };
+    gate.sheet.handle(
+      'menu-overlay:vault-rotate-admin',
+      SHEET_MENU_TYPES['menu-overlay:vault-rotate-admin'],
+      async (event, payload) => {
+        const rec = recordForSheetSender(event.sender);
+        if (!rec || !rec.sheet) return { ok: false };
+        const { token, secret } = payload || {};
+        if (typeof token !== 'number' || !(secret instanceof Uint8Array)) return { ok: false };
+        const current = rec.sheet.getCurrentMenu();
+        if (!current || token !== current.token) return { ok: false };
+        const buf = Buffer.from(secret);
+        try {
+          const res = await vaultRotateAdminKey(buf); // { ok, adminPrivateKeyB64? }
+          if (res && res.ok) {
+            rec.sheet.closeMenuOverlay('activated', current.token);
+            // The new one-time admin private key — main→chrome→sheet (channel-3 init carries the model).
+            // Shown ONCE on the dismiss-locked vault-adminkey-show sheet, opened AFTER the write.
+            chromeForAttachment(rec.win)?.send('vault-adminkey-show', {
+              adminPrivateKey: res.adminPrivateKeyB64
+            });
+            return { ok: true };
+          }
+          // Squawk 0058: forward the delegate's NON-SECRET failure reason ('busy' — the
+          // second-wall refusal during a compromise rotation) so the sheet's copy is truthful.
+          return res && res.reason ? { ok: false, reason: res.reason } : { ok: false };
+        } finally {
+          buf.fill(0);
+          secret.fill?.(0);
         }
-        // Squawk 0058: forward the delegate's NON-SECRET failure reason ('busy' — the
-        // second-wall refusal during a compromise rotation) so the sheet's copy is truthful.
-        return res && res.reason ? { ok: false, reason: res.reason } : { ok: false };
-      } finally {
-        buf.fill(0);
-        secret.fill?.(0);
-      }
-    });
+      },
+      { value: { ok: false } }
+    );
   }
 
   // M12 F4 Leg 2 (key-rotation): the vault-change-master sheet's TWO-SECRET channel (old + new
@@ -497,33 +528,38 @@ function registerOverlayIpc({
   // precedes any write). On success we close the sheet (no one-time display — the new master is
   // operator-chosen). Gated on the vaultChangeMaster injection.
   if (vaultChangeMaster) {
-    ipcMain.handle('menu-overlay:vault-change-master', async (event, payload) => {
-      const rec = recordForSheetSender(event.sender);
-      if (!rec || !rec.sheet) return { ok: false };
-      const { token, oldSecret, newSecret } = payload || {};
-      if (typeof token !== 'number' || !(oldSecret instanceof Uint8Array) || !(newSecret instanceof Uint8Array)) {
-        return { ok: false };
-      }
-      const current = rec.sheet.getCurrentMenu();
-      if (!current || token !== current.token) return { ok: false };
-      const oldBuf = Buffer.from(oldSecret);
-      const newBuf = Buffer.from(newSecret);
-      try {
-        const res = await vaultChangeMaster(oldBuf, newBuf); // { ok, reason? }
-        if (res && res.ok) {
-          rec.sheet.closeMenuOverlay('activated', current.token);
-          return { ok: true };
+    gate.sheet.handle(
+      'menu-overlay:vault-change-master',
+      SHEET_MENU_TYPES['menu-overlay:vault-change-master'],
+      async (event, payload) => {
+        const rec = recordForSheetSender(event.sender);
+        if (!rec || !rec.sheet) return { ok: false };
+        const { token, oldSecret, newSecret } = payload || {};
+        if (typeof token !== 'number' || !(oldSecret instanceof Uint8Array) || !(newSecret instanceof Uint8Array)) {
+          return { ok: false };
         }
-        // Squawk 0058: forward the delegate's NON-SECRET failure reason ('busy' — the
-        // second-wall refusal during a compromise rotation) so the sheet's copy is truthful.
-        return res && res.reason ? { ok: false, reason: res.reason } : { ok: false };
-      } finally {
-        oldBuf.fill(0);
-        newBuf.fill(0);
-        oldSecret.fill?.(0);
-        newSecret.fill?.(0);
-      }
-    });
+        const current = rec.sheet.getCurrentMenu();
+        if (!current || token !== current.token) return { ok: false };
+        const oldBuf = Buffer.from(oldSecret);
+        const newBuf = Buffer.from(newSecret);
+        try {
+          const res = await vaultChangeMaster(oldBuf, newBuf); // { ok, reason? }
+          if (res && res.ok) {
+            rec.sheet.closeMenuOverlay('activated', current.token);
+            return { ok: true };
+          }
+          // Squawk 0058: forward the delegate's NON-SECRET failure reason ('busy' — the
+          // second-wall refusal during a compromise rotation) so the sheet's copy is truthful.
+          return res && res.reason ? { ok: false, reason: res.reason } : { ok: false };
+        } finally {
+          oldBuf.fill(0);
+          newBuf.fill(0);
+          oldSecret.fill?.(0);
+          newSecret.fill?.(0);
+        }
+      },
+      { value: { ok: false } }
+    );
   }
 
   // M12 F4 Leg 2 (key-rotation): the vault-recover sheet's TWO-SECRET channel (recovery key + new
@@ -535,34 +571,43 @@ function registerOverlayIpc({
   // onUnlock/broadcast moves the page to unlocked; we close the sheet. Gated on the vaultRecover
   // injection.
   if (vaultRecover) {
-    ipcMain.handle('menu-overlay:vault-recover', async (event, payload) => {
-      const rec = recordForSheetSender(event.sender);
-      if (!rec || !rec.sheet) return { ok: false };
-      const { token, recoverySecret, newSecret } = payload || {};
-      if (typeof token !== 'number' || !(recoverySecret instanceof Uint8Array) || !(newSecret instanceof Uint8Array)) {
-        return { ok: false };
-      }
-      const current = rec.sheet.getCurrentMenu();
-      if (!current || token !== current.token) return { ok: false };
-      const recoveryBuf = Buffer.from(recoverySecret);
-      const newBuf = Buffer.from(newSecret);
-      try {
-        const res = await vaultRecover(recoveryBuf, newBuf); // { ok, reason? }
-        if (res && res.ok) {
-          rec.sheet.closeMenuOverlay('activated', current.token);
-          return { ok: true };
+    gate.sheet.handle(
+      'menu-overlay:vault-recover',
+      SHEET_MENU_TYPES['menu-overlay:vault-recover'],
+      async (event, payload) => {
+        const rec = recordForSheetSender(event.sender);
+        if (!rec || !rec.sheet) return { ok: false };
+        const { token, recoverySecret, newSecret } = payload || {};
+        if (
+          typeof token !== 'number' ||
+          !(recoverySecret instanceof Uint8Array) ||
+          !(newSecret instanceof Uint8Array)
+        ) {
+          return { ok: false };
         }
-        // Squawk 0058: forward the delegate's NON-SECRET failure reason ('format' — a
-        // malformed recovery display; 'busy' — the second-wall refusal during a compromise
-        // rotation) so the sheet can keep its copy truthful.
-        return res && res.reason ? { ok: false, reason: res.reason } : { ok: false };
-      } finally {
-        recoveryBuf.fill(0);
-        newBuf.fill(0);
-        recoverySecret.fill?.(0);
-        newSecret.fill?.(0);
-      }
-    });
+        const current = rec.sheet.getCurrentMenu();
+        if (!current || token !== current.token) return { ok: false };
+        const recoveryBuf = Buffer.from(recoverySecret);
+        const newBuf = Buffer.from(newSecret);
+        try {
+          const res = await vaultRecover(recoveryBuf, newBuf); // { ok, reason? }
+          if (res && res.ok) {
+            rec.sheet.closeMenuOverlay('activated', current.token);
+            return { ok: true };
+          }
+          // Squawk 0058: forward the delegate's NON-SECRET failure reason ('format' — a
+          // malformed recovery display; 'busy' — the second-wall refusal during a compromise
+          // rotation) so the sheet can keep its copy truthful.
+          return res && res.reason ? { ok: false, reason: res.reason } : { ok: false };
+        } finally {
+          recoveryBuf.fill(0);
+          newBuf.fill(0);
+          recoverySecret.fill?.(0);
+          newSecret.fill?.(0);
+        }
+      },
+      { value: { ok: false } }
+    );
   }
 
   // M18 F2 L4 (compromise-mode rotation, flight DD4/DD5): the vault-compromise sheet's
@@ -592,42 +637,47 @@ function registerOverlayIpc({
   // invoke (the finally still dual-zeroizes) and the sheet shows the DD5 pre-commit
   // copy. Gated on the vaultCompromiseRotate injection.
   if (vaultCompromiseRotate) {
-    ipcMain.handle('menu-overlay:vault-compromise', async (event, payload) => {
-      const rec = recordForSheetSender(event.sender);
-      if (!rec || !rec.sheet) return { ok: false };
-      const { token, oldSecret, newSecret } = payload || {};
-      if (typeof token !== 'number' || !(oldSecret instanceof Uint8Array) || !(newSecret instanceof Uint8Array)) {
-        return { ok: false };
-      }
-      const current = rec.sheet.getCurrentMenu();
-      if (!current || token !== current.token) return { ok: false };
-      if (current.menuType !== 'vault-compromise') return { ok: false };
-      const oldBuf = Buffer.from(oldSecret);
-      const newBuf = Buffer.from(newSecret);
-      try {
-        const chromeId = chromeForAttachment(rec.win)?.id;
-        const res = await vaultCompromiseRotate({ oldMasterPassword: oldBuf, newMasterPassword: newBuf });
-        if (res && res.ok) {
-          // H2 step 1 — stash + hold FIRST (before ANY sheet interaction).
-          stashCompromiseReveal?.(chromeId, { recoveryKey: res.recoveryKey, revoked: res.revoked });
-          // H2 step 2 — the null-guarded window path.
-          if (rec.sheet && rec.win && !rec.win.isDestroyed?.()) {
-            rec.sheet.closeMenuOverlay('activated', current.token);
-            chromeForAttachment(rec.win)?.send('vault-recovery-show', {
-              recoveryKey: res.recoveryKey,
-              replacing: true
-            });
-          }
-          return { ok: true };
+    gate.sheet.handle(
+      'menu-overlay:vault-compromise',
+      SHEET_MENU_TYPES['menu-overlay:vault-compromise'],
+      async (event, payload) => {
+        const rec = recordForSheetSender(event.sender);
+        if (!rec || !rec.sheet) return { ok: false };
+        const { token, oldSecret, newSecret } = payload || {};
+        if (typeof token !== 'number' || !(oldSecret instanceof Uint8Array) || !(newSecret instanceof Uint8Array)) {
+          return { ok: false };
         }
-        return res && res.reason ? { ok: false, reason: res.reason } : { ok: false };
-      } finally {
-        oldBuf.fill(0);
-        newBuf.fill(0);
-        oldSecret.fill?.(0);
-        newSecret.fill?.(0);
-      }
-    });
+        const current = rec.sheet.getCurrentMenu();
+        if (!current || token !== current.token) return { ok: false };
+        if (current.menuType !== 'vault-compromise') return { ok: false };
+        const oldBuf = Buffer.from(oldSecret);
+        const newBuf = Buffer.from(newSecret);
+        try {
+          const chromeId = chromeForAttachment(rec.win)?.id;
+          const res = await vaultCompromiseRotate({ oldMasterPassword: oldBuf, newMasterPassword: newBuf });
+          if (res && res.ok) {
+            // H2 step 1 — stash + hold FIRST (before ANY sheet interaction).
+            stashCompromiseReveal?.(chromeId, { recoveryKey: res.recoveryKey, revoked: res.revoked });
+            // H2 step 2 — the null-guarded window path.
+            if (rec.sheet && rec.win && !rec.win.isDestroyed?.()) {
+              rec.sheet.closeMenuOverlay('activated', current.token);
+              chromeForAttachment(rec.win)?.send('vault-recovery-show', {
+                recoveryKey: res.recoveryKey,
+                replacing: true
+              });
+            }
+            return { ok: true };
+          }
+          return res && res.reason ? { ok: false, reason: res.reason } : { ok: false };
+        } finally {
+          oldBuf.fill(0);
+          newBuf.fill(0);
+          oldSecret.fill?.(0);
+          newSecret.fill?.(0);
+        }
+      },
+      { value: { ok: false } }
+    );
   }
 
   // M18 F2 L4: the vault-compromise-recover sheet's TWO-SECRET channel (recovery key +
@@ -639,40 +689,49 @@ function registerOverlayIpc({
   // delegate decodes it for parseRecoveryKey (the vaultRecover precedent). Gated on the
   // same vaultCompromiseRotate injection.
   if (vaultCompromiseRotate) {
-    ipcMain.handle('menu-overlay:vault-compromise-recover', async (event, payload) => {
-      const rec = recordForSheetSender(event.sender);
-      if (!rec || !rec.sheet) return { ok: false };
-      const { token, recoverySecret, newSecret } = payload || {};
-      if (typeof token !== 'number' || !(recoverySecret instanceof Uint8Array) || !(newSecret instanceof Uint8Array)) {
-        return { ok: false };
-      }
-      const current = rec.sheet.getCurrentMenu();
-      if (!current || token !== current.token) return { ok: false };
-      if (current.menuType !== 'vault-compromise-recover') return { ok: false };
-      const recoveryBuf = Buffer.from(recoverySecret);
-      const newBuf = Buffer.from(newSecret);
-      try {
-        const chromeId = chromeForAttachment(rec.win)?.id;
-        const res = await vaultCompromiseRotate({ recoveryKey: recoveryBuf, newMasterPassword: newBuf });
-        if (res && res.ok) {
-          stashCompromiseReveal?.(chromeId, { recoveryKey: res.recoveryKey, revoked: res.revoked });
-          if (rec.sheet && rec.win && !rec.win.isDestroyed?.()) {
-            rec.sheet.closeMenuOverlay('activated', current.token);
-            chromeForAttachment(rec.win)?.send('vault-recovery-show', {
-              recoveryKey: res.recoveryKey,
-              replacing: true
-            });
-          }
-          return { ok: true };
+    gate.sheet.handle(
+      'menu-overlay:vault-compromise-recover',
+      SHEET_MENU_TYPES['menu-overlay:vault-compromise-recover'],
+      async (event, payload) => {
+        const rec = recordForSheetSender(event.sender);
+        if (!rec || !rec.sheet) return { ok: false };
+        const { token, recoverySecret, newSecret } = payload || {};
+        if (
+          typeof token !== 'number' ||
+          !(recoverySecret instanceof Uint8Array) ||
+          !(newSecret instanceof Uint8Array)
+        ) {
+          return { ok: false };
         }
-        return res && res.reason ? { ok: false, reason: res.reason } : { ok: false };
-      } finally {
-        recoveryBuf.fill(0);
-        newBuf.fill(0);
-        recoverySecret.fill?.(0);
-        newSecret.fill?.(0);
-      }
-    });
+        const current = rec.sheet.getCurrentMenu();
+        if (!current || token !== current.token) return { ok: false };
+        if (current.menuType !== 'vault-compromise-recover') return { ok: false };
+        const recoveryBuf = Buffer.from(recoverySecret);
+        const newBuf = Buffer.from(newSecret);
+        try {
+          const chromeId = chromeForAttachment(rec.win)?.id;
+          const res = await vaultCompromiseRotate({ recoveryKey: recoveryBuf, newMasterPassword: newBuf });
+          if (res && res.ok) {
+            stashCompromiseReveal?.(chromeId, { recoveryKey: res.recoveryKey, revoked: res.revoked });
+            if (rec.sheet && rec.win && !rec.win.isDestroyed?.()) {
+              rec.sheet.closeMenuOverlay('activated', current.token);
+              chromeForAttachment(rec.win)?.send('vault-recovery-show', {
+                recoveryKey: res.recoveryKey,
+                replacing: true
+              });
+            }
+            return { ok: true };
+          }
+          return res && res.reason ? { ok: false, reason: res.reason } : { ok: false };
+        } finally {
+          recoveryBuf.fill(0);
+          newBuf.fill(0);
+          recoverySecret.fill?.(0);
+          newSecret.fill?.(0);
+        }
+      },
+      { value: { ok: false } }
+    );
   }
 
   // M12 F3 Leg 4 (first-run-setup): the recovery-show Copy button. The sheet is chrome-
@@ -682,7 +741,7 @@ function registerOverlayIpc({
   // tests omit it). The recovery key already originated in main — re-copying it is
   // in-domain (never leaves main → the chrome-class sheet → the OS clipboard).
   if (writeClipboard) {
-    ipcMain.on('menu-overlay:copy-text', (event, payload) => {
+    gate.sheet.on('menu-overlay:copy-text', SHEET_MENU_TYPES['menu-overlay:copy-text'], (event, payload) => {
       const rec = recordForSheetSender(event.sender);
       if (!rec || !rec.sheet) return;
       const text = payload && payload.text;
@@ -701,23 +760,28 @@ function registerOverlayIpc({
   // ledger FIRST, then closes with the resolution-family 'activated'). Gated on
   // the authAnswerFromSheet injection so offline overlay tests never register it.
   if (authAnswerFromSheet) {
-    ipcMain.handle('menu-overlay:auth-submit', (event, payload) => {
-      const rec = recordForSheetSender(event.sender);
-      if (!rec || !rec.sheet) return { answered: false };
-      const { token, username, secret } = payload || {};
-      if (typeof token !== 'number' || typeof username !== 'string' || !(secret instanceof Uint8Array)) {
-        return { answered: false };
-      }
-      const current = rec.sheet.getCurrentMenu();
-      if (!current || token !== current.token) return { answered: false };
-      const buf = Buffer.from(secret);
-      try {
-        return authAnswerFromSheet(rec, username, buf) || { answered: false };
-      } finally {
-        buf.fill(0);
-        secret.fill?.(0);
-      }
-    });
+    gate.sheet.handle(
+      'menu-overlay:auth-submit',
+      SHEET_MENU_TYPES['menu-overlay:auth-submit'],
+      (event, payload) => {
+        const rec = recordForSheetSender(event.sender);
+        if (!rec || !rec.sheet) return { answered: false };
+        const { token, username, secret } = payload || {};
+        if (typeof token !== 'number' || typeof username !== 'string' || !(secret instanceof Uint8Array)) {
+          return { answered: false };
+        }
+        const current = rec.sheet.getCurrentMenu();
+        if (!current || token !== current.token) return { answered: false };
+        const buf = Buffer.from(secret);
+        try {
+          return authAnswerFromSheet(rec, username, buf) || { answered: false };
+        } finally {
+          buf.fill(0);
+          secret.fill?.(0);
+        }
+      },
+      { value: { answered: false } }
+    );
   }
 
   // M15 F1 Leg 2 (flight DD4/AC "Popover payload path (DD3-preserving)"), HAT
@@ -763,51 +827,56 @@ function registerOverlayIpc({
   // on the validateBookmarkEdit injection so offline overlay tests that don't
   // wire it never register this channel.
   if (validateBookmarkEdit) {
-    ipcMain.handle('menu-overlay:bookmark-edit-submit', (event, payload) => {
-      const rec = recordForSheetSender(event.sender);
-      if (!rec || !rec.sheet) return { ok: false };
-      const { token, id, action } = payload || {};
-      if (typeof token !== 'number' || typeof id !== 'string') return { ok: false };
-      const current = rec.sheet.getCurrentMenu();
-      if (!current || token !== current.token) return { ok: false };
+    gate.sheet.handle(
+      'menu-overlay:bookmark-edit-submit',
+      SHEET_MENU_TYPES['menu-overlay:bookmark-edit-submit'],
+      (event, payload) => {
+        const rec = recordForSheetSender(event.sender);
+        if (!rec || !rec.sheet) return { ok: false };
+        const { token, id, action } = payload || {};
+        if (typeof token !== 'number' || typeof id !== 'string') return { ok: false };
+        const current = rec.sheet.getCurrentMenu();
+        if (!current || token !== current.token) return { ok: false };
 
-      /** @type {{ ok: true, name: string, url: string } | null} */
-      let validated = null;
-      if (action !== 'remove') {
-        validated = validateBookmarkEdit({
-          name: payload && payload.name,
-          url: payload && payload.url
-        });
-        if (!validated.ok) return { ok: false };
-      }
-
-      if (list) {
-        const jarId = typeof current.jarId === 'string' ? current.jarId : null;
-        const rows = list(jarId);
-        const row = rows.find((r) => r.id === id);
-        if (!row) return { ok: false, reason: 'not-found' };
-        if (
-          action !== 'remove' &&
-          rows.find((r) => r.id !== id && bookmarkUrlsMatch(r.url, /** @type {any} */ (validated).url))
-        ) {
-          return { ok: false, reason: 'duplicate-url' };
+        /** @type {{ ok: true, name: string, url: string } | null} */
+        let validated = null;
+        if (action !== 'remove') {
+          validated = validateBookmarkEdit({
+            name: payload && payload.name,
+            url: payload && payload.url
+          });
+          if (!validated.ok) return { ok: false };
         }
-      }
 
-      if (action === 'remove') {
+        if (list) {
+          const jarId = typeof current.jarId === 'string' ? current.jarId : null;
+          const rows = list(jarId);
+          const row = rows.find((r) => r.id === id);
+          if (!row) return { ok: false, reason: 'not-found' };
+          if (
+            action !== 'remove' &&
+            rows.find((r) => r.id !== id && bookmarkUrlsMatch(r.url, /** @type {any} */ (validated).url))
+          ) {
+            return { ok: false, reason: 'duplicate-url' };
+          }
+        }
+
+        if (action === 'remove') {
+          rec.sheet.closeMenuOverlay('activated', current.token);
+          chromeForAttachment(rec.win)?.send('bookmark-edit-submit', { id, action: 'remove' });
+          return { ok: true };
+        }
         rec.sheet.closeMenuOverlay('activated', current.token);
-        chromeForAttachment(rec.win)?.send('bookmark-edit-submit', { id, action: 'remove' });
+        chromeForAttachment(rec.win)?.send('bookmark-edit-submit', {
+          id,
+          action: 'save',
+          name: /** @type {any} */ (validated).name,
+          url: /** @type {any} */ (validated).url
+        });
         return { ok: true };
-      }
-      rec.sheet.closeMenuOverlay('activated', current.token);
-      chromeForAttachment(rec.win)?.send('bookmark-edit-submit', {
-        id,
-        action: 'save',
-        name: /** @type {any} */ (validated).name,
-        url: /** @type {any} */ (validated).url
-      });
-      return { ok: true };
-    });
+      },
+      { value: { ok: false } }
+    );
   }
 
   // M15 F3 Leg 5a (AC8/AC8b): the bookmarks-overflow sheet's DROP-INDEX channel.
@@ -831,7 +900,7 @@ function registerOverlayIpc({
   // The close mirrors menu-overlay:activated's ordering (close, then forward) and
   // is what ends the gesture deterministically, rather than waiting on a
   // bookmarks-changed broadcast that a no-op commit would never fire.
-  ipcMain.on('menu-overlay:overflow-drop', (event, payload) => {
+  gate.sheet.on('menu-overlay:overflow-drop', SHEET_MENU_TYPES['menu-overlay:overflow-drop'], (event, payload) => {
     const rec = recordForSheetSender(event.sender);
     if (!rec || !rec.sheet) return;
     const { token, index } = payload || {};
@@ -885,51 +954,56 @@ function registerOverlayIpc({
   // and recordForSheetSender compares webContents IDENTITY, never a
   // payload-declared id.
   if (certTrust) {
-    ipcMain.handle('menu-overlay:cert-override-proceed', (event, payload) => {
-      const rec = recordForSheetSender(event.sender);
-      if (!rec || !rec.sheet) return { ok: false, reason: 'sender' };
+    gate.sheet.handle(
+      'menu-overlay:cert-override-proceed',
+      SHEET_MENU_TYPES['menu-overlay:cert-override-proceed'],
+      (event, payload) => {
+        const rec = recordForSheetSender(event.sender);
+        if (!rec || !rec.sheet) return { ok: false, reason: 'sender' };
 
-      const { token } = payload || {};
-      const current = rec.sheet.getCurrentMenu();
-      if (typeof token !== 'number' || !current || token !== current.token) {
-        return { ok: false, reason: 'token' };
-      }
-      if (current.menuType !== 'cert-override') return { ok: false, reason: 'menu-type' };
+        const { token } = payload || {};
+        const current = rec.sheet.getCurrentMenu();
+        if (typeof token !== 'number' || !current || token !== current.token) {
+          return { ok: false, reason: 'token' };
+        }
+        if (current.menuType !== 'cert-override') return { ok: false, reason: 'menu-type' };
 
-      const entry = rec.activeTabWcId != null && rec.tabViews ? rec.tabViews.get(rec.activeTabWcId) : null;
-      const cert = entry && entry.loadFailure && entry.loadFailure.cert;
-      const wc = entry ? getTabContents(rec.activeTabWcId) : null;
-      const entryOk =
-        !!entry &&
-        !entry.trusted &&
-        !!cert &&
-        cert.overridable === true &&
-        typeof cert.host === 'string' &&
-        typeof cert.fingerprint === 'string' &&
-        typeof entry.lastRequestedUrl === 'string' &&
-        isSafeTabUrl(entry.lastRequestedUrl) &&
-        !!wc;
-      if (!entryOk) return { ok: false, reason: 'entry' };
+        const entry = rec.activeTabWcId != null && rec.tabViews ? rec.tabViews.get(rec.activeTabWcId) : null;
+        const cert = entry && entry.loadFailure && entry.loadFailure.cert;
+        const wc = entry ? getTabContents(rec.activeTabWcId) : null;
+        const entryOk =
+          !!entry &&
+          !entry.trusted &&
+          !!cert &&
+          cert.overridable === true &&
+          typeof cert.host === 'string' &&
+          typeof cert.fingerprint === 'string' &&
+          typeof entry.lastRequestedUrl === 'string' &&
+          isSafeTabUrl(entry.lastRequestedUrl) &&
+          !!wc;
+        if (!entryOk) return { ok: false, reason: 'entry' };
 
-      certTrust.allow(keyFor(entry.partition, cert.host, cert.port, cert.fingerprint));
-      rec.sheet.closeMenuOverlay('activated', token);
-      // Design review (HIGH): closeMenuOverlay('activated') has JUST
-      // synchronously focused this window's chrome (focusChrome() —
-      // menu-overlay-manager.js's close path). Setting this TRUE — never
-      // false — arms the SAME #216-fix reassert net tab-navigate arms
-      // (register-tab-ipc.js), so the guest's asynchronous self-focus,
-      // landing a few ms into the loadURL below, cannot steal focus back
-      // with the net disarmed. Accepted consequence: after a SUCCESSFUL
-      // proceed, OS focus rests on the chrome (F6/Tab reach the page; the
-      // HAT judges the feel). Disarms itself at the resulting
-      // did-navigate/did-fail-load like every other chrome-initiated
-      // navigation.
-      entry.chromeNavPending = true;
-      wc.loadURL(entry.lastRequestedUrl).catch((err) => {
-        console.warn('[cert-override-proceed] loadURL rejected:', err && (err.code || err.message || err));
-      });
-      return { ok: true };
-    });
+        certTrust.allow(keyFor(entry.partition, cert.host, cert.port, cert.fingerprint));
+        rec.sheet.closeMenuOverlay('activated', token);
+        // Design review (HIGH): closeMenuOverlay('activated') has JUST
+        // synchronously focused this window's chrome (focusChrome() —
+        // menu-overlay-manager.js's close path). Setting this TRUE — never
+        // false — arms the SAME #216-fix reassert net tab-navigate arms
+        // (register-tab-ipc.js), so the guest's asynchronous self-focus,
+        // landing a few ms into the loadURL below, cannot steal focus back
+        // with the net disarmed. Accepted consequence: after a SUCCESSFUL
+        // proceed, OS focus rests on the chrome (F6/Tab reach the page; the
+        // HAT judges the feel). Disarms itself at the resulting
+        // did-navigate/did-fail-load like every other chrome-initiated
+        // navigation.
+        entry.chromeNavPending = true;
+        wc.loadURL(entry.lastRequestedUrl).catch((err) => {
+          console.warn('[cert-override-proceed] loadURL rejected:', err && (err.code || err.message || err));
+        });
+        return { ok: true };
+      },
+      { value: { ok: false, reason: 'sender' } }
+    );
   }
 
   // M15 F3 Leg 5b (AC3): the bookmarks-overflow sheet's DRAG-LIFECYCLE channel —
@@ -958,7 +1032,7 @@ function registerOverlayIpc({
   // and matches the forwarded token against it. Safe to relax because `end` is
   // non-destructive by construction: it can only cancel a session, never commit
   // one — an unexpected `end` costs the operator a no-op, never a wrong write.
-  ipcMain.on('menu-overlay:sheet-drag', (event, payload) => {
+  gate.sheet.on('menu-overlay:sheet-drag', SHEET_MENU_TYPES['menu-overlay:sheet-drag'], (event, payload) => {
     const rec = recordForSheetSender(event.sender);
     if (!rec || !rec.sheet) return;
     const { phase, token, index } = payload || {};
@@ -977,13 +1051,17 @@ function registerOverlayIpc({
     chromeForAttachment(rec.win)?.send('bookmark-sheet-drag', { phase: 'start', token, index });
   });
 
-  ipcMain.on('find-overlay:open', (event, payload) => {
-    if (!registry.getWindowForChrome(event.sender)) return;
-    const { wcId, findText } = payload || {};
-    registry.getWindowForGuest(wcId)?.findOverlay?.openSession(wcId, typeof findText === 'string' ? findText : '');
-  });
+  gate.owningChrome.on(
+    'find-overlay:open',
+    (payload) => (payload && typeof payload === 'object' ? payload.wcId : undefined),
+    (event, payload) => {
+      if (!registry.getWindowForChrome(event.sender)) return;
+      const { wcId, findText } = payload || {};
+      registry.getWindowForGuest(wcId)?.findOverlay?.openSession(wcId, typeof findText === 'string' ? findText : '');
+    }
+  );
 
-  ipcMain.on('find-overlay:close', (event) => {
+  gate.findOrOwningChrome.on('find-overlay:close', (event) => {
     const fromRec = recordForFindSender(event.sender);
     const fromOverlay = fromRec != null;
     const rec = fromRec || registry.getWindowForChrome(event.sender);
@@ -995,21 +1073,21 @@ function registerOverlayIpc({
     rec.findOverlay.closeSession({ refocusGuest: fromOverlay });
   });
 
-  ipcMain.on('find-overlay:query', (event, payload) => {
+  gate.find.on('find-overlay:query', (event, payload) => {
     const rec = recordForFindSender(event.sender);
     if (!rec || !rec.findOverlay) return;
     rec.findOverlay.query(payload || {});
   });
 
-  ipcMain.on('tearoff-overlay:show', (event, payload) => {
+  gate.chrome.on('tearoff-overlay:show', (event, payload) => {
     const { x, y } = /** @type {any} */ (payload || {});
     registry.getWindowForChrome(event.sender)?.tearoffOverlay?.show(x, y);
   });
-  ipcMain.on('tearoff-overlay:move', (event, payload) => {
+  gate.chrome.on('tearoff-overlay:move', (event, payload) => {
     const { x, y } = /** @type {any} */ (payload || {});
     registry.getWindowForChrome(event.sender)?.tearoffOverlay?.setPosition(x, y);
   });
-  ipcMain.on('tearoff-overlay:hide', (event) => {
+  gate.chrome.on('tearoff-overlay:hide', (event) => {
     registry.getWindowForChrome(event.sender)?.tearoffOverlay?.hide();
   });
 }

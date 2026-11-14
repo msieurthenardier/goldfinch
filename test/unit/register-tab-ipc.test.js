@@ -9,6 +9,7 @@ const {
   createSendOrQueue,
   pushTabStateFor
 } = require('../../src/main/register-tab-ipc');
+const { eventFrom, makeTestGate } = require('../helpers/ipc-gate-fixture');
 
 class FakeIpc {
   constructor() {
@@ -22,10 +23,15 @@ class FakeIpc {
     this.listeners.set(channel, fn);
   }
   invoke(channel, sender, ...args) {
-    return this.handles.get(channel)({ sender }, ...args);
+    return this.handles.get(channel)(eventFrom(sender), ...args);
   }
   send(channel, sender, ...args) {
-    return this.listeners.get(channel)({ sender }, ...args);
+    // A guest sender (it has a `mainFrame`) sends from that main frame; the chrome has none.
+    const extra =
+      sender && sender.mainFrame
+        ? { senderFrame: { frameTreeNodeId: sender.mainFrame.frameTreeNodeId, origin: 'https://page.test' } }
+        : {};
+    return this.listeners.get(channel)(eventFrom(sender, extra), ...args);
   }
 }
 
@@ -34,6 +40,8 @@ class FakeContents extends EventEmitter {
     super();
     this.id = id;
     this.log = log;
+    this.mainFrame = { frameTreeNodeId: 1 };
+    this.session = { fakeSessionFor: id };
     this.destroyed = false;
     this.focused = false;
     this.url = `https://tab-${id}.test/`;
@@ -288,6 +296,7 @@ function setup() {
   };
   const deps = {
     ipcMain,
+    gate: makeTestGate({ ipcMain, registry }),
     WebContentsView,
     internalPreloadPath: '/preload/internal.js',
     webPreloadPath: '/preload/web.js',
@@ -325,6 +334,8 @@ function setup() {
     broadcastMoveTargetsChanged: () => log.push(['broadcast-targets']),
     getTabContents: (id) => webContents.fromId(id),
     popupRegistry,
+    // Leg `downloads`: records which partition a tab's session belongs to.
+    noteSessionPartition: (ses, partition) => log.push(['note-partition', ses, partition]),
     // Sortie 06 Leg 1: lazy vault-human getter - records the capture drops.
     vaultHuman: () => ({ dropCapturesForTab: (wcId) => log.push(['drop-captures', wcId]) }),
     schedule: (fn, ms) => {
@@ -521,6 +532,162 @@ test('tab-create preserves trusted/untrusted construction and wires before navig
     false,
     'internal branch webPreferences must not carry an autoplayPolicy key (squawk 0118 scopes it to web guests)'
   );
+});
+
+// Mission 23 Flight 1 (`ipc-gate-complete`, 22c): `tab-create` validates its arguments BEFORE any
+// webPreferences are chosen. A refused create returns null and constructs NO view.
+test('tab-create refuses bad arguments with null and constructs no view (22c matrix)', async () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  const chrome = source.chromeView.webContents;
+  const entry = (url) => ({ url, title: 't' });
+  const refused = [
+    ['trusted + a web URL', { url: 'https://example.test/', partition: 'persist:jar-a', trusted: true }],
+    ['untrusted + goldfinch://', { url: 'goldfinch://settings', partition: 'persist:jar-a', trusted: false }],
+    ['untrusted + file:', { url: 'file:///etc/passwd', partition: 'persist:jar-a', trusted: false }],
+    ['untrusted + an unknown partition', { url: 'https://example.test/', partition: 'persist:nope', trusted: false }],
+    [
+      'untrusted + the internal partition',
+      { url: 'https://example.test/', partition: 'goldfinch-internal', trusted: false }
+    ],
+    ['untrusted + a malformed burner name', { url: 'https://example.test/', partition: 'burner:abc', trusted: false }],
+    ['untrusted + no partition', { url: 'https://example.test/', trusted: false }],
+    ['trusted: "yes" (a truthy string)', { url: 'goldfinch://settings', partition: 'x', trusted: 'yes' }],
+    ['trusted: 1', { url: 'goldfinch://settings', partition: 'x', trusted: 1 }],
+    ['trusted absent', { url: 'https://example.test/', partition: 'persist:jar-a' }],
+    ['no url', { partition: 'persist:jar-a', trusted: false }],
+    ['a null url', { url: null, partition: 'persist:jar-a', trusted: false }],
+    ['a non-string url', { url: 5, partition: 'persist:jar-a', trusted: false }],
+    ['a null payload', null],
+    ['a non-object payload', 'https://example.test/'],
+    [
+      'an out-of-range restore index',
+      {
+        url: 'https://example.test/',
+        partition: 'persist:jar-a',
+        trusted: false,
+        restoreHistory: { entries: [entry('https://a.test/')], index: 1 }
+      }
+    ],
+    [
+      'a negative restore index',
+      {
+        url: 'https://example.test/',
+        partition: 'persist:jar-a',
+        trusted: false,
+        restoreHistory: { entries: [entry('https://a.test/')], index: -1 }
+      }
+    ],
+    [
+      'a fractional restore index',
+      {
+        url: 'https://example.test/',
+        partition: 'persist:jar-a',
+        trusted: false,
+        restoreHistory: { entries: [entry('https://a.test/')], index: 0.5 }
+      }
+    ],
+    [
+      'a restore with too many entries',
+      {
+        url: 'https://example.test/',
+        partition: 'persist:jar-a',
+        trusted: false,
+        restoreHistory: { entries: Array.from({ length: 201 }, () => entry('https://a.test/')), index: 0 }
+      }
+    ],
+    [
+      'an empty restore',
+      {
+        url: 'https://example.test/',
+        partition: 'persist:jar-a',
+        trusted: false,
+        restoreHistory: { entries: [], index: 0 }
+      }
+    ],
+    [
+      'a restore on a trusted tab',
+      { url: 'goldfinch://settings', trusted: true, restoreHistory: { entries: [entry('https://a.test/')], index: 0 } }
+    ],
+    [
+      'a non-object restore',
+      { url: 'https://example.test/', partition: 'persist:jar-a', trusted: false, restoreHistory: 'x' }
+    ]
+  ];
+  for (const [label, payload] of refused) {
+    const res = await h.ipcMain.invoke('tab-create', chrome, payload);
+    assert.equal(res, null, `${label} must be refused with null`);
+  }
+  assert.equal(h.views.length, 0, 'no WebContentsView was constructed by any refused create');
+  assert.equal(source.tabViews.size, 0, 'no tab was registered');
+  assert.deepEqual(
+    h.log.filter((x) => x[0] === 'add-view' || x[0] === 'wire-guest' || x[0] === 'load' || x[0] === 'restore'),
+    [],
+    'nothing was attached, wired or navigated'
+  );
+});
+
+test('tab-create still constructs on every legitimate path: new tab, container tab, burner, internal page, restore with history, default-jar external URL', async () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  const chrome = source.chromeView.webContents;
+  const ok = [
+    { url: 'https://example.test/', partition: 'persist:jar-a', trusted: false },
+    { url: 'https://example.test/', partition: 'burner:123456789', trusted: false },
+    { url: 'goldfinch://settings', partition: 'ignored', trusted: true },
+    {
+      url: 'https://example.test/b',
+      partition: 'persist:jar-a',
+      trusted: false,
+      restoreHistory: { entries: [{ url: 'https://a.test/' }, { url: 'https://example.test/b' }], index: 1, title: 'T' }
+    }
+  ];
+  const ids = [];
+  for (const payload of ok) ids.push(await h.ipcMain.invoke('tab-create', chrome, payload));
+  assert.equal(h.views.length, ok.length);
+  for (const id of ids) assert.equal(typeof id, 'number');
+  assert.equal(source.tabViews.size, ok.length);
+  const restore = h.log.find((x) => x[0] === 'restore');
+  assert.deepEqual(restore[2], { entries: [{ url: 'https://a.test/' }, { url: 'https://example.test/b' }], index: 1 });
+  // A create from a non-chrome sender is refused by the gate (null) and constructs nothing either.
+  const fromPage = await h.ipcMain.invoke(
+    'tab-create',
+    { id: 999 },
+    { url: 'https://example.test/', partition: 'persist:jar-a', trusted: false }
+  );
+  assert.equal(fromPage, null);
+  assert.equal(h.views.length, ok.length);
+});
+
+test('tab-create with a restore whose history holds bad entries: the good entries restore (index re-pointed), an all-bad restore is a plain create, nothing is refused (rider to leg ipc-gate-complete)', async () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  const chrome = source.chromeView.webContents;
+  const base = { url: 'https://example.test/c', partition: 'persist:jar-a', trusted: false };
+
+  const mixedId = await h.ipcMain.invoke('tab-create', chrome, {
+    ...base,
+    restoreHistory: {
+      entries: [{ url: 'https://a.test/' }, { url: 'file:///etc/passwd' }, { url: 'https://example.test/c' }],
+      index: 2
+    }
+  });
+  assert.equal(typeof mixedId, 'number', 'a restore with one file: entry is NOT refused');
+  const restores = h.log.filter((x) => x[0] === 'restore');
+  assert.equal(restores.length, 1);
+  assert.deepEqual(restores[0][2], {
+    entries: [{ url: 'https://a.test/' }, { url: 'https://example.test/c' }],
+    index: 1
+  });
+
+  const loadsBefore = h.log.filter((x) => x[0] === 'load').length;
+  const plainId = await h.ipcMain.invoke('tab-create', chrome, {
+    ...base,
+    restoreHistory: { entries: [{ url: 'file:///x' }, { url: 'goldfinch://settings' }], index: 0 }
+  });
+  assert.equal(typeof plainId, 'number', 'an all-bad restore still creates the tab');
+  assert.equal(h.log.filter((x) => x[0] === 'restore').length, 1, 'no restore for an all-bad history');
+  assert.equal(h.log.filter((x) => x[0] === 'load').length, loadsBefore + 1, 'a plain create loads the tab url');
 });
 
 // Squawk 0036 (#104 carve-out): burner tabs must not leak LAN/public IPs via
@@ -757,6 +924,31 @@ test('remaining lifecycle channels execute through captured handlers with their 
   const reopened = h.ipcMain.invoke('tab-reopen', source.chromeView.webContents);
   assert.equal(reopened.url, 'https://tab-102.test/');
   assert.equal(reopened.stripIndex, 1);
+});
+
+// Mission 23 Flight 1 (`ipc-gate`): tab-reopen and closed-tab-stack-size are chrome-class.
+test('tab-reopen refuses a non-chrome sender BEFORE it pops the closed-tab stack; closed-tab-stack-size likewise', () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  h.closed.push({
+    url: 'https://tab-7.test/',
+    title: 't',
+    jarId: 'jar-a',
+    stripIndex: 0,
+    windowId: 1,
+    navEntries: [],
+    navIndex: 0
+  });
+  const page = { sender: { id: 'guest' }, senderFrame: { origin: 'https://evil.test' } };
+  const nullFrame = { sender: source.chromeView.webContents, senderFrame: null };
+  for (const ev of [page, nullFrame]) {
+    assert.throws(() => h.ipcMain.handles.get('tab-reopen')(ev), /forbidden/);
+    assert.throws(() => h.ipcMain.handles.get('closed-tab-stack-size')(ev), /forbidden/);
+  }
+  assert.equal(h.closed.length, 1, 'the stack was not popped by a refused call');
+  assert.equal(h.log.filter((e) => e[0] === 'broadcast-stack').length, 0, 'and no size push fired');
+  assert.equal(h.ipcMain.invoke('closed-tab-stack-size', source.chromeView.webContents), 1);
+  assert.equal(h.ipcMain.invoke('tab-reopen', source.chromeView.webContents).url, 'https://tab-7.test/');
 });
 
 // ---------------------------------------------------------------------------
@@ -1040,6 +1232,114 @@ test("AC3: tab-navigate loadURL is gated on the target tab's trust — unsafe we
     h.log.filter((x) => x[0] === 'load' && x[1] === 101).length,
     1,
     'an unowned sender adds no further loads'
+  );
+});
+
+test('N3: tab-navigate / tab-set-active / tab-set-bounds / tab-find tolerate a missing or non-object payload', () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  h.addTab(source, 101, false);
+  const before = h.log.length;
+  for (const ch of ['tab-navigate', 'tab-set-active', 'tab-set-bounds', 'tab-find']) {
+    for (const bad of [undefined, null, 'x', 7]) {
+      assert.doesNotThrow(() => h.ipcMain.send(ch, source.chromeView.webContents, bad), `${ch} ${String(bad)}`);
+    }
+  }
+  assert.equal(h.log.length, before, 'a malformed payload does nothing');
+});
+
+// Review fix C2: the chrome holds the credential-free display address, so the load-failure panel's Retry
+// names it; main restores the address THIS tab recorded for the failed load - and only that.
+test('C2: a failed credentialed load retried from the panel re-requests the credentialed address', () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  h.addTab(source, 101, false);
+  const entry = source.tabViews.get(101);
+  const real = 'https://user:pw@intranet.test/page?x=1';
+  entry.loadFailure = { code: -105, name: 'ERR_NAME_NOT_RESOLVED', url: real };
+  entry.lastRequestedUrl = real;
+  const loads = () => h.log.filter((x) => x[0] === 'load' && x[1] === 101).map((x) => x[2]);
+
+  // The panel retries with the display form: main loads the recorded, credentialed address.
+  h.ipcMain.send('tab-navigate', source.chromeView.webContents, {
+    wcId: 101,
+    verb: 'loadURL',
+    args: ['https://intranet.test/page?x=1']
+  });
+  assert.deepEqual(loads(), [real]);
+  assert.equal(entry.lastRequestedUrl, real);
+
+  // An ordinary retry (no credentials involved) is unchanged.
+  entry.loadFailure = { code: -105, name: 'ERR_X', url: 'https://example.test/a' };
+  entry.lastRequestedUrl = 'https://example.test/a';
+  h.ipcMain.send('tab-navigate', source.chromeView.webContents, {
+    wcId: 101,
+    verb: 'loadURL',
+    args: ['https://example.test/a']
+  });
+  assert.deepEqual(loads().slice(1), ['https://example.test/a']);
+
+  // A different address typed by the operator is never rewritten, even on the same host.
+  entry.loadFailure = { code: -105, name: 'ERR_X', url: real };
+  entry.lastRequestedUrl = real;
+  for (const typed of [
+    'https://intranet.test/other',
+    'https://intranet.test/page',
+    'https://evil:x@intranet.test/page?x=1'
+  ]) {
+    h.ipcMain.send('tab-navigate', source.chromeView.webContents, { wcId: 101, verb: 'loadURL', args: [typed] });
+  }
+  assert.deepEqual(loads().slice(2), [
+    'https://intranet.test/other',
+    'https://intranet.test/page',
+    'https://evil:x@intranet.test/page?x=1'
+  ]);
+});
+
+// Second-cycle C2: outside the load-failure state nothing is ever restored.
+test('C2: credentials are restored only for a tab in the load-failure state, against its own failure address', () => {
+  const real = 'https://user:pw@intranet.test/page?x=1';
+  const clean = 'https://intranet.test/page?x=1';
+  const run = (prep, typed) => {
+    const h = setup();
+    const source = h.makeRecord(1);
+    h.addTab(source, 101, false);
+    const entry = source.tabViews.get(101);
+    prep(entry);
+    h.ipcMain.send('tab-navigate', source.chromeView.webContents, { wcId: 101, verb: 'loadURL', args: [typed] });
+    return h.log.filter((x) => x[0] === 'load' && x[1] === 101).map((x) => x[2]);
+  };
+  // (1) loaded successfully with credentials (no failure record): the cleaned address loads as asked.
+  assert.deepEqual(
+    run((e) => {
+      e.loadFailure = null;
+      e.lastRequestedUrl = real;
+    }, clean),
+    [clean]
+  );
+  // (2) same, the credentials set by a page-initiated navigation (recorded as last-requested only).
+  assert.deepEqual(
+    run((e) => {
+      e.loadFailure = null;
+      e.lastRequestedUrl = 'https://evil:x@intranet.test/page?x=1';
+    }, 'https://intranet.test/page?x=1'),
+    [clean]
+  );
+  // (3) failure state, but a DIFFERENT address is navigated.
+  assert.deepEqual(
+    run((e) => {
+      e.loadFailure = { code: -105, name: 'ERR_X', url: real };
+      e.lastRequestedUrl = real;
+    }, 'https://intranet.test/elsewhere'),
+    ['https://intranet.test/elsewhere']
+  );
+  // (4) failure record for an address without credentials; last-requested carries some.
+  assert.deepEqual(
+    run((e) => {
+      e.loadFailure = { code: -105, name: 'ERR_X', url: clean };
+      e.lastRequestedUrl = real;
+    }, clean),
+    [clean]
   );
 });
 
@@ -2186,6 +2486,15 @@ test('pushTabStateFor: sends only the SET fields, then nav-state unconditionally
   ]);
 });
 
+test('C4: pushTabStateFor re-pushes the crash with a credential-free address', () => {
+  const wc = { isDestroyed: () => false, navigationHistory: { canGoBack: () => false, canGoForward: () => false } };
+  const entry = { crash: { reason: 'crashed', exitCode: 1, url: 'https://u:p@a.example/' } };
+  const out = [];
+  pushTabStateFor({}, 5, entry, wc, (ch, build) => out.push([ch, build()]));
+  assert.equal(out.find((o) => o[0] === 'tab-crash')[1].crash.url, 'https://a.example/');
+  assert.equal(entry.crash.url, 'https://u:p@a.example/');
+});
+
 test('pushTabStateFor: all four optional fields set → all four re-pushed, then nav-state', () => {
   const wc = { isDestroyed: () => false, navigationHistory: { canGoBack: () => false, canGoForward: () => true } };
   const entry = {
@@ -2401,4 +2710,47 @@ test('Sortie 06 AC13: navigation inside the tab (a did-navigate) neither closes 
   record.tabViews.get(101).view.webContents.emit('did-navigate');
   assert.equal(h.log.some(ev('close-prompt')), false);
   assert.equal(h.log.some(ev('drop-captures')), false);
+});
+
+// Mission 23 Flight 1 (`ipc-gate-complete`, NF7): tab-history-snapshot is OWNING-chrome.
+test('tab-history-snapshot: the owning chrome reads its tab; another window chrome, a non-tab id and a page get null', async () => {
+  const h = setup();
+  const a = h.makeRecord(1);
+  const b = h.makeRecord(2);
+  h.addTab(a, 101);
+  const own = await h.ipcMain.invoke('tab-history-snapshot', a.chromeView.webContents, { webContentsId: 101 });
+  assert.deepEqual(own, { entries: [{ url: 'https://tab-101.test/' }], index: 0 });
+  assert.equal(await h.ipcMain.invoke('tab-history-snapshot', b.chromeView.webContents, { webContentsId: 101 }), null);
+  assert.equal(await h.ipcMain.invoke('tab-history-snapshot', a.chromeView.webContents, { webContentsId: 10 }), null);
+  assert.equal(
+    await h.ipcMain.invoke('tab-history-snapshot', a.chromeView.webContents, { webContentsId: '101' }),
+    null
+  );
+  assert.equal(await h.ipcMain.invoke('tab-history-snapshot', a.chromeView.webContents, undefined), null);
+  assert.equal(await h.ipcMain.invoke('tab-history-snapshot', { id: 999 }, { webContentsId: 101 }), null);
+});
+
+// Mission 23 Flight 1 (leg `downloads`): the session -> partition write is one additive statement at tab creation.
+test("tab-create records the new web tab's partition against its session; an internal tab records none", async () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  await h.ipcMain.invoke('tab-create', source.chromeView.webContents, {
+    url: 'https://example.test/',
+    partition: 'persist:jar-a',
+    trusted: false
+  });
+  const notes = h.log.filter((x) => x[0] === 'note-partition');
+  assert.equal(notes.length, 1);
+  assert.equal(notes[0][1], h.views[0].webContents.session, "the new view's own session");
+  assert.equal(notes[0][2], 'persist:jar-a');
+  assert.ok(
+    h.log.findIndex((x) => x[0] === 'note-partition') < h.log.findIndex((x) => x[0] === 'wire-guest'),
+    'written before the guest is wired and navigated'
+  );
+  await h.ipcMain.invoke('tab-create', source.chromeView.webContents, {
+    url: 'goldfinch://settings',
+    partition: 'ignored',
+    trusted: true
+  });
+  assert.equal(h.log.filter((x) => x[0] === 'note-partition').length, 1, 'no partition noted for the internal tab');
 });

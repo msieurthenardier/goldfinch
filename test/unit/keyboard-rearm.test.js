@@ -45,7 +45,7 @@ const HANDLER = 'tab-set-active';
 // --- the scan -------------------------------------------------------------------
 
 /**
- * Locate the `ipcMain.on('<eventName>', (…) => { … })` handler in already-comment-masked
+ * Locate the `ipcMain.on('<eventName>', (…) => { … })` (or gate-registered `gate.<class>.on(…)`) handler in already-comment-masked
  * source and return its body text (the arrow function's `{ … }`, braces included), or
  * null if not found. Bracket-balanced via the shared toolkit so nested braces/strings do
  * not desync the extraction.
@@ -54,7 +54,7 @@ const HANDLER = 'tab-set-active';
  * @returns {string | null}
  */
 function extractHandlerBody(masked, eventName) {
-  const startRe = new RegExp(`ipcMain\\.on\\(\\s*'${eventName}'\\s*,`);
+  const startRe = new RegExp(`(?:ipcMain|gate\\.\\w+)\\.on\\(\\s*'${eventName}'\\s*,`);
   const m = masked.match(startRe);
   if (!m || m.index === undefined) return null;
   const arrowIdx = masked.indexOf('=>', m.index);

@@ -11,6 +11,10 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { createVaultController } = require('../../src/renderer/chrome/vault-controller');
 
+// Mission 23 Flight 1 (leg `vault-fill-trust`): every gesture push now carries the picker context id,
+// destination string and certificate flag; the controller must hand the id back on every chrome-facing call.
+const CTX = { contextId: 'ctx-1', destination: 'example.com', certificate: false };
+
 async function flush() {
   await Promise.resolve();
   await Promise.resolve();
@@ -33,8 +37,8 @@ function harness({ reachableItems = [] } = {}) {
       // `await flush()` right after construction to let this settle FIRST.
       getVaultLockState: () => Promise.resolve({ setUp: false, unlocked: false }),
       getVaultAutomationHeld: () => Promise.resolve({ held: false }),
-      vaultReachableItems: (wcId) => {
-        vaultReachableItemsCalls.push(wcId);
+      vaultReachableItems: (payload) => {
+        vaultReachableItemsCalls.push(payload);
         return Promise.resolve(reachableItems);
       },
       vaultFillGenerated: (payload) => {
@@ -83,25 +87,25 @@ test('AC10: unlocked + canGenerate=true prepends { action: "generate" } ahead of
   const h = harness({ reachableItems: [{ vaultId: 'global', id: 'i1', title: 'GitHub' }] });
   await flush(); // let the boot fetch settle first
   h.on.onVaultLockState({ setUp: true, unlocked: true });
-  h.on.onVaultGesture({ wcId: 5, generate: { canGenerate: true, constraints: { minLength: 8 } } });
+  h.on.onVaultGesture({ wcId: 5, ...CTX, generate: { canGenerate: true, constraints: { minLength: 8 } } });
   await flush();
 
   assert.equal(h.opens.length, 1);
   assert.equal(h.opens[0].menuType, 'vault-picker');
   assert.deepEqual(h.opens[0].model, [{ action: 'generate' }, { vaultId: 'global', id: 'i1', title: 'GitHub' }]);
-  assert.deepEqual(h.vaultReachableItemsCalls, [5]);
+  assert.deepEqual(h.vaultReachableItemsCalls, [{ wcId: 5, contextId: 'ctx-1' }]);
 });
 
 test('AC10: unlocked + no generate (or canGenerate=false) behaves exactly as today — no generate row', async () => {
   const h = harness({ reachableItems: [{ vaultId: 'global', id: 'i1', title: 'GitHub' }] });
   await flush();
   h.on.onVaultLockState({ setUp: true, unlocked: true });
-  h.on.onVaultGesture({ wcId: 5 });
+  h.on.onVaultGesture({ wcId: 5, ...CTX });
   await flush();
   assert.deepEqual(h.opens[0].model, [{ vaultId: 'global', id: 'i1', title: 'GitHub' }]);
 
   h.opens.length = 0;
-  h.on.onVaultGesture({ wcId: 5, generate: { canGenerate: false, constraints: {} } });
+  h.on.onVaultGesture({ wcId: 5, ...CTX, generate: { canGenerate: false, constraints: {} } });
   await flush();
   assert.deepEqual(h.opens[0].model, [{ vaultId: 'global', id: 'i1', title: 'GitHub' }]);
 });
@@ -110,7 +114,7 @@ test('AC10: locked + canGenerate=true opens Generate+Unlock rows with NO store r
   const h = harness();
   await flush();
   h.on.onVaultLockState({ setUp: true, unlocked: false });
-  h.on.onVaultGesture({ wcId: 5, generate: { canGenerate: true, constraints: { minLength: 8 } } });
+  h.on.onVaultGesture({ wcId: 5, ...CTX, generate: { canGenerate: true, constraints: { minLength: 8 } } });
 
   assert.equal(h.opens.length, 1);
   assert.equal(h.opens[0].menuType, 'vault-picker');
@@ -122,7 +126,7 @@ test("AC10: locked + no generate (today's behavior) raises the plain unlock shee
   const h = harness();
   await flush();
   h.on.onVaultLockState({ setUp: true, unlocked: false });
-  h.on.onVaultGesture({ wcId: 5 });
+  h.on.onVaultGesture({ wcId: 5, ...CTX });
 
   assert.equal(h.opens.length, 1);
   assert.equal(h.opens[0].menuType, 'vault-unlock');
@@ -132,7 +136,7 @@ test('AC10: the Generate row re-shows after Unlock -> a successful unlock re-ope
   const h = harness({ reachableItems: [{ vaultId: 'global', id: 'i1', title: 'GitHub' }] });
   await flush();
   h.on.onVaultLockState({ setUp: true, unlocked: false });
-  h.on.onVaultGesture({ wcId: 5, generate: { canGenerate: true, constraints: { minLength: 8 } } });
+  h.on.onVaultGesture({ wcId: 5, ...CTX, generate: { canGenerate: true, constraints: { minLength: 8 } } });
   assert.equal(h.opens[0].menuType, 'vault-picker');
 
   // Choose Unlock (handleActivation's UNLOCK_ID branch).
@@ -153,12 +157,12 @@ test("AC11: GENERATE_ID dispatches vaultFillGenerated with the flow's wcId + con
   const h = harness();
   await flush();
   h.on.onVaultLockState({ setUp: true, unlocked: true });
-  h.on.onVaultGesture({ wcId: 5, generate: { canGenerate: true, constraints: { minLength: 12 } } });
+  h.on.onVaultGesture({ wcId: 5, ...CTX, generate: { canGenerate: true, constraints: { minLength: 12 } } });
   await flush();
 
   const handled = h.controller.handleActivation({ menuType: 'vault-picker', id: 'generate-password' });
   assert.equal(handled, true);
-  assert.deepEqual(h.vaultFillGeneratedCalls, [{ wcId: 5, constraints: { minLength: 12 } }]);
+  assert.deepEqual(h.vaultFillGeneratedCalls, [{ wcId: 5, contextId: 'ctx-1', constraints: { minLength: 12 } }]);
 
   // Flow is cleared: a second GENERATE_ID with no pending flow is a safe no-op.
   h.vaultFillGeneratedCalls.length = 0;
@@ -170,7 +174,7 @@ test('AC11: a resolved { filled: false } from vaultFillGenerated raises no sheet
   const h = harness();
   await flush();
   h.on.onVaultLockState({ setUp: true, unlocked: true });
-  h.on.onVaultGesture({ wcId: 5, generate: { canGenerate: true, constraints: {} } });
+  h.on.onVaultGesture({ wcId: 5, ...CTX, generate: { canGenerate: true, constraints: {} } });
   await flush();
   h.setFillGeneratedResult({ filled: false, reason: 'unsatisfiable' });
   h.opens.length = 0;
@@ -184,7 +188,7 @@ test('AC11: UNLOCK_ID sets the flow to unlocking and opens vault-unlock, keeping
   const h = harness();
   await flush();
   h.on.onVaultLockState({ setUp: true, unlocked: false });
-  h.on.onVaultGesture({ wcId: 9, generate: { canGenerate: true, constraints: { minLength: 8 } } });
+  h.on.onVaultGesture({ wcId: 9, ...CTX, generate: { canGenerate: true, constraints: { minLength: 8 } } });
   h.opens.length = 0;
 
   const handled = h.controller.handleActivation({ menuType: 'vault-picker', id: 'unlock-saved-logins' });
@@ -196,7 +200,7 @@ test("pick:<i> on an action row's own index is a no-op (never crashes / never fi
   const h = harness({ reachableItems: [] });
   await flush();
   h.on.onVaultLockState({ setUp: true, unlocked: true });
-  h.on.onVaultGesture({ wcId: 5, generate: { canGenerate: true, constraints: {} } });
+  h.on.onVaultGesture({ wcId: 5, ...CTX, generate: { canGenerate: true, constraints: {} } });
   await flush();
   // The model is [{action:'generate'}] — pick:0 would resolve that very entry,
   // which has no vaultId/id; the fill dispatch must not throw.

@@ -110,14 +110,14 @@ function sanitizeQueue(q) {
 
 /**
  * @param {{
- *   ipcMain: any,
+ *   gate: any,
  *   registry: any,
  *   getVaultHuman?: () => any,
  *   vaultTrace?: (step: string, fields: any) => void
  * }} deps
  */
 function registerSavePromptIpc({
-  ipcMain,
+  gate,
   registry,
   getVaultHuman = () => null,
   // Opt-in trace (GOLDFINCH_VAULT_TRACE=1): opaque ids and reason strings ONLY - never an
@@ -164,18 +164,26 @@ function registerSavePromptIpc({
     });
   }
 
-  ipcMain.handle('save-prompt:open', (event, payload) => {
-    const res = openPrompt(event, payload);
-    const id = payload && typeof payload.captureId === 'string' ? payload.captureId : null;
-    vaultTrace('save-prompt-open', {
-      captureId: id,
-      presented: res.presented === true,
-      reason: res.presented ? null : res.reason || null
-    });
-    return res;
-  });
+  // Mission 23 Flight 1 (`ipc-gate-complete`): every channel here is gate-registered. The two
+  // chrome-side channels are the plain chrome class (`save-prompt:open`'s active-tab gate
+  // already implies ownership); the six page-side channels are the save-prompt class (sender
+  // identity = this window's prompt view). Token, kind and business gates stay inline.
+  gate.chrome.handle(
+    'save-prompt:open',
+    (event, payload) => {
+      const res = openPrompt(event, payload);
+      const id = payload && typeof payload.captureId === 'string' ? payload.captureId : null;
+      vaultTrace('save-prompt-open', {
+        captureId: id,
+        presented: res.presented === true,
+        reason: res.presented ? null : res.reason || null
+      });
+      return res;
+    },
+    { value: { presented: false, reason: 'gone' } }
+  );
 
-  ipcMain.on('save-prompt:anchor', (event, payload) => {
+  gate.chrome.on('save-prompt:anchor', (event, payload) => {
     const rec = registry.getWindowForChrome(event.sender);
     if (!rec || !rec.savePrompt) return;
     const { token, right } = payload || {};
@@ -197,105 +205,114 @@ function registerSavePromptIpc({
     return rec;
   }
 
-  ipcMain.on('save-prompt:pointer', (event, payload) => {
+  gate.savePrompt.on('save-prompt:pointer', (event, payload) => {
     const rec = resolvePage(event, payload);
     if (rec) rec.savePrompt.setPointerInside(payload.inside === true);
   });
 
-  ipcMain.on('save-prompt:focus', (event, payload) => {
+  gate.savePrompt.on('save-prompt:focus', (event, payload) => {
     const rec = resolvePage(event, payload);
     if (rec) rec.savePrompt.setFocusInside(payload.inside === true);
   });
 
-  ipcMain.on('save-prompt:height', (event, payload) => {
+  gate.savePrompt.on('save-prompt:height', (event, payload) => {
     const rec = resolvePage(event, payload);
     if (!rec || typeof payload.height !== 'number') return;
     rec.savePrompt.reportHeight(payload.token, payload.height);
   });
 
-  ipcMain.on('save-prompt:dismiss', (event, payload) => {
+  gate.savePrompt.on('save-prompt:dismiss', (event, payload) => {
     const rec = resolvePage(event, payload);
     if (rec) rec.savePrompt.dismiss();
   });
 
-  ipcMain.handle('save-prompt:save', (event, payload) => {
-    // 1. sender identity
-    const rec = recordForPromptSender(event.sender);
-    if (!rec || !rec.savePrompt) return { saved: false, reason: 'refused' };
-    const { token, captureId, vaultId } = payload || {};
-    // 2. token freshness
-    if (typeof token !== 'number' || !rec.savePrompt.isCurrentToken(token)) return { saved: false, reason: 'refused' };
-    // 3. kind: OFFER state (not a result / saving state), model not `locked`
-    if (!rec.savePrompt.canSave()) return { saved: false, reason: 'refused' };
-    // 4. business gate: the SHOWN capture, whose tab is still this window's ACTIVE tab, and
-    //    main's own capture<->tab binding agrees.
-    if (typeof captureId !== 'string' || captureId !== rec.savePrompt.currentCaptureId()) {
-      return { saved: false, reason: 'refused' };
-    }
-    const shownWcId = rec.savePrompt.currentWcId();
-    if (shownWcId == null || rec.activeTabWcId !== shownWcId) return { saved: false, reason: 'refused' };
-    const vh = getVaultHuman();
-    if (!vh || vh.captureTabOf(captureId) !== shownWcId) return { saved: false, reason: 'refused' };
-    return rec.savePrompt.save(typeof vaultId === 'string' ? vaultId : undefined);
-  });
+  gate.savePrompt.handle(
+    'save-prompt:save',
+    (event, payload) => {
+      // 1. sender identity
+      const rec = recordForPromptSender(event.sender);
+      if (!rec || !rec.savePrompt) return { saved: false, reason: 'refused' };
+      const { token, captureId, vaultId } = payload || {};
+      // 2. token freshness
+      if (typeof token !== 'number' || !rec.savePrompt.isCurrentToken(token))
+        return { saved: false, reason: 'refused' };
+      // 3. kind: OFFER state (not a result / saving state), model not `locked`
+      if (!rec.savePrompt.canSave()) return { saved: false, reason: 'refused' };
+      // 4. business gate: the SHOWN capture, whose tab is still this window's ACTIVE tab, and
+      //    main's own capture<->tab binding agrees.
+      if (typeof captureId !== 'string' || captureId !== rec.savePrompt.currentCaptureId()) {
+        return { saved: false, reason: 'refused' };
+      }
+      const shownWcId = rec.savePrompt.currentWcId();
+      if (shownWcId == null || rec.activeTabWcId !== shownWcId) return { saved: false, reason: 'refused' };
+      const vh = getVaultHuman();
+      if (!vh || vh.captureTabOf(captureId) !== shownWcId) return { saved: false, reason: 'refused' };
+      return rec.savePrompt.save(typeof vaultId === 'string' ? vaultId : undefined);
+    },
+    { value: { saved: false, reason: 'refused' } }
+  );
 
   // Locked offer consent (Leg 2; flight DD7). FOUR guards in order, mirroring `:save`:
   // sender identity, token freshness, kind (offer state + `locked` model + the dedicated
   // `consenting` in-flight flag), business gate (shown capture, active tab, main's own
   // capture<->tab binding, then `captureConsent` itself). On success the prompt closes
   // `unlock-requested` - the CHROME then raises the unlock sheet; this handler writes nothing.
-  ipcMain.handle('save-prompt:consent', (event, payload) => {
-    /** @param {string} outcome @param {any} res */
-    const done = (outcome, res) => {
-      const id = payload && typeof payload.captureId === 'string' ? payload.captureId : null;
-      vaultTrace('save-prompt-consent', { captureId: id, outcome });
-      return res;
-    };
-    // 1. sender identity
-    const rec = recordForPromptSender(event.sender);
-    if (!rec || !rec.savePrompt) return done('refused-sender', { ok: false, reason: 'refused' });
-    const { token, captureId, vaultId } = payload || {};
-    // 2. token freshness
-    if (typeof token !== 'number' || !rec.savePrompt.isCurrentToken(token)) {
-      return done('refused-token', { ok: false, reason: 'refused' });
-    }
-    // 3. kind (sets the consenting flag synchronously; every refusal below rolls it back)
-    if (!rec.savePrompt.beginConsent()) return done('refused-kind', { ok: false, reason: 'refused' });
-    // 4. business gate
-    const refuse = () => {
-      rec.savePrompt.endConsent();
-      return done('refused-gate', { ok: false, reason: 'refused' });
-    };
-    if (typeof captureId !== 'string' || captureId !== rec.savePrompt.currentCaptureId()) return refuse();
-    const shownWcId = rec.savePrompt.currentWcId();
-    if (shownWcId == null || rec.activeTabWcId !== shownWcId) return refuse();
-    const vh = getVaultHuman();
-    if (!vh || vh.captureTabOf(captureId) !== shownWcId) return refuse();
-    /** @type {any} */
-    let res;
-    try {
-      res = vh.captureConsent({ captureId, vaultId: typeof vaultId === 'string' ? vaultId : null });
-    } catch {
-      return refuse();
-    }
-    if (res && res.ok === true) {
-      rec.savePrompt.consentGranted();
-      return done('granted', { ok: true });
-    }
-    const reason = res && typeof res.reason === 'string' ? res.reason : 'refused';
-    if (reason === 'unlocked') {
-      // The vault unlocked first: the prompt stays; the chrome converts it (AC9).
-      rec.savePrompt.endConsent();
-      return done('unlocked', { ok: false, reason: 'unlocked' });
-    }
-    if (reason === 'expired') {
-      rec.savePrompt.showResult('failure', 'This save request expired', 4000, 'expired');
-      return done('expired', { ok: false, reason: 'expired' });
-    }
-    // bad vault (or any other refusal): say so, then dismiss (drops the record).
-    rec.savePrompt.showResult('failure', "Couldn't save to that vault", 4000, 'dismissed');
-    return done('bad-vault', { ok: false, reason: 'bad-vault' });
-  });
+  gate.savePrompt.handle(
+    'save-prompt:consent',
+    (event, payload) => {
+      /** @param {string} outcome @param {any} res */
+      const done = (outcome, res) => {
+        const id = payload && typeof payload.captureId === 'string' ? payload.captureId : null;
+        vaultTrace('save-prompt-consent', { captureId: id, outcome });
+        return res;
+      };
+      // 1. sender identity
+      const rec = recordForPromptSender(event.sender);
+      if (!rec || !rec.savePrompt) return done('refused-sender', { ok: false, reason: 'refused' });
+      const { token, captureId, vaultId } = payload || {};
+      // 2. token freshness
+      if (typeof token !== 'number' || !rec.savePrompt.isCurrentToken(token)) {
+        return done('refused-token', { ok: false, reason: 'refused' });
+      }
+      // 3. kind (sets the consenting flag synchronously; every refusal below rolls it back)
+      if (!rec.savePrompt.beginConsent()) return done('refused-kind', { ok: false, reason: 'refused' });
+      // 4. business gate
+      const refuse = () => {
+        rec.savePrompt.endConsent();
+        return done('refused-gate', { ok: false, reason: 'refused' });
+      };
+      if (typeof captureId !== 'string' || captureId !== rec.savePrompt.currentCaptureId()) return refuse();
+      const shownWcId = rec.savePrompt.currentWcId();
+      if (shownWcId == null || rec.activeTabWcId !== shownWcId) return refuse();
+      const vh = getVaultHuman();
+      if (!vh || vh.captureTabOf(captureId) !== shownWcId) return refuse();
+      /** @type {any} */
+      let res;
+      try {
+        res = vh.captureConsent({ captureId, vaultId: typeof vaultId === 'string' ? vaultId : null });
+      } catch {
+        return refuse();
+      }
+      if (res && res.ok === true) {
+        rec.savePrompt.consentGranted();
+        return done('granted', { ok: true });
+      }
+      const reason = res && typeof res.reason === 'string' ? res.reason : 'refused';
+      if (reason === 'unlocked') {
+        // The vault unlocked first: the prompt stays; the chrome converts it (AC9).
+        rec.savePrompt.endConsent();
+        return done('unlocked', { ok: false, reason: 'unlocked' });
+      }
+      if (reason === 'expired') {
+        rec.savePrompt.showResult('failure', 'This save request expired', 4000, 'expired');
+        return done('expired', { ok: false, reason: 'expired' });
+      }
+      // bad vault (or any other refusal): say so, then dismiss (drops the record).
+      rec.savePrompt.showResult('failure', "Couldn't save to that vault", 4000, 'dismissed');
+      return done('bad-vault', { ok: false, reason: 'bad-vault' });
+    },
+    { value: { ok: false, reason: 'refused' } }
+  );
 }
 
 module.exports = { registerSavePromptIpc, sanitizeSavePromptModel, sanitizeQueue };

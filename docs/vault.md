@@ -251,6 +251,177 @@ business logic and no privileged APIs; it renders a model and runs the APG keybo
   effect. The picker model and the activated selection are metadata / an index only — the
   password is read and dispatched solely in main, never in the model, the selection, or a
   return value.
+- **Who may raise the picker: main witnesses the click (Mission 23 Flight 1, leg
+  `vault-fill-trust`).** Web guests run `contextIsolation:false`, so nothing the page-side
+  icon code reads about an event can be believed, and a page that obtains the preload's IPC
+  object (a page-patched `Array.prototype.push` receives Electron's emit event, whose
+  `.sender` is that object) can send the gesture message itself with no click at all. The
+  icon's page-world `isTrusted` check is therefore **gone**; the page-side message is only
+  a hint and **main decides**. Each tab web guest (never a popup or an internal tab) has one
+  `input-event` listener (`guest-wiring.js`; `before-mouse-event` is preventable and is
+  deliberately not used) feeding `src/main/vault/gesture-witness.js`, which keeps per tab
+  only the last real left-button press, left-button release and right-button press
+  (view-local coordinates, monotonic time). `guest-vault-gesture` and
+  `guest-vault-icon-menu` are registered `activeOnly` (a background tab is refused by the IPC
+  gate) and are then admitted by the pure `gesture-verifier.js`, checked in this order:
+  (1) the tab's **committed origin** is an http(s) tuple origin (`committed-origin.js`: a
+  derived read of `webContents.getURL()`, which keeps answering with the previous committed
+  URL for the whole of a pending navigation, so there is no new tab-entry field; error pages
+  and every other scheme yield nothing); (2) a real left-button **release** was witnessed in
+  this tab within **2 s** with its press on record at or before it (an MCP `click` is real
+  input to main, since it is injected below the page, which is also what makes the positive
+  case testable; a script-synthesised click never reaches `input-event`) - for the icon
+  menu, a real right-button **press** (press only: the platform decides whether `contextmenu`
+  fires on press or release); (3) the message carries a box of four finite numbers no larger
+  than **four times** the icon's real 30x16 in either dimension; (4) scaled by the tab's LIVE
+  zoom factor (view coordinates are `clientX x zoomFactor`), with **2 view pixels** of
+  tolerance, the box contains both the press and the release point; (5) no gesture of that
+  kind was accepted for this tab within **1 s**. An accepted gesture **consumes** the
+  witnessed click (one real click raises at most one sheet); a refusal consumes nothing, so a
+  page cannot burn the operator's real click with a bogus message sent first. With
+  `GOLDFINCH_IPC_TRACE=1` each decision writes one line - `[vault-gesture] accepted`,
+  `[vault-gesture] refused reason=<origin|no-real-input|bad-box|outside-box|rate>`, and
+  `[vault-icon-menu] ...` likewise - never a URL, title, coordinate or item data. Constants:
+  `WITNESS_WINDOW_MS` 2000, `RATE_INTERVAL_MS` 1000, `BOX_MAX_FACTOR` 4, `BOX_TOLERANCE_PX` 2.
+- **Stated residual - the box is page-supplied.** A page that sends the message itself can
+  claim a box around any real click the operator made on that page. It **cannot** raise the
+  sheet with no click, from a background tab, or more than once per click. With the
+  page-world trust check gone a page can also choose which of **its own** fields is the fill
+  target; the credential still reaches only that page. The picker's own controls (below,
+  *The picker's controls*) are the defence against a misdirected click. Known and not fixed here: a touch tap produces no mouse press for the witness (so it
+  raises nothing), and Ctrl+click as a context-menu trigger arrives as a left press.
+- **The per-open picker context.** An accepted gesture (or an accepted "Fill login..." from
+  the native icon menu) makes main mint a context (`picker-context.js`, held on the
+  vault-human object beside its per-tab capture drops): an unguessable id, the tab, the
+  committed origin, and whether the tab's security state is "certificate overridden". One
+  live context per tab; a new one replaces the old. The `vault-gesture` push to the chrome
+  carries the id, the **destination display string** (`vault-destination.js`: the host as
+  the URL parser serialises it - punycode for a non-ASCII host - plus a non-default port;
+  an `http:` origin keeps its scheme) and the certificate flag, and the chrome keeps all
+  three in `pendingVaultFlow` through every hop (the unlocked picker, the locked sheet and the
+  picker that follows an unlock, the locked generate / unlock two-row picker, the unlock row,
+  and the `locked` re-raise after a pick). `vault-reachable-items`, `vault-fill-human` and
+  `vault-fill-generated` each take the id and **refuse without a live context for that tab and
+  id**; at fill, for **every** item type and for a generated password, the tab's committed
+  origin must equal the context's (a card or identity is not origin-MATCHED to the site, but
+  it still goes only to the page the operator was looking at when the picker rose). "Fill
+  login..." mints only if, when the native menu item is clicked, the tab is still alive, still
+  its window's active tab and still at the origin captured at the right-press. Every refused
+  context writes `[vault-gesture] context-refused reason=<missing|stale|origin|certificate>` under the
+  trace.
+- **Context lifetime.** The context is dropped by: a fill that used it; `did-navigate` on that
+  tab (a cross-document main-frame commit, including a reload; deliberately **not**
+  `did-navigate-in-page`, which stays on the same origin and is covered by the fill-time
+  check); the sites that already close the save prompt and drop captures
+  (`closeSavePromptAndDrop`: tab switch, hide, close, move, and fullscreen entry); window
+  close; the sheet's `onClosed` reporting a dismissal of `vault-picker` or `vault-unlock`
+  (explicit allowlists in `picker-dismissal.js`: escape, outside click, blur, teardown and the
+  tab reasons - never `activated`, `superseded` or `vault-lock`; every context of that
+  window's tabs, since `onClosed` names no tab); and a time limit. **A vault lock keeps it**
+  (a fill against a locked vault answers `locked` and the chrome re-raises the unlock sheet,
+  continuing the same open). The time limit and the guest's fill-target lifetime are one shared
+  constant, **120 s** (`src/shared/vault-picker-limits.js`; the guest's was 60 s), so an unlock
+  that takes a minute does not end in a silent no-fill. Chrome recovery leaves no usable
+  context: the reloaded chrome has lost the id and the context ages out.
+- **The picker's controls (Mission 23 Flight 1, leg `vault-picker-controls`).** Everything
+  here is inside the menu-overlay sheet, which automation cannot read or script under the
+  `vault-*` menu types, so it is covered by unit tests and a by-eye pass, never a live run.
+  - **Destination.** The picker card has a line of its own, "Fill on `<destination>`", between
+    the header and the list (`vault-picker-destination`; `textContent`, capped at 80
+    characters - an over-long destination keeps a short head, an ellipsis and its END, so the
+    registrable domain (the right end of a host) is always visible; the tail is never dropped -
+    and the list's `aria-describedby`, so a screen reader announces it when focus
+    lands on the list). The string rides as one extra top-level field of the open payload
+    (`destination`); it appears in every picker view (the unlocked picker, the locked
+    generate / unlock two-row picker, the picker after an unlock, the certificate warning and
+    the confirmation). The chrome opens every picker through one function and **does not open
+    one without a destination**.
+  - **Nothing selected.** The picker's own open handler ignores the start index and focuses the
+    list container, in every view (no sentinel index: a negative one wraps in `focusItem`).
+    From there ArrowDown goes to the first row and ArrowUp to the **last** (`menu-controller.js`
+    treats "nothing focused" as its own case; every other menu always has an item focused, so it
+    is unchanged); Enter and Space on the container do nothing.
+  - **Arming (the sheet's DD7 axis).** `src/shared/sheet-arming.js` maps an opted-in menu type
+    to a delay (this leg: `vault-picker` at **500 ms**, nothing else). The sheet derives the delay
+    from its own menu type - no chrome flag, no main re-derivation - and passes it to
+    `createSheetReport.begin(token, delayMs)` on **every** init, so a model replace re-arms. It
+    is a **timestamp gate, not a timer**: an activation before "armed until" (an injected clock)
+    returns false without setting the one-shot latch, so nothing closes and a later activation
+    still works. Pointer, Enter and Space all reach the row's `click` listener, which calls that
+    gated sender and nothing else. Dismissals (Escape, the header close, the backdrop, the
+    confirmation view's Cancel) do not pass through the sender and are never delayed. A cosmetic
+    class (`vault-picker-arming`, dimmed rows) is cleared by a timer; nothing depends on it.
+    Other consumers (cert picker, cert override, auth card) opt in during a later leg of the
+    flight by adding a row to the table.
+  - **Certificate warning.** When the gesture's certificate flag is set, the chrome opens a
+    **warning view first on every branch** (unlocked, locked, locked with Generate): a notice
+    naming the condition and one action, Continue - no items, no Generate row, no footer.
+    Continue calls `vault-certificate-acknowledge` (owning chrome, `{ wcId, contextId }`), which
+    sets an acknowledged bit on the main-held context; only then does the chrome run the branch
+    the gesture would have run. **Main enforces it in `requireContext`**, the one place the
+    three operations share: a context with the flag set and not acknowledged is refused with
+    trace reason `certificate` (and `{ filled: false, reason: 'certificate' }`), so a page
+    that skips the warning gains nothing. The acknowledge handler is the one caller that looks
+    the context up without that clause. A new gesture mints a new, unacknowledged context.
+  - **Card / identity on a new site.** A login is untouched. For a card or an identity whose
+    `confirmedOrigins` (below) does not list the context's origin, `vault-fill-human` fills
+    nothing, records `{ vaultId, itemId }` as **pending** on the context and answers
+    `confirm-needed` (the context is not consumed). The chrome restores its flow in a
+    `confirming` phase holding the picked row (the way it does for `locked`) and reopens the
+    picker as the **confirmation view**: what is about to be filled (title and the row's
+    non-secret secondary line), the destination, and two actions - Fill and Cancel - neither
+    focused, no footer. **The confirm is an explicit, distinct call**: `vault-fill-human` takes
+    `confirm: true`, sent only by that view's Fill; main fills on an unconfirmed origin only when
+    `confirm` is `true` **and** the pending record matches the item - any other call on an
+    unconfirmed origin overwrites pending and answers `confirm-needed` again. So confirmation
+    view up -> vault locks -> unlock -> the plain picker reopens -> the same card picked asks
+    again, never fills (a plain pick sends no `confirm`). **Cancel is a dismissal**: it closes
+    the sheet the way the header close control does, so the existing dismissal consumer drops
+    the context; there is no cancel channel. After a confirmed fill main records the origin.
+    A confirm for a different item, a missing context or a changed origin fills nothing and
+    records nothing; an item deleted between pick and confirm fills nothing.
+  - **Template choke points.** The picker template routes any unknown action id to "Manage
+    passwords" (a navigation), so the new views depend on four places: `activationIdFor` reports
+    each new action under its own id; the action-entry predicate recognises the new entries; the
+    "nothing to fill here" note is not rendered in the warning or confirmation view; the
+    "Manage passwords" footer is omitted from both. Each is pinned in
+    `vault-picker-controls-template.test.js`.
+- **`confirmedOrigins`.** A top-level array of origin strings on **card and identity** items,
+  the sites where the operator has confirmed a fill. It is outside the schema's field lists (so
+  `metadataOf` and the vault page's list payload never carry it, and the four-source drift
+  guards are untouched), is never rewritten on load, and needs no vault format change. An
+  older item simply has none. `confirmed-origins.js` holds the tolerant reader (not an array ->
+  empty; non-strings filtered), the cap (**50**, oldest dropped, so that site asks again) and
+  the pure append (an origin already listed is a no-op: no duplicate, no reordering, no write).
+  - **Recording** is `recordConfirmedOrigin` on the store: decrypt, change the one item in place,
+    encrypt, write - **not** through the normaliser, so `updatedAt` is untouched; it is a
+    gated operation (the re-key gate's count is now **14**). The store has no change broadcast,
+    so an open vault page is not re-rendered. If it throws (busy during a rotation, a disk
+    error) the failure is traced without item data and the fill, already sent, is not failed.
+  - **Write paths.** The editor save carries the stored value over **regardless of what the page
+    sent** (a reveal returns the stored item, so the page can see the field, but it can never
+    set it) and deletes a page-supplied value on a new item. **Cross-vault copy strips it** on
+    every branch (new, replace, keep-both): a copied card asks again. **Bundle merge ignores it
+    in its equality** (both branches), so import-merge and restore-merge do not duplicate an
+    item that differs only there; the destination keeps its own list. **Capture update carries
+    it, except that a card update that changes the card number clears it** (a different card
+    asks again). Rotation, re-key, export and restore move whole items and carry it; a restored
+    bundle from elsewhere can therefore carry confirmed sites - the trust is the same as for the
+    items themselves. Global-vault items used from several jars keep one list on the item.
+    There is no "forget confirmed sites" control on the vault page yet (a possible follow-up).
+- **Human fills have no first-form fallback.** Main marks every HUMAN fill message
+  (`vault-fill`, `vault-fill-card`, `vault-fill-identity`) `{ human: true }` (main to guest,
+  so a page cannot forge it). The guest then consumes its pending fill target and passes
+  `strict` to the isolated-world fill, so a human fill with no live, in-range target fills
+  **nothing** instead of the page's first detected form (`requireOrdinal` on the three field
+  modules, off by default). That also covers the one remaining gap: a fill that passes the
+  origin check while a cross-document navigation is pending reaches the new document, whose
+  preload holds no target, so nothing is filled. An automation fill is unmarked: its
+  first-detected-entry behaviour is byte-identical and it never consumes a human's target. The
+  icon's right-click binds the target exactly as its click does, so "Fill login..." still fills.
+  What a page can do with the preload's IPC object: register its own `vault-fill*` listener on
+  its own tab (it sees the credential main just sent to that tab, the page the operator chose to
+  fill) and send any guest-class message; nothing relies on "a page cannot listen".
 
 **Accepted limitation — internal-page a11y gap.** The a11y audit drives the app over the MCP
 surface, and the eval/observe tools exclude the internal session even for admin. So the
@@ -791,7 +962,7 @@ even while the vault is **locked**. Choosing it:
 automation surface (the automation vault-human dependency block never receives the generate fill
 delegate).
 
-A stale gesture (the picker sat open past the fill-target's 60s TTL, or the page mutated the form
+A stale gesture (the picker sat open past the fill-target's 120 s lifetime (shared with the picker context), or the page mutated the form
 between the gesture and the fill) fills nothing — deliberately, with **no first-field fallback**
 unlike the ordinary login fill: a generated password landing in the wrong form is worse than no
 fill at all.

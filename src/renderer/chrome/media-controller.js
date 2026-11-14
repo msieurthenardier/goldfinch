@@ -19,6 +19,17 @@ export function createMediaController(deps) {
   } = deps;
   /* --------------------------------------------------------------- media panel */
 
+  // Page media never loads from its own address in the chrome. Each item reaches an element through
+  // the proxy (`goldfinch-media://proxy/<token>/...`, the token being the one main delivered with the
+  // list - never a tab number), or - for an image only - as the inline `data:` raster main already
+  // validated. `toMediaProxyUrl` answers null for anything else, and every sink below handles null by
+  // assigning nothing.
+  const INLINE_IMAGE_RE = /^data:image\//i;
+  function imageSrc(token, item) {
+    if (item.type === 'image' && typeof item.url === 'string' && INLINE_IMAGE_RE.test(item.url)) return item.url;
+    return toMediaProxyUrl(token, item.url);
+  }
+
   function togglePanel(force) {
     const collapsed = els.panel.classList.contains('collapsed');
     const show = force != null ? force : collapsed;
@@ -138,7 +149,8 @@ export function createMediaController(deps) {
     if (item.type === 'image') {
       const img = document.createElement('img');
       img.loading = 'lazy';
-      img.src = toMediaProxyUrl(tab.wcId, item.url);
+      const thumbSrc = imageSrc(tab.mediaToken, item);
+      if (thumbSrc) img.src = thumbSrc;
       img.alt = item.label || item.name || '';
       thumb.appendChild(img);
       thumb.title = 'Open in viewer';
@@ -146,8 +158,8 @@ export function createMediaController(deps) {
     } else if (item.type === 'video') {
       // isSafePosterUrl gates the RAW poster URL before wrapping — the proxy
       // wrap must never bypass this validation (DD2/AC3).
-      if (isSafePosterUrl(item.poster))
-        thumb.style.backgroundImage = `url("${toMediaProxyUrl(tab.wcId, item.poster)}")`;
+      const posterSrc = isSafePosterUrl(item.poster) ? toMediaProxyUrl(tab.mediaToken, item.poster) : null;
+      if (posterSrc) thumb.style.backgroundImage = `url("${posterSrc}")`;
       thumb.insertAdjacentHTML('beforeend', `<span class="play-glyph">▶</span>`);
       thumb.title = 'Play here';
       thumb.addEventListener('click', () => playInline(item, thumb));
@@ -220,7 +232,8 @@ export function createMediaController(deps) {
     const player = document.createElement(item.type === 'video' ? 'video' : 'audio');
     // Resolved at call time (fine — the item belongs to the active tab: playInline
     // only ever runs from a click on a card rendered for the current tab).
-    player.src = toMediaProxyUrl(activeTab().wcId, item.url);
+    const playerSrc = toMediaProxyUrl(activeTab().mediaToken, item.url);
+    if (playerSrc) player.src = playerSrc;
     player.controls = true;
     player.autoplay = true;
     player.className = 'inline-player';
@@ -281,7 +294,8 @@ export function createMediaController(deps) {
     const img = document.createElement('img');
     // Resolved at call time (fine — the item belongs to the active tab: openLightbox
     // only ever runs from a click on a card rendered for the current tab).
-    img.src = toMediaProxyUrl(activeTab().wcId, item.url);
+    const lightboxSrc = imageSrc(activeTab().mediaToken, item);
+    if (lightboxSrc) img.src = lightboxSrc;
     img.alt = item.label || item.name || '';
     img.className = 'lightbox-img';
     img.draggable = false;
@@ -385,11 +399,17 @@ export function createMediaController(deps) {
   });
 
   async function downloadItem(item, tab) {
-    const res = await window.goldfinch.downloadMedia({
-      webContentsId: tab ? tab.wcId : null,
-      url: item.url,
-      suggestedName: item.name
-    });
+    let res;
+    try {
+      res = await window.goldfinch.downloadMedia({
+        webContentsId: tab ? tab.wcId : null,
+        url: item.url,
+        suggestedName: item.name
+      });
+    } catch {
+      // A refused call (the named tab is not the sender window's) rejects: say so, don't throw.
+      res = null;
+    }
     if (!res || !res.ok) toast('Download failed', res && res.error ? res.error : 'Unknown error');
   }
 
@@ -466,7 +486,10 @@ export function createMediaController(deps) {
         })
         .then((res) => {
           if (!res || !res.ok) bulkComplete(item.url, false);
-        });
+        })
+        // The gate refuses a download naming a tab that is not the sender's (a tab closed
+        // mid-batch): the invoke REJECTS. Count the item failed and keep pumping.
+        .catch(() => bulkComplete(item.url, false));
     }
   }
 
@@ -503,7 +526,7 @@ export function createMediaController(deps) {
 
   /* --------------------------------------------------- docked music player */
 
-  const player = { list: [], index: -1, url: null, wcId: null };
+  const player = { list: [], index: -1, url: null, token: null };
   const pa = els.playerAudio;
 
   function currentAudioItems() {
@@ -513,9 +536,11 @@ export function createMediaController(deps) {
 
   // Start a track; the page's audio list becomes the playlist for prev/next.
   // The playlist survives tab switches (prev/next act on player.list, not a
-  // freshly-read activeTab()), so the owning wcId is captured HERE, once, from
+  // freshly-read activeTab()), so the owning tab's proxy TOKEN is captured HERE, once, from
   // the active tab at build time — not re-resolved per track in loadCurrent,
-  // which would attribute the stream to whatever tab is active at seek time.
+  // which would attribute the stream to whatever tab is active at seek time. After that tab
+  // navigates the token is stale and the proxy answers 404: playback stops, and nothing is
+  // fetched through any other tab.
   function playAudio(item) {
     player.list = currentAudioItems();
     player.index = player.list.findIndex((m) => m.url === item.url);
@@ -524,7 +549,7 @@ export function createMediaController(deps) {
       player.index = 0;
     }
     const t = activeTab();
-    player.wcId = t ? t.wcId : null;
+    player.token = t ? t.mediaToken : null;
     loadCurrent();
   }
 
@@ -534,8 +559,15 @@ export function createMediaController(deps) {
     // ADJACENT-LINE HAZARD: player.url MUST stay RAW — highlightPlaying() compares
     // it raw-to-raw against card.dataset.url (also raw). Wrap ONLY pa.src below.
     player.url = item.url;
-    pa.src = toMediaProxyUrl(player.wcId, item.url);
-    pa.play().catch(() => {});
+    const dockedSrc = toMediaProxyUrl(player.token, item.url);
+    if (dockedSrc) {
+      pa.src = dockedSrc;
+      pa.play().catch(() => {});
+    } else {
+      // No usable address (no token, or not a web URL): stop whatever was loaded, load nothing.
+      pa.pause();
+      pa.removeAttribute('src');
+    }
     els.playerTitle.textContent = item.label || item.name;
     els.player.classList.remove('hidden');
     els.playerPrev.disabled = player.index <= 0;

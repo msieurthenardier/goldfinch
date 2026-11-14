@@ -1,0 +1,9 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>g-frame</title>
+<body style="margin: 0; height: 2000px">
+  <iframe id="fr" style="position: absolute; left: 100px; top: 150px; width: 400px; height: 200px; border: 0"></iframe>
+  <script>
+    document.getElementById('fr').src = new URLSearchParams(location.search).get('inner');
+  </script>
+</body>

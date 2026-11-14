@@ -244,7 +244,7 @@ test('AC8: the drop index rides its OWN channel, never channel-4 sendActivated',
 
 test('AC8b: the main-side handler names all THREE guards, the menuType one included', () => {
   const code = readMasked('src/main/register-overlay-ipc.js');
-  const start = code.indexOf("ipcMain.on('menu-overlay:overflow-drop'");
+  const start = code.indexOf("'menu-overlay:overflow-drop',");
   assert.notEqual(start, -1);
   const body = code.slice(start, code.indexOf('\n  });', start));
   assert.match(body, /recordForSheetSender\(event\.sender\)/, 'guard 1 — sender identity');

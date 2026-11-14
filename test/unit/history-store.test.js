@@ -27,6 +27,11 @@ function removeTempDir(dir) {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
+// The handle a recorder keeps for its last visit: the store updates a title only when ALL FOUR match.
+function handleOf(visitId, jarId, url, visitedAt) {
+  return { visitId, jarId, url, visitedAt };
+}
+
 function freshStore() {
   const resolved = require.resolve('../../src/main/history-store');
   delete require.cache[resolved];
@@ -65,7 +70,7 @@ test('exposes exactly the repo interface', () => {
 test('every method throws "history store not open" before open(), except close()', () => {
   const store = freshStore();
   assert.throws(() => store.recordVisit({ jarId: 'a', url: 'https://x/', visitedAt: 1 }), /history store not open/);
-  assert.throws(() => store.setTitle(1, 'x'), /history store not open/);
+  assert.throws(() => store.setTitle(handleOf(1, 'a', 'https://example.com/', 1), 'x'), /history store not open/);
   assert.throws(() => store.listRecent('a'), /history store not open/);
   assert.throws(() => store.listByPage('a'), /history store not open/);
   assert.throws(() => store.search('a', 'x'), /history store not open/);
@@ -172,10 +177,14 @@ test('full API round-trips: record -> listRecent -> setTitle -> search -> delete
     assert.equal(recent[0].title, null);
 
     // setTitle
-    const updated = store.setTitle(id2, 'Second Page');
+    const updated = store.setTitle(handleOf(id2, 'a', 'https://example.com/page2', 2000), 'Second Page');
     assert.equal(updated, true);
     assert.equal(store.listRecent('a').find((r) => r.id === id2).title, 'Second Page');
-    assert.equal(store.setTitle(999999, 'nope'), false, 'unknown visit id returns false');
+    assert.equal(
+      store.setTitle(handleOf(999999, 'a', 'https://example.com/page2', 2000), 'nope'),
+      false,
+      'unknown visit id returns false'
+    );
 
     // search
     const found = store.search('a', 'exam');
@@ -343,7 +352,7 @@ test('title backfill: setTitle updates the row AND the FTS shadow', () => {
       [id]
     );
 
-    store.setTitle(id, 'Brand New Title');
+    store.setTitle(handleOf(id, 'a', 'https://example.com/', 1000), 'Brand New Title');
 
     assert.deepEqual(
       store.search('a', 'Brand').map((r) => r.id),
@@ -1049,7 +1058,7 @@ test('null title is accepted; FTS treats it as empty until setTitle backfills', 
     store.open(dir);
     const id = store.recordVisit({ jarId: 'a', url: 'https://example.com/notitle', visitedAt: 1000 });
     assert.equal(store.listRecent('a')[0].title, null);
-    store.setTitle(id, 'Filled In');
+    store.setTitle(handleOf(id, 'a', 'https://example.com/notitle', 1000), 'Filled In');
     assert.deepEqual(
       store.search('a', 'Filled').map((r) => r.id),
       [id]
@@ -1240,4 +1249,106 @@ test('expiredOriginsForJar validates jarId/cutoffMs and throws TypeError', () =>
   } finally {
     removeTempDir(dir);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Mission 23 Flight 1 (leg `jar-isolation`, finding 9): a title update touches only the visit it belongs
+// to. SQLite reuses a deleted row's id, so id alone is not an identity.
+// ---------------------------------------------------------------------------
+
+test('setTitle: a handle whose row id was reissued to ANOTHER JAR changes no row', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.open(dir);
+    const url = 'https://example.com/';
+    const idA = store.recordVisit({ jarId: 'a', url, title: null, visitedAt: 1000 });
+    const handleA = handleOf(idA, 'a', url, 1000);
+    store.clearJar('a');
+    const idB = store.recordVisit({ jarId: 'b', url, title: 'Visit in B', visitedAt: 1000 });
+    assert.equal(idB, idA, 'precondition: the row id was reissued to the other jar');
+    assert.equal(store.setTitle(handleA, 'HOSTILE'), false);
+    assert.equal(store.listRecent('b')[0].title, 'Visit in B');
+    assert.deepEqual(store.search('b', 'HOSTILE'), [], 'the hostile title was never indexed');
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('setTitle: within one jar a reissued id changes no row when the clock moved, nor when only the url matches', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.open(dir);
+    const id1 = store.recordVisit({ jarId: 'a', url: 'https://example.com/one', title: null, visitedAt: 1000 });
+    const handle = handleOf(id1, 'a', 'https://example.com/one', 1000);
+    store.clearJar('a');
+    // Different url, later time.
+    const id2 = store.recordVisit({ jarId: 'a', url: 'https://example.com/two', title: 'Two', visitedAt: 2000 });
+    assert.equal(id2, id1);
+    assert.equal(store.setTitle(handle, 'HOSTILE'), false);
+    // Same url again, later time: the time still differs.
+    store.clearJar('a');
+    const id3 = store.recordVisit({ jarId: 'a', url: 'https://example.com/one', title: 'Again', visitedAt: 3000 });
+    assert.equal(id3, id1);
+    assert.equal(store.setTitle(handle, 'HOSTILE'), false);
+    assert.equal(store.listRecent('a')[0].title, 'Again');
+    // Same millisecond, different url: the url still differs.
+    store.clearJar('a');
+    const id4 = store.recordVisit({ jarId: 'a', url: 'https://example.com/other', title: 'Other', visitedAt: 1000 });
+    assert.equal(id4, id1);
+    assert.equal(store.setTitle(handle, 'HOSTILE'), false);
+    assert.equal(store.listRecent('a')[0].title, 'Other');
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('setTitle: a normal update still works and the index follows; a malformed handle changes nothing', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.open(dir);
+    const id = store.recordVisit({ jarId: 'a', url: 'https://example.com/', title: null, visitedAt: 1000 });
+    for (const bad of [undefined, null, 5, {}, { visitId: id }, handleOf(id, '', 'https://example.com/', 1000)]) {
+      assert.equal(store.setTitle(/** @type {any} */ (bad), 'x'), false);
+    }
+    assert.equal(store.setTitle(handleOf(id, 'a', 'https://example.com/', 1000), 'Fresh Title'), true);
+    assert.deepEqual(
+      store.search('a', 'Fresh').map((r) => r.id),
+      [id]
+    );
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Mission 23 Flight 1, leg `prompts-and-bounds`: the search expression is bounded
+// ---------------------------------------------------------------------------
+test('sanitizeSearchQuery: caps the query (256 characters, 16 tokens) - cut, not refused; counts tokens, not time', () => {
+  const { sanitizeSearchQuery, SEARCH_QUERY_MAX_CHARS, SEARCH_QUERY_MAX_TOKENS } = freshStore();
+  assert.equal(SEARCH_QUERY_MAX_CHARS, 256);
+  assert.equal(SEARCH_QUERY_MAX_TOKENS, 16);
+  // 2,000 short words: at most 16 quoted tokens come out.
+  const words = Array.from({ length: 2000 }, (_, i) => 'w' + (i % 7)).join(' ');
+  const expr = sanitizeSearchQuery(words);
+  assert.equal(expr.split(' ').length, 16);
+  assert.ok(expr.startsWith('"w0"* "w1"*'));
+  // A 100 KB single token is cut to the character cap.
+  assert.equal(sanitizeSearchQuery('a'.repeat(100 * 1024)), `"${'a'.repeat(256)}"*`);
+  // Under both caps: exactly as before.
+  assert.equal(sanitizeSearchQuery('  foo "bar"  baz '), '"foo"* "bar"* "baz"*');
+  assert.equal(sanitizeSearchQuery('   '), null);
+  assert.equal(sanitizeSearchQuery('""'), null);
+  // Only the first 256 characters count: a token that starts after them is gone.
+  assert.equal(sanitizeSearchQuery('x'.repeat(256) + ' later'), `"${'x'.repeat(256)}"*`);
+});
+
+test('search and suggest go through the same bounded expression (source scan)', () => {
+  const src = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '../../src/main/history-store.js'),
+    'utf8'
+  );
+  assert.equal((src.match(/= sanitizeSearchQuery\(query\)/g) || []).length, 2, 'search() and suggest() both call it');
 });

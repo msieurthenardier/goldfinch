@@ -324,7 +324,7 @@ test('allow() has exactly one caller: the cert-override-proceed handler (grep -r
   // The single call site must sit inside the cert-override-proceed handler's
   // registration, not some other channel accidentally sharing the file.
   const masked = maskComments(fs.readFileSync(REGISTER_OVERLAY_PATH, 'utf8'));
-  const handlerIdx = masked.indexOf("ipcMain.handle('menu-overlay:cert-override-proceed'");
+  const handlerIdx = masked.indexOf("'menu-overlay:cert-override-proceed',");
   assert.notEqual(handlerIdx, -1, 'the cert-override-proceed handler must exist');
   const allowIdx = masked.indexOf('.allow(');
   assert.notEqual(allowIdx, -1, 'exactly one .allow( call must exist in the file');

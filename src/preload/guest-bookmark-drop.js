@@ -142,7 +142,7 @@ function createBookmarkDropListeners({ ipcRenderer, setTimeout: defer }) {
       }
       if (consumedByPage) return; // the page's own drop handler took it — page wins
       try {
-        ipcRenderer.send(GUEST_BOOKMARK_DROP_CHANNEL); // AC5: bare — no url, no id
+        ipcRenderer.send('guest-bookmark-drop'); // AC5: bare — no url, no id (literal: DD3; the constant is pinned equal by a test)
       } catch {
         /* main gone / tab tearing down */
       }

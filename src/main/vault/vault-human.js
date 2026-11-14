@@ -5,12 +5,16 @@
 // `pick-and-fill` leg (DD5/DD6/DD9). Two ops sit between the chrome renderer's
 // gesture→pick→fill state machine and the vault store / F1 fill delegate:
 //
-//   - reachableItems(wcId)  → the badged, origin-filtered, metadata-only picker
-//     model for the tab (or [] for a burner / bad-URL / locked state).
-//   - fillHuman({ wcId, vaultId, itemId }) → resolves the credential by (vaultId,
+//   - reachableItems(wcId, contextId)  → the badged, origin-filtered, metadata-only picker
+//     model for the tab (or [] for a burner / bad-URL / locked state / no live picker context).
+//   - fillHuman({ wcId, vaultId, itemId, contextId }) → resolves the credential by (vaultId,
 //     itemId) UNDER THE MRK (in main) and hands `{ wcId, credential }` to the F1
 //     fill delegate — the password NEVER crosses back to chrome. Re-checks lock →
 //     burner → cross-vault scope → exact-origin, in that order.
+//
+// Mission 23 Flight 1 (`vault-fill-trust`): all three human-fill ops (and the generated fill) first require
+// a live per-open PICKER CONTEXT minted by main when a gesture was accepted (`mintContext`); a fill also
+// requires the tab to still be at the context's committed origin, for every item type.
 //
 // SECURITY (leg core): the picker model + the activated selection are metadata /
 // an index only. The password is read and dispatched ONLY here; it is never in the
@@ -28,6 +32,8 @@ const crypto = require('node:crypto');
 const { originMatches } = require('../../shared/origin-match');
 
 const { resolvePersistJar } = require('../persist-jar-gate');
+// Leg `vault-picker-controls` (M23 F1): the confirmed-sites list a card / identity fill consults.
+const { readConfirmedOrigins } = require('./confirmed-origins');
 // Card capture (issue #152): the non-secret descriptors derived from a PAN, plus the
 // plausibility gate that keeps an arbitrary submitted form value out of the vault.
 const { isPlausibleCardNumber, brandForNumber, last4Of, titleForNumber, digitsOf } = require('./card-identity');
@@ -36,6 +42,9 @@ const { isPlausibleCardNumber, brandForNumber, last4Of, titleForNumber, digitsOf
 // (never re-typed here); `identityProfileOf`/`classifyCapture` are LD6/DD10's own
 // wiring — reused here, never reimplemented (both had no caller before this leg).
 const { IDENTITY_FIELDS, identityProfileOf, classifyCapture } = require('./identity-profile');
+// Mission 23 Flight 1 (`vault-fill-trust`): the per-open picker context and the committed-origin read.
+const { createPickerContexts } = require('./picker-context');
+const { committedOriginOf } = require('./committed-origin');
 
 // DD6: the field LABELS an identity offer names — never a value (ten of eleven
 // identity fields are declared secret in vault-item-schema.js). Mirrors, and must
@@ -221,6 +230,11 @@ function dispatchByFamily(rec, { login, card, identity }) {
  *   `register-browser-ipc.js`'s own `vaultTrace` uses, with the same `[vault-capture]` prefix.
  *   `detail` must carry vault ids/counts only — NEVER a field value (LD9's duplicate-profile
  *   refusal trace is the sole caller today).
+ * @property {(line: string) => void} [gestureTrace]  Mission 23 Flight 1 (`vault-fill-trust`): the
+ *   one-line picker-context refusal trace (`[vault-gesture] context-refused reason=...`), supplied by
+ *   `main.js` behind `GOLDFINCH_IPC_TRACE`. No-op when omitted. Carries a reason only.
+ * @property {() => string} [randomContextId]  context-id source (default: 16 random bytes, hex).
+ * @property {number} [pickerTtlMs]  context time limit (default `PICKER_TTL_MS`, 120 s).
  */
 
 /**
@@ -308,6 +322,17 @@ function createVaultHuman(deps) {
   // / timeout. Never leaves main.
   /** @type {Map<string, CaptureRecord>} */
   const captures = new Map();
+
+  // Mission 23 Flight 1 (`vault-fill-trust`): the per-open picker contexts. Beside the per-tab capture
+  // drops on purpose - the tab-lifecycle helper that drops captures drops these too, with no new
+  // parameter. NOT dropped by a vault lock (`dropAllCaptures` leaves them): a fill against a locked vault
+  // answers `locked` and the same picker open continues after the unlock.
+  const _gestureTrace = typeof deps.gestureTrace === 'function' ? deps.gestureTrace : () => {};
+  const contexts = createPickerContexts({
+    now: _now,
+    ...(deps.randomContextId ? { randomId: deps.randomContextId } : {}),
+    ...(deps.pickerTtlMs ? { ttlMs: deps.pickerTtlMs } : {})
+  });
 
   /**
    * Zeroize a record's password Buffer, clear its drop timer, and evict it from the
@@ -404,6 +429,72 @@ function createVaultHuman(deps) {
   }
 
   /**
+   * Mint the per-open picker context for an ACCEPTED gesture (replaces any live one for the tab).
+   * @param {{ wcId: number, origin: string, certOverride: boolean }} arg
+   * @returns {{ id: string, wcId: number, origin: string, certOverride: boolean }}
+   */
+  function mintContext({ wcId, origin, certOverride }) {
+    return contexts.mint({ wcId, origin, certOverride });
+  }
+
+  /**
+   * The ONE context gate of the chrome-facing vault operations: a live context for this tab and id
+   * (`missing` / `stale`), when `checkOrigin` the tab still at the context's COMMITTED origin (`origin`), and
+   * - leg `vault-picker-controls` - a context whose tab's navigation carries a certificate override is refused
+   * (`certificate`) until the operator has acknowledged the warning (`acknowledgeCertificate`). Only the
+   * acknowledge handler passes `allowUnacknowledged`. A refusal writes one trace line (a reason only).
+   * @param {number} wcId
+   * @param {unknown} contextId
+   * @param {{ checkOrigin?: boolean, allowUnacknowledged?: boolean }} [opts]
+   * @returns {{ ok: true, context: any } | { ok: false, reason: 'missing' | 'stale' | 'origin' | 'certificate' }}
+   */
+  function requireContext(wcId, contextId, { checkOrigin = false, allowUnacknowledged = false } = {}) {
+    const found = /** @type {any} */ (contexts.lookup(wcId, contextId));
+    if (!found.ok) {
+      _gestureTrace(`[vault-gesture] context-refused reason=${found.reason}`);
+      return found;
+    }
+    if (found.context.certOverride && !found.context.acknowledged && !allowUnacknowledged) {
+      _gestureTrace('[vault-gesture] context-refused reason=certificate');
+      return { ok: false, reason: 'certificate' };
+    }
+    if (checkOrigin) {
+      const wc = deps.fromId(wcId);
+      const now = wc && typeof wc.getURL === 'function' ? committedOriginOf(wc.getURL()) : null;
+      if (now === null || now !== found.context.origin) {
+        _gestureTrace('[vault-gesture] context-refused reason=origin');
+        return { ok: false, reason: 'origin' };
+      }
+    }
+    return found;
+  }
+
+  /**
+   * The operator acknowledged the certificate warning for this picker open: set the acknowledged bit on the
+   * main-held context. Looks the context up WITHOUT the certificate clause (it is the one thing that lifts
+   * it) but with the origin check (a page that has since navigated has no open to acknowledge).
+   * @param {number} wcId
+   * @param {unknown} contextId
+   * @returns {{ ok: boolean }}
+   */
+  function acknowledgeCertificate(wcId, contextId) {
+    const gate = /** @type {any} */ (requireContext(wcId, contextId, { checkOrigin: true, allowUnacknowledged: true }));
+    if (!gate.ok) return { ok: false };
+    gate.context.acknowledged = true;
+    return { ok: true };
+  }
+
+  /** Drop a tab's picker context (a fill used it, navigation, tab lifecycle). @param {number} wcId */
+  function dropContext(wcId) {
+    return contexts.drop(wcId);
+  }
+
+  /** Drop every context belonging to the given tabs (a dismissed picker / unlock sheet of one window). @param {Iterable<number>} wcIds */
+  function dropContextsForTabs(wcIds) {
+    return contexts.dropMany(wcIds);
+  }
+
+  /**
    * The picker model for the tab: the badged, metadata-only reachable items, LOGINS
    * FIRST, then CARDS (issue #152), then IDENTITY (M21 F3 Leg 3, DD7). `[]` for a
    * burner (no persistent jar), a bad/empty URL, or a locked/uncreated vault — all
@@ -417,10 +508,14 @@ function createVaultHuman(deps) {
    * at the merge point, rather than inside the store: the login row's key set is
    * pinned as a metadata-only guard by vault-store-reachable.test.js, and this is
    * presentation routing for the unified picker, not vault metadata.
+   * Mission 23 Flight 1 (`vault-fill-trust`): requires a live picker context for this tab and id
+   * (an unrecognised or missing one reads as `[]`, the same answer a burner gets).
    * @param {number} wcId
+   * @param {string} contextId
    * @returns {Array<any>}
    */
-  function reachableItems(wcId) {
+  function reachableItems(wcId, contextId) {
+    if (!requireContext(wcId, contextId).ok) return [];
     const origin = tabOriginFor(wcId);
     if (!origin) return [];
     const jar = tabJarFor(wcId);
@@ -455,10 +550,87 @@ function createVaultHuman(deps) {
    * any fill delegate. On success the
    * credential is built + consumed HERE and `{ filled: true }` (no secret) is
    * returned.
-   * @param {{ wcId: number, vaultId: string, itemId: string }} sel
+   *
+   * Mission 23 Flight 1 (`vault-fill-trust`), checked BEFORE every other gate: a live picker context
+   * for this tab and id (`no-context`), and the tab still at the context's committed origin for EVERY
+   * item type (`origin-changed`) - a card or identity is not origin-MATCHED to the site, but it must
+   * still go to the page the operator was looking at when the picker rose. A fill that succeeds consumes
+   * the context; a refused one (including `locked`) leaves it for the re-raised picker.
+   *
+   * Leg `vault-picker-controls` (DD6): a CARD or IDENTITY on a site not among the item's confirmed origins
+   * fills nothing, records `{ vaultId, itemId }` as pending on the context and answers `confirm-needed`.
+   * The confirm is an explicit, distinct call - `confirm: true`, sent only by the chrome's confirmation view
+   * - and fills only when the pending record matches this item; any other call on an unconfirmed origin
+   * overwrites pending and asks again (so a lock between the question and the answer can never turn a plain
+   * re-pick into a fill). After a confirmed fill the origin is recorded. A login never takes this step.
+   * @param {{ wcId: number, vaultId: string, itemId: string, contextId: string, confirm?: boolean }} sel
    * @returns {{ filled: boolean, reason?: string }}
    */
-  function fillHuman({ wcId, vaultId, itemId }) {
+  function fillHuman({ wcId, vaultId, itemId, contextId, confirm }) {
+    const gate = /** @type {any} */ (requireContext(wcId, contextId, { checkOrigin: true }));
+    if (!gate.ok) return { filled: false, reason: gateReason(gate.reason) };
+    const result = fillHumanChecked({ wcId, vaultId, itemId, context: gate.context, confirm: confirm === true });
+    if (result.filled) contexts.drop(wcId);
+    return result;
+  }
+
+  /**
+   * The chrome-facing refusal word for a context-gate refusal (the two mappings, `fillHuman` and
+   * `fillGenerated`, share it).
+   * @param {string} reason
+   * @returns {string}
+   */
+  function gateReason(reason) {
+    if (reason === 'origin') return 'origin-changed';
+    if (reason === 'certificate') return 'certificate';
+    return 'no-context';
+  }
+
+  /**
+   * The confirmation rule for a card / identity (leg `vault-picker-controls`). Returns null when the fill may
+   * proceed (the item's confirmed origins already list the context's origin, OR this is the explicit confirm
+   * for exactly the item the context has pending); otherwise records `{ vaultId, itemId }` as pending and
+   * returns the `confirm-needed` answer.
+   * @param {any} context
+   * @param {string} vaultId
+   * @param {any} item
+   * @param {boolean} confirm
+   * @returns {{ filled: false, reason: 'confirm-needed' } | null}
+   */
+  function confirmationNeeded(context, vaultId, item, confirm) {
+    if (readConfirmedOrigins(item).includes(context.origin)) return null;
+    const pending = context.pending;
+    if (confirm === true && pending && pending.vaultId === vaultId && pending.itemId === item.id) return null;
+    context.pending = { vaultId, itemId: item.id };
+    return { filled: false, reason: 'confirm-needed' };
+  }
+
+  /**
+   * After a CONFIRMED fill: record the context's origin on the item (a no-op when already listed) and clear
+   * the pending record. The fill was already sent, so a store failure (busy during a rotation, a disk error)
+   * is traced WITHOUT item data and never fails the fill.
+   * @param {any} context
+   * @param {string} vaultId
+   * @param {any} item
+   */
+  function recordConfirmed(context, vaultId, item) {
+    context.pending = null;
+    if (readConfirmedOrigins(item).includes(context.origin)) return;
+    try {
+      const store = deps.getVaultStore();
+      if (typeof store.recordConfirmedOrigin === 'function')
+        store.recordConfirmedOrigin(vaultId, item.id, context.origin);
+    } catch (err) {
+      _trace('confirmed-origin-record-failed', { name: err && /** @type {any} */ (err).name });
+    }
+  }
+
+  /**
+   * The pre-existing fill body (everything `fillHuman`'s doc above lists), run only after the context gate.
+   * @param {{ wcId: number, vaultId: string, itemId: string, context: any, confirm: boolean }} sel
+   * @returns {{ filled: boolean, reason?: string }}
+   */
+  function fillHumanChecked({ wcId, vaultId, itemId, context, confirm }) {
     const store = deps.getVaultStore();
 
     // (1) locked (covers a lock BETWEEN pick and fill — DD6: re-prompt, don't error).
@@ -500,6 +672,8 @@ function createVaultHuman(deps) {
       // unlocked, persistent jar, jar scope — has already run, and the fill still
       // requires the explicit per-fill operator selection that got us here.
       if (!deps.fillCardDelegate) return { filled: false, reason: 'ineligible' };
+      const ask = confirmationNeeded(context, vaultId, item, confirm);
+      if (ask) return ask;
       deps.fillCardDelegate({
         wcId,
         card: {
@@ -509,6 +683,7 @@ function createVaultHuman(deps) {
           cvv: item.cvv
         }
       });
+      recordConfirmed(context, vaultId, item);
       return { filled: true };
     }
 
@@ -518,10 +693,13 @@ function createVaultHuman(deps) {
       // Every other gate above — unlocked, persistent jar, jar scope — has
       // already run.
       if (!deps.fillIdentityDelegate) return { filled: false, reason: 'ineligible' };
+      const ask = confirmationNeeded(context, vaultId, item, confirm);
+      if (ask) return ask;
       /** @type {any} */
       const identity = {};
       for (const field of IDENTITY_FIELDS) identity[field] = item[field];
       deps.fillIdentityDelegate({ wcId, identity });
+      recordConfirmed(context, vaultId, item);
       return { filled: true };
     }
 
@@ -553,10 +731,25 @@ function createVaultHuman(deps) {
    * effect — `webContents.fromId(wcId)?.send('vault-fill-generated',
    * { candidates })`) and returns `{ filled: true }`. The return NEVER carries
    * a candidate — the chrome never receives or holds the generated password.
+   *
+   * Mission 23 Flight 1 (`vault-fill-trust`): the same context gate as `fillHuman`, first, including the
+   * committed-origin equality; a successful fill consumes the context.
+   * @param {{ wcId: number, candidates: string[], contextId: string }} arg
+   * @returns {{ filled: boolean, reason?: string }}
+   */
+  function fillGenerated({ wcId, candidates, contextId }) {
+    const gate = /** @type {any} */ (requireContext(wcId, contextId, { checkOrigin: true }));
+    if (!gate.ok) return { filled: false, reason: gateReason(gate.reason) };
+    const result = fillGeneratedChecked({ wcId, candidates });
+    if (result.filled) contexts.drop(wcId);
+    return result;
+  }
+
+  /**
    * @param {{ wcId: number, candidates: string[] }} arg
    * @returns {{ filled: boolean, reason?: string }}
    */
-  function fillGenerated({ wcId, candidates }) {
+  function fillGeneratedChecked({ wcId, candidates }) {
     const store = deps.getVaultStore();
     const jar = tabJarFor(wcId);
     const origin = tabOriginFor(wcId);
@@ -1715,6 +1908,9 @@ function createVaultHuman(deps) {
             brand: rec.brand ?? existing.brand,
             last4: rec.last4 ?? existing.last4
           };
+          // A different card number is a different card: its confirmed sites do not carry over (it asks
+          // again everywhere). An unchanged number keeps them (leg `vault-picker-controls`).
+          if (number !== existing.number) delete cardItem.confirmedOrigins;
         } else {
           if (typeof vaultId !== 'string' || !rec.choices.includes(vaultId)) {
             return { saved: false, reason: 'invalid-vault' };
@@ -1875,6 +2071,7 @@ function createVaultHuman(deps) {
    * @returns {CaptureRecord[]}
    */
   function dropCapturesForTab(wcId) {
+    contexts.drop(wcId); // Mission 23 Flight 1: the tab's picker context goes with its captures.
     const dropped = [];
     for (const id of [...captures.keys()]) {
       const rec = captures.get(id);
@@ -1897,6 +2094,7 @@ function createVaultHuman(deps) {
    */
   function dropCapturesForWindow(chromeId) {
     const wcIds = new Set(deps.tabWcIdsForChrome ? deps.tabWcIdsForChrome(chromeId) : []);
+    contexts.dropMany(wcIds); // Mission 23 Flight 1: window close drops its tabs' picker contexts too.
     const dropped = [];
     for (const id of [...captures.keys()]) {
       const rec = captures.get(id);
@@ -1928,6 +2126,11 @@ function createVaultHuman(deps) {
     reachableItems,
     fillHuman,
     fillGenerated,
+    mintContext,
+    requireContext,
+    acknowledgeCertificate,
+    dropContext,
+    dropContextsForTabs,
     capture,
     captureCard,
     captureIdentity,

@@ -2,12 +2,14 @@
 
 const { effectiveAfterRestartFromConfigured } = require('./third-party-cookies');
 const { relaunchOptions } = require('./relaunch-options');
+const { projectSettingsForChrome, chromeSettingsGet } = require('./settings-chrome-view');
 
 // Electron-free registration for chrome-trusted settings reads and the guarded
 // goldfinch://settings mutation/automation surface.
 
 function registerSettingsIpc({
   ipcMain,
+  gate,
   registerInternalHandler,
   settings,
   shields,
@@ -31,18 +33,18 @@ function registerSettingsIpc({
   adminEnabled,
   defaultBrowser,
   app,
-  registry,
   env = process.env
 }) {
-  const broadcastSettings = () => broadcast('settings-changed', settings.getAll());
+  // DD13: the chrome never receives the automation key hashes; see settings-chrome-view.js.
+  const broadcastSettings = () => broadcast('settings-changed', projectSettingsForChrome(settings.getAll()));
 
-  ipcMain.handle('settings-get', (_event, key) => (key ? settings.get(key) : settings.getAll()));
-  ipcMain.handle('shields-get', () => shields.get());
+  gate.chrome.handle('settings-get', (_event, key) => chromeSettingsGet(settings, key), 'throw');
+  gate.chrome.handle('shields-get', () => shields.get(), 'throw');
   // Sortie 02 DD4: read-only, non-secret, process-constant startup decision (bare: consumed
   // by both the file:// chrome and the internal settings page). `operatorOverride` lets the UI
   // compute restart-pending as "would a restart change anything".
   const isolationState = () => ({ isolateEffective, operatorOverride });
-  ipcMain.handle('shields-isolation-state', isolationState);
+  gate.chrome.handle('shields-isolation-state', isolationState, 'throw');
 
   // Sortie 02 DD11: Restart now. STATE-CHANGING (relaunches the process), so it is guarded:
   // (chrome channel) sender identity via the window registry; (both) a main-side business gate
@@ -81,23 +83,31 @@ function registerSettingsIpc({
     }
     return { ok: true };
   }
-  ipcMain.handle('shields-restart-to-apply', (event) => {
-    if (!registry || !registry.getWindowForChrome(event && event.sender)) {
-      return { ok: false, reason: 'refused' };
-    }
-    return restartToApply();
+  // Mission 23 Flight 1 (`ipc-gate-complete`): chrome class; a refused caller gets the refusal
+  // shape the handler always returned. No arguments, and the main-side `not-pending` gate stays
+  // inside `restartToApply`.
+  gate.chrome.handle('shields-restart-to-apply', () => restartToApply(), {
+    value: { ok: false, reason: 'refused' }
   });
-  ipcMain.handle('shields-set', (_event, patch) => {
-    const config = shields.set(patch || {});
-    broadcast('shields-changed', config);
-    return config;
-  });
-  ipcMain.handle('shields-pause', (_event, payload) => {
-    const { site, paused } = /** @type {any} */ (payload || {});
-    const config = shields.setPaused(site, paused);
-    broadcast('shields-changed', config);
-    return config;
-  });
+  gate.chrome.handle(
+    'shields-set',
+    (_event, patch) => {
+      const config = shields.set(patch || {});
+      broadcast('shields-changed', config);
+      return config;
+    },
+    'throw'
+  );
+  gate.chrome.handle(
+    'shields-pause',
+    (_event, payload) => {
+      const { site, paused } = /** @type {any} */ (payload || {});
+      const config = shields.setPaused(site, paused);
+      broadcast('shields-changed', config);
+      return config;
+    },
+    'throw'
+  );
 
   registerInternalHandler(ipcMain, 'internal-settings-get', (_event, key) =>
     key ? settings.get(key) : settings.getAll()
@@ -212,16 +222,26 @@ function registerSettingsIpc({
     return { ok: true };
   });
 
-  ipcMain.handle('automation:get-activity', () => {
-    const server = getMcpServer();
-    return server ? server.getActivity() : { sessions: [], log: [] };
-  });
+  // Chrome OR internal page (the indicator and the automation page both read it): a positive
+  // class, not a deliberately-open channel.
+  gate.chromeOrInternal.handle(
+    'automation:get-activity',
+    () => {
+      const server = getMcpServer();
+      return server ? server.getActivity() : { sessions: [], log: [] };
+    },
+    'throw'
+  );
 
-  ipcMain.handle('chrome-clipboard-write', (_event, text) => {
-    clipboard.writeText(String(text == null ? '' : text));
-  });
+  gate.chrome.handle(
+    'chrome-clipboard-write',
+    (_event, text) => {
+      clipboard.writeText(String(text == null ? '' : text));
+    },
+    'throw'
+  );
 
-  ipcMain.on('unpin-toolbar-item', (_event, item) => {
+  gate.chrome.on('unpin-toolbar-item', (_event, item) => {
     if (item !== 'media' && item !== 'shields' && item !== 'devtools') return;
     settings.set('toolbarPins', { ...settings.get('toolbarPins'), [item]: false });
     broadcastSettings();
@@ -232,7 +252,7 @@ function registerSettingsIpc({
   // broadcasts itself (CLAUDE.md's "any handler mutating settings directly must
   // broadcast settings-changed itself" rule). The Settings checkbox and the
   // shortcut converge on this SAME stored value — no divergent state.
-  ipcMain.on('toggle-bookmarks-bar', () => {
+  gate.chrome.on('toggle-bookmarks-bar', () => {
     settings.set('bookmarksBarEnabled', !settings.get('bookmarksBarEnabled'));
     broadcastSettings();
   });
@@ -244,16 +264,20 @@ function registerSettingsIpc({
   // broadcast-invariant net's detection half is a call-shape regex (squawk
   // 0003) — and broadcastSettings() is this handler's own call, per CLAUDE.md's
   // "any handler mutating settings directly must broadcast itself" rule.
-  ipcMain.handle('chrome-welcome-set', (_event, { key, value }) => {
-    if (key !== 'homePage' && key !== 'searchEngine') return { ok: false, error: 'unknown key' };
-    try {
-      settings.set(key, value);
-      broadcastSettings();
-      return { ok: true };
-    } catch (e) {
-      return { ok: false, error: String(e && e.message) };
-    }
-  });
+  gate.chrome.handle(
+    'chrome-welcome-set',
+    (_event, { key, value }) => {
+      if (key !== 'homePage' && key !== 'searchEngine') return { ok: false, error: 'unknown key' };
+      try {
+        settings.set(key, value);
+        broadcastSettings();
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: String(e && e.message) };
+      }
+    },
+    'throw'
+  );
 }
 
 module.exports = { registerSettingsIpc };

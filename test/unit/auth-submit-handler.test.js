@@ -9,6 +9,7 @@
 
 const { withOverlaySenderLookup } = require('../helpers/fake-overlay-registry');
 const { test } = require('node:test');
+const { makeTestGate } = require('../helpers/ipc-gate-fixture');
 const assert = require('node:assert/strict');
 
 const { registerOverlayIpc } = require('../../src/main/register-overlay-ipc');
@@ -56,7 +57,7 @@ function makeHarness({ delegateResult = { answered: true } } = {}) {
   };
 
   registerOverlayIpc({
-    ipcMain,
+    gate: makeTestGate({ ipcMain, registry, autoFrame: true }),
     registry,
     chromeForAttachment: () => null,
     chromeForTab: () => null,
@@ -70,9 +71,10 @@ function makeHarness({ delegateResult = { answered: true } } = {}) {
 
 test('registration is gated on the injection — absent delegate registers no handler', () => {
   const ipcMain = makeIpc();
+  const gateRegistry = withOverlaySenderLookup({ records: () => [], getWindowForChrome: () => null });
   registerOverlayIpc({
-    ipcMain,
-    registry: withOverlaySenderLookup({ records: () => [], getWindowForChrome: () => null }),
+    gate: makeTestGate({ ipcMain, registry: gateRegistry, autoFrame: true }),
+    registry: gateRegistry,
     chromeForAttachment: () => null,
     chromeForTab: () => null,
     sanitizeActivatedValue: () => undefined
@@ -122,9 +124,10 @@ test('a throwing delegate still zeroizes BOTH arrays (finally runs) and rejects 
     }
   };
   let seenBuf = null;
+  const gateRegistry = withOverlaySenderLookup({ records: () => [rec], getWindowForChrome: () => null });
   registerOverlayIpc({
-    ipcMain,
-    registry: withOverlaySenderLookup({ records: () => [rec], getWindowForChrome: () => null }),
+    gate: makeTestGate({ ipcMain, registry: gateRegistry, autoFrame: true }),
+    registry: gateRegistry,
     chromeForAttachment: () => null,
     chromeForTab: () => null,
     sanitizeActivatedValue: () => undefined,

@@ -29,6 +29,8 @@ interface MenuOverlayInitPayload {
    * own guest (the locked-vault unlock-to-save prompt, spawned by a submit that also
    * navigates the page). Absent/false = the ordinary blur-dismissable behavior. */
   keepFocus?: boolean;
+  /** Leg `vault-picker-controls`: the vault picker's destination display string (the "Fill on ..." line). */
+  destination?: string;
 }
 
 interface MenuOverlayBridge {

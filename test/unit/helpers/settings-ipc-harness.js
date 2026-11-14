@@ -1,6 +1,7 @@
 'use strict';
 
 const { registerSettingsIpc } = require('../../../src/main/register-settings-ipc');
+const { eventFrom, makeTestGate } = require('../../helpers/ipc-gate-fixture');
 
 function makeSettingsIpcHarness(overrides = {}) {
   const bare = new Map();
@@ -80,9 +81,11 @@ function makeSettingsIpcHarness(overrides = {}) {
     getWindowForChrome: (sender) => (sender === chromeSender ? { id: 1 } : null)
   };
 
+  const gate = makeTestGate({ ipcMain, registry });
   registerSettingsIpc({
     app,
     registry,
+    gate,
     env,
     ipcMain,
     registerInternalHandler,
@@ -135,16 +138,19 @@ function makeSettingsIpcHarness(overrides = {}) {
     values,
     clipboard,
     defaultSessionReads: () => defaultSessionReads,
-    invoke: (channel, ...args) => bare.get(channel)({}, ...args),
+    invoke: (channel, ...args) => bare.get(channel)(eventFrom(chromeSender), ...args),
     shieldsCfg,
     env,
     app,
     calls,
     fail,
     chromeSender,
-    invokeFrom: (channel, sender, ...args) => bare.get(channel)({ sender }, ...args),
+    invokeFrom: (channel, sender, ...args) => bare.get(channel)(eventFrom(sender), ...args),
+    // A raw event (e.g. a page sender with no frame) straight at the registered handler.
+    invokeRaw: (channel, event, ...args) => bare.get(channel)(event, ...args),
+    sendRaw: (channel, event, ...args) => listeners.get(channel)(event, ...args),
     invokeInternal: (channel, ...args) => internal.get(channel)({}, ...args),
-    send: (channel, ...args) => listeners.get(channel)({}, ...args)
+    send: (channel, ...args) => listeners.get(channel)(eventFrom(chromeSender), ...args)
   };
 }
 
