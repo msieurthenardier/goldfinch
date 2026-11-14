@@ -1,6 +1,6 @@
 # Flight: Page Containment
 
-**Status**: in-flight
+**Status**: landed
 
 > Architect design review: **approve with changes** (2026-11-12). Second pass: approve with changes, no blocking holes; its contradictions (picker-context model, token reuse, arming rule, allowlist wording, HAT text) are resolved in the text below. First-pass changes incorporated: clickjacking and record lifecycle in DD4/DD5/DD8, format-bump probe for DD6 (Q6), arming placement in DD7, sync registrar in DD1, store validator in DD9, `ipc-gate` split in two, Q6–Q8 added.
 **Mission**: [Security Review Remediation](../../mission.md)
@@ -214,7 +214,7 @@ CLAUDE.md and `docs/` are corrected in the leg that makes each claim true or fal
   - Original entry: `jar-isolation-and-downloads` - Media list validation and tab-bound proxy tokens (DD8), download partition / naming / gated open with executable confirmation (DD9), history title scoping (DD10, title part). Behavior specs: `cross-jar-fetch-isolation` (extended), `download-true-type`.
 - [x] `prompts-and-bounds` - *(re-scoped by operator ruling 2026-11-14; original entry kept below)* History title cap and rate limit, history address length cap, credentials removed from the address shown and stored, client-certificate picker opening with nothing selected plus arming, sign-in realm cap, history search cap. Behavior spec: `address-and-history-bounds`.
   - Original entry: `prompts-and-bounds` - Auth realm bounds, address-bar host display (DD11), arming for cert picker / cert override / auth card (DD7 consumers), history search and in-page navigation bounds (DD10), 22b disposition.
-- [ ] `hat-and-alignment` _(optional, operator opted in)_ - Guided acceptance of the surfaces automation cannot observe: vault picker (destination, no default row, arming) for a login (origin-gated, no confirmation), a card and an identity (confirmation on a new site — or on every fill if Q6 forced the fallback), plus the warning row on a certificate-override tab, download open confirmation in the popup, auth card, cert picker, address bar; includes one walk with a second window open on the same jar (shared vault and download state the operator is not looking at). Every operator action is checked against the real UI at HAT design time.
+- [x] `hat-and-alignment` _(optional, operator opted in)_ - Guided acceptance of the surfaces automation cannot observe: vault picker (destination, no default row, arming) for a login (origin-gated, no confirmation), a card and an identity (confirmation on a new site — or on every fill if Q6 forced the fallback), plus the warning row on a certificate-override tab, download open confirmation in the popup, auth card, cert picker, address bar; includes one walk with a second window open on the same jar (shared vault and download state the operator is not looking at). Every operator action is checked against the real UI at HAT design time.
 
 ---
 

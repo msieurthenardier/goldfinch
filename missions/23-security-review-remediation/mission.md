@@ -122,13 +122,13 @@ Vault cryptography primitives and key hierarchy; login origin matching; MCP Orig
 
 ## Known Issues
 
-- [ ] Web-content boundary audit was interrupted before delivering its findings — discovered at planning, affects Flight 1 scope.
+- [x] Web-content boundary audit was interrupted before delivering its findings — discovered at planning, affects Flight 1 scope.
 
 ## Flights
 
 > **Note:** These are tentative suggestions, not commitments. Flights are planned and created one at a time as work progresses. This list will evolve based on discoveries during implementation.
 
-- [ ] Flight 1: **Page containment** — opening leg: live probe of guest reach to the preload's IPC, finish the web-content audit, re-verify claims; sender classification and standing guard for every handler; vault picker gesture, prompt and fill-payload path; media proxy and download session/naming/open; history `jar_id`; spoofing and main-thread bounds. *(findings 1, 2, 4, 6, 9, 10, 14, 15, 16-history, 22)*
+- [x] Flight 1: **Page containment** — opening leg: live probe of guest reach to the preload's IPC, finish the web-content audit, re-verify claims; sender classification and standing guard for every handler; vault picker gesture, prompt and fill-payload path; media proxy and download session/naming/open; history `jar_id`; spoofing and main-thread bounds. *(findings 1, 2, 4, 6, 9, 10, 14, 15, 16-history, 22)*
 - [ ] **Checkpoint**: operator go/no-go after Flight 1 — review the completed audit and re-verified finding list, then confirm or re-scope Flights 2 and 3.
 - [ ] Flight 2: **Vault and automation boundary** — admin reach into vault and cookie values; admin-tier gate; vault file authentication, identity binding and rollback with migration; lock on suspend; clipboard; MCP port, session and audit bounds; tier documentation. *(findings 5, 11, 12, 13, 16-MCP, 17, 21)* — separate flight because the vault format change is hard to reverse and needs its own design conversation.
 - [ ] Flight 3: **Shipping and at-rest** — update notification; checksums, provenance, tag protection, immutable releases, build-token scope; fuses, switches, cookies at rest and code-on-disk dispositions; dependency bumps; final disposition table and documentation sweep. *(findings 3, 7, 8, 18, 19, 20)* — separate flight because it changes the release pipeline and repository settings rather than app behavior.

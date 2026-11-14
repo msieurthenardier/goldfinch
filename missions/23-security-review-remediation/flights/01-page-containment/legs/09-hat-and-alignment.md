@@ -1,6 +1,6 @@
 # Leg: hat-and-alignment
 
-**Status**: planned
+**Status**: completed
 **Flight**: [Page Containment](../flight.md)
 **Kind**: interactive — human acceptance test. The operator performs each step; the Flight Director presents one step at a time, waits for the result, and fixes what the operator finds before moving on. No crew agent runs this leg on its own.
 

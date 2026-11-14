@@ -926,6 +926,11 @@ body {
   overflow-y: auto;
   overflow-x: hidden;
   padding: 8px;
+  /* The list holds focus at open with NO row selected (picker + cert picker, programmatic
+     focus). The UA :focus-visible ring would box every row and read as "all selected";
+     the open sheet is the context, so the container shows no indicator. Rows keep
+     .cm-item:focus-visible. */
+  outline: none;
 }
 .vault-picker-row {
   /* .cm-item gives the flex/hover/focus base. Modern password-manager row: a credential
