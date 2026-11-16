@@ -97,6 +97,9 @@
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
+/** The error line for a cookie value main would not show without the operator's confirmation. */
+export const NOT_CONFIRMED_TEXT = 'Not shown - the confirmation was not given.';
+
 /**
  * @param {ReadonlyArray<{tag: string, attrs: Record<string, string>}>} shapes
  * @returns {SVGSVGElement}
@@ -256,7 +259,10 @@ export function createCookiesPanel({ bridge, jarId, mountEl, onError, onCountCha
         .then((result) => {
           if (token !== revealGen) return; // superseded by a later toggle on this row
           if (!result || !result.ok) {
-            onError('Could not load cookie value');
+            // Leg `admin-reach` (DD2): main asks the operator first while an admin automation session is
+            // attached; a reply that ends `not-confirmed` is a distinct, expected outcome - say so.
+            const notConfirmed = !!result && typeof result.error === 'string' && result.error.endsWith('not-confirmed');
+            onError(notConfirmed ? NOT_CONFIRMED_TEXT : 'Could not load cookie value');
             setHiddenState();
             return;
           }

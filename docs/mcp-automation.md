@@ -244,6 +244,17 @@ GUI surface — they never expose a key plaintext beyond its one-time mint revea
   `GOLDFINCH_MCP_PORT` is a **dev-only** override (ignored on a packaged binary): when honored on an
   unpackaged dev run it pins the port **exactly-or-fails-loudly** — no free-fallback — so a dev pin
   that is taken surfaces a bind error rather than silently moving.
+  **The fallback stays, and it is shown.** When the server is listening on a port other than the one
+  configured, the Automation page says so beside the port field (`Listening on 49708 — 49707 was in
+  use`) and the toolbar indicator's tooltip carries the same sentence (the indicator is hidden while no
+  key is enabled, so the page is then the only place the note appears). Both are redrawn on every bind,
+  fallback and re-bind, and cleared when the surface is switched off or re-bound to the configured port.
+  **What this does not stop**: a local program can take the configured port before Goldfinch starts and
+  will then receive whatever a client sends there, including its `Authorization` header — the fallback
+  only moves Goldfinch aside. A client whose configuration still names the configured port is the one
+  affected; the note is how the operator notices. The only strict-port options that exist are the
+  `GOLDFINCH_MCP_PORT` environment pin on an **unpackaged** build and an explicit port passed to the server
+  in tests; **a packaged build has neither**, so a packaged build always falls back.
 - **Bind status** — a status line that reads `Connected — listening on 127.0.0.1:<port>` when the
   server is bound, `Failed to bind: <error>` on a bind error (including a failed live rebind), or
   `Not running — turn on the Automation toggle to bind the surface` when the surface isn't
@@ -298,6 +309,18 @@ empty token (`Authorization: Bearer ` with nothing after it) is treated as no ke
   admin key matches **only** when the process is launched with `GOLDFINCH_AUTOMATION_ADMIN` set
   **and** an admin key has actually been minted (`automationAdminKeyHash` non-empty). With the gate
   unset, an otherwise-valid admin key is `401`'d.
+- **How the admin tier is obtained — and the only way.** Three things, all required: the launch
+  flag (`GOLDFINCH_AUTOMATION_ADMIN`), a minted admin key (`automationAdminKeyHash`, written only
+  by the mint path), and automation enabled (the persisted toggle, or the dev override). Nothing
+  else stands in for the flag. A settings call cannot write either hash (`internal-settings-set`
+  refuses `automationKeyHashes` and `automationAdminKeyHash` for every caller, admin included —
+  mint and revoke write through the store directly). A key-hash map entry named like a reserved
+  identity — `admin`, `global`, `internal`, `default`, `burner`, `burner-*` (one predicate,
+  `src/shared/reserved-ids.js`) — is never an identity: `validateKey` skips it, `mintJarKey`
+  refuses it, the store's `set` rejects it, and `load` drops it per entry (other jars' keys
+  survive) and persists the repair once. A hash planted in the stored settings document therefore
+  authenticates as nothing; before this change an `admin` entry authenticated as the admin tier
+  with no launch flag.
 
 ### Identity binding and jar-scoping
 
@@ -314,6 +337,20 @@ A request's key resolves to an **identity** — a `jarId` or the literal `admin`
   - **A session id reused under a different valid key is rejected.** If a known `Mcp-Session-Id` is
     replayed with a *different* still-valid key (or this jar's key is rotated while other valid keys
     remain), the identity no longer matches the session's bound identity → bare **401**.
+
+- **Session limits (Mission 23 Flight 2, leg `automation-bounds`).** **Each key may hold at most 8
+  sessions** (the admin key is capped the same way; `MAX_SESSIONS_PER_IDENTITY`). An `initialize` past
+  that closes ONE of that key's own sessions to make room, chosen in this order: **a session with no open
+  GET stream first, then one with no request in flight, then the lowest last-request time**. It never
+  closes another key's session. The global cap (64 sessions, answered `429`) remains the backstop. There
+  is deliberately **no idle timeout**: the SDK client this project's scripts use does not re-initialise
+  after a `404`, so an expiring session would strand a client that sat idle between calls. A client whose
+  session was evicted gets the existing **`404` `No valid session: unknown Mcp-Session-Id`** on its next
+  call and **must reconnect** (the SDK client will not do so by itself; it surfaces a thrown HTTP error and
+  its stream's reconnect also 404s). An evicted session's vault keys are zeroized exactly as on any close.
+  The SDK client opens its GET stream by default, so it is rarely the one evicted; a raw HTTP caller that
+  never opens a stream is. The session clock is monotonic (`process.hrtime`), which does not count suspended
+  time on Linux.
 
 - **A jar key sees and drives ONLY its own jar's tabs.** Jar membership is decided by **session
   object identity** — the tab's `webContents.session` must be the *same* `Session` object Electron
@@ -633,6 +670,28 @@ below.
 > identity (admin included) — matching the eval/devtools internal-exclusion guards. Page zoom and
 > print are web-content affordances; the privileged internal chrome is never a target.
 
+### What injected input can and cannot do (Mission 23 Flight 2, `automation-input`)
+
+`click`, `typeText`, `pressKey`, `dragPointer` (and the engine's raw `sendInput`) inject with
+`webContents.sendInputEvent`; to the guest that is indistinguishable from physical input, so main
+marks it. Every injection raises a per-tab count for as long as it runs plus a 50 ms trailing
+allowance (a default `dragPointer` runs 15 events x 4 ms = about 60 ms, so about 110 ms in all).
+
+| | Admin key | Jar-scoped key |
+|---|---|---|
+| Reaches the page (clicks, typing, keys; a typed login form still yields a save offer) | yes | yes |
+| Can raise the vault picker (the fill icon) | **no** - a click on the icon is `[vault-gesture] refused reason=no-real-input`; automation keeps its own login-only `vaultFill` | **no** |
+| Runs the browser's own shortcuts (Ctrl+T/W/L/F/J/P, zoom, DevTools, F6 hops, ...) | yes (it is how the chrome is driven in tests) | **no** - the key reaches the page only; also not the application menu's chords (Ctrl+Q does not quit) |
+
+Consequences to know: the operator's own click on the fill icon in a tab is ignored while
+automation is injecting into that same tab (and for 50 ms after) - they click again; for a jar key,
+the operator's own shortcut in that tab is likewise lost for that instant, and application-menu
+shortcuts in it for up to 500 ms after the last jar key injection. A jar and an admin injection
+overlapping in one tab suppress shortcuts for both. `pressKey`'s vocabulary has no F11 or F12, so
+those are not reachable by any tier. The tab-boundary Tab hop (sent by the page preload, not a
+`before-input-event` path) is not gated: a jar key's Tab past the last tabbable control can still
+move focus to the chrome.
+
 ### Observe tools (4)
 
 | Tool | Input schema | Result shape |
@@ -677,10 +736,77 @@ natively awaited.
 > high-bar, deliberately-enabled, loopback-bound, key-gated tier (`GOLDFINCH_AUTOMATION_ADMIN` env var +
 > a separately-minted admin key + the Automation-page toggle), which CAN be enabled on a packaged
 > build — builds its engine with `allowInternal:true` and **reaches** the internal session with both
-> `evaluate` and `injectScript`, by design (end-to-end testing needs to reach internal pages). The
+> `evaluate` and `injectScript`, by design (end-to-end testing needs to reach internal pages) - but what an
+> internal page's bridge hands back is **not** unrestricted: see *What each tier can reach in an internal page*
+> below. The
 > **master-password secret sheet is refused for all tiers, admin included** — resolve.js's separate,
 > ungated `isSheetContents` gate (DD3) is untouched by the admin relaxation above; neither eval tool ever
 > opts into it.
+
+### What each tier can reach in an internal page (the reveal gate)
+
+The admin tier reaches `goldfinch://` pages and can call the pages' bridge (`window.goldfinchInternal.*`)
+from `evaluate` / `injectScript`. Since Mission 23 Flight 2 (leg `admin-reach`, flight DD2) the bridge
+methods that **return a secret, mint a key or let the caller pick where an encrypted bundle is written**
+take a **native confirmation** while the threat exists. The dialog is a real OS message box parented on the
+page's window, **Cancel first and default**, naming the action and the item, and saying that an automation
+connection has been active recently and will be able to read what is shown. No automation tier can see it or answer it
+(it is not a webContents), so a script that calls the method just waits.
+
+- **Gated (and only these)**: `vaultReveal` (`internal-vault-reveal`), `vaultTotpCode`
+  (`internal-vault-totp-code`), `jarsCookiesValue` (`internal-jars-cookies-value`), `vaultExport` /
+  `vaultExportProfile` (`internal-vault-export`, `-export-profile`), `automationJarKeyMint` and
+  `automationAdminKeyMint` (`automation:jar-key-mint`, `automation:admin-key-mint`).
+- **When it applies** - either condition: (a) an **admin-identity session made a request within the last
+  ten minutes** (`ADMIN_ACTIVE_WINDOW_MS`; the stamp is written when the request passes the identity check,
+  before its body is read, so an admin call always finds the gate on for itself; a request refused 401
+  never stamps; a client that vanished without closing stops causing confirmations ten minutes after its
+  last request), or (b) script was **evaluated in the calling document** by automation
+  since it loaded (the scripted mark - a script can set a timer and outlive its session, including one the
+  idle sweep closes). The mark is dropped on a main-frame commit that is not in-page (a reload included) and
+  when the contents is destroyed. Injected clicks and keys set no mark; a reveal they drive while the session
+  is attached is caught by (a). **When neither holds, nothing changes**: no dialog in everyday use. The
+  window is sound because every admin action that could lead to a secret is itself a request, and script
+  a long request started is covered by (b) independently of (a). **The indicator may show the admin tier
+  while the gate is off**: an admin session that is attached but silent past the window is still listed as
+  a session (it is one); the gate reopens the instant it makes a request.
+- **Residual (stated, not fixed)**: a value the operator reveals while no automation is active stays in
+  the page until hidden; automation that attaches or wakes later can read what is still shown. The gate
+  governs who can *cause* a reveal, not what is already on screen.
+- **What a refusal looks like** (a spec contract): reveal `{ refused: 'not-confirmed' }`; code read
+  `{ code: null, refused: 'not-confirmed' }`; cookie value `{ ok: false, error: 'jars: cookies-value - not-confirmed' }`;
+  export `{ ok: false, canceled: true, refused: 'not-confirmed' }`; mint `{ key: null, refused: 'not-confirmed' }`
+  (nothing is written, no `settings-changed` is broadcast). The same reply comes for 'denied', 'timeout'
+  (60 s unanswered), 'busy' (one dialog per window - a second request is refused at once, never queued),
+  'gone' (the page navigated, the contents was destroyed or the window closed while it was up) and a sender
+  that is not the page's main frame.
+- **When a confirmation is refused or cancelled without the operator answering** (so a window is never
+  stranded behind a dialog the desktop did not keep modal): a request from a tab that is **not its window's
+  active tab** is refused at once as `gone`, no dialog (`evaluate` does not activate a tab - call
+  `activateTab` on the target first); a pending confirmation is cancelled as `gone` when its tab stops
+  being in front (switch, hide, close, move); and a real mouse press or key down on the window (chrome or any
+  tab) cancels it after a 400 ms grace period. Automation's own injected input does not count, so
+  injected input cannot dismiss a dialog; switching or closing the tab (by anyone, automation's `activateTab` /
+  `closeTab` included) does cancel it, and a cancel is always a refusal, never a confirmation, and stores no grant. The trace stays `decision=gone`; the vault page's per-item reads
+  answer such a cancel with `busy: true` so the page retries.
+- **One grant, scoped to an item**: once a reveal or code read of item X is confirmed, later reveals and
+  code reads of X from the same document (until its next main-frame navigation) are answered without a
+  dialog - the page asks per field and the code widget polls. Nothing else is remembered: not another item,
+  not a cookie, not an export, not a mint.
+- **A confirmed value is readable by the attached automation.** The dialog says so; that is the operator's
+  informed choice. A reveal returns the whole item, every secret field at once.
+- **Not gated, by design**: turning automation off and revoking a key (the operator's kill switch); the vault
+  list, item save and copy, access-key list, the chrome's cookie list and every chrome-class channel (none
+  returns a secret); the vault fill channels (refused by Flight 1's picker context). **`internal-settings-get`
+  still returns the automation key hashes to internal pages** - hashes of 256-bit keys, documented, not
+  gated. An admin script can also still change `vaultAutoLockMinutes` and `automationPort` (neither yields a
+  secret; both are visible in settings).
+- **A key holder can read back a password from a page it filled** (Mission 23 finding 17c): `vaultFill` is
+  login-only and never returns a password, but a key holder that fills a login form can `readDom` / `evaluate`
+  that page's own field. That is the fill feature working as designed, not an internal-bridge reach.
+- Trace: `GOLDFINCH_REVEAL_GATE_TRACE=1` prints one line per decision other than not-applicable
+  (`[reveal-gate] channel=<c> decision=<d> reason=<admin-attached|touched>`), never a name, id or path.
+  `docs/dev-testing.md` -> *Reveal gate*.
 
 ### DevTools tools (2)
 
@@ -989,7 +1115,11 @@ the live indicator + log viewer against this contract. The shape below is the de
   modifiers, e.g. `key=M+control`), `text(N chars)` for
   `typeText` (**length only — content is never logged**); `null` for ops where `targetWcId`
   already names the tab sufficiently (`enumerateTabs`, `captureWindow`, `getChromeTarget`,
-  `readDom`, etc.).
+  `readDom`, etc.). **Clipping (leg `automation-bounds`):** `op`, `errorCode` and `detail` are each
+  clipped inside the log's `record()` to **256 code points** (never splitting a surrogate pair; an
+  ellipsis marks the cut) and non-strings are coerced, so a key holder cannot park large strings in the
+  ring. `sessionId` and `identity` are stored exactly as `noteSessionOpen` recorded them (the page joins on
+  them).
 
 **Snapshot shape** (the broadcast payload **and** the on-demand read):
 

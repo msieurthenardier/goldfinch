@@ -236,6 +236,8 @@ export default [
       'src/renderer/pages/settings.js',
       // Sortie 05: goldfinch://automation's controller + the scroll-spy shared with settings.js.
       'src/renderer/pages/automation.js',
+      'src/renderer/pages/automation-key-flow.js',
+      'src/renderer/pages/automation-port-moved.js',
       'src/renderer/pages/section-scroll-spy.js',
       // vault.js (M12 Flight 3, Leg 1) is the goldfinch://vault page controller — a
       // real ES module importing its pure state-model via a flat serving-path specifier.
@@ -257,6 +259,9 @@ export default [
       // confirms + Copy-to…) — the same real-ES-module shape (`export function` needs
       // sourceType: module).
       'src/renderer/pages/vault-item-actions-controller.js',
+      // vault-secret-reads-controller.js (Mission 23 Flight 2) owns the per-field Reveal / Copy and the
+      // one-time-code poller - the same real-ES-module shape.
+      'src/renderer/pages/vault-secret-reads-controller.js',
       'src/renderer/menu-overlay.js',
       // save-prompt.js (Sortie 06) is the corner save-prompt page controller - a real ES module
       // (static import of the shared vault-capture-template builders).

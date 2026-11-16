@@ -31,6 +31,9 @@ function navEvent(url) {
 }
 
 function makeHarness({
+  // Leg `vault-lifecycle`: opt in to recording the power-lock registration and the quit lock.
+  vaultLifecycle = false,
+  vaultQuitLockThrows = false,
   restore = null,
   platform = 'linux',
   dev = false,
@@ -147,6 +150,15 @@ function makeHarness({
     // M18 F2 L4 (H2 resurface): optional post-boot-config hook — passed through so
     // the boot-config test pins its placement (after the queued-send flush).
     onChromeBooted,
+    ...(vaultLifecycle
+      ? {
+          startVaultPowerLock: () => events.push('power-lock-registered'),
+          lockVaultForQuit: () => {
+            events.push('vault-quit-lock');
+            if (vaultQuitLockThrows) throw new Error('boom');
+          }
+        }
+      : {}),
     initProfileAndStores: () => events.push('init-stores'),
     profileStores: { jars: { getDefault: () => ({ id: 'personal' }) } },
     historyStore: {
@@ -859,6 +871,37 @@ test('quit path snapshots and flushes before MCP stop, then closes stores at wil
   h.events.length = 0;
   h.appListeners.get('will-quit')();
   assert.deepEqual(h.events, ['history-close', 'appdb-close']);
+});
+
+test('leg vault-lifecycle: before-quit locks the vault AFTER the downloads flush and BEFORE the MCP stop', async () => {
+  const h = makeHarness({ restore: { windows: [{ tabs: [] }] }, vaultLifecycle: true });
+  await h.lifecycle.ready;
+  h.events.length = 0;
+  h.appListeners.get('before-quit')();
+  assert.deepEqual(h.events, [
+    'quitting:true',
+    'cancel-titles',
+    'session-write',
+    'flush-downloads',
+    'vault-quit-lock',
+    'stop-mcp'
+  ]);
+});
+
+test('leg vault-lifecycle: a throwing quit lock is logged and the MCP stop still runs', async () => {
+  const h = makeHarness({ vaultLifecycle: true, vaultQuitLockThrows: true });
+  await h.lifecycle.ready;
+  h.events.length = 0;
+  assert.doesNotThrow(() => h.appListeners.get('before-quit')());
+  assert.ok(h.events.includes('vault-quit-lock'));
+  assert.equal(h.events.at(-1), 'stop-mcp');
+});
+
+test('leg vault-lifecycle: the power lock registers once, after ready (store init first)', async () => {
+  const h = makeHarness({ vaultLifecycle: true });
+  await h.lifecycle.ready;
+  assert.equal(h.events.filter((e) => e === 'power-lock-registered').length, 1);
+  assert.ok(h.events.indexOf('init-stores') < h.events.indexOf('power-lock-registered'));
 });
 
 // ---------------------------------------------------------------------------

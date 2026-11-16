@@ -178,5 +178,5 @@ node serve-tls.mjs --port <T2> --cert-set trusted             # trusted — need
   cached for that origin in the current run; always import first, then launch
   the app.
 - Electron 44 on Linux was confirmed (Mission 20 Flight 2 Leg 1 spike, finding
-  (g)) to honour NSS user trust anchors with no other configuration — no
+  (g); last measured on Electron 44, not re-measured on 45) to honour NSS user trust anchors with no other configuration — no
   external-host fallback is needed for the trusted row.

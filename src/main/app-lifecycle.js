@@ -12,6 +12,12 @@ const HYGIENE_PURGE_MARKER = 'default-session-purge-v1';
 function registerAppLifecycle({
   app,
   gate,
+  // Leg `admin-reach` (DD2): `(wc) => void`, the scripted-document mark the dev chrome channel's engine
+  // threads (main.js builds it from the same document-marks store as the MCP engine).
+  markScripted,
+  // Leg `automation-input` (DD4): `{ begin }`, the shared injected-input counts the dev chrome channel's engine
+  // brackets its input with (main.js builds the ONE store; the dev channel's engine is non-jar).
+  injectedInput,
   sessionRuntime,
   initProfileAndStores,
   profileStores,
@@ -28,6 +34,12 @@ function registerAppLifecycle({
   downloadsStore,
   setDownloadsManager,
   getDownloadsManager,
+  // Leg `vault-lifecycle` (DD7): `() => void` - subscribes the vault's power-lock listeners; called once
+  // after `app.ready`. `() => void` - the quit lock; called first in the vault part of `before-quit`.
+  startVaultPowerLock,
+  // Leg `clipboard-and-file-modes`: `() => Promise` - the pending secret-clipboard clear; FIRST in `before-quit`.
+  flushSecretClipboard,
+  lockVaultForQuit,
   wireDownloadHandler,
   applyShields,
   applySpellcheck,
@@ -341,6 +353,11 @@ function registerAppLifecycle({
     sessionStore.load(userDataPath);
     historyRecorderForQuit = createHistoryRecorder({ store: historyStore, listJars, broadcast });
     setHistoryRecorder(historyRecorderForQuit);
+    try {
+      startVaultPowerLock?.();
+    } catch (error) {
+      logger.error('[vault-power-lock] registration failed:', error);
+    }
 
     // Mission 20 Flight 3 Leg 3 (DD8/AC7): prune old minidumps to the newest
     // 20 at every ready — after initProfileAndStores, so `app.getPath(
@@ -444,6 +461,10 @@ function registerAppLifecycle({
         // here lifts guard 5 while guard 3 has no `isSheetContents` to fire on — the sheet
         // would then be fully drivable, master-password keylogging included.
         sheetMenuFor: (contents) => registry.sheetMenuFor(contents),
+        // Leg `admin-reach` (DD2): the scripted-document mark, at this dev-only chrome channel too (it
+        // has no session, so it relies on the mark alone). Grep-pinned at BOTH createEngine sites.
+        markScripted,
+        injectedInput,
         chromeForTab,
         raiseWindowForTab,
         getHistoryReads: {
@@ -512,6 +533,16 @@ function registerAppLifecycle({
   });
 
   app.on('before-quit', () => {
+    // Leg `clipboard-and-file-modes` (DD7): FIRST, in its own try, so nothing earlier can skip it. The
+    // clipboard API is asynchronous in Electron 45: the read is started here and settles on a
+    // microtask, before the window closes that follow; a failure is logged, never fatal.
+    try {
+      Promise.resolve(flushSecretClipboard?.()).catch((error) =>
+        logger.error('[secret-clipboard] before-quit flush failed:', error)
+      );
+    } catch (error) {
+      logger.error('[secret-clipboard] before-quit flush failed:', error);
+    }
     setSessionQuitting(true);
     // Squawk 0073: cancel the continuous-snapshot debounce timer FIRST — otherwise a
     // timer armed by recent browsing could still be pending when will-quit closes
@@ -537,6 +568,14 @@ function registerAppLifecycle({
       logger.error('[session-store] before-quit snapshot write failed:', error);
     }
     getDownloadsManager()?.flushInterrupted();
+    // The vault locks at quit (leg `vault-lifecycle`, DD7), BEFORE the MCP stop: the lock's teardown
+    // zeroizes automation's vault keys and closes vault sheets, and needs the server and windows alive.
+    // `app.exit()`, `process.exit` and signals never deliver `before-quit`; process exit drops the keys anyway.
+    try {
+      lockVaultForQuit?.();
+    } catch (error) {
+      logger.error('[vault] before-quit lock failed:', error);
+    }
     getMcpServer()?.stop();
   });
 

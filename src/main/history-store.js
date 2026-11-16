@@ -25,6 +25,8 @@
 //   neither JSON store holds a live handle to close).
 
 const fs = require('fs');
+const { createFileModes } = require('./file-modes');
+const fileModes = createFileModes({ fs });
 const path = require('path');
 const { DatabaseSync } = require('node:sqlite');
 const { origin } = require('./jar-data-helpers');
@@ -267,11 +269,15 @@ function open(userDataPath) {
 
   fs.mkdirSync(userDataPath, { recursive: true });
   const dbPath = path.join(userDataPath, FILE_NAME);
+  // Owner-only: pre-create the file 0600 (so the -wal/-shm sidecars inherit it) and tighten the existing
+  // database family once, before SQLite opens anything. Best-effort; journal mode and pragmas untouched.
+  fileModes.prepareDatabaseFiles(dbPath);
 
   try {
     db = attemptOpen(dbPath);
   } catch {
     quarantineCorruptFile(dbPath);
+    fileModes.prepareDatabaseFiles(dbPath);
     db = attemptOpen(dbPath);
   }
 

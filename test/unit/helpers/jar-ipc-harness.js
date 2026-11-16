@@ -6,6 +6,7 @@ const { origin } = require('../../../src/main/jar-data-helpers');
 // Required once for the file: cache-busting this singleton while jars.js holds
 // its own reference would recreate the store-order hazard this harness avoids.
 const appDb = require('../../../src/main/app-db');
+const { makeTestRevealGate } = require('../../helpers/reveal-gate-fixture');
 
 const personal = {
   id: 'personal',
@@ -159,7 +160,9 @@ function makeHarness(
     // resolves null and these fakes are simply never called — byte-unchanged
     // behavior for every pre-leg-2 test.
     certTrust: certTrustOverride = undefined,
-    certObserver: certObserverOverride = undefined
+    certObserver: certObserverOverride = undefined,
+    // Leg `admin-reach`: a real reveal gate in a chosen state (default: not applicable).
+    revealGate = makeTestRevealGate().gate
   } = {}
 ) {
   appDb.open('', { memory: true });
@@ -233,6 +236,7 @@ function makeHarness(
   const result = registerJarIpc({
     ipcMain,
     gate,
+    revealGate,
     jars,
     session,
     rerollSeed,

@@ -58,7 +58,7 @@ const { isSafeColor } = require('../shared/safe-color');
 const { BURNER } = require('../shared/burner');
 // DD8 (M12 F3): the reserved `global` sentinel is single-sourced so it can never
 // drift from vault-store's GLOBAL_ID. Same value, one home.
-const { GLOBAL_ID } = require('../shared/reserved-ids');
+const { isReservedId } = require('../shared/reserved-ids');
 
 const FILE_NAME = 'containers.json';
 const SCHEMA_VERSION = 2;
@@ -146,16 +146,8 @@ let codec = { serialize: defaultSerialize, deserialize: defaultDeserialize };
 // access key would then unlock the shared global vault (cross-vault escalation).
 // Reserving it here means slug()/add() remap it to `jar-global` and validateContainers
 // remaps any pre-existing `global` entry, so no container id can ever collide.
-function isReservedId(id) {
-  return (
-    id === 'burner' ||
-    id.startsWith('burner-') ||
-    id === 'admin' ||
-    id === 'internal' ||
-    id === 'default' ||
-    id === GLOBAL_ID
-  );
-}
+// The predicate itself (`isReservedId`) lives in src/shared/reserved-ids.js — one
+// home shared with the automation key map, imported above.
 
 // Same validation rules as add()/validateContainers — shared so rename() cannot
 // drift from the mint-time discipline.

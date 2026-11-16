@@ -1,5 +1,8 @@
 # Probe Results — Flight 01 Leg 01, Track A
 
+> **Addendum 2026-11-14 (Flight 2, leg `electron-45`) — the body below is unchanged and describes Electron 44.10.0.** With the unchanged fixture `tests/behavior/fixtures/page-containment-probe/` and the same repo source, a page obtained the guest preload's IPC object on Electron 44.10.0 (`status.reached` true after `rescanMedia`; `q1-instrument.js` recorded 2 hits) and did **not** on Electron 45.3.2 (`reached` false; 0 hits; page `require`/`process`/`electron` undefined). Inference, not proven: Electron 45 moved sandboxed preloads to a native EventEmitter, so the dispatch no longer passes through a page-patchable `Array.prototype.push`. **Not proven closed** — no other route was searched for. Operator ruling: the main-side caller class stays the boundary; the two dependent behavior specs were re-authored to record the reach per runtime.
+
+
 Measurements of our own isolation boundaries (DD12 framing): each probe asks "does this boundary hold", records the observation and stops. Nothing observed was used. Host: Linux/WSL2, Electron 44.10.0 (Chromium 152.0.7977.169), WSLg Wayland. Run 2026-11-13.
 
 ## Verdicts

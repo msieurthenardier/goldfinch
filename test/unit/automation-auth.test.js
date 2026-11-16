@@ -150,3 +150,34 @@ test('validateKey — never throws on malformed ctx', () => {
   assert.equal(validateKey('k', { keyHashes: { bad: /** @type {any} */ ('not-hex') } }), null);
   assert.equal(validateKey('k', {}), null);
 });
+
+// ---------------------------------------------------------------------------
+// Reserved key-map entries (Mission 23 F2, leg admin-key-name): the launch flag is the
+// only door to the admin tier — a hash stored under a reserved identity name never
+// authenticates as that identity (or any).
+// ---------------------------------------------------------------------------
+
+for (const name of ['admin', 'global', 'internal', 'default', 'burner', 'burner-9']) {
+  test(`validateKey — a key whose hash is stored under "${name}" resolves to null`, () => {
+    const key = generateKey();
+    const ctx = { keyHashes: { [name]: hashKey(key) }, adminEnabled: false, adminKeyHash: '' };
+    assert.equal(validateKey(key, ctx), null);
+    // Even with the admin gate on and a different real admin hash, the map entry grants nothing.
+    assert.equal(validateKey(key, { ...ctx, adminEnabled: true, adminKeyHash: hashKey(generateKey()) }), null);
+  });
+}
+
+test('validateKey — "__proto__" / "constructor" own entries never resolve; a real jar beside them still does', () => {
+  const key = generateKey();
+  const jarKey = generateKey();
+  const map = JSON.parse(`{"__proto__":"${hashKey(key)}","constructor":"${hashKey(key)}","work":"${hashKey(jarKey)}"}`);
+  assert.equal(validateKey(key, { keyHashes: map }), null);
+  assert.equal(validateKey(jarKey, { keyHashes: map }), 'work');
+});
+
+test('validateKey — the real admin key still authenticates as admin under the flag; without it, as nothing', () => {
+  const adminKey = generateKey();
+  const ctx = { keyHashes: { admin: hashKey(adminKey) }, adminKeyHash: hashKey(adminKey) };
+  assert.equal(validateKey(adminKey, { ...ctx, adminEnabled: true }), 'admin');
+  assert.equal(validateKey(adminKey, { ...ctx, adminEnabled: false }), null);
+});

@@ -1,7 +1,9 @@
 'use strict';
 
 const { registerSettingsIpc } = require('../../../src/main/register-settings-ipc');
+const { createSecretClipboard } = require('../../../src/main/secret-clipboard');
 const { eventFrom, makeTestGate } = require('../../helpers/ipc-gate-fixture');
+const { makeTestRevealGate } = require('../../helpers/reveal-gate-fixture');
 
 function makeSettingsIpcHarness(overrides = {}) {
   const bare = new Map();
@@ -46,8 +48,13 @@ function makeSettingsIpcHarness(overrides = {}) {
       clipboardValue = text;
       events.push(['clipboard', text]);
     },
-    readText: () => clipboardValue
+    readText: () => clipboardValue,
+    clear: () => {
+      clipboardValue = '';
+      events.push(['clipboard-clear']);
+    }
   };
+  const secretClipboard = createSecretClipboard({ clipboard, logger: { error() {} } });
 
   const shieldsCfg = {
     enabled: true,
@@ -84,6 +91,7 @@ function makeSettingsIpcHarness(overrides = {}) {
   const gate = makeTestGate({ ipcMain, registry });
   registerSettingsIpc({
     app,
+    revealGate: overrides.revealGate || makeTestRevealGate().gate,
     registry,
     gate,
     env,
@@ -110,7 +118,7 @@ function makeSettingsIpcHarness(overrides = {}) {
     currentAutomationStatus: () => ({ enabled: true, port: values.automationPort || 0 }),
     rebindMcpServer: async () => events.push(['rebind']),
     freePortInRange: async () => 43123,
-    clipboard,
+    secretClipboard,
     jars: { list: () => [{ id: 'personal', name: 'Personal', color: '#fff' }] },
     mintJarKey: (id, store) => {
       store.set('automationKeyHashes', { [id]: 'hash' });
@@ -137,6 +145,7 @@ function makeSettingsIpcHarness(overrides = {}) {
     events,
     values,
     clipboard,
+    secretClipboard,
     defaultSessionReads: () => defaultSessionReads,
     invoke: (channel, ...args) => bare.get(channel)(eventFrom(chromeSender), ...args),
     shieldsCfg,

@@ -1391,3 +1391,84 @@ test('[HIGH] closeDevTools: internal-session REFUSED for non-admin (no allowInte
   );
   assert.equal(internalWc._closeCount, 0, 'closeDevTools must NOT run for a non-admin call on an internal guest');
 });
+
+// ---------------------------------------------------------------------------
+// Mission 23 Flight 2 (leg `admin-reach`, AC9): evaluate / injectScript mark the document BEFORE the
+// script runs, and only they do. The setter is an injected dependency; an absent one is tolerated.
+// ---------------------------------------------------------------------------
+
+test('markScripted: evaluate and injectScript call it AFTER resolve and BEFORE executeJavaScript, keyed on the target wc', async () => {
+  for (const [name, op] of [
+    ['evaluate', (id, d) => evaluate(id, '1+1', d)],
+    ['injectScript', (id, d) => injectScript(id, 'window.x = 1', d)]
+  ]) {
+    const log = [];
+    const guestWc = makeEvalGuestWc(410, 2);
+    const origExec = guestWc.executeJavaScript.bind(guestWc);
+    guestWc.executeJavaScript = async (code) => {
+      log.push('exec');
+      return origExec(code);
+    };
+    const fromId = makeFakeFromId({ 410: guestWc });
+    const deps = {
+      fromId: (id) => {
+        log.push('resolve');
+        return fromId(id);
+      },
+      chromeContents: null,
+      markScripted: (wc) => log.push(['mark', wc.id])
+    };
+    await op(410, deps);
+    const markAt = log.findIndex((e) => Array.isArray(e));
+    assert.ok(markAt > log.indexOf('resolve'), name + ': marked after resolve');
+    assert.ok(markAt < log.indexOf('exec'), name + ': marked before the script runs');
+    assert.deepEqual(log[markAt], ['mark', 410]);
+  }
+});
+
+test('markScripted: the mark stands when the script throws; a refused resolve marks nothing', async () => {
+  const marked = [];
+  const guestWc = makeEvalGuestWc(411, 1);
+  guestWc.executeJavaScript = async () => {
+    throw new Error('page threw');
+  };
+  const deps = {
+    fromId: makeFakeFromId({ 411: guestWc }),
+    chromeContents: null,
+    markScripted: (wc) => marked.push(wc.id)
+  };
+  await assert.rejects(() => evaluate(411, 'throw 1', deps), /page threw/);
+  assert.deepEqual(marked, [411]);
+  await assert.rejects(() => evaluate(999, 'x', deps));
+  assert.deepEqual(marked, [411], 'resolve refused the contents - nothing marked');
+});
+
+test('markScripted: absent setter is tolerated (existing unit constructions unchanged); a throwing setter fails the op before the script', async () => {
+  const guestWc = makeEvalGuestWc(412, 5);
+  assert.equal(await evaluate(412, 'x', { fromId: makeFakeFromId({ 412: guestWc }), chromeContents: null }), 5);
+  let ran = false;
+  const wc2 = makeEvalGuestWc(413, 5);
+  wc2.executeJavaScript = async () => {
+    ran = true;
+  };
+  await assert.rejects(
+    () =>
+      evaluate(413, 'x', {
+        fromId: makeFakeFromId({ 413: wc2 }),
+        chromeContents: null,
+        markScripted: () => {
+          throw new Error('mark failed');
+        }
+      }),
+    /mark failed/
+  );
+  assert.equal(ran, false);
+});
+
+test('markScripted: no read-only op marks (readDom, readAxTree, captureScreenshot never call the setter)', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '../../src/main/automation/observe.js'), 'utf8');
+  const callers = src.match(/markScriptedDocument\(wc, deps\);/g) || [];
+  assert.equal(callers.length, 2, 'exactly evaluate and injectScript call it');
+});

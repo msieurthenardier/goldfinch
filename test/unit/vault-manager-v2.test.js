@@ -62,10 +62,10 @@ function managerPath(dir) {
 function readManager(dir) {
   return JSON.parse(fs.readFileSync(managerPath(dir), 'utf8'));
 }
-// The store's (unexported) mrk-envelope AAD for a `.gfvault` document — bound to the
+// The mrk-envelope AAD for a `.gfvault` document (the vault-crypto export) — bound to the
 // GFVAULT doc version (a separate version space from the manager's).
 function gfvaultMrkAad() {
-  return Buffer.from(`gfvault/mrk-env/v${vc.VERSION}`, 'utf8');
+  return vc.mrkEnvelopeAad(vc.WRITE_VAULT_VERSION, 'global');
 }
 // The ruled no-admin refusal: a VaultStateError carrying EXACTLY this message —
 // discriminable by the flow-wiring leg's Settings state; explicitly NOT a
@@ -132,12 +132,15 @@ async function writeManagerFixture(dir, { version, withAdmin, masterAadVersion }
   ];
   fs.writeFileSync(
     vaultPath(dir, 'global'),
-    vc.serializeVault({
-      vaultId: 'global',
-      kdf: FAST_SCRYPT,
-      envelopes: [mrkEnv],
-      items: vc.encryptItems(items, vaultKey)
-    }),
+    vc.serializeVault(
+      {
+        vaultId: 'global',
+        kdf: FAST_SCRYPT,
+        envelopes: [mrkEnv],
+        items: vc.encryptItems(items, vaultKey, vc.WRITE_VAULT_VERSION, 'global')
+      },
+      { version: vc.WRITE_VAULT_VERSION }
+    ),
     'utf8'
   );
   mrk.fill(0);

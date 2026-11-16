@@ -8,7 +8,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { createAuditLog, DEFAULT_CAPACITY } = require('../../src/main/automation/audit-log');
+const { createAuditLog, DEFAULT_CAPACITY, MAX_FIELD_CODE_POINTS } = require('../../src/main/automation/audit-log');
 
 // A controllable clock: each read returns the next queued value, or the last one
 // forever once the queue drains (so callers that read once-per-mutation get a
@@ -220,4 +220,64 @@ test('detail propagates through snapshot() and recentEntries()', () => {
   const snap = log.snapshot();
   assert.equal(snap.log[0].detail, 'url=https://example.com');
   assert.equal(snapshots[0].log[0].detail, 'url=https://example.com');
+});
+
+// Leg `automation-bounds` (AC7): clipping lives inside record(), so no caller can skip it.
+test('record clips op / errorCode / detail to 256 code points with an ellipsis; a megabyte detail stores 256', () => {
+  const log = createAuditLog({ now: fakeClock([1]) });
+  const big = 'x'.repeat(1024 * 1024);
+  log.record({
+    identity: 'admin',
+    sessionId: 's',
+    op: big,
+    targetWcId: null,
+    outcome: 'error',
+    errorCode: big,
+    detail: big
+  });
+  const [e] = log.recentEntries();
+  for (const f of [e.op, e.errorCode, e.detail]) {
+    assert.equal(Array.from(f).length, MAX_FIELD_CODE_POINTS);
+    assert.equal(f.endsWith('\u2026'), true);
+  }
+  assert.equal(MAX_FIELD_CODE_POINTS, 256);
+});
+
+test('clipping never splits a surrogate pair, and a field at exactly the cap is stored whole', () => {
+  const log = createAuditLog({ now: fakeClock([1]) });
+  const emoji = '\u{1F600}'.repeat(400);
+  log.record({ identity: 'a', sessionId: 's', op: 'o', targetWcId: null, outcome: 'ok', detail: emoji });
+  const [e] = log.recentEntries();
+  assert.equal(Array.from(e.detail).length, 256);
+  assert.equal(e.detail, '\u{1F600}'.repeat(255) + '\u2026', 'whole emoji, then the ellipsis');
+  const exact = 'y'.repeat(256);
+  const exactEmoji = '\u{1F600}'.repeat(256);
+  log.record({ identity: 'a', sessionId: 's', op: exact, targetWcId: null, outcome: 'ok', detail: exactEmoji });
+  const e2 = log.recentEntries()[1];
+  assert.equal(e2.op, exact);
+  assert.equal(e2.detail, exactEmoji, '256 code points (512 units) is not clipped');
+});
+
+test('clipping coerces non-strings, keeps null, and leaves sessionId / identity byte-identical', () => {
+  const log = createAuditLog({ now: fakeClock([1]) });
+  const sid = 's'.repeat(300);
+  const ident = 'j'.repeat(300);
+  log.noteSessionOpen(sid, ident);
+  // @ts-ignore deliberately wrong types
+  log.record({
+    identity: ident,
+    sessionId: sid,
+    op: 12345,
+    targetWcId: null,
+    outcome: 'ok',
+    errorCode: 7,
+    detail: null
+  });
+  const [e] = log.recentEntries();
+  assert.equal(e.op, '12345');
+  assert.equal(e.errorCode, '7');
+  assert.equal(e.detail, null);
+  assert.equal(e.sessionId, sid);
+  assert.equal(e.identity, ident);
+  assert.equal(log.activeSessions()[0].sessionId, sid, 'the join key matches what noteSessionOpen recorded');
 });

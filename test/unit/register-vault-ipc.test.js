@@ -15,6 +15,7 @@ const path = require('node:path');
 const { registerVaultIpc } = require('../../src/main/register-vault-ipc');
 const { registerInternalHandler } = require('../../src/main/internal-ipc');
 const vs = require('../../src/main/vault/vault-store');
+const { makeTestRevealGate } = require('../helpers/reveal-gate-fixture');
 
 const FAST_SCRYPT = { algo: 'scrypt', N: 2 ** 12, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 const MASTER = 'correct horse battery staple';
@@ -65,6 +66,7 @@ function wire({ store = makeStore(), jarsList = [], getCompromiseReport, clearCo
   const ipcMain = makeFakeIpcMain();
   registerVaultIpc({
     ipcMain,
+    revealGate: makeTestRevealGate().gate,
     registerInternalHandler,
     getVaultStore: () => store,
     jars: { list: () => jarsList },
@@ -85,6 +87,7 @@ async function realHarness({ broadcastVaultLockState } = {}) {
   const ipcMain = makeFakeIpcMain();
   registerVaultIpc({
     ipcMain,
+    revealGate: makeTestRevealGate().gate,
     registerInternalHandler,
     getVaultStore: () => store,
     jars: { list: () => REAL_JARS },
@@ -163,7 +166,13 @@ test('internal-vault-lock drives the REAL store lockNow → onLock (the single v
     });
     await store.setup({ masterPassword: MASTER }); // set up + unlocked
     const ipcMain = makeFakeIpcMain();
-    registerVaultIpc({ ipcMain, registerInternalHandler, getVaultStore: () => store, jars: { list: () => REAL_JARS } });
+    registerVaultIpc({
+      ipcMain,
+      revealGate: makeTestRevealGate().gate,
+      registerInternalHandler,
+      getVaultStore: () => store,
+      jars: { list: () => REAL_JARS }
+    });
 
     const res = ipcMain.invoke('internal-vault-lock', vaultEvent());
     assert.deepEqual(res, { ok: true });
@@ -382,7 +391,9 @@ test('a LOCKED store surfaces every CRUD channel as structured { locked: true } 
     store.lockNow();
     const ev = vaultEvent();
     assert.deepEqual(ipcMain.invoke('internal-vault-list', ev, 'global'), { locked: true });
-    assert.deepEqual(ipcMain.invoke('internal-vault-reveal', ev, { vaultId: 'global', itemId: 'x' }), { locked: true });
+    assert.deepEqual(await ipcMain.invoke('internal-vault-reveal', ev, { vaultId: 'global', itemId: 'x' }), {
+      locked: true
+    });
     assert.deepEqual(
       ipcMain.invoke('internal-vault-item-save', ev, {
         vaultId: 'global',
@@ -511,12 +522,15 @@ test('internal-vault-reveal returns the secret ONLY for the requested id; delete
       origin: 'https://b',
       password: 'pwB'
     });
-    const rev = ipcMain.invoke('internal-vault-reveal', vaultEvent(), { vaultId: 'global', itemId: a.id });
+    const rev = await ipcMain.invoke('internal-vault-reveal', vaultEvent(), { vaultId: 'global', itemId: a.id });
     assert.equal(rev.item.password, 'pwA');
     assert.equal(JSON.stringify(rev.item).includes('pwB'), false, 'reveal is single-id scoped');
-    assert.deepEqual(ipcMain.invoke('internal-vault-reveal', vaultEvent(), { vaultId: 'global', itemId: 'nope' }), {
-      item: null
-    });
+    assert.deepEqual(
+      await ipcMain.invoke('internal-vault-reveal', vaultEvent(), { vaultId: 'global', itemId: 'nope' }),
+      {
+        item: null
+      }
+    );
 
     assert.deepEqual(ipcMain.invoke('internal-vault-item-delete', vaultEvent(), { vaultId: 'global', itemId: b.id }), {
       deleted: true
@@ -667,6 +681,7 @@ test('internal-vault-export builds a ciphertext-only bundle from the store and h
     const ipcMain = makeFakeIpcMain();
     registerVaultIpc({
       ipcMain,
+      revealGate: makeTestRevealGate().gate,
       registerInternalHandler,
       getVaultStore: () => store,
       jars: { list: () => REAL_JARS },
@@ -703,6 +718,7 @@ test('internal-vault-export on a LOCKED manager returns { locked: true } (never 
     const ipcMain = makeFakeIpcMain();
     registerVaultIpc({
       ipcMain,
+      revealGate: makeTestRevealGate().gate,
       registerInternalHandler,
       getVaultStore: () => store,
       jars: { list: () => REAL_JARS },
@@ -731,6 +747,7 @@ test('internal-vault-export with a pre-chosen savePath forwards it to vaultSaveB
     const ipcMain = makeFakeIpcMain();
     registerVaultIpc({
       ipcMain,
+      revealGate: makeTestRevealGate().gate,
       registerInternalHandler,
       getVaultStore: () => store,
       jars: { list: () => REAL_JARS },
@@ -779,6 +796,7 @@ test('internal-vault-export-profile: carried is real NAMES (not entryHandles), a
     const ipcMain = makeFakeIpcMain();
     registerVaultIpc({
       ipcMain,
+      revealGate: makeTestRevealGate().gate,
       registerInternalHandler,
       getVaultStore: () => store,
       jars: { list: () => namedJars },
@@ -821,6 +839,7 @@ test('internal-vault-export-profile on a LOCKED manager returns { locked: true }
     const ipcMain = makeFakeIpcMain();
     registerVaultIpc({
       ipcMain,
+      revealGate: makeTestRevealGate().gate,
       registerInternalHandler,
       getVaultStore: () => store,
       jars: { list: () => REAL_JARS },
@@ -854,6 +873,7 @@ test('internal-vault-pick-save-path runs the save-location picker ONLY and retur
   const ipcMain = makeFakeIpcMain();
   registerVaultIpc({
     ipcMain,
+    revealGate: makeTestRevealGate().gate,
     registerInternalHandler,
     getVaultStore: () => store,
     jars: { list: () => [] },

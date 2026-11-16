@@ -39,7 +39,8 @@ function writeFileAtomic(destPath, buf) {
   /** @type {number | undefined} */
   let fd;
   try {
-    fd = fs.openSync(tmp, 'wx');
+    // Owner-only at creation (leg `clipboard-and-file-modes`): the rename keeps the temp file's mode.
+    fd = fs.openSync(tmp, 'wx', 0o600);
     fs.writeSync(fd, /** @type {any} */ (Buffer.isBuffer(buf) ? buf : Buffer.from(buf, 'utf8')));
     fs.fsyncSync(fd);
     fs.closeSync(fd);

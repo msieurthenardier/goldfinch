@@ -21,7 +21,7 @@
 const CAPTURE_REFUSAL_PREFIX = 'automation: capture-';
 
 /**
- * The single guest retry waits this long. Live-measured on WSLg/Electron 44: a fresh
+ * The single guest retry waits this long. Live-measured on WSLg/Electron 44 (not re-measured on 45; a 45.3.2 smoke captured 12 of 12 fresh tabs at once with no `capture-failed` refusal, 55-61 ms per capture): a fresh
  * guest's first capturable frame arrived 93-199ms after the first rejected attempt
  * (16 tabs, squawk 0155 Verification), so one retry at 250ms covers it with margin while
  * keeping a genuine failure's refusal well under the 3000ms capture-timeout budget.

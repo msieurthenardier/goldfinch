@@ -219,6 +219,66 @@ function dragEvents(from, to, steps = 12) {
 }
 
 // ---------------------------------------------------------------------------
+// The one bracket around every injection (Mission 23 Flight 2, leg `automation-input`, DD4)
+// ---------------------------------------------------------------------------
+
+/** Event types that can run an application-menu accelerator. */
+const MENU_KEY_TYPES = new Set(['keyDown', 'rawKeyDown']);
+
+/**
+ * Run `fn` (the code that calls `wc.sendInputEvent`) inside the per-tab injected-input counts
+ * (`src/main/automation/injected-input.js`, threaded as `deps.injectedInput`). `begin` is called HERE -
+ * after the caller's resolve / activate / re-resolve sequence and immediately before the first event,
+ * never across the activation wait (that would swallow the operator's own input for its whole length) -
+ * and the release runs in a `finally` (or when the returned promise settles), across every paced step.
+ * A throw before this call leaves the counts untouched. The jar tier is `deps.jarTier === true`, an
+ * explicit engine option set only at the MCP server's `getEngine` call for a non-admin identity; the
+ * dev chrome channel's engine and the admin session's engine are non-jar. A jar-tier injection that
+ * includes a key-down also has the target ignore the application menu's shortcuts for its duration
+ * (+ a hold), because Electron's default menu binds chords (Ctrl+Q) that never reach the guest's
+ * `before-input-event`. An engine built without the counts (unit tests) injects unbracketed.
+ *
+ * Every `sendInputEvent(` call in `src/main/**` must sit inside a `withInjection(` argument
+ * (source-scan pinned in `test/unit/injected-input-invariant.test.js`; `scroll` uses the debugger).
+ *
+ * @template T
+ * @param {number} wcId
+ * @param {any} deps  the engine deps (`injectedInput` and `jarTier` are the only fields read)
+ * @param {any} wc  the resolved target
+ * @param {object[]} events  the events `fn` will send (only their types are read)
+ * @param {() => T} fn
+ * @returns {T}
+ */
+function withInjection(wcId, deps, wc, events, fn) {
+  const counts = deps && deps.injectedInput;
+  if (!counts || typeof counts.begin !== 'function') return fn();
+  const jar = deps.jarTier === true;
+  const hasKey = events.some((e) => e && MENU_KEY_TYPES.has(/** @type {any} */ (e).type));
+  const release = counts.begin(wcId, { jar, menuTarget: jar && hasKey ? wc : null });
+  let result;
+  try {
+    result = fn();
+  } catch (err) {
+    release();
+    throw err;
+  }
+  if (result && typeof (/** @type {any} */ (result).then) === 'function') {
+    return /** @type {any} */ (result).then(
+      (/** @type {any} */ v) => {
+        release();
+        return v;
+      },
+      (/** @type {any} */ err) => {
+        release();
+        throw err;
+      }
+    );
+  }
+  release();
+  return result;
+}
+
+// ---------------------------------------------------------------------------
 // Low-level single-event primitive (no foreground-to-act)
 // ---------------------------------------------------------------------------
 
@@ -234,7 +294,7 @@ function dragEvents(from, to, steps = 12) {
  */
 function sendInput(wcId, event, deps) {
   const wc = resolveContents(wcId, deps);
-  wc.sendInputEvent(event);
+  withInjection(wcId, deps, wc, [event], () => wc.sendInputEvent(event));
 }
 
 // ---------------------------------------------------------------------------
@@ -268,7 +328,10 @@ async function actOn(wcId, events, deps) {
     // before acting (the discipline the rest of the module group follows).
     wc = resolveContents(wcId, deps);
   }
-  for (const ev of events) wc.sendInputEvent(ev);
+  const target = wc;
+  withInjection(wcId, deps, target, events, () => {
+    for (const ev of events) target.sendInputEvent(ev);
+  });
 }
 
 /**
@@ -295,10 +358,13 @@ async function actOnPaced(wcId, events, deps, stepDelayMs) {
     await activate(wcId);
     wc = resolveContents(wcId, deps);
   }
-  for (const ev of events) {
-    wc.sendInputEvent(ev);
-    if (stepDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, stepDelayMs));
-  }
+  const target = wc;
+  await withInjection(wcId, deps, target, events, async () => {
+    for (const ev of events) {
+      target.sendInputEvent(ev);
+      if (stepDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, stepDelayMs));
+    }
+  });
 }
 
 /**
@@ -425,6 +491,7 @@ const pressKey = (wcId, name, modifiers, deps) => actOn(wcId, keyEvents(name, mo
 // ---------------------------------------------------------------------------
 
 module.exports = {
+  withInjection,
   KEY_NAMES,
   keyEvents,
   mouseClickEvents,

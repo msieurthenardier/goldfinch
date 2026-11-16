@@ -6,13 +6,15 @@ const { stripAppToken } = require('./user-agent');
 
 // Positive allowlist: only permissions listed here are granted; everything
 // else — including permission strings that don't exist yet — is denied by
-// default. Electron 43's setPermissionRequestHandler and
-// setPermissionCheckHandler each take a DIFFERENT union of permission
-// strings (e.g. 'window-management'/'speaker-selection' are request-only;
-// 'hid'/'serial'/'usb' are check-only). This one Set is intentionally
-// shared by both handlers below — do not "fix" the apparent asymmetry by
-// splitting it; a permission irrelevant to one handler's union is simply
-// never asked of it. The shared-Set union is pinned by the unit test
+// default. On Electron 43 setPermissionRequestHandler and
+// setPermissionCheckHandler each took a DIFFERENT union of permission
+// strings (e.g. 'window-management'/'speaker-selection' were request-only;
+// 'hid'/'serial'/'usb' were check-only). Re-read on Electron 45.3.2's
+// electron.d.ts (2026-11-14): both handlers now list one IDENTICAL union
+// (including 'display-capture', 'window-management', 'hid', 'serial', 'usb'),
+// so the asymmetry is gone from the typings; the one shared Set is still the
+// right shape — do not split it. A permission irrelevant to one handler is
+// simply never asked of it. The shared-Set union is pinned by the unit test
 // 'permission allowlist denies invented/future permissions and grants
 // allowlisted members' (test/unit/session-runtime.test.js), which exercises
 // BOTH handlers against the same membership — a split would have to weaken
@@ -24,9 +26,10 @@ const ALLOWED_PERMISSIONS = new Set([
   'mediaKeySystem',
   'storage-access',
   'top-level-storage-access',
-  'speaker-selection',
-  'window-management'
+  'speaker-selection'
 ]);
+// 'window-management' left this list in Mission 23 Flight 2 (leg `port-and-permissions`, flight DD8): nothing in
+// src/ uses multi-screen placement, and a permission nobody needs is not granted silently.
 
 // Storage Access API permissions: refused while native third-party cookie
 // isolation is in force (sortie 02 DD7) — granting would tell the page
@@ -270,6 +273,12 @@ function createSessionRuntime(deps) {
   function onSessionCreated(session) {
     if (isCreatingInternalSession()) {
       session.__goldfinchInternal = true;
+      // Flight 2 DD8: with no handler Electron GRANTS (measured: notifications, geolocation, camera,
+      // microphone, window-management all 'granted' on a goldfinch:// page). Internal pages ask for nothing, so
+      // both handlers answer false for every permission, known or invented, and no `privacy-permission` message
+      // is sent (that is the web path's). Idempotent: installing twice replaces the same two handlers.
+      session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
+      session.setPermissionCheckHandler(() => false);
       return;
     }
 

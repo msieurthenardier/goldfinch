@@ -19,4 +19,39 @@
 // The global (non-jar) vault's stable id / filename base — the reserved sentinel.
 const GLOBAL_ID = 'global';
 
-module.exports = { GLOBAL_ID };
+/**
+ * The reserved identity names: ids no jar may hold and no automation key may be
+ * stored under. `burner` / `burner-*` are renderer-only, `admin` is the admin
+ * tier's identity, `internal` is the internal-page jar, `default` the legacy
+ * default, and `global` the manager-wide vault. ONE predicate — jars.js (jar ids),
+ * the settings store (strip + validator), `validateKey`, `mintJarKey` and the
+ * chrome's key state all call it, so they cannot drift apart.
+ * @param {unknown} id
+ * @returns {boolean}
+ */
+function isReservedId(id) {
+  return (
+    typeof id === 'string' &&
+    (id === 'burner' ||
+      id.startsWith('burner-') ||
+      id === 'admin' ||
+      id === 'internal' ||
+      id === 'default' ||
+      id === GLOBAL_ID)
+  );
+}
+
+/**
+ * A name that may NOT be an automation key-map entry: every reserved identity,
+ * plus the two names that are not an ordinary own entry on a plain object
+ * (`hashes['__proto__'] = …` sets the prototype). Stricter than `isReservedId`
+ * on purpose — a jar id may legitimately never be either, but this predicate
+ * guards a map, not a jar list.
+ * @param {unknown} name
+ * @returns {boolean}
+ */
+function isReservedKeyName(name) {
+  return isReservedId(name) || name === '__proto__' || name === 'constructor';
+}
+
+module.exports = { GLOBAL_ID, isReservedId, isReservedKeyName };

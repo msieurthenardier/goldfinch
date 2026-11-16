@@ -15,6 +15,15 @@
 > the old focus-hold / memorize-then-relay protocol is NOT part of this
 > spec.
 
+> **Vault file version 2 (Mission 23 Flight 2, leg `vault-format-v2`, 2026-11-14).**
+> A profile export now REBUILDS every entry as a `.gfvault` **version 2** bound to its
+> entry handle (never copied verbatim), with the master-key envelope only: **no access
+> envelope is carried** in a profile bundle. Restore and adopt write version-2 files
+> bound to the DESTINATION id. The fixture builders call the store, so they produce
+> version-2 donors; a version-1 donor (and a version-1 bundle as the released code made
+> it) comes from the flight scratchpad's generator (`vault-format-v2/generate.cjs`).
+> Steps 2 and 7 carry the version expectations.
+
 ## Intent
 
 Verifies mission criteria 4, 5, and 6 against the real app: a
@@ -76,12 +85,12 @@ end state.
 | # | Actions | Expected Results |
 |---|---------|------------------|
 | 1 | (Setup) Verify preconditions; snapshot donor disk state; record the bundle path. | (empty) |
-| 2 | **Opacity scan**: byte-scan the exported bundle file for each donor jar's NAME and for any item plaintext. | No jar name, color, or item plaintext appears anywhere in the serialized bundle; entries are keyed by opaque handles; no plaintext `sourceId`/`vaultId` (criterion 4). |
+| 2 | **Opacity scan**: byte-scan the exported bundle file for each donor jar's NAME and for any item plaintext. | No jar name, color, or item plaintext appears anywhere in the serialized bundle; entries are keyed by opaque handles; no plaintext `sourceId`/`vaultId` (criterion 4). **Every embedded document is `version: 2`, its own `vaultId` field is its entry handle (not a jar id), and it carries exactly one envelope, the `mrk` envelope — no `hkdf-access` envelope appears anywhere in the bundle.** |
 | 3 | Wipe profile (app stopped); relaunch; Executor reads the fresh vault page. | Not-set-up state: setup CTA + the single restore/import entry; `isSetUp` false on disk (no manager.json). Seeded Personal/Work containers present in the jar registry. |
 | 4 | Operator: start the restore workflow, pick the bundle; enter the donor master password on the sheet (operator-performed, secretKind=master). | Operator attests the secret sheet survives window blur (DD8); Executor's poll shows `sheetVisible` true then false; page advances to the mapping step. |
 | 5 | Executor: read the mapping modal DOM ("Choose destinations"). | One row per bundle vault with the DECRYPTED source jar name/color + item count — labels match the donor jars (proves decrypt-before-mapping AND that the labels came from ciphertext, not a plaintext id). Every row has a visible, changeable directive; nothing committed to disk yet (manager still absent). |
 | 6 | Operator: direct the donor "Personal" jar → **existing** Personal container (prefilled by name-match); one other jar → **new jar** (accept prefilled name/color dot); global → **Global**; commit. | Mapping accepts; flow proceeds to the forced recovery rotation. |
-| 7 | Operator: acknowledge the single dismiss-locked recovery sheet (ack-gate: hold until Executor confirms disk capture). | Operator attests: ONE sheet only — no admin sheet follows. Disk (captured pre-ack): manager written at v2 with **NO admin fields** (`adminPublicKeyB64` absent, mrk slots master+recovery only); the donor "Personal" vault landed under the existing `personal` container's id (no duplicate `personal-1`); the new jar exists; global present. |
+| 7 | Operator: acknowledge the single dismiss-locked recovery sheet (ack-gate: hold until Executor confirms disk capture). | Operator attests: ONE sheet only — no admin sheet follows. Disk (captured pre-ack): manager written at v2 with **NO admin fields** (`adminPublicKeyB64` absent, mrk slots master+recovery only); the donor "Personal" vault landed under the existing `personal` container's id (no duplicate `personal-1`); the new jar exists; global present; **each landed `.gfvault` is `version: 2` with `vaultId` equal to its destination id (`personal`, the new jar's id, `global`)**. |
 | 8 | Executor: read the page post-ack. | Profile unlocked; the per-vault outcome surface NAMES each vault's fate (e.g. "Personal → Personal: restored", "…: restored", "Global → Global: restored") — never a raw handle; the sever offer card is present at the top of Settings as an info panel, stating it severs the previous owner's master password. |
 | 9 | Executor (shell): probe the adopted profile — donor recovery key; the donor master password (operator-witnessed unlock, password never disclosed to agents). | Donor recovery key fails (adopt force-rotated recovery); donor master password STILL UNLOCKS (the DD4 residual, pre-sever). |
 | 10 | Operator: accept the sever card → the existing change-master sheet (master-kind adopt, DD7); confirm with the donor password, set a NEW master password. Then lock and attempt the donor password. | Card clears; manager master-envelope fingerprint changes (donor envelope re-wrapped, byte-diff); operator-witnessed: the NEW password unlocks, the donor password now FAILS — donor master access severed (criterion 8), and it survives a cold restart. |

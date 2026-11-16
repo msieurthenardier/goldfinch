@@ -77,6 +77,17 @@ observes.
   both items and returns ONLY per-field booleans (or SHA-256 digests via
   `crypto.subtle`) — never a secret value, so none reaches the transcript or the
   run log. Never rendered into the page.
+  **Re-authored 2026-11-14 (Mission 23 Flight 2, leg `admin-reach`): `vaultReveal` is gated.**
+  The Executor's admin session makes every reveal raise a native confirmation (one per item per
+  document; a confirmed item's repeat reads in the same document need none) that no automation tier
+  can answer. Every secret-equality read below (the digest halves of steps 3, 6, 8 and 10, and any
+  `vaultReveal` in 10a) is therefore **`[by-eye]` / operator-attended**: the Executor runs the
+  script, the operator presses the affirmative button in the native dialog (launch with
+  `GOLDFINCH_REVEAL_GATE_TRACE=1` to see the decision), and a reply of
+  `{ refused: 'not-confirmed' }` (nobody answered inside 60 s) is recorded **NOT RUN for that half —
+  never a pass**. The structural halves (notices, item counts, titles, `vaultList` metadata) are
+  ungated and run unattended as before. A run with no operator therefore completes every structural
+  assertion and leaves the secret-equality assertions open.
 
 ## Steps
 

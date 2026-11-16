@@ -610,7 +610,7 @@ export function createJarsSections(deps) {
   const DELETE_VAULT_COPY =
     'This jar has a saved password vault — deleting it is permanent and unrecoverable. Deletes the jar and wipes its cookies, site storage, and cache. Open tabs in this jar will close.';
   /**
-   * @type {{ [action: string]: { copy: string, run: (id: string) => Promise<any>, okNote: string, failNote: string, silentSuccess?: boolean, vaultPresentCopy?: string, exportVault?: (id: string) => Promise<{ ok?: boolean, path?: string, locked?: boolean, canceled?: boolean }> } }}
+   * @type {{ [action: string]: { copy: string, run: (id: string) => Promise<any>, okNote: string, failNote: string, silentSuccess?: boolean, vaultPresentCopy?: string, exportVault?: (id: string) => Promise<{ ok?: boolean, path?: string, locked?: boolean, canceled?: boolean, refused?: string }> } }}
    */
   const DATA_ACTIONS = {};
   for (const cls of JAR_DATA_CLASSES) {

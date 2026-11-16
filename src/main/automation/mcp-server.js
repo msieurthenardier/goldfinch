@@ -259,6 +259,50 @@ const MAX_BODY_BYTES = 1024 * 1024;
 // the permanent Server+transport pairs an initialize-only client can retain.
 const MAX_SESSIONS = 64;
 
+// Per-identity session cap (leg `automation-bounds`, flight DD5). One key can hold at most this many
+// sessions; an `initialize` past it closes one of THAT key's own sessions (see `pickVictim`) and never
+// touches another identity's. There is deliberately NO idle timeout: the MCP client this project ships
+// scripts against does not re-initialise after a 404, so an expired session would strand a client that
+// sat idle between calls. Exhaustion is bounded under pressure, not by the clock.
+const MAX_SESSIONS_PER_IDENTITY = 8;
+
+// How recently an admin session must have made a request for `hasAdminSession()` (the reveal gate's
+// condition (a)) to read true. Ten minutes: long enough to span an operator's pause between prompts,
+// short enough that a client which vanished without closing stops causing confirmations.
+const ADMIN_ACTIVE_WINDOW_MS = 10 * 60 * 1000;
+
+/**
+ * Default session clock: milliseconds from a MONOTONIC source (`process.hrtime`). It never goes backwards
+ * and, on Linux, does not count suspended time - so after a suspend a session looks MORE recent than it
+ * is, which errs toward the gate staying on.
+ * @returns {number}
+ */
+function monotonicNowMs() {
+  return Number(process.hrtime.bigint() / 1000000n);
+}
+
+/**
+ * Choose which of an identity's sessions to close to make room: no open GET stream first (a client that
+ * never opened one is the leak this bounds), then no request in flight (never one mid-request), then the
+ * lowest `lastSeen`. Pure; takes a snapshot, never the live map.
+ * @param {Array<{ hasStream: boolean, inFlight: number, lastSeen: number }>} candidates
+ * @returns {any | null}
+ */
+function pickVictim(candidates) {
+  let best = null;
+  for (const c of candidates) {
+    if (
+      best === null ||
+      Number(c.hasStream) < Number(best.hasStream) ||
+      (c.hasStream === best.hasStream && Number(c.inFlight > 0) < Number(best.inFlight > 0)) ||
+      (c.hasStream === best.hasStream && c.inFlight > 0 === best.inFlight > 0 && c.lastSeen < best.lastSeen)
+    ) {
+      best = c;
+    }
+  }
+  return best;
+}
+
 // Discriminated sentinel readJsonBody resolves when the body exceeds the cap, so
 // the caller distinguishes over-cap (caller writes 413) from the existing
 // empty/parse-failure case (undefined → 400).
@@ -332,10 +376,12 @@ async function freePortInRange(lo = 49152, hi = 65535) {
  * recreated/closed window is always picked up at call time.
  *
  * @param {object} [opts]
- * @param {(engineOpts?: { allowInternal?: boolean }) => any} [opts.getEngine]
+ * @param {(engineOpts?: { allowInternal?: boolean, jarTier?: boolean }) => any} [opts.getEngine]
  *   lazy accessor for the automation engine (createEngine(...) result). Now takes
- *   an options bag: the per-session Server passes `{ allowInternal: identity === 'admin' }`
- *   so the admin engine relaxes the internal-session exclusion (DD6 / Leg 2).
+ *   an options bag: the per-session Server passes `{ allowInternal: identity === 'admin',
+ *   jarTier: identity !== 'admin' }` - the admin engine relaxes the internal-session exclusion (DD6 / Leg 2),
+ *   and `jarTier` (leg `automation-input`, DD4) is the tier flag for the injected-input counts, set here and
+ *   nowhere else.
  * @param {{
  *   jars: { list: () => Array<{ id: string, partition: string }> },
  *   fromId: (id: number) => any,
@@ -370,7 +416,7 @@ async function freePortInRange(lo = 49152, hi = 65535) {
  *   `() => devEnableOverride` (`!app.isPackaged && isMcpAutomationEnabled(argv)`),
  *   so this is never active in a packaged build. Accepts a boolean or a lazy
  *   reader; normalized to a `() => boolean`. Defaults to `() => false`.
- * @param {(payload: { sessions: any[], log: any[] }) => void} [opts.broadcast]
+ * @param {(payload: { sessions: any[], log: any[], port?: { configured: number, bound: number | null } }) => void} [opts.broadcast]
  *   audit fan-out callback (Leg 3 / DD8). Called with the audit snapshot after
  *   every recorded tool call and every session open/close. main.js injects
  *   `(payload) => broadcastToChromeAndInternal('automation-activity-changed', payload)`.
@@ -403,12 +449,15 @@ async function freePortInRange(lo = 49152, hi = 65535) {
  * @param {number} [opts.port]  listen port override (takes precedence over
  *   GOLDFINCH_MCP_PORT / the default); used by tests to pick a free high port.
  *   An explicit `opts.port` forces STRICT bind-exactly-or-reject semantics.
+ * @param {() => number} [opts.now]  monotonic ms clock (default `process.hrtime`-based); tests inject one
+ * @param {number} [opts.maxSessionsPerIdentity]  per-key session cap (default 8)
+ * @param {number} [opts.adminActiveWindowMs]  reveal-gate recency window (default ten minutes)
  * @param {() => void} [opts.onVaultHeldChange]  Sortie 07: fired when any session ctx's held state flips
  *   (main recomputes + pushes the aggregate). Optional; a throw is swallowed.
  * @param {boolean} [opts.honorEnv]  when false (packaged build, DD6), the
  *   GOLDFINCH_MCP_PORT env is ignored everywhere (port resolution + strict
  *   detection). main.js passes `!app.isPackaged`. Defaults to true.
- * @returns {{ start: () => Promise<void>, stop: () => Promise<void>, port: number, getActivity: () => { sessions: any[], log: any[] }, zeroizeAllVaultSessions: () => void, isVaultHeld: () => boolean }}
+ * @returns {{ start: () => Promise<void>, stop: () => Promise<void>, port: number, configuredPort: number, listening: boolean, getActivity: () => { sessions: any[], log: any[], port?: { configured: number, bound: number | null } }, zeroizeAllVaultSessions: () => void, isVaultHeld: () => boolean, hasAdminSession: () => boolean }}
  *   NOTE: `port` is a live getter returning the actually-bound port (updated by
  *   start() including a fallback retry). Callers MUST read `mcpServer.port` live
  *   each time — do NOT destructure it (that snapshots the pre-start value).
@@ -505,14 +554,43 @@ function createMcpServer(opts = {}) {
   // fires the injected broadcast with the fresh snapshot on every mutation — one
   // local consumer this flight, so a per-mutation broadcast is acceptable (Flight 5
   // may debounce). In-memory ring only, no disk persistence (DD8).
-  const auditLog = createAuditLog({ onChange: (snap) => broadcast(snap) });
+  const auditLog = createAuditLog({ onChange: (snap) => broadcast(withPort(snap)) });
+
+  /**
+   * The activity snapshot plus the configured / bound port pair (Mission 23 Flight 2, leg
+   * `port-and-permissions`, DD5). `bound` is null when the server is not listening: `boundPort` starts equal to
+   * the configured port, so it cannot tell "listening there" from "never bound". Every snapshot that leaves this
+   * module - broadcast or read - carries the pair, so a later session event cannot overwrite it with a snapshot
+   * that lacks it.
+   * @param {{ sessions: any[], log: any[] }} snap
+   */
+  function withPort(snap) {
+    return { ...snap, port: { configured: preferred, bound: httpServer ? boundPort : null } };
+  }
+
+  const now = typeof opts.now === 'function' ? opts.now : monotonicNowMs;
+  const maxSessionsPerIdentity =
+    Number.isInteger(opts.maxSessionsPerIdentity) && opts.maxSessionsPerIdentity > 0
+      ? opts.maxSessionsPerIdentity
+      : MAX_SESSIONS_PER_IDENTITY;
+  const adminActiveWindowMs =
+    Number.isFinite(opts.adminActiveWindowMs) && opts.adminActiveWindowMs >= 0
+      ? opts.adminActiveWindowMs
+      : ADMIN_ACTIVE_WINDOW_MS;
 
   // Live sessions, keyed by the transport's generated session id. Each entry
   // owns a Server + its StreamableHTTPServerTransport + the IDENTITY bound at
   // session creation (DD4 / Leg 2). Created on `initialize`, routed to thereafter
   // by the `Mcp-Session-Id` header, evicted on transport `onclose`.
-  /** @type {Map<string, { server: import('@modelcontextprotocol/sdk/server/index.js').Server, transport: StreamableHTTPServerTransport, identity: string, vaultCtx: ReturnType<typeof createVaultContext> }>} */
+  // `lastSeen` (injected monotonic clock) is stamped on every request that passes the identity check;
+  // `inFlight` counts non-GET requests inside `transport.handleRequest`; `streams`/`hasStream` track the
+  // long-lived GET stream; `closing` marks an eviction victim (excluded from capacity counts at once).
+  /** @type {Map<string, { server: import('@modelcontextprotocol/sdk/server/index.js').Server, transport: StreamableHTTPServerTransport, identity: string, vaultCtx: ReturnType<typeof createVaultContext>, lastSeen: number, inFlight: number, streams: number, hasStream: boolean, closing: boolean }>} */
   const sessions = new Map();
+  // Per-identity count of initialisations between the capacity check and `onsessioninitialized`, so two
+  // simultaneous initialises for one key cannot both pass the per-identity cap.
+  /** @type {Map<string, number>} */
+  const pendingByIdentity = new Map();
   // Reservations close the async gap between the capacity check and the
   // transport's onsessioninitialized callback, so concurrent initializes cannot
   // all observe the same free slot and exceed MAX_SESSIONS.
@@ -566,7 +644,12 @@ function createMcpServer(opts = {}) {
         vaultCtx.answerAuth(identity, target, scopeCtx || {})
     };
     const registry = buildToolRegistry(
-      () => scopeEngine(getEngine({ allowInternal: identity === 'admin' }), identity, scopeCtx),
+      () =>
+        scopeEngine(
+          getEngine({ allowInternal: identity === 'admin', jarTier: identity !== 'admin' }),
+          identity,
+          scopeCtx
+        ),
       () => boundVault
     );
     server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: registry.listTools() }));
@@ -825,8 +908,16 @@ function createMcpServer(opts = {}) {
         // session on every tool call / break the normal terminate path.
         // Tradeoff (acceptable for Goldfinch's clients): a dropped SSE stream tears
         // down immediately rather than awaiting a resumable reconnect.
+        // Recency stamp (leg `automation-bounds`): immediately after the identity match and BEFORE the
+        // body is read or the transport is called, so an admin tool call always finds the reveal gate on
+        // for itself, and a request that failed identity resolution (above) never stamps.
+        entry.lastSeen = now();
         if (req.method === 'GET') {
+          entry.streams++;
+          entry.hasStream = true;
           res.on('close', () => {
+            entry.streams = Math.max(0, entry.streams - 1);
+            entry.hasStream = entry.streams > 0;
             if (sessions.has(sessionId)) {
               // transport.close() fires onclose → sessions.delete + noteSessionClose
               // (idempotent), so a concurrent/prior teardown is a clean no-op.
@@ -849,7 +940,14 @@ function createMcpServer(opts = {}) {
             return;
           }
         }
-        await entry.transport.handleRequest(req, res, body);
+        // GET is the long-lived stream (tracked by `hasStream`); it is not "a request in flight".
+        const counts = req.method !== 'GET';
+        if (counts) entry.inFlight++;
+        try {
+          await entry.transport.handleRequest(req, res, body);
+        } finally {
+          if (counts) entry.inFlight = Math.max(0, entry.inFlight - 1);
+        }
         return;
       }
       // A session id was supplied but is unknown (stale/torn-down).
@@ -876,14 +974,45 @@ function createMcpServer(opts = {}) {
       return;
     }
 
-    // Reject before allocating another Server+transport pair. Include pending
-    // initializations so concurrent requests cannot race past the active cap.
-    if (sessions.size + pendingSessions >= MAX_SESSIONS) {
+    // Per-identity cap (leg `automation-bounds`). Everything from here to the reservation is synchronous,
+    // so the count and the reservation cannot be interleaved by a second initialise. Counts include this
+    // identity's PENDING initialisations; sessions already marked `closing` no longer count.
+    const ownPending = pendingByIdentity.get(identity) || 0;
+    const ownLive = [...sessions.values()].filter((e) => e.identity === identity && !e.closing);
+    if (ownLive.length + ownPending >= maxSessionsPerIdentity && ownLive.length > 0) {
+      // Net-zero for the global count (a slot is freed for the one reserved below), so the global 429
+      // check is skipped. Victims come from a SNAPSHOT; the live map is never iterated while closing.
+      let excess = ownLive.length + ownPending - maxSessionsPerIdentity + 1;
+      const pool = [...ownLive];
+      while (excess > 0 && pool.length > 0) {
+        const victim = pickVictim(pool);
+        pool.splice(pool.indexOf(victim), 1);
+        victim.closing = true;
+        excess--;
+        // transport.close() fires the existing onclose: vault keys zeroized, map entry deleted,
+        // noteSessionClose. Nothing is duplicated here; a failure must never reach the server.
+        try {
+          Promise.resolve(victim.transport.close()).catch(() => {});
+        } catch {
+          /* already closing */
+        }
+      }
+    } else if ([...sessions.values()].filter((e) => !e.closing).length + pendingSessions >= MAX_SESSIONS) {
+      // Reject before allocating another Server+transport pair. Include pending
+      // initializations so concurrent requests cannot race past the active cap.
       sendJsonRpcError(res, 429, 'Session limit reached: maximum ' + MAX_SESSIONS + ' active sessions');
       return;
     }
     pendingSessions++;
+    pendingByIdentity.set(identity, ownPending + 1);
     let hasReservation = true;
+    const releaseReservation = () => {
+      pendingSessions--;
+      hasReservation = false;
+      const left = (pendingByIdentity.get(identity) || 1) - 1;
+      if (left > 0) pendingByIdentity.set(identity, left);
+      else pendingByIdentity.delete(identity);
+    };
 
     // Fresh PER-SESSION id holder (Leg 3 / DD8). Allocated ABOVE the transport so
     // onsessioninitialized can fill it AND it can be threaded into buildServer for
@@ -920,13 +1049,20 @@ function createMcpServer(opts = {}) {
       sessionIdGenerator: () => randomUUID(),
       enableJsonResponse: true,
       onsessioninitialized: (sid) => {
-        if (hasReservation) {
-          pendingSessions--;
-          hasReservation = false;
-        }
+        if (hasReservation) releaseReservation();
         sessionRef.id = sid;
         // Store the SAME vaultCtx reference the tools use (M12 F1 Leg 3).
-        sessions.set(sid, { server, transport, identity, vaultCtx });
+        sessions.set(sid, {
+          server,
+          transport,
+          identity,
+          vaultCtx,
+          lastSeen: now(),
+          inFlight: 0,
+          streams: 0,
+          hasStream: false,
+          closing: false
+        });
         // Mark the session active (Leg 3 / DD8) — fires the broadcast.
         auditLog.noteSessionOpen(sid, identity);
       }
@@ -954,10 +1090,7 @@ function createMcpServer(opts = {}) {
       // Pass the already-parsed body so the SDK does not try to re-read the stream.
       await transport.handleRequest(req, res, body);
     } finally {
-      if (hasReservation) {
-        pendingSessions--;
-        hasReservation = false;
-      }
+      if (hasReservation) releaseReservation();
     }
   }
 
@@ -997,6 +1130,25 @@ function createMcpServer(opts = {}) {
    */
   async function start() {
     if (started) return;
+    // Announce the outcome - first bind, fallback, or a failed bind - once the attempt has settled, unless
+    // stop() superseded it (a stop bumps the generation). A re-bind constructs a new instance, so its own
+    // start() announces; nothing waits for the next tool call to make the snapshot true.
+    const expected = lifecycleGeneration + 1;
+    try {
+      await startAttempt();
+    } finally {
+      if (lifecycleGeneration === expected) {
+        try {
+          broadcast(withPort(auditLog.snapshot()));
+        } catch {
+          // a notify failure must never fail a bind
+        }
+      }
+    }
+  }
+
+  /** @returns {Promise<void>} */
+  async function startAttempt() {
     started = true;
     const generation = ++lifecycleGeneration;
 
@@ -1147,10 +1299,10 @@ function createMcpServer(opts = {}) {
    * Read the current audit snapshot (Leg 3 / DD8) — active sessions + the recent
    * tool-call ring — WITHOUT waiting for a broadcast. Flight 5 / tests / a future
    * IPC query use this to read current state on demand.
-   * @returns {{ sessions: any[], log: any[] }}
+   * @returns {{ sessions: any[], log: any[], port?: { configured: number, bound: number | null } }}
    */
   function getActivity() {
-    return auditLog.snapshot();
+    return withPort(auditLog.snapshot());
   }
 
   /**
@@ -1169,6 +1321,26 @@ function createMcpServer(opts = {}) {
     return false;
   }
 
+  /**
+   * True iff some admin-identity session made a request within `adminActiveWindowMs` (leg
+   * `automation-bounds`, DD2 (a), replacing "an admin session is attached"). Sound because every admin
+   * action that could lead to a secret is itself a request, and `routeRequest` stamps `lastSeen` before
+   * the body is read or the transport is called - so the gate is on for the very call that needs it. A
+   * request that fails identity resolution never stamps. A request in flight longer than the window is
+   * covered by its own stamp only until the window ends; script it started is covered independently by
+   * the scripted-document mark (`observe.js` marks before `executeJavaScript`; `reveal-gate.js` checks
+   * the mark without consulting this function). A session that is attached but outside the window is
+   * still listed in `getActivity()` (it is a session), so the indicator may show the admin tier while
+   * this reads false; the gate reopens the instant that session makes a request.
+   */
+  function hasAdminSession() {
+    const t = now();
+    for (const e of sessions.values()) {
+      if (e.identity === 'admin' && !e.closing && t - e.lastSeen <= adminActiveWindowMs) return true;
+    }
+    return false;
+  }
+
   // `port` is a live getter (not a fixed value): start() may bind a different free
   // port in fallback mode, and consumers (main.js's post-start capture,
   // currentAutomationStatus) must read the bound port. Callers MUST NOT destructure
@@ -1179,9 +1351,18 @@ function createMcpServer(opts = {}) {
     get port() {
       return boundPort;
     },
+    /** The port this instance was asked to bind (setting / env / explicit), whether or not it got it. */
+    get configuredPort() {
+      return preferred;
+    },
+    /** True only while the HTTP server is bound; `port` alone cannot say (it starts at the configured port). */
+    get listening() {
+      return httpServer !== null;
+    },
     getActivity,
     zeroizeAllVaultSessions,
-    isVaultHeld
+    isVaultHeld,
+    hasAdminSession
   };
 }
 
@@ -1197,6 +1378,7 @@ function createMcpServer(opts = {}) {
 // ---------------------------------------------------------------------------
 
 const { generateKey, hashKey } = require('./automation-auth');
+const { isReservedKeyName } = require('../../shared/reserved-ids');
 
 /**
  * Mint a per-jar automation key. Stores the new key's hash under `jarId` in
@@ -1224,6 +1406,12 @@ const { generateKey, hashKey } = require('./automation-auth');
 function mintJarKey(jarId, settings, jars) {
   if (typeof jarId !== 'string' || jarId === '') {
     throw new TypeError('mintJarKey: jarId must be a non-empty string');
+  }
+  // Reserved identities (admin, global, internal, default, burner*) and the
+  // non-own-entry names (__proto__, constructor) are never mint targets — with or
+  // without a jars accessor, before a key is generated or anything is written.
+  if (isReservedKeyName(jarId)) {
+    throw new Error('mintJarKey: jarId ' + jarId + ' is a reserved name and cannot hold an automation key');
   }
   if (jars && typeof jars.list === 'function') {
     const known = jars.list().some((j) => j.id === jarId);
@@ -1311,6 +1499,10 @@ module.exports = {
   resolvePort,
   freePortInRange,
   DEFAULT_PORT,
+  MAX_SESSIONS,
+  MAX_SESSIONS_PER_IDENTITY,
+  ADMIN_ACTIVE_WINDOW_MS,
+  pickVictim,
   mintJarKey,
   mintAdminKey,
   revokeJarKey,

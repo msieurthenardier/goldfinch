@@ -587,3 +587,11 @@ test('jars-WIPE leaves the .gfvault intact (spare-on-wipe lifecycle pin)', async
   assert.equal(result.ok, true);
   assert.ok(fs.existsSync(vaultFile(dir, 'personal')), 'the .gfvault SURVIVES a wipe (only delete removes it)');
 });
+
+test('projectSettingsForChrome — jarIdsWithKey never reports a reserved name', () => {
+  const hex = 'a'.repeat(64);
+  const out = projectSettingsForChrome({
+    automationKeyHashes: { work: hex, admin: hex, global: hex, 'burner-2': hex }
+  });
+  assert.deepEqual(out.automationKeyState.jarIdsWithKey, ['work']);
+});

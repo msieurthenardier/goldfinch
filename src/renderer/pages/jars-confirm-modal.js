@@ -61,7 +61,7 @@
  */
 
 /**
- * @typedef {{ copy: string, run: (id: string) => Promise<any>, okNote: string, failNote: string, silentSuccess?: boolean, vaultPresentCopy?: string, exportVault?: (id: string) => Promise<{ ok?: boolean, path?: string, locked?: boolean, canceled?: boolean }> }} DataAction
+ * @typedef {{ copy: string, run: (id: string) => Promise<any>, okNote: string, failNote: string, silentSuccess?: boolean, vaultPresentCopy?: string, exportVault?: (id: string) => Promise<{ ok?: boolean, path?: string, locked?: boolean, canceled?: boolean, refused?: string }> }} DataAction
  */
 
 /**
@@ -225,6 +225,10 @@ export function createConfirmModal({
               exportResult.textContent = res.path ? `Exported to ${res.path}` : 'Vault exported.';
             } else if (res && res.locked) {
               exportResult.textContent = 'Unlock the vault to export it first.';
+            } else if (res && res.refused) {
+              // Leg `admin-reach` (DD2): the export was not confirmed (admin automation attached). Nothing
+              // was written; Confirm (delete) is a separate, still-available choice - this never blocks it.
+              exportResult.textContent = 'Export not confirmed - nothing was written.';
             } else if (res && res.canceled) {
               exportResult.textContent = 'Export canceled.';
             } else {

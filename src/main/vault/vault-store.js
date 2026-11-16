@@ -37,7 +37,9 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const vc = require('./vault-crypto');
+const vupgrade = require('./vault-upgrade');
 const { writeFileAtomic } = require('./atomic-write');
+const { createFileModes } = require('../file-modes');
 // M18 F2 Leg 2 (DD2): the multi-file transaction primitive. The store consumes
 // ONLY `recover` today (idempotent load-time recovery in the constructor);
 // beginTransaction/commit are driven by the compromise rotation (leg 3).
@@ -236,6 +238,8 @@ class VaultCollisionError extends VaultStateError {
  * @property {(() => void)} [onUnlock]  called after any MRK install (master / recovery / admin unlock).
  * @property {(fn: () => void, ms: number) => any} [setTimeout]  idle-timer arm (default global).
  * @property {(handle: any) => void} [clearTimeout]  idle-timer clear (default global).
+ * @property {(line: string) => void} [log]  diagnostic sink (default: none). Lines may name vault ids (slugs), never a secret.
+ * @property {ReadonlySet<number>} [readableVersions]  `.gfvault` versions this store reads (default: vault-crypto's set) — a test seam.
  * @property {() => number} [now]  clock (default Date.now) — item timestamps.
  * @property {any} [scryptParams]  master-KDF params (default production SCRYPT_PARAMS).
  * @property {(name: string, color: string) => { id: string, name: string, color: string, partition: string, retentionDays: number }} [createJar]
@@ -252,19 +256,37 @@ class VaultCollisionError extends VaultStateError {
  */
 
 // ---------------------------------------------------------------------------
-// AAD for the `mrk` envelope. vault-crypto's internal `envelopeAad` is not
-// exported, so bind a concrete, stable AAD mirroring its scheme: the `.gfvault`
-// document version. The IDENTICAL buffer is passed on wrap and unwrap, so a
-// version-downgrade / relabel of the `mrk` envelope fails GCM authentication —
-// the tamper protection DD3 mandates for every envelope.
+// Vault id of a document EMBEDDED in a bundle (not read from a slot). A bundle
+// document is bound (version 2) to the id its bundle states for it, which depends
+// on the bundle's own shape, never on a guess:
+//   - a single-vault bundle (bundle version 1, `exportVault`): the bundle's
+//     `sourceVaultId`, which a version-2 document must also carry in its own field;
+//   - a profile bundle (bundle version 2): the entry's handle (random, unique per
+//     bundle, authenticated by the bundle's identity AAD).
+// `normalizeRestoreBundle` carries that id as an explicit `bindId` per entry (its
+// synthetic single-vault handle is NOT the binding id). A version-1 document's
+// AADs ignore the id, so for version 1 the value is only required to be a string.
+// The `mrk` envelope AAD (`vc.mrkEnvelopeAad`) and the items AAD live in
+// vault-crypto; no call relies on a default version or id.
 // ---------------------------------------------------------------------------
 
 /**
- * @param {number} version  the `.gfvault` document version.
- * @returns {Buffer}
+ * The id an embedded document is bound to, checked. For a version-2 document the
+ * plaintext `vaultId` field must equal it - a cheap, early, typed error (an edited
+ * field is a format problem, not a wrong password); the AADs are what actually bind.
+ * Never reads the document's own field to CHOOSE the id.
+ * @param {unknown} bindId  the id the bundle states for this entry.
+ * @param {{ version: number, vaultId?: unknown }} doc  a parsed `.gfvault` document.
+ * @returns {string}
  */
-function mrkEnvelopeAad(version) {
-  return Buffer.from(`gfvault/mrk-env/v${version}`, 'utf8');
+function bundleBindId(bindId, doc) {
+  if (typeof bindId !== 'string' || bindId.length === 0) {
+    throw new vc.VaultFormatError('vault-store: bundle entry has no vault id to bind to');
+  }
+  if (doc.version >= 2 && doc.vaultId !== bindId) {
+    throw new vc.VaultFormatError('vault-store: the embedded vault document does not belong to its bundle entry');
+  }
+  return bindId;
 }
 
 // ---------------------------------------------------------------------------
@@ -282,7 +304,7 @@ function mrkEnvelopeAad(version) {
 // `identity` rides in the bundle as ciphertext keyed off the bundle MRK, via
 // the EXPORTED generic primitives (`deriveHkdfKey` + `wrapVaultKey`/
 // `unwrapVaultKey`, `vault-crypto.js`) — no new crypto surface, mirroring the
-// `mrkEnvelopeAad` local-helper idiom above. `restoreProfile` itself never
+// idiom of `vc.mrkEnvelopeAad` (vault-crypto.js; the helper moved there from this file). `restoreProfile` itself never
 // reads `identity` (cycle-1 review question 3, ruled, unchanged this leg): it
 // consumes the explicit `mapping[].newJar.{name,color}` the mapping step
 // supplies; `decryptIdentity` is exported for leg 3's pre-mapping label step.
@@ -536,6 +558,29 @@ function validateImportedKdf(kdf) {
   }
 }
 
+/**
+ * The key-derivation parameters a master re-wrap uses (Mission 23 Flight 2 DD6).
+ * Returns `stored` UNCHANGED (same object) only when it is scrypt, each of N, r and p
+ * is at least the default's, and its own `maxmem` covers scrypt's real requirement
+ * (`128 * r * (N + p + 2)` -- looser than `validateImportedKdf`'s `128 * N * r`, which
+ * Node's scrypt fails at). Otherwise the default set whole: components are never mixed
+ * and no product comparison is used. Anything unexpected -> the default.
+ * @param {any} stored
+ * @param {any} dflt
+ * @returns {any}
+ */
+function chooseRewrapKdf(stored, dflt) {
+  if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return dflt;
+  if (stored.algo !== 'scrypt') return dflt;
+  const { N, r, p, maxmem } = stored;
+  for (const v of [N, r, p, maxmem]) {
+    if (typeof v !== 'number' || !Number.isFinite(v)) return dflt;
+  }
+  if (N < dflt.N || r < dflt.r || p < dflt.p) return dflt;
+  if (maxmem < 128 * r * (N + p + 2)) return dflt;
+  return stored;
+}
+
 // A bundle's decrypted item array is bounded so a crafted bundle cannot import an
 // absurd count/size. Generous vs. any real vault; a hard ceiling all the same.
 // (M19 F1 Leg 1: this constant now lives in `browser-import.js`, imported
@@ -749,7 +794,7 @@ function validateBundleEnvelope(bundle) {
 /**
  * @param {any} bundle
  * @returns {{ managerVersion?: any, kdf: any, mrk: any, adminPublicKeyB64?: any,
- *   vaults: Array<{ entryHandle: string, identity: any, identityPlaintext?: true, vault: any }> }}
+ *   vaults: Array<{ entryHandle: string, bindId: string, identity: any, identityPlaintext?: true, vault: any }> }}
  */
 function normalizeRestoreBundle(bundle) {
   if (!bundle || typeof bundle !== 'object' || Array.isArray(bundle)) {
@@ -787,7 +832,14 @@ function normalizeRestoreBundle(bundle) {
       mrk: bundle.mrk,
       adminPublicKeyB64: bundle.adminPublicKeyB64,
       vaults: [
-        { entryHandle: v1EntryHandle(bundle.sourceVaultId), identity, identityPlaintext: true, vault: bundle.vault }
+        {
+          entryHandle: v1EntryHandle(bundle.sourceVaultId),
+          // The id the document is bound to (version 2): the bundle's own, NOT the synthetic handle.
+          bindId: bundle.sourceVaultId,
+          identity,
+          identityPlaintext: true,
+          vault: bundle.vault
+        }
       ]
     };
   }
@@ -826,6 +878,7 @@ function normalizeRestoreBundle(bundle) {
       // spreading would let `identityPlaintext: true` ride through untouched.
       vaults: bundle.vaults.map((/** @type {any} */ e) => ({
         entryHandle: e.entryHandle,
+        bindId: e.entryHandle, // a profile bundle's documents are bound to their entry handle.
         identity: e.identity,
         vault: e.vault
       }))
@@ -959,6 +1012,12 @@ class VaultStore {
     this._setTimeout = deps.setTimeout ?? setTimeout;
     this._clearTimeout = deps.clearTimeout ?? clearTimeout;
     this._now = deps.now ?? Date.now;
+    this._log = typeof deps.log === 'function' ? deps.log : () => {};
+    this._readableVersions = deps.readableVersions ?? vc.READABLE_VAULT_VERSIONS;
+    /** Slot ids whose file named another vault, already logged (once per id per store). @type {Set<string>} */
+    this._loggedIdMismatch = new Set();
+    /** Upgrade events already logged, `id NUL reason` (once per store). @type {Set<string>} */
+    this._loggedUpgrade = new Set();
     this.scryptParams = deps.scryptParams ?? vc.SCRYPT_PARAMS;
     // M18 F3 Leg 2: injected jars.js surface for `restoreProfile`'s 'new'
     // directive (create-then-verify, DD3 ruling 4) — keeps this module
@@ -976,6 +1035,8 @@ class VaultStore {
     this.vaultKeys = new Map();
     /** @type {any} */
     this._timer = null;
+    /** Wall-clock stamp of the last `_touch` (null while locked). @type {number | null} */
+    this._touchedAt = null;
 
     // M17 F4 L3 (AC4): idle auto-lock SUPPRESSION flag — consulted ONLY in the
     // _touch timer callback (never in any crypto/rotation path). While set, a
@@ -985,6 +1046,7 @@ class VaultStore {
     // teardown) so the recovery-adopt path cannot autolock into a permanent
     // lockout before its rotated one-time recovery key is acknowledged.
     this._suspendAutoLock = false;
+    this._powerLockDeferred = false;
 
     // Unlock GENERATION (PR#112 finding 3): bumped on every lock-state transition
     // (install / lock / reset). An async manager mutation captures it before its
@@ -1027,6 +1089,7 @@ class VaultStore {
     // COUNTER (`_inFlightOps`), not a mutex — it does not serialize two
     // concurrent `restoreProfile` calls against EACH OTHER.
     this._restoreInFlight = false;
+    this._fileModes = createFileModes({ fs });
 
     // M18 F2 Leg 2 (DD2): idempotent transaction recovery runs on EVERY store
     // construction — between path setup above and the load-loudly manager
@@ -1035,6 +1098,7 @@ class VaultStore {
     // orphaned `.tmp-*` atomic-write temps are swept. ENOENT-tolerant on a
     // missing `vaults/` dir (fresh profile) and ciphertext-only — it never
     // reads or repairs vault content.
+    this._tightenExistingModes();
     vtxn.recover(this.vaultsDir);
 
     // Load-loudly: validate an existing manager.json up front so a corrupt file
@@ -1058,7 +1122,18 @@ class VaultStore {
   }
 
   _ensureVaultsDir() {
-    fs.mkdirSync(this.vaultsDir, { recursive: true });
+    // Owner-only at creation; an existing directory is tightened (best-effort, never throws).
+    this._fileModes.ensureOwnerDir(this.vaultsDir);
+  }
+
+  /**
+   * Once, at open and before any write: tighten an existing vaults directory to 0700 and every file in it
+   * (vault files, manager, journals, staged files, temp orphans) to 0600. Never fatal, never on a timer.
+   */
+  _tightenExistingModes() {
+    if (!fs.existsSync(this.vaultsDir)) return;
+    this._fileModes.chmodDir(this.vaultsDir);
+    this._fileModes.tightenFilesIn(this.vaultsDir, () => true);
   }
 
   // -------------------------------------------------------------------------
@@ -1156,13 +1231,34 @@ class VaultStore {
   _readVault(vaultId) {
     const p = this._vaultPath(vaultId);
     if (!fs.existsSync(p)) return null;
-    return vc.parseVault(fs.readFileSync(p));
+    const doc = vc.parseVault(fs.readFileSync(p), { readable: this._readableVersions });
+    // DIAGNOSTIC, never a boundary: the field is unauthenticated, so refusing on it
+    // protects nothing. A version-1 file with another id (an operator moved it by hand)
+    // opens exactly as before and is logged once per id; a later version is bound to
+    // its id in its AADs and a mismatch is a typed format error naming no id.
+    if (doc.vaultId !== vaultId) {
+      if (!this._loggedIdMismatch.has(vaultId)) {
+        this._loggedIdMismatch.add(vaultId);
+        try {
+          this._log(
+            `[vault] file for "${vaultId}" names vault "${String(doc.vaultId)}" (version ${doc.version}${doc.version > 1 ? ', refused' : ', opened anyway'})`
+          );
+        } catch {
+          /* a logger must never fail a read */
+        }
+      }
+      if (doc.version > 1) throw new vc.VaultWrongVaultError();
+    }
+    return doc;
   }
 
   /**
    * Serialize + atomically write a vault document.
    * @param {string} vaultId
-   * @param {{ envelopes: any[], items: any, kdf?: any }} parts
+   * @param {{ version: number, envelopes: any[], items: any, kdf?: any }} parts
+   *   `version` is REQUIRED: a writer that rewrites an existing document passes
+   *   THAT document's version; a writer that builds a new file passes
+   *   `vc.WRITE_VAULT_VERSION`. `vaultId` is the slot id, stamped into the file.
    */
   _writeVault(vaultId, parts) {
     // M18 F2 Leg 2 (DD3): second wall — see _writeManager. Living in the sink
@@ -1170,12 +1266,15 @@ class VaultStore {
     // `_writeVaultForKey` and every future caller.
     this._assertNotRekeying('write refused');
     this._ensureVaultsDir();
-    const json = vc.serializeVault({
-      vaultId,
-      kdf: parts.kdf,
-      envelopes: parts.envelopes,
-      items: parts.items
-    });
+    const json = vc.serializeVault(
+      {
+        vaultId,
+        kdf: parts.kdf,
+        envelopes: parts.envelopes,
+        items: parts.items
+      },
+      { version: parts.version, readable: this._readableVersions }
+    );
     writeFileAtomic(this._vaultPath(vaultId), Buffer.from(json, 'utf8'));
   }
 
@@ -1196,10 +1295,14 @@ class VaultStore {
    */
   _touch() {
     this._clearTimer();
-    if (this.mrk === null) return;
-    const mins = this.getAutoLockMinutes();
-    const safeMins = typeof mins === 'number' && mins >= 1 ? mins : 10;
-    const ms = safeMins * 60 * 1000;
+    if (this.mrk === null) {
+      this._touchedAt = null;
+      return;
+    }
+    // Wall-clock stamp (Mission 23 F2 leg 07): a monotonic clock and a Node timer both stop while the
+    // machine is suspended, and that sleep is exactly what `idleMs()` must be able to see.
+    this._touchedAt = this._now();
+    const ms = this.autoLockMs();
     this._timer = this._setTimeout(() => {
       // M17 F4 L3 (AC4): while a fresh-adopt is surfacing its one-time recovery +
       // admin keys, autolock would be a permanent lockout on the recovery-adopt
@@ -1219,6 +1322,31 @@ class VaultStore {
   }
 
   /**
+   * The idle interval in ms — the ONE coercion (`vaultAutoLockMinutes`, anything unusable -> 10 minutes)
+   * shared by the idle timer and the power-lock module's resume check.
+   * @returns {number}
+   */
+  autoLockMs() {
+    const mins = this.getAutoLockMinutes();
+    const safeMins = typeof mins === 'number' && mins >= 1 ? mins : 10;
+    return safeMins * 60 * 1000;
+  }
+
+  /**
+   * Milliseconds since the last touch on the wall clock, or `null` while locked. Never re-arms.
+   * @returns {number | null}
+   */
+  idleMs() {
+    if (this.mrk === null || this._touchedAt === null) return null;
+    return this._now() - this._touchedAt;
+  }
+
+  /** True across the fresh-adopt key-surfacing window (`setAutoLockSuspended(true)`). */
+  isAutoLockSuspended() {
+    return this._suspendAutoLock === true;
+  }
+
+  /**
    * M17 F4 L3 (AC4): set/clear the idle auto-lock suppression flag. Consulted
    * ONLY by the _touch timer callback (a re-arm-instead-of-lock guard); it never
    * touches key material or the arming logic. Driven by main across a fresh-adopt
@@ -1229,14 +1357,27 @@ class VaultStore {
    */
   setAutoLockSuspended(suspended) {
     this._suspendAutoLock = suspended === true;
+    // A power lock (suspend / lock-screen) that arrived inside the suspension was remembered: the
+    // suspension ending is when it is honoured. Only while still unlocked; `lockNow` clears the memory.
+    if (!this._suspendAutoLock && this._powerLockDeferred) {
+      this._powerLockDeferred = false;
+      if (this.mrk !== null) this.lockNow();
+    }
+  }
+
+  /** Remember a power lock event deferred by the suspension (see `setAutoLockSuspended`). */
+  deferPowerLock() {
+    if (this._suspendAutoLock && this.mrk !== null) this._powerLockDeferred = true;
   }
 
   /**
    * Zeroize every in-memory key Buffer and drop references. Safe to call when
-   * already locked (the quit hook wires `before-quit` → lockNow at the call site).
+   * already locked (`before-quit` calls it in `app-lifecycle.js`, ahead of the MCP stop).
    */
   lockNow() {
+    this._powerLockDeferred = false;
     this._clearTimer();
+    this._touchedAt = null;
     if (this.mrk !== null) {
       this.mrk.fill(0);
       this.mrk = null;
@@ -1434,7 +1575,7 @@ class VaultStore {
     const params = this.scryptParams;
 
     // Manager-envelope AAD binds the MANAGER document version (gfmanager), NOT
-    // vault-crypto's `.gfvault` VERSION (M12 F1 review) — the two version spaces are
+    // the vault file's version (`vc.WRITE_VAULT_VERSION`, M12 F1 review) — the two version spaces are
     // OWNED separately. setup() still WRITES v1 (M18 F2 Leg 1: v2 writers are the
     // full-envelope-set rewrites of later legs), so these wraps pass MANAGER_VERSION.
     // Every unwrap site (unlock / unlockWithRecovery / unlockWithAdmin / the rotation
@@ -1483,11 +1624,12 @@ class VaultStore {
     const mrkEnv = {
       keyId: 'mrk',
       type: 'mrk',
-      ...vc.wrapVaultKey(vaultKey, mrk, mrkEnvelopeAad(vc.VERSION))
+      ...vc.wrapVaultKey(vaultKey, mrk, vc.mrkEnvelopeAad(vc.WRITE_VAULT_VERSION, vaultId))
     };
     this._writeVault(vaultId, {
+      version: vc.WRITE_VAULT_VERSION,
       envelopes: [mrkEnv],
-      items: vc.encryptItems(items, vaultKey)
+      items: vc.encryptItems(items, vaultKey, vc.WRITE_VAULT_VERSION, vaultId)
     });
   }
 
@@ -1556,6 +1698,10 @@ class VaultStore {
     this.mrk = mrk;
     this._mrkGen++; // finding 3: an unlock/re-key is a generation change.
     this.vaultKeys = new Map();
+    // Leg `vault-upgrade` (flight DD6): the master key is in hand, so every version-1 vault file is
+    // upgraded NOW, synchronously, before the idle timer is armed and before `onUnlock`. It never
+    // throws, awaits nothing, and a failure of any kind leaves the profile readable as it was.
+    this._upgradeVaultFiles();
     this._touch();
     // DD10: fire the unlock hook from the single MRK-install choke point so ALL
     // three unlock paths (master / recovery / admin) broadcast `unlocked`.
@@ -1568,6 +1714,208 @@ class VaultStore {
       } catch {
         // an unlock-notify failure must not throw out of the unlock paths.
       }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Version-1 -> version-2 upgrade (leg `vault-upgrade`, flight DD6)
+  // -------------------------------------------------------------------------
+
+  /**
+   * The ids this profile's vault files may be bound to: the global id, then the jar registry's, in their
+   * registry spelling, de-duplicated (a registry entry spelled 'global' is an impostor and collapses into it).
+   * @returns {string[]}
+   */
+  _upgradeRegistryIds() {
+    const ids = [GLOBAL_ID];
+    for (const j of this.listJars()) {
+      if (typeof j?.id === 'string' && j.id.length > 0 && !ids.includes(j.id)) ids.push(j.id);
+    }
+    return ids;
+  }
+
+  /**
+   * Log one upgrade event once per (id, reason) per store. Reason codes and ids only: never an item, a title, a
+   * path or a key. A logger can never fail the upgrade.
+   * @param {string} id
+   * @param {string} reason
+   */
+  _logUpgradeOnce(id, reason) {
+    const k = `${id}\u0000${reason}`;
+    if (this._loggedUpgrade.has(k)) return;
+    this._loggedUpgrade.add(k);
+    try {
+      this._log(`[vault] upgrade: "${id}": ${reason}`);
+    } catch {
+      /* a logger must never fail the upgrade */
+    }
+  }
+
+  /**
+   * Roll the journal state back or forward and swallow a recovery failure (the next store construction repeats it).
+   * @param {string} id  the log id.
+   */
+  _upgradeRecover(id) {
+    try {
+      vtxn.recover(this.vaultsDir);
+    } catch {
+      this._logUpgradeOnce(id, 'recover-failed');
+    }
+  }
+
+  /**
+   * Upgrade every version-1 vault file to version 2, in ONE journalled transaction, verified three times with the
+   * id taken from three different places, undone if the last check fails. SYNCHRONOUS (no await anywhere, pinned by
+   * a source scan) and NEVER throws: everything runs inside one try. Called from `_installMrk` only.
+   * @returns {void}
+   */
+  _upgradeVaultFiles() {
+    try {
+      this._upgradeVaultFilesCore();
+    } catch {
+      this._logUpgradeOnce('*', 'unexpected');
+    }
+  }
+
+  /** @returns {void} */
+  _upgradeVaultFilesCore() {
+    // Compromise rotation reaches `_installMrk` with its re-key gate still up: every file is already current
+    // there, and the transaction writes bypass the sinks' wall — skip, silently.
+    if (this._rekeyInProgress) return;
+    const mrk = this.mrk;
+    if (!mrk) return;
+    /** @type {string[]} */
+    let names;
+    try {
+      names = fs.readdirSync(this.vaultsDir);
+    } catch (err) {
+      if (/** @type {any} */ (err).code === 'ENOENT') return; // a fresh profile: nothing to upgrade.
+      throw err;
+    }
+    // A journal here is residue (the constructor's recovery already ran): settle it, skip this time.
+    if (vtxn.journalsIn(names).length > 0) {
+      this._upgradeRecover('*');
+      this._logUpgradeOnce('*', 'journal-present');
+      return;
+    }
+
+    // ---- which files: registry ids whose EXACT file name is present; a stray is logged and left alone ----
+    const present = new Set(names);
+    /** @type {vupgrade.UpgradeInput[]} */
+    const inputs = [];
+    const slotFiles = new Set();
+    for (const id of this._upgradeRegistryIds()) {
+      const fileName = path.basename(this._vaultPath(id));
+      slotFiles.add(fileName);
+      if (!present.has(fileName)) continue;
+      try {
+        inputs.push({ id, bindId: id, bytes: fs.readFileSync(this._vaultPath(id)) });
+      } catch {
+        this._logUpgradeOnce(id, 'unreadable');
+      }
+    }
+    for (const name of names) {
+      if (name.endsWith('.gfvault') && !slotFiles.has(name)) {
+        this._logUpgradeOnce(name.slice(0, -'.gfvault'.length), 'stray-file-left-alone');
+      }
+    }
+    if (inputs.length === 0) return;
+
+    const built = vupgrade.buildUpgrade({ vaults: inputs, mrk, readable: this._readableVersions });
+    for (const sk of built.skipped) {
+      if (sk.reason !== 'current') this._logUpgradeOnce(sk.id, sk.reason);
+    }
+    const upgraded = built.upgraded;
+    if (upgraded.length === 0) return;
+
+    // ---- (a) IN MEMORY, before anything is staged: each rebuilt document parses, decrypts back, and carries
+    // the access envelopes byte-for-byte. The id is the builder's own here; (b) and (c) take theirs elsewhere. ----
+    for (const u of upgraded) {
+      try {
+        vupgrade.verifyDocument({
+          doc: vc.parseVault(u.json, { readable: this._readableVersions }),
+          id: u.bindId,
+          mrk,
+          items: u.items,
+          envelopes: u.envelopes
+        });
+      } catch {
+        this._logUpgradeOnce(u.id, 'verify-memory-failed');
+        return; // nothing staged: all or nothing.
+      }
+    }
+
+    // ---- stage + (b) verify the STAGED BYTES with the id taken from the journal member's final file name ----
+    /** @type {ReturnType<typeof vtxn.beginTransaction> | null} */
+    let handle = null;
+    try {
+      handle = vtxn.beginTransaction(
+        this.vaultsDir,
+        upgraded.map((u) => ({ finalName: path.basename(this._vaultPath(u.id)), content: u.json }))
+      );
+      for (let i = 0; i < handle.members.length; i++) {
+        const member = handle.members[i];
+        const fromName = member.finalName.slice(0, -'.gfvault'.length);
+        vupgrade.verifyDocument({
+          doc: vc.parseVault(fs.readFileSync(path.join(this.vaultsDir, member.stagedName)), {
+            readable: this._readableVersions
+          }),
+          id: fromName,
+          mrk,
+          items: upgraded[i].items,
+          envelopes: upgraded[i].envelopes
+        });
+      }
+      vtxn.commit(handle);
+    } catch {
+      this._upgradeRecover('*');
+      if (handle === null || !handle.committed) {
+        this._logUpgradeOnce('*', handle === null ? 'stage-failed' : 'verify-staged-failed');
+        return; // rolled back: every file is as it was.
+      }
+      // Committed: `recover` rolled it forward; the upgrade is done — fall through to the final check.
+    }
+
+    // ---- (c) AFTER the commit, through the real reader, ids taken from the registry again ----
+    const byId = new Map(upgraded.map((u) => [u.id, u]));
+    /** @type {string | null} */
+    let failedId = null;
+    let checked = 0;
+    for (const id of this._upgradeRegistryIds()) {
+      const u = byId.get(id);
+      if (!u) continue;
+      checked++;
+      try {
+        vupgrade.verifyDocument({
+          doc: this._readVault(id),
+          id,
+          mrk,
+          items: u.items,
+          envelopes: u.envelopes
+        });
+      } catch {
+        failedId = id;
+        break;
+      }
+    }
+    if (failedId === null && checked === upgraded.length) return; // done: the originals can be dropped.
+
+    // ---- undo: a second journalled transaction puts every original back ----
+    // RESIDUAL, accepted (do not "fix" this into a retry loop): if the undo transaction itself cannot
+    // begin, the version-2 files that already passed (a) and (b) stay as they are and the event is logged
+    // `undo-failed`. They are valid, readable files; the next unlock sees them as current and does not retry.
+    this._logUpgradeOnce(failedId ?? '*', 'verify-after-commit-failed');
+    /** @type {ReturnType<typeof vtxn.beginTransaction> | null} */
+    let undo = null;
+    try {
+      undo = vtxn.beginTransaction(
+        this.vaultsDir,
+        upgraded.map((u) => ({ finalName: path.basename(this._vaultPath(u.id)), content: u.original }))
+      );
+      vtxn.commit(undo);
+    } catch {
+      this._upgradeRecover('*');
+      this._logUpgradeOnce('*', undo !== null && undo.committed ? 'undo-rolled-forward' : 'undo-failed');
     }
   }
 
@@ -1605,12 +1953,15 @@ class VaultStore {
       });
       stepUpMrk.fill(0); // zeroize the transient step-up buffer after the re-unwrap.
       this._assertMrkGeneration(gen); // locked/re-keyed during the step-up derive → refuse before using mrk.
+      // DD6: the step-up above used the STORED params; the new wrap never goes below the default.
+      const rewrapKdf = chooseRewrapKdf(manager.kdf, this.scryptParams);
       const newMasterEnv = await vc.wrapMaster(mrk, newMasterPassword, {
         version: manager.version, // wrap at the SAME version the document carries (AAD homogeneity).
-        params: manager.kdf
+        params: rewrapKdf
       });
       this._assertMrkGeneration(gen); // and again before persisting.
       manager.mrk.master = newMasterEnv;
+      if (rewrapKdf !== manager.kdf) manager.kdf = rewrapKdf; // envelope + params in the same write.
       this._writeManager(manager);
       this._touch();
     });
@@ -1732,12 +2083,15 @@ class VaultStore {
       this._installMrk(mrk); // the user ends UNLOCKED (they recovered); fires onUnlock — bumps the generation.
       const gen = this._mrkGen; // capture AFTER install so a lockNow during the wrap below is caught.
       // Rewrap the master envelope under the new password — the recovery proof authenticated it.
+      // DD6: a fresh password is in hand — never re-wrap below the default's parameters.
+      const rewrapKdf = chooseRewrapKdf(manager.kdf, this.scryptParams);
       const newMasterEnv = await vc.wrapMaster(mrk, newMasterPassword, {
         version: manager.version, // preserve the document's version (DD1 — no mixed-version documents).
-        params: manager.kdf
+        params: rewrapKdf
       });
       this._assertMrkGeneration(gen); // finding 3: refuse if locked/re-keyed mid-derive.
       manager.mrk.master = newMasterEnv;
+      if (rewrapKdf !== manager.kdf) manager.kdf = rewrapKdf; // envelope + params in the same write.
       this._writeManager(manager);
       this._touch();
     });
@@ -1914,24 +2268,31 @@ class VaultStore {
             throw new vc.VaultFormatError(`vault "${vaultId}": missing mrk envelope`);
           }
           // Un-unwrappable under the old MRK → VaultAuthError, loud pre-commit.
-          const oldKey = vc.unwrapVaultKey(env, oldMrk, mrkEnvelopeAad(doc.version));
+          const oldKey = vc.unwrapVaultKey(env, oldMrk, vc.mrkEnvelopeAad(doc.version, vaultId));
           workingKeys.push(oldKey);
-          const items = vc.decryptItems(doc.items, oldKey);
+          const items = vc.decryptItems(doc.items, oldKey, doc.version, vaultId);
           if (doc.envelopes.some((/** @type {any} */ e) => e.keyId !== 'mrk')) {
             revokedVaultIds.push(vaultId); // carried ≥1 access envelope — reported as revoked.
           }
           const newKey = vc.newVaultKey();
           workingKeys.push(newKey);
           // EXACTLY ONE envelope on the rebuilt doc: the new mrk envelope at the
-          // vault-doc's own AAD version (unchanged) — every access envelope is
+          // write version (items and key envelope are re-encrypted, so the file is rebuilt at it) — every access envelope is
           // dropped by construction, which is what revokes the access keys.
-          const newEnv = { keyId: 'mrk', type: 'mrk', ...vc.wrapVaultKey(newKey, newMrk, mrkEnvelopeAad(doc.version)) };
-          const json = vc.serializeVault({
-            vaultId,
-            kdf: doc.kdf,
-            envelopes: [newEnv],
-            items: vc.encryptItems(items, newKey)
-          });
+          const newEnv = {
+            keyId: 'mrk',
+            type: 'mrk',
+            ...vc.wrapVaultKey(newKey, newMrk, vc.mrkEnvelopeAad(vc.WRITE_VAULT_VERSION, vaultId))
+          };
+          const json = vc.serializeVault(
+            {
+              vaultId,
+              kdf: doc.kdf,
+              envelopes: [newEnv],
+              items: vc.encryptItems(items, newKey, vc.WRITE_VAULT_VERSION, vaultId)
+            },
+            { version: vc.WRITE_VAULT_VERSION }
+          );
           rebuilt.push({ finalName: `${vaultId}.gfvault`, content: Buffer.from(json, 'utf8') });
           // The decrypted item plaintext lives only in `items` — transient JS
           // objects released with this iteration (the same exposure class as
@@ -1941,21 +2302,24 @@ class VaultStore {
         // ---- the new manager: version 2 with NO admin fields (DD1 — absence is
         // the deliberate revoked/unprovisioned state; rotateAdminKey is the
         // from-scratch re-provision if the operator ever wants one back).
-        // KDF ruling (design review Q2): PRESERVE manager.kdf — the document's
-        // existing params, exactly as every existing rotation does; never the
-        // bare SCRYPT_PARAMS constant and never a silent swap of an adopted
-        // profile's params. Read-time bounds are already guaranteed by
-        // validateImportedKdf on every _readManager. ----
+        // KDF ruling (narrowed 2026-11-14, Mission 23 Flight 2 DD6 -- supersedes in part
+        // the Mission 18 Flight 2 design-review Q2 "PRESERVE manager.kdf" ruling): stored
+        // params at or above the injected default are still preserved (never the bare
+        // SCRYPT_PARAMS constant, never a swap of a stronger adopted profile); weaker ones
+        // are raised whole to the default (chooseRewrapKdf). A fresh password in hand is
+        // the one moment the params can be raised without locking anyone out. The probe
+        // and step-up above used the STORED params; `manager.kdf` is not mutated.
+        const rewrapKdf = chooseRewrapKdf(manager.kdf, this.scryptParams);
         const masterEnv = await vc.wrapMaster(newMrk, newMasterPassword, {
           version: MANAGER_VERSION_V2, // v2 AAD — homogeneous with every envelope written below.
-          params: manager.kdf
+          params: rewrapKdf
         });
         const recoveryEnv = vc.wrapRecovery(newMrk, rec.material, { version: MANAGER_VERSION_V2 });
         rec.material.fill(0); // operator-held via `display` from here — drop the buffer (the setup idiom).
         const newManager = {
           format: MANAGER_FORMAT,
           version: MANAGER_VERSION_V2,
-          kdf: manager.kdf,
+          kdf: rewrapKdf,
           mrk: { master: masterEnv, recovery: recoveryEnv }
         };
 
@@ -2108,13 +2472,13 @@ class VaultStore {
    * serialized into the bundle file — callers use it only for an in-app
    * notice (e.g. the export-completion surface's "Exported N vaults: …").
    *
-   * Each embedded `.gfvault` document also has its OWN plaintext `vaultId`
-   * field (set to the LOCAL id at write time) SCRUBBED to the entry's own
-   * `entryHandle` before embedding — that field is otherwise a second,
-   * independent leak of the exact identity this method's `identity` ciphertext
-   * exists to hide (found while adding ruling 6's name==slug byte-scan) and
-   * plays no role downstream (`_restoreProfile`/`_previewRestoreBundle` never
-   * read `doc.vaultId`).
+   * Each embedded `.gfvault` document is REBUILT (leg `vault-format-v2`, DD6), never
+   * copied: the slot's file is decrypted at ITS OWN version and slot id, then written
+   * as a fresh version-2 document under a NEW vault key whose plaintext `vaultId`, key
+   * envelope and items are all bound to the entry's `entryHandle` - the real id would
+   * otherwise be a second plaintext leak of the identity the `identity` ciphertext
+   * hides. Whatever version the source file is, the entry is version 2. Access
+   * envelopes are DROPPED (restore never reads them).
    *
    * GATED + the same unlock-window POLICY as `exportVault` (ruling 8 / DD10).
    * NO write, NO password argument (every input is already on disk).
@@ -2165,17 +2529,48 @@ class VaultStore {
         identity = { kind: 'jar', name: jar.name, color: jar.color };
         carried.push(jar.name);
       }
-      // SECURITY (found while testing ruling 6's name==slug byte-scan): the on-disk
-      // `.gfvault` document carries its OWN plaintext `vaultId` field (set to the
-      // LOCAL id at write time — `_writeVault`), which duplicates the exact leak
-      // this leg closes one level down. That field plays no role downstream —
-      // `_restoreProfile`/`_previewRestoreBundle` read `doc.envelopes`/`doc.items`/
-      // `doc.version` only, never `doc.vaultId` — so it is scrubbed to the entry's
-      // own opaque `entryHandle` before embedding, never the raw local id.
+      // The embedded document is REBUILT, not copied (leg `vault-format-v2`, DD6). A bundle
+      // entry is bound to its handle, never to the real jar id (the id is the exact identity
+      // this entry's `identity` ciphertext hides): decrypt the slot's file at ITS OWN version
+      // and slot id, then write a fresh version-2 document under a NEW vault key, its key
+      // envelope and items bound to the handle. Whatever version the source file is, the
+      // entry is version 2 - no refusal path for a mixed profile. Access envelopes are
+      // DROPPED: restore never reads them (it writes only the master-key envelope) and a
+      // bundle that carried them would hand an access-key holder a second copy of the
+      // vault's ciphertext. The fresh key means the bundle shares no key with the live file.
+      const mrkEnv = doc.envelopes.find((/** @type {any} */ e) => e.keyId === 'mrk');
+      if (!mrkEnv) {
+        throw new vc.VaultFormatError(`vault "${localId}": missing mrk envelope`);
+      }
+      const sourceKey = vc.unwrapVaultKey(mrkEnv, mrk, vc.mrkEnvelopeAad(doc.version, localId));
+      const bundleKey = vc.newVaultKey();
+      /** @type {string} */
+      let rebuilt;
+      try {
+        const items = vc.decryptItems(doc.items, sourceKey, doc.version, localId);
+        rebuilt = vc.serializeVault(
+          {
+            vaultId: entryHandle,
+            kdf: doc.kdf,
+            envelopes: [
+              {
+                keyId: 'mrk',
+                type: 'mrk',
+                ...vc.wrapVaultKey(bundleKey, mrk, vc.mrkEnvelopeAad(vc.WRITE_VAULT_VERSION, entryHandle))
+              }
+            ],
+            items: vc.encryptItems(items, bundleKey, vc.WRITE_VAULT_VERSION, entryHandle)
+          },
+          { version: vc.WRITE_VAULT_VERSION }
+        );
+      } finally {
+        sourceKey.fill(0);
+        bundleKey.fill(0);
+      }
       vaults.push({
         entryHandle,
         identity: encryptIdentity(mrk, entryHandle, identity),
-        vault: { ...doc, vaultId: entryHandle }
+        vault: JSON.parse(rebuilt)
       });
     }
     return {
@@ -2330,6 +2725,18 @@ class VaultStore {
     if (!mrkEnv) {
       throw new vc.VaultFormatError('vault-store: bundle vault missing mrk envelope');
     }
+    // The id the embedded document is bound to: the bundle's `sourceVaultId` (a version-2
+    // document must carry the same in its own field - a typed format error HERE, before any
+    // secret is tried, so an edited id never reads as a wrong password). A version-1 document
+    // ignores the value; an old bundle lacking `sourceVaultId` falls back to the document's field.
+    const bindId = bundleBindId(
+      typeof bundle.sourceVaultId === 'string' && bundle.sourceVaultId.length > 0
+        ? bundle.sourceVaultId
+        : vaultDoc.version === 1
+          ? vaultDoc.vaultId
+          : undefined,
+      vaultDoc
+    );
 
     // ---- crypto phase (before ANY write) ----
     let mrk;
@@ -2352,7 +2759,7 @@ class VaultStore {
     // installed and both buffers zeroized.
     let vaultKey = null;
     try {
-      vaultKey = vc.unwrapVaultKey(mrkEnv, mrk, mrkEnvelopeAad(vaultDoc.version));
+      vaultKey = vc.unwrapVaultKey(mrkEnv, mrk, vc.mrkEnvelopeAad(vaultDoc.version, bindId));
       // The ciphertext is GCM-authentic but its PLAINTEXT shape is attacker-chosen:
       // validate the decrypted array (non-object / missing-or-duplicate id / bound)
       // BEFORE any write or `items.map` (finding 4) — a non-array previously crashed
@@ -2362,7 +2769,9 @@ class VaultStore {
       // loud; only item-type recognition is softened, and only here). This call
       // site has NO caller anywhere in `src/main` (verified — a store-only
       // return-shape change, not new IPC/page plumbing).
-      const { items: knownItems, skippedTypes } = partitionImportedItems(vc.decryptItems(vaultDoc.items, vaultKey));
+      const { items: knownItems, skippedTypes } = partitionImportedItems(
+        vc.decryptItems(vaultDoc.items, vaultKey, vaultDoc.version, bindId)
+      );
       // LD2: a bundle vault carrying more than one `identity` item is itself the
       // violation (no destination to compare against on either branch below — the
       // existing-profile branch below is a whole-vault REPLACE, never a merge) —
@@ -2563,7 +2972,9 @@ class VaultStore {
       if (!mrkEnv) {
         throw new vc.VaultFormatError(`vault-store: bundle vault "${entry.entryHandle}" missing mrk envelope`);
       }
-      return { entryHandle: entry.entryHandle, doc, mrkEnv };
+      // The binding id is the entry's own (`bindId`), never the synthetic handle and never the
+      // document's field; a version-2 document whose field disagrees fails here, pre-secret.
+      return { entryHandle: entry.entryHandle, bindId: bundleBindId(entry.bindId, doc), doc, mrkEnv };
     });
 
     if (!fresh) {
@@ -2589,7 +3000,7 @@ class VaultStore {
     const results = [];
     let anyFailed = false;
     try {
-      for (const { entryHandle, doc, mrkEnv } of parsedVaults) {
+      for (const { entryHandle, bindId, doc, mrkEnv } of parsedVaults) {
         const directive = mapping[entryHandle];
         if (directive.directive === 'skip') {
           results.push({ entryHandle, outcome: 'skipped' });
@@ -2629,14 +3040,16 @@ class VaultStore {
           // zeroize in this per-iteration finally (stricter than changeMasterPassword's
           // collect-array, which that op needs for its batch-then-one-txn shape; this
           // loop writes each vault immediately, so there is nothing to batch).
-          vaultKey = vc.unwrapVaultKey(mrkEnv, mrk, mrkEnvelopeAad(doc.version));
+          vaultKey = vc.unwrapVaultKey(mrkEnv, mrk, vc.mrkEnvelopeAad(doc.version, bindId));
           // DD3 (Mission 21 F2 L3): tolerant of an unrecognized item TYPE — dropped +
           // reported via `skippedTypes`, never a whole-vault abort. Genuine corruption
           // (non-array / non-object item / missing-or-duplicate id) still throws, and
           // the try/catch below is what stops THAT from destroying results for vaults
           // that already landed (the fix this leg's AC names: "tolerance means adding
           // per-entry exception handling, not relaxing a validator").
-          const { items: knownItems, skippedTypes } = partitionImportedItems(vc.decryptItems(doc.items, vaultKey));
+          const { items: knownItems, skippedTypes } = partitionImportedItems(
+            vc.decryptItems(doc.items, vaultKey, doc.version, bindId)
+          );
           // LD2: a bundle vault carrying more than one `identity` item is itself the
           // violation, independent of any destination — cap it here so BOTH branches
           // below (merge and whole-vault write) only ever see at most one.
@@ -2652,12 +3065,15 @@ class VaultStore {
             // always false before any vault is written).
             const destDoc = this._readVault(destId);
             const destKey = this._vaultKeyFromDoc(destId, destDoc);
-            const destItems = /** @type {VaultItem[]} */ (vc.decryptItems(destDoc.items, destKey));
+            const destItems = /** @type {VaultItem[]} */ (
+              vc.decryptItems(destDoc.items, destKey, destDoc.version, destId)
+            );
             const merge = mergeVaultItems(destItems, items);
             this._writeVault(destId, {
+              version: destDoc.version,
               kdf: destDoc.kdf,
               envelopes: destDoc.envelopes,
-              items: vc.encryptItems(merge.items, destKey)
+              items: vc.encryptItems(merge.items, destKey, destDoc.version, destId)
             });
             mergeReport = merge.mergeReport;
             // LD2's merge-collision ruling: the destination's existing identity
@@ -2797,6 +3213,7 @@ class VaultStore {
       }
       return {
         entryHandle: entry.entryHandle,
+        bindId: bundleBindId(entry.bindId, doc),
         identity: entry.identity,
         // Read off the NORMALIZED ENTRY (never `entry.identity.identityPlaintext` —
         // ruling 5's tag-smuggling fix): `normalizeRestoreBundle`'s v2 extraction
@@ -2823,15 +3240,17 @@ class VaultStore {
 
     try {
       const labels = [];
-      for (const { entryHandle, identity, identityPlaintext, doc, mrkEnv } of parsedVaults) {
+      for (const { entryHandle, bindId, identity, identityPlaintext, doc, mrkEnv } of parsedVaults) {
         let vaultKey = null;
         try {
           // Ruling 11's per-iteration discipline: at most one bundle vault key live at a time.
-          vaultKey = vc.unwrapVaultKey(mrkEnv, mrk, mrkEnvelopeAad(doc.version));
+          vaultKey = vc.unwrapVaultKey(mrkEnv, mrk, vc.mrkEnvelopeAad(doc.version, bindId));
           // DD3: tolerant of an unrecognized item type (reported, not thrown) — see the
           // docstring above. Genuine corruption still throws and fails the WHOLE preview,
           // unchanged from before this leg.
-          const { items: knownItems, skippedTypes } = partitionImportedItems(vc.decryptItems(doc.items, vaultKey));
+          const { items: knownItems, skippedTypes } = partitionImportedItems(
+            vc.decryptItems(doc.items, vaultKey, doc.version, bindId)
+          );
           // LD2: destination-independent at preview — a bundle vault carrying more than
           // one identity item is itself the violation, knowable before any target is chosen.
           const { items, droppedIdentity } = capSingleIdentity(knownItems);
@@ -2990,7 +3409,7 @@ class VaultStore {
     if (!env) {
       throw new vc.VaultFormatError(`vault "${vaultId}": missing mrk envelope`);
     }
-    const key = vc.unwrapVaultKey(env, mrk, mrkEnvelopeAad(doc.version));
+    const key = vc.unwrapVaultKey(env, mrk, vc.mrkEnvelopeAad(doc.version, vaultId));
     this.vaultKeys.set(vaultId, key);
     return key;
   }
@@ -3074,7 +3493,7 @@ class VaultStore {
     }
 
     const vaultKey = this._vaultKeyFromDoc(vaultId, doc);
-    const items = /** @type {VaultItem[]} */ (vc.decryptItems(doc.items, vaultKey));
+    const items = /** @type {VaultItem[]} */ (vc.decryptItems(doc.items, vaultKey, doc.version, vaultId));
     const idx = typeof item?.id === 'string' ? items.findIndex((it) => it.id === item.id) : -1;
     const existingCreatedAt = idx >= 0 ? items[idx].createdAt : undefined;
     const normalized = this._normalizeItem(item, existingCreatedAt);
@@ -3100,9 +3519,10 @@ class VaultStore {
     }
 
     this._writeVault(vaultId, {
+      version: doc.version,
       kdf: doc.kdf,
       envelopes: doc.envelopes,
-      items: vc.encryptItems(items, vaultKey)
+      items: vc.encryptItems(items, vaultKey, doc.version, vaultId)
     });
     return normalized;
   }
@@ -3167,7 +3587,7 @@ class VaultStore {
 
     if (!lazy) {
       vaultKey = this._vaultKeyFromDoc(vaultId, doc);
-      destItems = /** @type {VaultItem[]} */ (vc.decryptItems(doc.items, vaultKey));
+      destItems = /** @type {VaultItem[]} */ (vc.decryptItems(doc.items, vaultKey, doc.version, vaultId));
       kdf = doc.kdf;
       envelopes = doc.envelopes;
       // "Nothing lands without a choice" (DD9): a non-empty destination
@@ -3249,9 +3669,10 @@ class VaultStore {
       this.vaultKeys.set(vaultId, freshKey);
     } else {
       this._writeVault(vaultId, {
+        version: doc.version,
         kdf,
         envelopes,
-        items: vc.encryptItems(survivors, /** @type {Buffer} */ (vaultKey))
+        items: vc.encryptItems(survivors, /** @type {Buffer} */ (vaultKey), doc.version, vaultId)
       });
     }
 
@@ -3323,7 +3744,7 @@ class VaultStore {
     const sourceDoc = this._readVault(sourceId);
     if (sourceDoc === null) throw new VaultStateError('vault-store: copyItem source vault has no items');
     const sourceKey = this._vaultKeyFromDoc(sourceId, sourceDoc);
-    const sourceItems = /** @type {any[]} */ (vc.decryptItems(sourceDoc.items, sourceKey));
+    const sourceItems = /** @type {any[]} */ (vc.decryptItems(sourceDoc.items, sourceKey, sourceDoc.version, sourceId));
     const sourceWithOrigins = sourceItems.find((it) => it && it.id === itemId);
     if (!sourceWithOrigins) throw new VaultStateError('vault-store: copyItem item not found');
     // A copy forgets the confirmed sites (leg `vault-picker-controls`): the copy is a new item in another
@@ -3341,7 +3762,7 @@ class VaultStore {
     let destKey = null;
     if (destDoc !== null) {
       destKey = this._vaultKeyFromDoc(destId, destDoc);
-      destItems = /** @type {any[]} */ (vc.decryptItems(destDoc.items, destKey));
+      destItems = /** @type {any[]} */ (vc.decryptItems(destDoc.items, destKey, destDoc.version, destId));
     }
 
     // (8) plan.
@@ -3417,9 +3838,10 @@ class VaultStore {
       this.vaultKeys.set(destId, freshKey);
     } else {
       this._writeVault(destId, {
+        version: destDoc.version,
         kdf: destDoc.kdf,
         envelopes: destDoc.envelopes,
-        items: vc.encryptItems(finalItems, /** @type {Buffer} */ (destKey))
+        items: vc.encryptItems(finalItems, /** @type {Buffer} */ (destKey), destDoc.version, destId)
       });
     }
     return reply;
@@ -3463,7 +3885,7 @@ class VaultStore {
     const doc = this._readVault(vaultId);
     if (doc === null) return { recorded: false };
     const vaultKey = this._vaultKeyFromDoc(vaultId, doc);
-    const items = /** @type {any[]} */ (vc.decryptItems(doc.items, vaultKey));
+    const items = /** @type {any[]} */ (vc.decryptItems(doc.items, vaultKey, doc.version, vaultId));
     const idx = items.findIndex((it) => it && it.id === itemId);
     if (idx < 0) return { recorded: false };
     const item = items[idx];
@@ -3472,9 +3894,10 @@ class VaultStore {
     if (!changed) return { recorded: false };
     items[idx] = { ...item, confirmedOrigins: list };
     this._writeVault(vaultId, {
+      version: doc.version,
       kdf: doc.kdf,
       envelopes: doc.envelopes,
-      items: vc.encryptItems(items, vaultKey)
+      items: vc.encryptItems(items, vaultKey, doc.version, vaultId)
     });
     return { recorded: true };
   }
@@ -3492,7 +3915,7 @@ class VaultStore {
     const doc = this._readVault(vaultId);
     if (doc === null) return [];
     const vaultKey = this._vaultKeyFromDoc(vaultId, doc);
-    return /** @type {VaultItem[]} */ (vc.decryptItems(doc.items, vaultKey));
+    return /** @type {VaultItem[]} */ (vc.decryptItems(doc.items, vaultKey, doc.version, vaultId));
   }
 
   /**
@@ -3503,16 +3926,17 @@ class VaultStore {
    * Requires the manager unlocked; an uncreated vault lists as empty. Also backs
    * leg-1's deferred item counts.
    * @param {string} target
+   * @param {{ touch?: boolean }} [opts]  `touch: false` leaves the idle timer alone (a periodic reader)
    * @returns {Array<{ vaultId: string, id: any, type: string, hasTotp: boolean, [k: string]: any }>}
    */
-  listItemsMeta(target) {
+  listItemsMeta(target, { touch = true } = {}) {
     this._requireMrk();
     const vaultId = this._resolveTarget(target);
-    this._touch();
+    if (touch) this._touch();
     const doc = this._readVault(vaultId);
     if (doc === null) return [];
     const vaultKey = this._vaultKeyFromDoc(vaultId, doc);
-    const items = /** @type {VaultItem[]} */ (vc.decryptItems(doc.items, vaultKey));
+    const items = /** @type {VaultItem[]} */ (vc.decryptItems(doc.items, vaultKey, doc.version, vaultId));
     return items.map((it) => ({ vaultId, ...metadataOf(it) }));
   }
 
@@ -3522,16 +3946,18 @@ class VaultStore {
    * vault). Returns null for a missing id or an uncreated vault.
    * @param {string} target
    * @param {string} itemId
+   * @param {{ touch?: boolean }} [opts]  `touch: false` (the one-time-code poll) leaves the idle timer
+   *   alone: a code display must not hold the vault open forever. A locked vault still throws.
    * @returns {VaultItem | null}
    */
-  revealItem(target, itemId) {
+  revealItem(target, itemId, { touch = true } = {}) {
     this._requireMrk();
     const vaultId = this._resolveTarget(target);
-    this._touch();
+    if (touch) this._touch();
     const doc = this._readVault(vaultId);
     if (doc === null) return null;
     const vaultKey = this._vaultKeyFromDoc(vaultId, doc);
-    const items = /** @type {VaultItem[]} */ (vc.decryptItems(doc.items, vaultKey));
+    const items = /** @type {VaultItem[]} */ (vc.decryptItems(doc.items, vaultKey, doc.version, vaultId));
     return items.find((it) => it.id === itemId) ?? null;
   }
 
@@ -3565,13 +3991,14 @@ class VaultStore {
     const doc = this._readVault(vaultId);
     if (doc === null) return false;
     const vaultKey = this._vaultKeyFromDoc(vaultId, doc);
-    const items = /** @type {VaultItem[]} */ (vc.decryptItems(doc.items, vaultKey));
+    const items = /** @type {VaultItem[]} */ (vc.decryptItems(doc.items, vaultKey, doc.version, vaultId));
     const kept = items.filter((it) => it.id !== itemId);
     if (kept.length === items.length) return false;
     this._writeVault(vaultId, {
+      version: doc.version,
       kdf: doc.kdf,
       envelopes: doc.envelopes,
-      items: vc.encryptItems(kept, vaultKey)
+      items: vc.encryptItems(kept, vaultKey, doc.version, vaultId)
     });
     return true;
   }
@@ -3907,6 +4334,7 @@ class VaultStore {
     const { secret, keyId } = vc.generateAccessKey();
     const accessEnv = vc.wrapAccess(vaultKey, secret, keyId);
     this._writeVault(vaultId, {
+      version: doc.version,
       kdf: doc.kdf,
       envelopes: [...doc.envelopes, accessEnv],
       items: doc.items
@@ -4037,7 +4465,7 @@ class VaultStore {
         if (!env) {
           throw new vc.VaultFormatError(`vault "${vaultId}": missing mrk envelope`);
         }
-        out.set(vaultId, vc.unwrapVaultKey(env, mrk, mrkEnvelopeAad(doc.version)));
+        out.set(vaultId, vc.unwrapVaultKey(env, mrk, vc.mrkEnvelopeAad(doc.version, vaultId)));
       }
     } finally {
       mrk.fill(0); // zeroize the transient MRK — the returned vault keys are what live on.
@@ -4059,7 +4487,7 @@ class VaultStore {
   readVaultItems(vaultId, vaultKey) {
     const doc = this._readVault(vaultId);
     if (doc === null) return [];
-    return /** @type {VaultItem[]} */ (vc.decryptItems(doc.items, vaultKey));
+    return /** @type {VaultItem[]} */ (vc.decryptItems(doc.items, vaultKey, doc.version, vaultId));
   }
 
   /**
@@ -4094,7 +4522,7 @@ class VaultStore {
     const kept = doc.envelopes.filter((/** @type {any} */ e) => !(e.keyId === keyId && e.keyId !== 'mrk'));
     const removed = kept.length !== doc.envelopes.length;
     if (removed) {
-      this._writeVault(vaultId, { kdf: doc.kdf, envelopes: kept, items: doc.items });
+      this._writeVault(vaultId, { version: doc.version, kdf: doc.kdf, envelopes: kept, items: doc.items });
     }
     return removed;
   }
@@ -4142,9 +4570,12 @@ module.exports = {
   // Re-exported for callers/tests that catch the crypto-layer errors.
   VaultAuthError: vc.VaultAuthError,
   VaultFormatError: vc.VaultFormatError,
+  VaultWrongVaultError: vc.VaultWrongVaultError,
   // Import hardening validators (PR#112 finding 4) — exported so the bounded KDF
   // schema and the decrypted-item-array guard are unit-tested directly.
   validateImportedKdf,
+  // DD6: pure re-wrap parameter choice, exported for its table test.
+  chooseRewrapKdf,
   validateImportedItems,
   // DD3's tolerant counterpart to validateImportedItems (Mission 21 F2 L3) — the
   // three bundle-import call sites' shared item-type filter, + LD2's identity cap

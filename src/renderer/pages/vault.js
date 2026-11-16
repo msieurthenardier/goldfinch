@@ -35,6 +35,8 @@ import { createVaultRestoreController } from './vault-restore-controller.js';
 import { createVaultFilter } from './vault-filter-controller.js';
 // @ts-ignore — serving-path vs disk-path mismatch
 import { createItemActionsController } from './vault-item-actions-controller.js';
+// @ts-ignore — serving-path vs disk-path mismatch
+import { revealField, copyField, createTotpPoller } from './vault-secret-reads-controller.js';
 
 /**
  * vault.js — the goldfinch://vault internal page controller (M12 Flight 3).
@@ -1631,6 +1633,13 @@ function init() {
     const row = el('div', 'vault-field vault-field-secret');
     const lab = el('label', 'vault-field-label', label);
     row.appendChild(lab);
+    // A read that main refuses (admin automation attached, operator did not confirm) says so HERE, patched
+    // in place (a live region the editor modal owns - it is outside #vault-root and the filter's scope).
+    const statusEl = el('p', 'vault-field-status');
+    statusEl.setAttribute('role', 'status');
+    const announce = (/** @type {string} */ text) => {
+      statusEl.textContent = text;
+    };
 
     const input =
       /** @type {HTMLInputElement|HTMLTextAreaElement} */
@@ -1689,21 +1698,21 @@ function init() {
           input.value = '';
           revealing = false;
         } else {
-          bridge
-            .vaultReveal({ vaultId: ctx.vaultId, itemId: ctx.itemId })
-            .then((res) => {
-              if (!res || res.locked) {
-                refresh();
-                return;
-              }
-              const secret = res.item ? (res.item[name] == null ? '' : String(res.item[name])) : '';
+          revealField({
+            bridge,
+            vaultId: ctx.vaultId,
+            itemId: /** @type {string} */ (ctx.itemId),
+            name,
+            refresh,
+            announce,
+            onSecret: (secret) => {
               ctx.secretStates[name] = revealState(ctx.secretStates[name], secret);
               revealing = true;
               input.value = secret;
               revealing = false;
               setRevealLabel();
-            })
-            .catch(() => {});
+            }
+          });
           return;
         }
         setRevealLabel();
@@ -1716,17 +1725,14 @@ function init() {
       // ~20s later if it still holds this exact value (squawk 0021).
       controls.appendChild(
         iconButton('copy', 'Copy', () => {
-          bridge
-            .vaultReveal({ vaultId: ctx.vaultId, itemId: ctx.itemId })
-            .then((res) => {
-              if (!res || res.locked) {
-                refresh();
-                return;
-              }
-              const secret = res.item ? (res.item[name] == null ? '' : String(res.item[name])) : '';
-              bridge.clipboardWrite(secret, { secret: true });
-            })
-            .catch(() => {});
+          copyField({
+            bridge,
+            vaultId: ctx.vaultId,
+            itemId: /** @type {string} */ (ctx.itemId),
+            name,
+            refresh,
+            announce
+          });
         })
       );
       wrap.appendChild(controls);
@@ -1739,6 +1745,7 @@ function init() {
     // widget. Both live outside the grid row (a fragment groups them).
     const frag = document.createDocumentFragment();
     frag.appendChild(row);
+    frag.appendChild(statusEl);
 
     if (name === 'password') {
       // A programmatic `input.value` set fires no input event, so the generated
@@ -1846,80 +1853,35 @@ function init() {
     wrap.appendChild(codeEl);
     wrap.appendChild(countEl);
 
-    let stopped = false;
-    let secondsRemaining = 0;
-    /** @type {any} */
-    let timer = null;
-
-    function clearTimer() {
-      if (timer !== null) {
-        clearTimeout(timer);
-        timer = null;
+    const status = el('p', 'vault-totp-status');
+    status.setAttribute('role', 'status');
+    wrap.appendChild(status);
+    const poller = createTotpPoller({
+      bridge: /** @type {any} */ (window.goldfinchInternal),
+      vaultId,
+      itemId,
+      codeEl,
+      countEl,
+      refresh,
+      announce: (text) => {
+        status.textContent = text;
       }
-    }
+    });
 
-    function tick() {
-      if (stopped) return;
-      countEl.textContent = `${secondsRemaining}s`;
-      clearTimer();
-      if (secondsRemaining <= 0) {
-        fetchCode();
-        return;
-      } // period boundary → re-fetch.
-      timer = setTimeout(() => {
-        secondsRemaining -= 1;
-        tick();
-      }, 1000);
-    }
-
-    function fetchCode() {
-      if (stopped || !window.goldfinchInternal) return;
-      window.goldfinchInternal
-        .vaultTotpCode({ vaultId, itemId })
-        .then((res) => {
-          if (stopped) return;
-          if (!res || res.locked) {
-            refresh();
-            return;
-          } // idle-lock mid-poll → unlock path.
-          if (res.code == null) {
-            codeEl.textContent = '—';
-            countEl.textContent = '';
-            return;
-          }
-          codeEl.textContent = res.code;
-          secondsRemaining = typeof res.secondsRemaining === 'number' ? res.secondsRemaining : 0;
-          tick();
-        })
-        .catch(() => {});
-    }
-
-    function start() {
-      if (!stopped) return; // already running (stopped===false)
-      stopped = false;
-      fetchCode();
-    }
-    function stop() {
-      stopped = true;
-      clearTimer();
-    }
-
-    // Stop polling while the page is hidden or the window is blurred; resume on return.
-    const onVisibility = () => {
-      if (document.hidden) stop();
-      else start();
-    };
-    const onBlur = () => stop();
-    const onFocus = () => start();
+    // Stop polling while the page is hidden or the window is blurred; resume on return. A refusal
+    // latches inside the poller (a native confirmation blurs the window - never ask again on refocus).
+    const onVisibility = () => poller.onVisibility(document.hidden);
+    const onBlur = () => poller.onBlur();
+    const onFocus = () => poller.onFocus();
     document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener('blur', onBlur);
     window.addEventListener('focus', onFocus);
 
-    // Begin polling (start() early-returns unless stopped, so kick off directly).
-    fetchCode();
+    // Begin polling.
+    poller.begin();
 
     editorCleanups.push(() => {
-      stop();
+      poller.stop();
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('blur', onBlur);
       window.removeEventListener('focus', onFocus);

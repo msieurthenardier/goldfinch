@@ -502,7 +502,7 @@ test('an access key opens ONLY its own vault; revoke takes effect immediately', 
     const workKey = reader.unlockVaultWithAccessKey('work', secret);
     const workDoc = vc.parseVault(fs.readFileSync(vaultPath(dir, 'work')));
     assert.deepEqual(
-      vc.decryptItems(workDoc.items, workKey).map((i) => i.title),
+      vc.decryptItems(workDoc.items, workKey, workDoc.version, 'work').map((i) => i.title),
       ['Work item']
     );
 
@@ -629,7 +629,7 @@ test('mintAccessKey accepts a Buffer step-up master password (no widening) and m
     const workKey = reader.unlockVaultWithAccessKey('work', secret);
     const workDoc = vc.parseVault(fs.readFileSync(vaultPath(dir, 'work')));
     assert.deepEqual(
-      vc.decryptItems(workDoc.items, workKey).map((i) => i.title),
+      vc.decryptItems(workDoc.items, workKey, workDoc.version, 'work').map((i) => i.title),
       ['Work']
     );
 
@@ -764,11 +764,14 @@ test('the mrk-envelope AAD is load-bearing: a version-mismatched AAD fails unwra
       type: 'mrk',
       ...vc.wrapVaultKey(vaultKey, mrk, Buffer.from('gfvault/mrk-env/v2'))
     };
-    const json = vc.serializeVault({
-      vaultId: 'global',
-      envelopes: [badEnv],
-      items: vc.encryptItems([], vaultKey)
-    });
+    const json = vc.serializeVault(
+      {
+        vaultId: 'global',
+        envelopes: [badEnv],
+        items: vc.encryptItems([], vaultKey, vc.WRITE_VAULT_VERSION, 'global')
+      },
+      { version: vc.WRITE_VAULT_VERSION }
+    );
     fs.writeFileSync(vaultPath(dir, 'global'), json, 'utf8');
 
     const s = makeStore(dir);

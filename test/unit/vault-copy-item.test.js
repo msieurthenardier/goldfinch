@@ -546,9 +546,14 @@ test('identity: replace leaves exactly one identity; with two dest identities th
     const doc = m.store._readVault('personal');
     const key = m.store._vaultKeyFromDoc('personal', doc);
     const vc = require('../../src/main/vault/vault-crypto');
-    const items = vc.decryptItems(doc.items, key);
+    const items = vc.decryptItems(doc.items, key, doc.version, 'personal');
     items.push(dIdent('extra', { fullName: 'Extra' }));
-    m.store._writeVault('personal', { kdf: doc.kdf, envelopes: doc.envelopes, items: vc.encryptItems(items, key) });
+    m.store._writeVault('personal', {
+      kdf: doc.kdf,
+      envelopes: doc.envelopes,
+      items: vc.encryptItems(items, key, doc.version, 'personal'),
+      version: doc.version
+    });
     const extraBefore = m.store.listItems('personal').find((i) => i.id === 'extra');
     const r = m.store.copyItem('work', 'isrc', 'personal', { resolution: 'replace', matchId: 'first' });
     assert.equal(r.outcome, 'replaced');

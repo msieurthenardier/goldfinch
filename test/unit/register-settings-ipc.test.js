@@ -3,6 +3,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { makeSettingsIpcHarness } = require('./helpers/settings-ipc-harness');
+const { makeTestRevealGate } = require('../helpers/reveal-gate-fixture');
 
 // Let the microtask queue drain around single-step MockTimers ticks (the real
 // setImmediate survives MockTimers' setTimeout interception) — CLAUDE.md's
@@ -153,6 +154,7 @@ test('chrome-welcome-set: a validator throw returns {ok:false, error} rather tha
   const chromeSender = { id: 'chrome' };
   registerSettingsIpc({
     ipcMain,
+    revealGate: makeTestRevealGate().gate,
     gate: makeTestGate({ ipcMain, registry: makeFakeRegistry({ chromeSender }) }),
     registerInternalHandler: () => {},
     settings,
@@ -165,7 +167,7 @@ test('chrome-welcome-set: a validator throw returns {ok:false, error} rather tha
     currentAutomationStatus: () => ({}),
     rebindMcpServer: async () => {},
     freePortInRange: async () => 0,
-    clipboard: { writeText: () => {} },
+    secretClipboard: { write: () => {}, flush: async () => false },
     jars: { list: () => [] },
     mintJarKey: () => '',
     revokeJarKey: () => {},
@@ -504,4 +506,56 @@ test('automation:get-activity: a trusted internal page is admitted as well as th
   };
   assert.deepEqual(h.invokeRaw('automation:get-activity', internal), { sessions: [], log: [] });
   assert.deepEqual(h.invoke('automation:get-activity'), { sessions: [], log: [] });
+});
+
+test('internal-settings-set refuses both key-hash settings: fixed message, nothing written, nothing broadcast', async () => {
+  const h = makeSettingsIpcHarness();
+  for (const key of ['automationKeyHashes', 'automationAdminKeyHash']) {
+    h.events.length = 0;
+    await assert.rejects(
+      () =>
+        h.invokeInternal(
+          'internal-settings-set',
+          key,
+          key === 'automationKeyHashes' ? { admin: 'a'.repeat(64) } : 'a'.repeat(64)
+        ),
+      (err) => err.message === `internal-settings-set: "${key}" cannot be written through a settings call`
+    );
+    assert.deepEqual(h.events, [], `${key}: no set, no broadcast`);
+  }
+  assert.deepEqual(h.values.automationKeyHashes, {});
+  assert.equal(h.values.automationAdminKeyHash, '');
+});
+
+test('internal-settings-set refuses a non-string key that coerces to a key-hash setting (the fake store coerces like the real one)', async () => {
+  const h = makeSettingsIpcHarness();
+  for (const name of ['automationKeyHashes', 'automationAdminKeyHash']) {
+    const value = name === 'automationKeyHashes' ? { admin: 'a'.repeat(64) } : 'a'.repeat(64);
+    const keys = [[name], new String(name), { toString: () => name }, 7, null, undefined];
+    for (const key of keys) {
+      h.events.length = 0;
+      await assert.rejects(
+        () => h.invokeInternal('internal-settings-set', key, value),
+        (err) => err.message === 'internal-settings-set: key must be a string'
+      );
+      assert.deepEqual(h.events, [], `${name}: ${String(typeof key)} key wrote or broadcast nothing`);
+    }
+  }
+  assert.deepEqual(h.values.automationKeyHashes, {});
+  assert.equal(h.values.automationAdminKeyHash, '');
+});
+
+test('mint, revoke and the admin mint/revoke channels still write the key settings', async () => {
+  const h = makeSettingsIpcHarness();
+  for (const [channel, arg] of [
+    ['automation:jar-key-mint', 'personal'],
+    ['automation:jar-key-revoke', 'personal']
+  ]) {
+    h.events.length = 0;
+    await h.invokeInternal(channel, arg);
+    assert.ok(
+      h.events.some((e) => e[0] === 'set' && e[1] === 'automationKeyHashes'),
+      channel
+    );
+  }
 });

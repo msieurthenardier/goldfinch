@@ -22,6 +22,7 @@
 //     hash or unset gate → never matches (no empty-Bearer accept).
 
 const crypto = require('crypto');
+const { isReservedKeyName } = require('../../shared/reserved-ids');
 
 // SHA-256 hex digests are exactly 64 lowercase hex chars.
 const HEX64 = /^[0-9a-f]{64}$/;
@@ -94,10 +95,13 @@ function validateKey(presentedKey, ctx) {
       return 'admin';
     }
 
-    // Jar keys. Iterate the map; a jar key never resolves to 'admin'.
+    // Jar keys. Iterate the map's OWN keys; an entry under a reserved identity
+    // name (`admin`, `global`, `internal`, `default`, `burner*`) or `__proto__` /
+    // `constructor` is never an identity, so a jar key never resolves to 'admin'.
     const keyHashes = c.keyHashes;
     if (keyHashes !== null && typeof keyHashes === 'object' && !Array.isArray(keyHashes)) {
       for (const jarId of Object.keys(keyHashes)) {
+        if (isReservedKeyName(jarId)) continue;
         const storedHash = keyHashes[jarId];
         if (hashEquals(presentedHash, storedHash)) {
           return jarId;
