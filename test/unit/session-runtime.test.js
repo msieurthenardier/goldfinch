@@ -174,12 +174,15 @@ function fakeSession(log) {
   return { session, handlers, counts, userAgentSets };
 }
 
-test('internal-session creation marks and refuses every web-session wiring', () => {
+test('internal-session creation marks it and refuses every web-session wiring except the two deny-all permission handlers', () => {
   const h = setup();
   h.setCreatingInternal(true);
-  const { session, counts } = fakeSession(h.log);
+  const { session, counts, handlers } = fakeSession(h.log);
   h.runtime.onSessionCreated(session);
   assert.equal(session.__goldfinchInternal, true);
+  // Flight 2 DD8: exactly the request and check handlers, both deny-all (Electron grants when none is set).
+  assert.equal(typeof handlers.permissionRequest, 'function');
+  assert.equal(typeof handlers.permissionCheck, 'function');
   assert.deepEqual(counts, { beforeRequest: 0, beforeSendHeaders: 0, headersReceived: 0 });
   assert.equal(session.cookies.listenerCount('changed'), 0);
   assert.deepEqual(h.log, []);
@@ -187,6 +190,45 @@ test('internal-session creation marks and refuses every web-session wiring', () 
   // observer — the early return above precedes the install site entirely.
   assert.equal(counts.certVerifyProc, undefined);
   assert.deepEqual(h.certObserverCalls, []);
+});
+
+test('DD8: the internal session denies every permission in both handlers, allowlisted names and invented ones, and reports none', () => {
+  const h = setup();
+  h.setCreatingInternal(true);
+  const { session, handlers } = fakeSession(h.log);
+  h.runtime.onSessionCreated(session);
+  const names = [
+    ...ALLOWLIST_SAMPLE,
+    'window-management',
+    'notifications',
+    'geolocation',
+    'media',
+    'display-capture',
+    'invented-future-permission'
+  ];
+  for (const p of names) {
+    let req = 'unanswered';
+    handlers.permissionRequest({ id: 10 }, p, (v) => {
+      req = v;
+    });
+    assert.equal(req, false, `request ${p}`);
+    assert.equal(handlers.permissionCheck({ id: 10 }, p), false, `check ${p}`);
+  }
+  assert.deepEqual(h.chromeSends, [], 'no privacy-permission message for the internal session');
+});
+
+test('DD8: installing on the internal session twice leaves the same deny-all pair (idempotent)', () => {
+  const h = setup();
+  h.setCreatingInternal(true);
+  const { session, handlers } = fakeSession(h.log);
+  h.runtime.onSessionCreated(session);
+  h.runtime.onSessionCreated(session);
+  let req;
+  handlers.permissionRequest(null, 'fullscreen', (v) => {
+    req = v;
+  });
+  assert.equal(req, false);
+  assert.equal(handlers.permissionCheck(null, 'fullscreen'), false);
 });
 
 // ---------------------------------------------------------------------------
@@ -601,8 +643,7 @@ const ALLOWLIST_SAMPLE = [
   'mediaKeySystem',
   'storage-access',
   'top-level-storage-access',
-  'speaker-selection',
-  'window-management'
+  'speaker-selection'
 ];
 
 function permissionOutcome(isolateEffective) {
@@ -630,6 +671,20 @@ test('DD7: isolateEffective denies storage-access permissions in both handlers; 
     h.chromeSends.find((c) => c[1].permission === 'storage-access'),
     ['privacy-permission', { webContentsId: 10, permission: 'storage-access', granted: false }]
   );
+});
+
+test('DD8: window-management is not granted by either web handler (isolation on or off)', () => {
+  for (const isolateEffective of [true, false]) {
+    const h = setup({ isolateEffective });
+    const { session, handlers } = fakeSession(h.log);
+    h.runtime.onSessionCreated(session);
+    let req;
+    handlers.permissionRequest({ id: 10 }, 'window-management', (v) => {
+      req = v;
+    });
+    assert.equal(req, false);
+    assert.equal(handlers.permissionCheck(null, 'window-management'), false);
+  }
 });
 
 test('DD7: with isolateEffective false every allowlisted permission is granted (unchanged)', () => {

@@ -230,7 +230,7 @@ export function createPrivacyController(deps) {
   // The last activity snapshot received, cached so the jarsList() resolve can re-run
   // the render with friendly jar names / jar colors once `containers` is populated
   // (the snapshot can arrive first).
-  let lastSnap = /** @type {{ sessions?: any[] }} */ ({ sessions: [] });
+  let lastSnap = /** @type {{ sessions?: any[], port?: { configured?: any, bound?: any } }} */ ({ sessions: [] });
 
   // The last automation KEY state (F7, Flight 3 Leg 6 HAT — distinct from the activity
   // snapshot above: this is which keys are ENABLED, not which connections are live).
@@ -287,7 +287,8 @@ export function createPrivacyController(deps) {
       adminKeyEnabled: lastKeyState.adminKeyEnabled,
       activeJarIds,
       adminActive,
-      containers: jarsClient.containers
+      containers: jarsClient.containers,
+      port: lastSnap && lastSnap.port
     });
 
     els.automationIndicator.classList.toggle('hidden', !model.visible);
@@ -326,14 +327,19 @@ export function createPrivacyController(deps) {
     const connectedNames = sessions.map((s) => (s.kind === 'admin' ? 'admin' : jarDisplayName(s.jarId)));
     // "connected" names the live transport(s) (DD6 wording — never "authorized");
     // "enabled" (above) names the persisted key state — kept as two distinct concepts.
-    const label = enabledPart + (connectedNames.length ? ' — connected: ' + connectedNames.join(', ') : '');
+    // Flight 2 DD5: the moved-port note rides the same tooltip / label (the indicator is hidden when no key is
+    // enabled; the automation page shows the note then).
+    const label =
+      enabledPart +
+      (connectedNames.length ? ' — connected: ' + connectedNames.join(', ') : '') +
+      (model.portLine ? ' — ' + model.portLine : '');
     els.automationIndicator.title = label;
     els.automationIndicator.setAttribute('aria-label', label);
   }
 
   /**
    * Update the cached activity snapshot (live connections) and re-render.
-   * @param {{ sessions?: any[] }} snap
+   * @param {{ sessions?: any[], port?: { configured?: any, bound?: any } }} snap
    */
   function updateAutomationIndicator(snap) {
     lastSnap = snap || { sessions: [] };

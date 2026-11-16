@@ -3,7 +3,7 @@
 **Slug**: `download-true-type`
 **Status**: active
 **Created**: 2026-11-14
-**Last Run**: 2026-11-14 — pass (8/8), [run log](download-true-type/runs/2026-11-14-04-54-01.md)
+**Last Run**: 2026-11-14 — pass (8/8) on Electron 45.3.2, [run log](download-true-type/runs/2026-11-14-20-44-51.md)
 
 ## Intent
 

@@ -375,6 +375,7 @@ module.exports = {
   beginTransaction,
   commit,
   recover,
+  journalsIn,
   VaultTxnError,
   // Name-family helpers — single-sourced so the residue-construction tests and
   // any future consumer never re-type the patterns.

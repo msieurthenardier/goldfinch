@@ -20,6 +20,7 @@ const { registerInternalHandler } = require('../../src/main/internal-ipc');
 const vs = require('../../src/main/vault/vault-store');
 const vc = require('../../src/main/vault/vault-crypto');
 const { createVaultContext } = require('../../src/main/vault/vault-context');
+const { makeTestRevealGate } = require('../helpers/reveal-gate-fixture');
 
 const FAST_SCRYPT = { algo: 'scrypt', N: 2 ** 12, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 const MASTER = 'correct horse battery staple';
@@ -60,7 +61,13 @@ async function realHarness() {
   const store = vs.load(dir, { scryptParams: FAST_SCRYPT, getAutoLockMinutes: () => 10, listJars: () => REAL_JARS });
   await store.setup({ masterPassword: MASTER });
   const ipcMain = makeFakeIpcMain();
-  registerVaultIpc({ ipcMain, registerInternalHandler, getVaultStore: () => store, jars: { list: () => REAL_JARS } });
+  registerVaultIpc({
+    ipcMain,
+    revealGate: makeTestRevealGate().gate,
+    registerInternalHandler,
+    getVaultStore: () => store,
+    jars: { list: () => REAL_JARS }
+  });
   return { dir, store, ipcMain };
 }
 
@@ -100,7 +107,7 @@ test('internal-vault-totp-code returns { code, secondsRemaining } and NEVER the 
       password: 'pw',
       totp: vc.normalizeTotpField(RAW_OTPAUTH)
     });
-    const res = ipcMain.invoke('internal-vault-totp-code', vaultEvent(), { vaultId: 'global', itemId: saved.id });
+    const res = await ipcMain.invoke('internal-vault-totp-code', vaultEvent(), { vaultId: 'global', itemId: saved.id });
     // exactly { code, secondsRemaining } — the seed must not appear.
     assert.deepEqual(Object.keys(res).sort(), ['code', 'secondsRemaining']);
     assert.match(res.code, /^\d{6}$/);
@@ -126,13 +133,16 @@ test('internal-vault-totp-code returns { code: null } for an item with no totp',
       password: 'pw'
     });
     assert.deepEqual(
-      ipcMain.invoke('internal-vault-totp-code', vaultEvent(), { vaultId: 'global', itemId: saved.id }),
+      await ipcMain.invoke('internal-vault-totp-code', vaultEvent(), { vaultId: 'global', itemId: saved.id }),
       { code: null }
     );
     // an absent item id → also { code: null }.
-    assert.deepEqual(ipcMain.invoke('internal-vault-totp-code', vaultEvent(), { vaultId: 'global', itemId: 'nope' }), {
-      code: null
-    });
+    assert.deepEqual(
+      await ipcMain.invoke('internal-vault-totp-code', vaultEvent(), { vaultId: 'global', itemId: 'nope' }),
+      {
+        code: null
+      }
+    );
   } finally {
     rm(dir);
   }
@@ -142,9 +152,12 @@ test('internal-vault-totp-code returns { locked: true } when the store is locked
   const { dir, store, ipcMain } = await realHarness();
   try {
     store.lockNow();
-    assert.deepEqual(ipcMain.invoke('internal-vault-totp-code', vaultEvent(), { vaultId: 'global', itemId: 'x' }), {
-      locked: true
-    });
+    assert.deepEqual(
+      await ipcMain.invoke('internal-vault-totp-code', vaultEvent(), { vaultId: 'global', itemId: 'x' }),
+      {
+        locked: true
+      }
+    );
   } finally {
     rm(dir);
   }
@@ -173,7 +186,7 @@ test('ENROLL ROUND-TRIP: a raw otpauth saved via internal-vault-item-save is sto
     assert.equal(typeof stored, 'string');
     assert.ok(stored.startsWith('otpauth://totp/'), `stored totp should be canonical, got ${stored}`);
     // And the live-code op computes a real code from it.
-    const code = ipcMain.invoke('internal-vault-totp-code', vaultEvent(), { vaultId: 'global', itemId: id });
+    const code = await ipcMain.invoke('internal-vault-totp-code', vaultEvent(), { vaultId: 'global', itemId: id });
     assert.match(code.code, /^\d{6}$/);
   } finally {
     rm(dir);

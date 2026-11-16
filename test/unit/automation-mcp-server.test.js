@@ -20,6 +20,9 @@ const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
 const { StreamableHTTPClientTransport } = require('@modelcontextprotocol/sdk/client/streamableHttp.js');
 const {
   createMcpServer,
+  pickVictim,
+  MAX_SESSIONS_PER_IDENTITY,
+  ADMIN_ACTIVE_WINDOW_MS,
   mintJarKey,
   revokeJarKey,
   revokeAdminKey,
@@ -682,12 +685,13 @@ function multiKeySettings({ enabled = true, withAdmin = false } = {}) {
 
 // Start a server with the multi-key settings + the scope ctx + a getEngine that
 // honours allowInternal (so the admin path actually enumerates the internal tab).
-async function startScopedServer({ enabled = true, withAdmin = false } = {}) {
+async function startScopedServer({ enabled = true, withAdmin = false } = {}, extraOpts = {}) {
   const server = createMcpServer({
     getEngine: (engineOpts) => makeFakeEngine(engineOpts),
     getSettings: multiKeySettings({ enabled, withAdmin }),
     scopeCtx: fakeScopeCtx(),
-    port: TEST_PORT
+    port: TEST_PORT,
+    ...extraOpts
   });
   await server.start();
   return server;
@@ -894,8 +898,8 @@ test('live re-validation — toggle-off mid-session → the next request on the 
   }
 });
 
-test('REGRESSION F11: initialize rejects once 64 active sessions are retained', async () => {
-  const server = await startServer();
+test('REGRESSION F11: initialize rejects once 64 active sessions are retained (per-identity cap raised so the GLOBAL cap is the one reached)', async () => {
+  const server = await startServer(undefined, { maxSessionsPerIdentity: 100 });
   try {
     for (let i = 0; i < 64; i++) await rawInitSession();
     assert.equal(server.getActivity().sessions.length, 64, 'the configured active-session capacity is reachable');
@@ -1788,5 +1792,369 @@ test('real-trigger: the store own lockNow() (while locked) and idle timer zeroiz
   } finally {
     await server.stop();
     fs.rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Mission 23 Flight 2 (leg `admin-reach`, AC22): `hasAdminSession` - the reveal gate's condition (a). True iff
+// some entry in the session map has identity exactly 'admin'; a jar-key session does not count.
+// ---------------------------------------------------------------------------
+
+test('hasAdminSession: false with no session and for a jar-key session; true for a recent admin request; lapses; any request refreshes it (injected clock)', async () => {
+  process.env.GOLDFINCH_AUTOMATION_ADMIN = '1';
+  let t = 1000;
+  const server = await startScopedServer({ withAdmin: true }, { now: () => t });
+  try {
+    assert.equal(server.hasAdminSession(), false, 'no sessions');
+    await rawInitSession(WORK_KEY);
+    assert.equal(server.hasAdminSession(), false, 'a jar-key session is never admin');
+    const sid = await rawInitSession(ADMIN_KEY);
+    assert.equal(server.hasAdminSession(), true, 'initialize is a request: the window starts at once');
+    t += ADMIN_ACTIVE_WINDOW_MS;
+    assert.equal(server.hasAdminSession(), true, 'still true exactly at the window edge');
+    t += 1;
+    assert.equal(server.hasAdminSession(), false, 'lapsed: attached but silent for longer than the window');
+    assert.equal(
+      server.getActivity().sessions.some((s) => s.sessionId === sid && s.kind === 'admin'),
+      true,
+      'AC6: the lapsed admin session is still LISTED (the indicator is not changed); only the gate is off'
+    );
+    const r = await rawPost(
+      { authorization: 'Bearer ' + ADMIN_KEY, 'mcp-session-id': sid },
+      { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }
+    );
+    assert.equal(r.status, 200);
+    assert.equal(server.hasAdminSession(), true, 'any request refreshes the window');
+  } finally {
+    await server.stop();
+    delete process.env.GOLDFINCH_AUTOMATION_ADMIN;
+  }
+});
+
+test('hasAdminSession: a request arriving after the window lapsed reads TRUE inside its own handler; a 401 request never stamps', async () => {
+  process.env.GOLDFINCH_AUTOMATION_ADMIN = '1';
+  let t = 1000;
+  /** @type {boolean[]} */
+  const seenInHandler = [];
+  /** @type {any} */
+  let server = null;
+  server = createMcpServer({
+    getEngine: (engineOpts) => {
+      // Called fresh per tool call, inside the request: this is "inside its own handler".
+      seenInHandler.push(server.hasAdminSession());
+      return makeFakeEngine(engineOpts);
+    },
+    getSettings: multiKeySettings({ withAdmin: true }),
+    scopeCtx: fakeScopeCtx(),
+    port: TEST_PORT,
+    now: () => t
+  });
+  await server.start();
+  try {
+    const sid = await rawInitSession(ADMIN_KEY);
+    t += ADMIN_ACTIVE_WINDOW_MS + 5000;
+    assert.equal(server.hasAdminSession(), false, 'precondition: lapsed');
+    // A valid key but another identity's id: 401, and it must not stamp the admin session.
+    const bad = await rawPost(
+      { authorization: 'Bearer ' + WORK_KEY, 'mcp-session-id': sid },
+      { jsonrpc: '2.0', id: 3, method: 'tools/list', params: {} }
+    );
+    assert.equal(bad.status, 401);
+    assert.equal(server.hasAdminSession(), false, 'a request that failed identity resolution never stamps');
+    // An unauthenticated request is refused by the gate before routing: also no stamp.
+    const none = await rawPost({ 'mcp-session-id': sid }, { jsonrpc: '2.0', id: 4, method: 'tools/list', params: {} });
+    assert.equal(none.status, 401);
+    assert.equal(server.hasAdminSession(), false, 'an unauthenticated request never stamps');
+    // The real call: the stamp is written before the transport runs, so the handler already sees it on.
+    const ok = await rawPost(
+      { authorization: 'Bearer ' + ADMIN_KEY, 'mcp-session-id': sid },
+      { jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'enumerateTabs', arguments: {} } }
+    );
+    assert.equal(ok.status, 200);
+    assert.deepEqual(seenInHandler, [true], 'the gate was already on inside the handler of the call that lapsed');
+    // A request in flight longer than the window is covered by its own stamp only until the window ends.
+    // That is sound ONLY because script the request started is covered by the scripted-document mark
+    // (observe.js marks before executeJavaScript; reveal-gate.js checks the mark independently of
+    // hasAdminSession) - pinned by the reveal-gate and observe tests, not by this one.
+    t += ADMIN_ACTIVE_WINDOW_MS + 1;
+    assert.equal(server.hasAdminSession(), false, 'the stamp does not outlive the window');
+  } finally {
+    await server.stop();
+    delete process.env.GOLDFINCH_AUTOMATION_ADMIN;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Mission 23 Flight 2 (leg `automation-bounds`, AC3/AC4/AC6): per-identity session cap with own-stalest
+// eviction. Injected clock; raw initialize (no SDK client, so no background stream unless a test opens one).
+// ---------------------------------------------------------------------------
+
+// Open the standalone GET stream for a session and hold it; resolves once the server answered 200.
+function openStream(key, sid) {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        host: '127.0.0.1',
+        port: TEST_PORT,
+        path: '/mcp',
+        method: 'GET',
+        headers: { accept: 'text/event-stream', authorization: 'Bearer ' + key, 'mcp-session-id': sid }
+      },
+      (res) => {
+        res.resume();
+        resolve({ status: res.statusCode, close: () => req.destroy() });
+      }
+    );
+    req.on('error', (e) => (req.destroyed ? undefined : reject(e)));
+    req.end();
+  });
+}
+
+const listBody = (id = 9) => ({ jsonrpc: '2.0', id, method: 'tools/list', params: {} });
+
+test('pickVictim: no stream first, then nothing in flight, then lowest lastSeen', () => {
+  const a = { name: 'a', hasStream: true, inFlight: 0, lastSeen: 1 };
+  const b = { name: 'b', hasStream: false, inFlight: 1, lastSeen: 2 };
+  const c = { name: 'c', hasStream: false, inFlight: 0, lastSeen: 9 };
+  const d = { name: 'd', hasStream: false, inFlight: 0, lastSeen: 5 };
+  assert.equal(pickVictim([a, b, c, d]).name, 'd', 'streamless and idle, oldest of those');
+  assert.equal(pickVictim([a, b, c]).name, 'c', 'idle beats the older one that is mid-request');
+  assert.equal(pickVictim([a, b]).name, 'b', 'streamless beats the older one that holds a stream');
+  const e = { name: 'e', hasStream: true, inFlight: 1, lastSeen: 7 };
+  assert.equal(pickVictim([a, e]).name, 'a', 'all streamed and busy or idle: still picks one (idle first)');
+  assert.equal(pickVictim([]), null);
+  assert.equal(MAX_SESSIONS_PER_IDENTITY, 8, 'the documented per-key limit');
+});
+
+test('per-identity cap: the streamless oldest of that key goes; streamed, other-identity and unrelated sessions stay; the evicted id gets the pinned 404', async () => {
+  let t = 100;
+  const server = await startScopedServer({}, { now: () => t, maxSessionsPerIdentity: 3 });
+  /** @type {Array<{close: () => void}>} */
+  const streams = [];
+  try {
+    const workSids = [];
+    for (let i = 0; i < 3; i++) workSids.push(await rawInitSession(WORK_KEY));
+    const s1 = await rawInitSession(VALID_KEY);
+    t += 10;
+    const s2 = await rawInitSession(VALID_KEY);
+    t += 10;
+    const s3 = await rawInitSession(VALID_KEY);
+    t += 10;
+    // s1 is the OLDEST but holds a stream; s2 then s3 are streamless.
+    streams.push(await openStream(VALID_KEY, s1));
+    t += 10;
+    assert.equal(server.getActivity().sessions.length, 6);
+
+    const s4 = await rawInitSession(VALID_KEY); // at the cap: one of test's own goes
+    const live = server.getActivity().sessions.map((s) => s.sessionId);
+    await waitFor(() => !server.getActivity().sessions.some((s) => s.sessionId === s2));
+    assert.equal(live.includes(s4) || server.getActivity().sessions.some((x) => x.sessionId === s4), true);
+    const ids = server.getActivity().sessions.map((s) => s.sessionId);
+    assert.equal(ids.includes(s2), false, 'AC6: the evicted session left the activity snapshot');
+    for (const keep of [s1, s3, s4, ...workSids]) assert.equal(ids.includes(keep), true, 'kept: ' + keep);
+    assert.equal(ids.length, 6, 'test holds exactly its cap (3) and work is untouched (3)');
+
+    // AC4: the evicted id reaches the existing, pinned 404 (status AND JSON-RPC error body).
+    const gone = await rawPost({ authorization: 'Bearer ' + VALID_KEY, 'mcp-session-id': s2 }, listBody());
+    assert.equal(gone.status, 404);
+    assert.deepEqual(JSON.parse(gone.body), {
+      jsonrpc: '2.0',
+      error: { code: -32000, message: 'No valid session: unknown Mcp-Session-Id' },
+      id: null
+    });
+    // ... and the survivors keep working.
+    for (const [key, sid] of [
+      [VALID_KEY, s1],
+      [VALID_KEY, s3],
+      [WORK_KEY, workSids[0]]
+    ]) {
+      const ok = await rawPost({ authorization: 'Bearer ' + key, 'mcp-session-id': sid }, listBody());
+      assert.equal(ok.status, 200);
+    }
+    // The other two statuses are unchanged: a known id under another identity is a bare 401 ...
+    const other = await rawPost({ authorization: 'Bearer ' + WORK_KEY, 'mcp-session-id': s1 }, listBody());
+    assert.equal(other.status, 401);
+    assert.equal(other.body, '');
+    // ... and a non-initialize request with no session id is a 400.
+    const none = await rawPost({ authorization: 'Bearer ' + VALID_KEY }, listBody());
+    assert.equal(none.status, 400);
+  } finally {
+    for (const s of streams) s.close();
+    await server.stop();
+  }
+});
+
+test('per-identity cap: a session mid-request is spared while a streamless idle one exists (inFlight is real, not just in the picker)', async () => {
+  let t = 100;
+  let release = () => {};
+  const gate = new Promise((r) => (release = r));
+  const server = createMcpServer({
+    getEngine: (engineOpts) => {
+      const eng = makeFakeEngine(engineOpts);
+      return { ...eng, enumerateTabs: async () => (await gate, eng.enumerateTabs()) };
+    },
+    getSettings: multiKeySettings(),
+    scopeCtx: fakeScopeCtx(),
+    port: TEST_PORT,
+    now: () => t,
+    maxSessionsPerIdentity: 2
+  });
+  await server.start();
+  try {
+    const busy = await rawInitSession(VALID_KEY); // oldest
+    t += 10;
+    const idle = await rawInitSession(VALID_KEY);
+    t += 10;
+    const pending = rawPost(
+      { authorization: 'Bearer ' + VALID_KEY, 'mcp-session-id': busy },
+      { jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'enumerateTabs', arguments: {} } }
+    );
+    await new Promise((r) => setTimeout(r, 50)); // the call is now parked inside the engine
+    const fresh = await rawInitSession(VALID_KEY);
+    await waitFor(() => !server.getActivity().sessions.some((s) => s.sessionId === idle));
+    const ids = server.getActivity().sessions.map((s) => s.sessionId);
+    assert.deepEqual(ids.sort(), [busy, fresh].sort(), 'the idle one went; the older session mid-request stayed');
+    release();
+    const done = await pending;
+    assert.equal(done.status, 200, 'the in-flight request completed normally');
+  } finally {
+    release();
+    await server.stop();
+  }
+});
+
+test('per-identity cap: two simultaneous initialisations at cap-1 leave exactly the cap', async () => {
+  const server = await startScopedServer({}, { maxSessionsPerIdentity: 3 });
+  try {
+    await rawInitSession(VALID_KEY);
+    await rawInitSession(VALID_KEY);
+    const [x, y] = await Promise.all([rawInitSession(VALID_KEY), rawInitSession(VALID_KEY)]);
+    await waitFor(() => server.getActivity().sessions.length === 3);
+    await new Promise((r) => setTimeout(r, 50));
+    const ids = server.getActivity().sessions.map((s) => s.sessionId);
+    assert.equal(ids.length, 3, 'exactly the cap, not cap+1');
+    assert.equal(ids.includes(x) && ids.includes(y), true, 'both new sessions survive; an older one made room');
+  } finally {
+    await server.stop();
+  }
+});
+
+test('per-identity cap: the admin identity is capped the same way and never evicts a jar key', async () => {
+  process.env.GOLDFINCH_AUTOMATION_ADMIN = '1';
+  let t = 1;
+  const server = await startScopedServer({ withAdmin: true }, { now: () => t, maxSessionsPerIdentity: 2 });
+  try {
+    const jar = await rawInitSession(WORK_KEY);
+    const a1 = await rawInitSession(ADMIN_KEY);
+    t += 1;
+    const a2 = await rawInitSession(ADMIN_KEY);
+    t += 1;
+    const a3 = await rawInitSession(ADMIN_KEY);
+    await waitFor(() => !server.getActivity().sessions.some((s) => s.sessionId === a1));
+    const ids = server.getActivity().sessions.map((s) => s.sessionId);
+    assert.deepEqual(ids.sort(), [jar, a2, a3].sort());
+  } finally {
+    await server.stop();
+    delete process.env.GOLDFINCH_AUTOMATION_ADMIN;
+  }
+});
+
+test('per-identity cap of 1: the new session replaces the old through the single onclose path (map entry and activity row gone)', async () => {
+  let t = 1;
+  const server = await startScopedServer({}, { now: () => t, maxSessionsPerIdentity: 1 });
+  try {
+    const first = await rawInitSession(VALID_KEY);
+    t += 1;
+    const second = await rawInitSession(VALID_KEY);
+    await waitFor(() => !server.getActivity().sessions.some((s) => s.sessionId === first));
+    assert.equal(server.getActivity().sessions.length, 1);
+    assert.equal(server.getActivity().sessions[0].sessionId, second);
+  } finally {
+    await server.stop();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Reserved names (Mission 23 F2, leg admin-key-name): mint refuses every reserved
+// identity and every non-own-entry name, with or without a jars accessor, before a
+// key is generated or anything is written. Revoke still cleans a stale entry.
+// ---------------------------------------------------------------------------
+
+for (const name of ['admin', 'global', 'internal', 'default', 'burner', 'burner-3', '__proto__', 'constructor']) {
+  test(`mint — "${name}" is refused with and without a jars accessor, nothing written`, () => {
+    const settings = memSettings();
+    const jars = { list: () => [{ id: name }, { id: 'personal' }] };
+    for (const accessor of [jars, undefined]) {
+      assert.throws(
+        () => mintJarKey(name, settings, accessor),
+        (err) => err instanceof Error && /reserved name/.test(err.message)
+      );
+    }
+    assert.equal(settings.get('automationKeyHashes'), undefined, 'no hash stored on a refused mint');
+  });
+}
+
+test('revokeJarKey — still removes a stale reserved entry (the cleanup path)', () => {
+  const settings = memSettings();
+  settings.set('automationKeyHashes', { admin: 'a'.repeat(64), work: 'b'.repeat(64) });
+  revokeJarKey('admin', settings);
+  assert.deepEqual(settings.get('automationKeyHashes'), { work: 'b'.repeat(64) });
+});
+
+// Mission 23 Flight 2, leg `automation-input` (DD4): the tier flag for the injected-input counts is an explicit
+// engine option set at exactly one place - the server's getEngine call - for a non-admin identity.
+test('jarTier: the engine options carry jarTier true for a jar session and false for the admin session', async () => {
+  process.env.GOLDFINCH_AUTOMATION_ADMIN = '1';
+  const seen = [];
+  const server = createMcpServer({
+    getEngine: (engineOpts) => {
+      seen.push(engineOpts);
+      return makeFakeEngine(engineOpts);
+    },
+    getSettings: multiKeySettings({ enabled: true, withAdmin: true }),
+    scopeCtx: fakeScopeCtx(),
+    port: TEST_PORT
+  });
+  await server.start();
+  try {
+    const jar = await connectClient(VALID_KEY);
+    try {
+      await jar.callTool({ name: 'enumerateTabs', arguments: {} });
+    } finally {
+      await jar.close();
+    }
+    const jarOpts = seen.at(-1);
+    assert.equal(jarOpts.jarTier, true, 'a jar-scoped session is the jar tier');
+    assert.equal(jarOpts.allowInternal, false);
+    const admin = await connectClient(ADMIN_KEY);
+    try {
+      await admin.callTool({ name: 'enumerateTabs', arguments: {} });
+    } finally {
+      await admin.close();
+    }
+    const adminOpts = seen.at(-1);
+    assert.equal(adminOpts.jarTier, false, 'the admin session is not the jar tier');
+    assert.equal(adminOpts.allowInternal, true);
+  } finally {
+    await server.stop();
+    delete process.env.GOLDFINCH_AUTOMATION_ADMIN;
+  }
+});
+
+test('audit — every broadcast and getActivity carry the configured/bound port pair (Flight 2 DD5)', async () => {
+  const broadcasts = [];
+  const server = await startAuditServer(broadcasts);
+  try {
+    const client = await connectClient(VALID_KEY);
+    try {
+      await client.callTool({ name: 'navigate', arguments: { wcId: 1, url: 'https://x.example' } });
+    } finally {
+      await client.close();
+    }
+    assert.ok(broadcasts.length >= 3, 'start + session open + call');
+    for (const b of broadcasts) assert.deepEqual(b.port, { configured: TEST_PORT, bound: TEST_PORT });
+    assert.deepEqual(server.getActivity().port, { configured: TEST_PORT, bound: TEST_PORT });
+  } finally {
+    await server.stop();
   }
 });

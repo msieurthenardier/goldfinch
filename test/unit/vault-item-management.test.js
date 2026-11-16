@@ -54,7 +54,7 @@ test('listItemsMeta returns metadata for all three types with NO secret field/va
       brand: 'visa',
       last4: '4242',
       number: '4111111111111111',
-      cvv: '123',
+      cvv: 'cvv-SECRET-x9',
       expiry: '12/30',
       notes: 'cardnote'
     });
@@ -63,7 +63,16 @@ test('listItemsMeta returns metadata for all three types with NO secret field/va
     const meta = store.listItemsMeta('global');
     assert.equal(meta.length, 3);
     const json = JSON.stringify(meta);
-    for (const needle of ['PW', 'SEED', 'reco', '4111111111111111', '123', 'hunter2-wifi', 'extra', 'cardnote']) {
+    for (const needle of [
+      'PW',
+      'SEED',
+      'reco',
+      '4111111111111111',
+      'cvv-SECRET-x9',
+      'hunter2-wifi',
+      'extra',
+      'cardnote'
+    ]) {
       assert.equal(json.includes(needle), false, `metadata leaked secret value "${needle}"`);
     }
     // No secret KEY appears for any row.

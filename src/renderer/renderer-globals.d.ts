@@ -698,14 +698,20 @@ interface GoldfinchInternalBridge {
     enabled: boolean;
     host: string;
     port: number;
+    configuredPort: number;
     bound: boolean;
     error: string | null;
   }>;
   defaultBrowserGetStatus(): Promise<DefaultBrowserStatus>;
   defaultBrowserMakeDefault(): Promise<{ ok: boolean; status: DefaultBrowserStatus }>;
-  automationSetPort(
-    port: number
-  ): Promise<{ enabled: boolean; host: string; port: number; bound: boolean; error: string | null }>;
+  automationSetPort(port: number): Promise<{
+    enabled: boolean;
+    host: string;
+    port: number;
+    configuredPort: number;
+    bound: boolean;
+    error: string | null;
+  }>;
   automationFindFreePort(): Promise<{ port: number | null }>;
   clipboardWrite(text: string, opts?: { secret?: boolean }): Promise<{ ok: boolean }>;
   automationListKeys(): Promise<{
@@ -713,9 +719,9 @@ interface GoldfinchInternalBridge {
     adminEnabled: boolean;
     adminKeySet: boolean;
   }>;
-  automationJarKeyMint(jarId: string): Promise<{ key: string }>;
+  automationJarKeyMint(jarId: string): Promise<{ key: string | null; refused?: 'not-confirmed' }>;
   automationJarKeyRevoke(jarId: string): Promise<{ ok: boolean }>;
-  automationAdminKeyMint(): Promise<{ key: string | null }>;
+  automationAdminKeyMint(): Promise<{ key: string | null; refused?: 'not-confirmed' }>;
   automationAdminKeyRevoke(): Promise<{ ok: boolean }>;
   automationGetActivity(): Promise<AutomationActivity>;
   onAutomationActivity(cb: (snap: AutomationActivity) => void): number;
@@ -818,7 +824,7 @@ interface GoldfinchInternalBridge {
   vaultReveal(payload: {
     vaultId: string;
     itemId: string;
-  }): Promise<{ item?: Record<string, any> | null; locked?: boolean }>;
+  }): Promise<{ item?: Record<string, any> | null; locked?: boolean; refused?: 'not-confirmed' }>;
   /** Preserving full-item save; unchangedSecrets names the masked-untouched fields.
    * Returns the saved item's METADATA (never a secret) — { item } or { locked }. */
   vaultItemSave(payload: {
@@ -854,7 +860,7 @@ interface GoldfinchInternalBridge {
   vaultTotpCode(payload: {
     vaultId: string;
     itemId: string;
-  }): Promise<{ code?: string | null; secondsRemaining?: number; locked?: boolean }>;
+  }): Promise<{ code?: string | null; secondsRemaining?: number; locked?: boolean; refused?: 'not-confirmed' }>;
   // First-run setup + unlock triggers (M12 F3 Leg 4 / DD5). No secret crosses either — the
   // password lives only on the chrome-owned sheet + in main; the page reacts to the
   // vault-lock-state broadcast below.
@@ -889,7 +895,15 @@ interface GoldfinchInternalBridge {
   exportVault(
     target: string,
     savePath?: string
-  ): Promise<{ ok?: boolean; path?: string; canceled?: boolean; locked?: boolean; error?: string; reason?: string }>;
+  ): Promise<{
+    ok?: boolean;
+    path?: string;
+    canceled?: boolean;
+    locked?: boolean;
+    error?: string;
+    reason?: string;
+    refused?: 'not-confirmed';
+  }>;
   /** Export the WHOLE PROFILE (M18 F3 L3 / DD1 ruling 7) — the vault page's Export modal's ONLY
    * export path. { ok, path, carried }, { canceled }, or { locked }. */
   exportProfile(savePath?: string): Promise<{
@@ -900,6 +914,7 @@ interface GoldfinchInternalBridge {
     locked?: boolean;
     error?: string;
     reason?: string;
+    refused?: 'not-confirmed';
   }>;
   /** Pick a save location for an export bundle — save dialog in main ONLY (no write). { path } or
    * { canceled }. */

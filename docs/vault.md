@@ -91,13 +91,14 @@ Everything lives under `userData/vaults/`:
   v2-effective); single-slot rotations preserve the document's existing version.
 
 - **`<vaultId>.gfvault`** — one per vault (`global.gfvault`, then `<jarId>.gfvault` created
-  lazily on the first credential save into that jar). Format id `gfvault`, version 1, owned
-  by `vault-crypto.js`. It is a self-contained JSON document:
+  lazily on the first credential save into that jar). Format id `gfvault`, **version 2 for every
+  file the app writes anew** (version 1 is still read, permanently), owned by `vault-crypto.js`.
+  It is a self-contained JSON document:
 
   ```json
   {
     "format": "gfvault",
-    "version": 1,
+    "version": 2,
     "vaultId": "<hex-or-jar-id>",
     "kdf": { "...": "scrypt params" },
     "envelopes": [
@@ -117,6 +118,142 @@ the document `version` are bound as GCM AAD, so relabelling an envelope or downg
 version fails authentication rather than silently succeeding — the load path (`parseVault`,
 `_readManager`) trusts the parsed plaintext header only because tampering it breaks the tag.
 
+**Version and vault id are explicit at every call (Mission 23 Flight 2 leg `vault-binding`).**
+`vault-crypto` has no default version and no default vault id. `READABLE_VAULT_VERSIONS`
+(`{1, 2}`, permanently) and `WRITE_VAULT_VERSION` (2) replace the old single `VERSION`; `serializeVault`
+takes the document's own `version` (required, refused outside the readable set) and
+`parseVault` accepts any readable version. `itemsAad(version, vaultId)` and
+`mrkEnvelopeAad(version, vaultId)` (the vault-key envelope's AAD, now exported from
+`vault-crypto`) give exactly today's strings at version 1 (`gfvault/items/1`,
+`gfvault/mrk-env/v1`) and bind the vault id from version 2 on; the id is **required for every
+version**, version 1 merely ignores its value, so a call site that forgets it fails now rather
+than only when a later version is switched on. The six manager-envelope functions
+(`wrapMaster` ... `openAdminSeal`) require a `version` too. The **access-envelope AAD is pinned
+at version 1** (`ACCESS_ENVELOPE_AAD_VERSION`): only an access key's holder can re-wrap its
+envelope, so it must not follow a document's version. Every store call site passes the
+document's own version and the id of the slot it read (`_readVault(vaultId)`), never the
+file's own `vaultId` field; a writer that rewrites an existing document passes that document's
+version, a writer that builds a new file passes `WRITE_VAULT_VERSION`. A document embedded in
+a bundle uses `bundleBindId(entry.bindId, doc)` (below).
+
+### File version 2 (leg `vault-format-v2`)
+
+**Every file the app writes anew is version 2, bound to its vault.** Version 2 changes two
+AAD strings and nothing else in the document:
+
+| What | Version 1 | Version 2 |
+|---|---|---|
+| Items blob | `gfvault/items/1` | `gfvault/items/2/<vaultId>` |
+| Vault-key envelope (`mrk`, wrapped by the master key) | `gfvault/mrk-env/v1` | `gfvault/mrk-env/v2/<vaultId>` |
+| Access envelope | `gfvault/env/1/hkdf-access/<keyId>` | **the same, pinned at 1** (`ACCESS_ENVELOPE_AAD_VERSION`) |
+
+**`<vaultId>` is the slot's, not the file's field.** For a slot read it is the id the store
+was asked for (`global`, or the jar id); the file's own `vaultId` field is only compared to it
+as an early diagnostic (and, being unauthenticated, is never used to choose a decrypt id —
+source-scan pinned). New vaults (setup, a jar's lazy first write, import, restore, adopt) and
+compromise rotation write version 2. **A writer that rewrites an existing document keeps that
+document's version** (save, delete, import of logins, `confirmedOrigins`, the restore merge,
+minting and revoking an access key): a version-1 file stays version 1 and stays readable, a
+version-2 file stays version 2. The version is authenticated (it is in the AAD), so a file
+cannot be relabelled either way: version 2 edited to 1 and version 1 edited to 2 both fail to
+open (`VaultAuthError`).
+
+**What a swapped file does, at each reader.** A version-2 file copied into another vault's
+slot is refused: the human path (`listItems`, `revealItem`, ...) and the admin-key path
+(`openAllWithAdminKey`) fail at the key envelope, whose AAD names the slot; the access-key
+path opens the key (the access envelope's AAD names no vault) but the items AAD for the
+requested slot then fails the read. While the file's plaintext `vaultId` field still names the
+other vault the failure is the typed `VaultWrongVaultError`; with the field edited to the slot
+it is an authentication failure. Never the other vault's items, never an empty vault, never a
+quarantine. A **version-1** file in the wrong slot still opens (it binds no id) and is logged.
+
+**Mixed profiles are normal.** A profile with version-1 and version-2 files side by side
+is what a skipped conversion leaves (see *The upgrade* below), and every operation (list, reveal, save, delete,
+copy both ways, access-key mint/revoke/open, admin-key open, automation reads, restore,
+rotation) works on each file at its own version.
+
+### The upgrade: version 1 becomes version 2 at the first unlock (leg `vault-upgrade`)
+
+**When.** The first time the master key is in hand, `VaultStore._installMrk` — the one point
+every master-key unlock passes (`unlock`, `unlockWithRecovery`, `unlockWithAdmin`,
+`recoverMasterPassword`, compromise rotation's final install, adopt) — calls
+`_upgradeVaultFiles()`, after the new key cache and **before** the idle timer is armed and
+`onUnlock` fires. It is **fully synchronous** (no `await`; source-scan pinned): the master key is
+already derived, so no key derivation is needed and nothing can interleave. `setup` writes version
+2 directly. Automation's access-key and admin-key paths never install a master key, so
+automation-only use never upgrades — and does not need to.
+
+**What.** Every registered vault (the global id, then the jar registry's, in registry spelling)
+whose file is exactly `<id>.gfvault` and still version 1: the vault key is unwrapped under the
+master key (version-1 AAD), the items decrypted, and both re-sealed under the version-2 AADs for
+that slot id. Access envelopes are carried **verbatim and in order** (their AAD is pinned at
+version 1, and the app holds no secret to re-wrap them); the informational `kdf` is kept. The
+pure builder is `vault-upgrade.js` (`buildUpgrade`, `verifyDocument`; no I/O); the store does
+the I/O. A file already version 2 is skipped after parsing only (no decrypt); if nothing needs
+converting no transaction is begun and nothing is written. A `.gfvault` file whose name matches
+no registered id (a **stray**) is left alone — never bound, never deleted — and logged once.
+
+**One transaction, verified three times, from three sources of the id.** All rebuilt files go
+through one journalled transaction (`vault-txn.js`, the one compromise rotation uses).
+(a) In memory, before anything is staged: each document is parsed and decrypted back, the items
+deep-equal the originals, the access envelopes are byte-identical (id: the builder's own).
+(b) On the **staged bytes**, after `beginTransaction` and before `commit`: each staged file is
+read back and decrypted with explicit `(2, id)` where the id is taken from the journal member's
+**final file name**, not from the builder; a failure rolls the (uncommitted) transaction back.
+(c) After the commit, through the real reader (`_readVault`, ids from the registry again): a
+failure writes **all** the original version-1 files back in a second journalled transaction
+(the originals are held in memory, ciphertext only, until this passes). The point of three
+sources is a mistake in *choosing* the id: a check that reused the builder's id would pass and
+every vault would be unreadable after a restart.
+
+**It never blocks an unlock and never strands a journal.** The whole thing is inside one `try`;
+a failure at any point is logged **once per id per process** (a reason code and the id — never
+an item, title, path or key) and the unlock proceeds. After any failure no journal remains
+(an uncommitted one is rolled back, a committed one rolled forward) so compromise rotation, which
+refuses while any journal exists, still works. **Skipped, and why a skipped file is fine:** a
+corrupt file, one that does not unwrap under this master key (or fails to decrypt), a missing
+file, a read-only directory, a failed stage write, a journal already present (settled, then
+skipped this time), and — silently — the re-key gate being up (compromise rotation's own final
+install; every file is already version 2 there). A skipped file stays version 1, stays usable
+exactly as today, fails with its own error if it is broken, and is retried at the next unlock.
+
+**The limit, in plain words.** The binding protects files written from this version on. After a
+profile's first unlock on this version no version-1 file of another vault is left to move, but:
+an **old version-1 copy** of one vault (kept from before the upgrade) can still be placed in
+another vault's slot, where — being version 1 — it opens and is upgraded and bound **there**. An
+older copy of the *same* vault is not detected (the existing rollback limit). A version-1 file
+whose own `vaultId` field disagrees with its slot is upgraded like any other and bound to the
+slot it is in (it opens as that slot today, so nothing changes). A marker saying "this profile is
+version 2" was considered and rejected: the manager is untouched by the upgrade, and any marker
+lives in a file that can be rolled back with the rest.
+
+**No backup is kept, deliberately.** A kept copy of a version-1 file retains the old access
+envelopes and the old wrapped key: a revoked access key would still open it, compromise rotation
+would not enumerate it, and it is exactly the swap material the binding exists to retire. The
+safety nets are the three verifications, the in-memory undo, and an operator's own copy of the
+`vaults` directory made **before** the first unlock on this version (the release notes say so).
+**An older build cannot open the upgraded files** — the only way back is that copy.
+
+**An older build cannot open a version-2 file** ("unsupported version", nothing lost), nor a
+bundle that holds one. This build reads version-1 files and bundles forever.
+
+**Bundle ids.** A document embedded in a bundle is bound (version 2) to the id the bundle states
+for it, by the bundle's own shape: a **single-vault bundle** (bundle version 1, `exportVault`)
+to its `sourceVaultId`, which must equal the embedded document's `vaultId` field (a mismatch
+is a `VaultFormatError` raised before any secret is tried, so an edited id never reads as a
+wrong password); a **profile bundle** (bundle version 2, `exportProfile`) to the entry's
+handle. `normalizeRestoreBundle` carries that as an explicit `bindId` per entry (a
+single-vault bundle's synthetic restore handle is NOT the binding id); restore and preview use
+it, and version-1 documents ignore it. **No bundle version changed.**
+
+**The id check is a diagnostic, not a boundary.** `_readVault` compares a file's `vaultId`
+field with the slot it was read from. A **version-1** file with another id opens exactly as it
+always has and the mismatch is logged once per id (`deps.log`, wired in `main.js`); the field is
+unauthenticated, so refusing on it would protect nothing, and an operator-moved file keeps
+opening. A document of a later version is bound to its id in its AADs and a mismatch throws
+`VaultWrongVaultError` (a `VaultFormatError`, message names no id). Jar ids are reusable, so a
+re-created jar finds its old vault file under the same id, unchanged.
+
 **Load-loudly, never quarantine.** A truncated, tampered, or unknown-version `manager.json`
 or `.gfvault` throws a typed `VaultFormatError` / `VaultAuthError`. The file is never
 renamed, quarantined, or recreated — the operator's ciphertext is treated as sacred. (This
@@ -134,6 +271,22 @@ manager to repair — recovery from a tampered `manager.json` is by re-importing
 trusted bundle. This closes the **silent-KDF-downgrade** vector: an attacker who lowered `N`
 on the un-step-up-gated recovery path could previously weaken the master-password derivation
 undetected; the read-path check now rejects it before any derive or write.
+
+**Re-wrap never goes below the app's own parameters (Mission 23 Flight 2 DD6).** Where a
+fresh master password is in hand — `changeMasterPassword`, `recoverMasterPassword`,
+`compromiseRotate` — the new master envelope is wrapped with `chooseRewrapKdf(manager.kdf,
+this.scryptParams)`: the stored parameters are kept (same object, never rewritten) only when
+they are scrypt, each of N, r and p is at least the store's default, and the stored `maxmem`
+covers scrypt's real need (`128 * r * (N + p + 2)`); otherwise the default set is written
+whole, in the same manager write as the new envelope. Components are never mixed and no
+product comparison is used. The earlier step-ups and rotation's reuse probe still use the
+STORED parameters. So tampered parameters (reachable only via a recovery-key unlock) and a
+profile adopted from a weaker bundle are raised at the next password change, recovery or
+rotation; unlock then takes the normal time for this version. Adopt itself keeps the donor's
+parameters (the donor's master envelope is carried verbatim), and there is **no floor on
+read**: a manager with weak-but-valid parameters still opens. Stronger-than-default
+parameters are preserved. This supersedes in part the Mission 18 Flight 2 "preserve
+`manager.kdf`" ruling.
 
 ## Key hierarchy — the MRK model
 
@@ -178,15 +331,91 @@ other's AAD.
   prior key state and fires the `onUnlock` hook. `this.mrk` is assigned only after a
   successful unwrap, so a failed unlock leaves the manager locked.
 - **Idle auto-lock.** Every store operation calls `_touch`, which re-arms an idle timer
-  (`getAutoLockMinutes`, default 10) whose fire calls `lockNow`. The timer is `unref`'d so it
-  never keeps the process alive.
+  (`getAutoLockMinutes`, default 10 minutes, via the one coercion `autoLockMs()`) whose fire
+  calls `lockNow`. The timer is `unref`'d so it never keeps the process alive. `_touch` also
+  stamps the wall clock, which `idleMs()` reads (null while locked). **A one-time-code display
+  does not hold the vault open**: the vault page's code widget polls `internal-vault-totp-code`
+  every 30 s, and that handler reads with `{ touch: false }` (both the item projection and
+  `revealItem`), so only real activity re-arms the timer; a locked vault still answers
+  `{ locked: true }` and the widget stops and the page re-renders locked. Every other
+  `revealItem` caller still touches. The other periodic-looking callers are event-driven:
+  `internal-vault-state` runs on page load and on each `vault-lock-state` push, and the chrome
+  asks `vault-lock-state-get` once at boot (neither polls).
+- **What locks the vault** (all through `lockNow`, the single path the toolbar's lock also
+  takes, so sheets close in every window, automation's vault keys are zeroized and the
+  indicator updates): idle; **suspend** (`powerMonitor` `suspend`); **resume after a long
+  sleep** (on `resume` / `unlock-screen`, if the wall-clock idle time is at least the idle
+  interval - a Node timer does not count suspended time, so this is the fallback when
+  `suspend` was missed); **screen lock** (`lock-screen`, macOS and Windows) and **user switch**
+  (`user-did-resign-active`, macOS); **shutdown** (`shutdown`, Linux and macOS); and **quit**
+  (`before-quit` locks before the MCP server stops; `app.exit()`, `process.exit` and signals do
+  not deliver `before-quit`, but process exit drops the keys regardless). **On Linux, locking
+  the screen does not lock the vault**: no screen-lock event exists there, only suspend. The
+  listener (`src/main/vault/power-lock.js`) is registered once after `app.ready`; an
+  already-locked vault is a no-op and a throwing lock never escapes it. While the fresh-adopt
+  key-surfacing window is open (`setAutoLockSuspended`), a power lock is deferred exactly as the
+  idle timer is - locking there would close the one screen that shows the recovery key - and is
+  remembered: the store locks the moment the suspension ends (`setAutoLockSuspended(false)`), if
+  still unlocked. A deferred resume check is not remembered; the idle timer covers it.
+  `GOLDFINCH_IPC_TRACE=1` prints `[vault-power-lock]` registration and lock lines.
+- **A lock voids the reveal gate's per-item grants** (`documentMarks.clearGrants()` in the
+  store's `onLock`), and a confirmation that was already open when the lock arrived stores no
+  grant (a grant epoch is read before the dialog opens): a locked-then-unlocked vault asks
+  again, and the confirmation, if then given, reveals nothing (`{ locked: true }`).
 - **Lock on quit + zeroization.** `lockNow` `.fill(0)`-zeroizes the MRK and every cached
-  vault key, clears the maps, and fires `onLock`; the app wires `before-quit → lockNow`. A
-  re-unlock zeroizes any prior state first (`_resetKeys`).
+  vault key, clears the maps, and fires `onLock`; `before-quit` calls it (own `try`, ahead of
+  the MCP stop). A re-unlock zeroizes any prior state first (`_resetKeys`).
+- **What is NOT re-keyed.** Revoking an access key and changing the master password do not
+  re-key the vault (accepted, Mission 23 finding 13): someone holding an OLD copy of the vault
+  file together with the revoked key, or the old master password, can still open THAT copy.
+  Compromise rotation (see *Rotation & recovery*) is the re-key, and the remedy.
 - **Step-up re-auth gate.** Durable-grant operations (mint an access key, and every
   rotation) require a fresh re-unwrap of the current master (or recovery) envelope even while
   already unlocked — the step-up precedes any write, so a wrong secret rewrites nothing. This
   hardens against a hijacked already-unlocked session.
+
+### Clipboard clearing (Mission 23 F2 leg `clipboard-and-file-modes`)
+
+Every secret the app puts on the OS clipboard goes through ONE Electron-free helper
+(`src/main/secret-clipboard.js`; a source scan fails on any other `clipboard.writeText` / `write` /
+`clear` in `src/main/**`): a vault item's secret Copy (`clipboard:write` with `{ secret: true }`), the
+sheet's Copy on a recovery-key, access-key or admin-key display card (`menu-overlay:copy-text`, whose
+row is pinned to exactly those three cards, so every sheet copy is a secret write), and the automation
+page's show-once key (its Copy goes straight to the bridge with `{ secret: true }`, never through
+`navigator.clipboard`). The page-context-menu copies (`chrome-clipboard-write`) are plain writes.
+
+- **When it clears.** 20 seconds after the copy, and at quit (`before-quit` runs the flush FIRST, in its
+  own `try`). A later write of any kind replaces the pending clear: a later secret re-arms it, a later
+  plain write cancels it (the clipboard no longer holds the secret).
+- **Only if the clipboard still holds exactly that text.** The timed clear and the quit flush share one
+  routine: read the clipboard, and clear it only if it equals what the app wrote. If the read throws, or
+  the clipboard holds anything else, nothing is cleared - wiping an unrelated copy is worse than leaving
+  a secret the operator copied on purpose.
+- **Measured on this build (Electron 45, WSLg/Wayland)**: `clipboard.readText()` is asynchronous (it
+  returns a promise; the routine awaits it) and returned the written text while the window was
+  focused, blurred, hidden and inside `before-quit`; the quit flush starts the read in `before-quit` and
+  it is best effort: if the read does not complete before the process exits, nothing is cleared (an Electron clipboard promise is not a microtask). On WSLg the Windows side of the clipboard is a
+  bridge the app does not control: in the measurements the text stayed on the Windows clipboard after
+  the app exited, and a `clipboard.clear()` did not reliably reach it.
+- **Limits no code here changes.** A clipboard manager, Windows clipboard history and the cloud clipboard
+  may keep a copy. `before-quit` is not delivered on a crash, a kill, `app.exit()`, `process.exit` or a
+  signal, so a pending secret is not cleared then (on most Linux hosts clipboard content owned by a dead
+  process vanishes anyway; on Windows and through the WSLg bridge it does not).
+
+### Files are owner-only (same leg)
+
+Vault files, `manager.json`, the transaction journal and its staged files (all written through
+`writeFileAtomic`, which opens its temp file `0600`), the vaults directory (`0700`), export bundles
+(`0600` on creation), `app.db` and `history.db` (pre-created `0600` before SQLite opens them, so the
+`-wal` / `-shm` sidecars inherit it) and the crash log (`0600`) are created owner-only. Anything that
+already exists - the vaults directory and every file in it, the databases and their sidecars, their
+`.corrupt-*` quarantines, the legacy `*.migrated` renames in the profile directory, the crash log - is
+tightened ONCE when the store opens, never on a timer, so a profile made by an older build is fixed at
+its next launch. A bundle the operator overwrites at a path they chose is `chmod`ed to `0600` after the
+write. Every mode call is best-effort: a failure (read-only profile, FAT, a network filesystem, Windows,
+which ignores mode bits) is logged once and the app carries on; nothing depends on the resulting mode.
+Chromium's own profile files (cookies, cache, crash dumps) are out of scope. A legacy file renamed
+`.migrated` during a launch is tightened at the NEXT launch.
 
 ## The fill trust boundary (F2 DD5 / F3)
 
@@ -268,9 +497,15 @@ business logic and no privileged APIs; it renders a model and runs the APG keybo
   derived read of `webContents.getURL()`, which keeps answering with the previous committed
   URL for the whole of a pending navigation, so there is no new tab-entry field; error pages
   and every other scheme yield nothing); (2) a real left-button **release** was witnessed in
-  this tab within **2 s** with its press on record at or before it (an MCP `click` is real
-  input to main, since it is injected below the page, which is also what makes the positive
-  case testable; a script-synthesised click never reaches `input-event`) - for the icon
+  this tab within **2 s** with its press on record at or before it (**automation input is
+  not a witnessed click**: an MCP `click` is injected with `sendInputEvent` and does reach the
+  tab's `input-event`, but main counts what automation is injecting into each tab
+  (`automation/injected-input.js`) and the witness listener ignores input while that count is
+  up, at every tier, plus a 50 ms trailing allowance - so an automation click on the icon ends
+  in `[vault-gesture] refused reason=no-real-input` and no sheet; an earlier real click stays on
+  record, and a real release that lands during an injection is dropped, which the verifier
+  refuses; the accept path is therefore walked by a physical click, `[by-eye]`; a
+  script-synthesised click never reaches `input-event`) - for the icon
   menu, a real right-button **press** (press only: the platform decides whether `contextmenu`
   fires on press or release); (3) the message carries a box of four finite numbers no larger
   than **four times** the icon's real 30x16 in either dimension; (4) scaled by the tab's LIVE
@@ -419,7 +654,7 @@ business logic and no privileged APIs; it renders a model and runs the APG keybo
   preload holds no target, so nothing is filled. An automation fill is unmarked: its
   first-detected-entry behaviour is byte-identical and it never consumes a human's target. The
   icon's right-click binds the target exactly as its click does, so "Fill login..." still fills.
-  What a page can do with the preload's IPC object: register its own `vault-fill*` listener on
+  What a page can do with the preload's IPC object (measured reachable on Electron 44.10.0; the known probe does not reach it on 45.3.2, not proven closed, so the main-side caller class stays the boundary): register its own `vault-fill*` listener on
   its own tab (it sees the credential main just sent to that tab, the page the operator chose to
   fill) and send any guest-class message; nothing relies on "a page cannot listen".
 
@@ -478,6 +713,55 @@ consumer reference: `docs/mcp-automation.md` (*Vault tools*).
   vaults opened for `vaultUnlock` (never the ids-as-secrets), and the item id for
   `vaultTotp` — and reads the `accessKey` / password / TOTP secret / vault key from neither
   the args nor the result.
+
+### Reading a secret from the vault page while automation is active (the reveal gate)
+
+The vault page's bridge returns secrets to the page: `vaultReveal` returns the **whole item**
+(every secret field at once; the page calls it per field — each eye button and each Copy) and
+`vaultTotpCode` returns the current one-time code (the editor's code widget calls it as soon as an
+item's editor opens). The internal-origin check keeps web pages out of those channels, but it does
+nothing about script an **admin automation key** evaluated inside the vault page. Since Mission 23
+Flight 2 (leg `admin-reach`) these channels — and vault export (`internal-vault-export`,
+`-export-profile`: the caller picks where an encrypted bundle is written) — take a **native
+confirmation** whenever (a) an admin automation session made a request in the last ten minutes or (b) automation has evaluated
+script in that document since it loaded (a script can outlive its session). The dialog is parented
+on the vault page's window, Cancel is the first and default button, it names the action and the item
+(the title from the non-secret metadata projection, cleaned and capped — never a secret), and it
+says an automation connection has been active recently and will be able to read what is shown. When neither
+condition holds there is no dialog and nothing changes.
+
+- **Per item, per document.** One confirmation covers that item's later reveals and code reads from
+  the same document (the page asks per field; the code widget polls) and nothing else; it ends at
+  the document's next main-frame navigation or when its contents is destroyed. With an admin
+  attached, opening the editor of an item that has a one-time code raises the dialog.
+- **A confirmation is cancelled, not left up, when the operator moves on** (leg `hat-and-alignment` fix 1): only
+  the window's active tab is ever asked; switching away from, hiding, closing or moving the tab cancels its
+  pending dialog; and a real click or key press in the window cancels it after 400 ms (injected automation input
+  does not). The read then answers `{ refused: 'not-confirmed', busy: true }` and the editor's code widget
+  retries instead of latching "not shown" (the line reads "Not confirmed - try again.").
+- **A confirmed value is readable by the attached automation** — the dialog says so; it is the
+  operator's informed choice. The vault's own lock still wins: a confirmation given after the vault
+  locked reveals nothing (`{ locked: true }`), and a locked vault answers before any dialog. A
+  vault that was locked **and unlocked again** while the dialog was up also reveals nothing
+  (`refused: 'not-confirmed'`): the operator confirmed for a session that no longer exists (the
+  grant epoch read before the dialog is compared after it; same for export). A metadata lookup
+  that cannot be completed is a refusal whenever the gate applies, never an ungated read.
+- **Refusals are normal answers**: `{ refused: 'not-confirmed' }` (reveal), `{ code: null, refused:
+  'not-confirmed' }` (code), `{ ok: false, canceled: true, refused: 'not-confirmed' }` (export).
+  The page stays hidden, writes nothing to the clipboard (never an empty string) and stops asking
+  (`vault-secret-reads-controller.js`). One exception on the two per-item reads (reveal, code):
+  when the refusal is only because **another dialog was open** (`busy`), main adds `busy: true`
+  beside the usual `refused: 'not-confirmed'`; the page shows "try again" and does NOT latch
+  (the code widget re-asks after 5 s or on the next focus). Mint, export and cookie-value
+  refusals are unchanged (no `busy` flag).
+- **Not gated**: the vault list, item save and copy, the access-key list (none returns a secret),
+  and the fill channels (refused by the picker context). A key holder that fills a login form can
+  still read that page's own password field back (`readDom` / `evaluate` on the page it filled) —
+  fill is the feature (finding 17c). `internal-settings-get` still returns the automation key
+  hashes to internal pages.
+
+Full tier reference: `docs/mcp-automation.md` *What each tier can reach in an internal page*; the
+trace flag and live-run recipe: `docs/dev-testing.md` *`GOLDFINCH_REVEAL_GATE_TRACE`*.
 
 ## Origin matching
 
@@ -1002,8 +1286,11 @@ ciphertext:
   (`deriveHkdfKey` + `wrapVaultKey`, AAD-bound to the bundle context + the entry's OWN
   entryHandle) — nothing human-readable, including which entry is global, appears before the
   bundle secret is entered. (The embedded `.gfvault` document's own `vaultId` field is also
-  scrubbed to the entryHandle before embedding — it otherwise duplicated the same leak one
-  level down and plays no role once inside a bundle.) `decryptIdentity` is the paired reader
+  set to the entryHandle: since leg `vault-format-v2` the embedded document is REBUILT, not
+  copied — decrypted at the source file's own version and slot id, then written as a fresh
+  **version-2** document under a new vault key, its key envelope and items bound to the
+  handle, whatever version the source file is. It carries the `mrk` envelope only: **profile
+  bundles no longer carry access envelopes** (restore never read them).) `decryptIdentity` is the paired reader
   (a tampered envelope fails GCM authentication loudly, never a silent unnamed jar, and
   independently refuses a plaintext-tagged envelope — see the v1 note below);
   `restoreProfile` itself never reads `identity` — the caller's explicit mapping step
@@ -1020,6 +1307,8 @@ ciphertext:
 
 No plaintext secret ever enters the bundle. Carrying the MRK envelope set preserves
 recovery-key (and, when provisioned, admin) portability on the far side.
+
+Both import paths bind the embedded document to the id its bundle states (see *File version 2* above) and write **version-2** files bound to the **destination** id, which may differ from the source's.
 
 Both import paths do all crypto **before any write** (a wrong secret throws and
 writes/installs nothing). The source **master password** (a Buffer) or the source
@@ -1313,6 +1602,9 @@ app session — dismissing it or relaunching clears it). While a rotation is in 
 every other vault write refuses with a transient busy error ("a rotation is already in
 progress") — retry after it completes.
 
+- **File version**: every vault file is rewritten at **version 2**, bound to its slot id
+  (a version-1 file is converted by the rotation, a version-2 one stays 2); the access
+  envelopes are dropped as above, so each file ends with exactly one `mrk` envelope.
 - **Scope of the sever**: compromise mode severs the **live profile** — after it, no
   previously issued or extracted key material (old master password, old recovery key,
   admin private key, per-jar access keys, even a raw captured MRK or vault key) opens

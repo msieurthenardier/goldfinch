@@ -42,6 +42,7 @@
 // module in this codebase holds to.
 
 import { isSafeColor } from './safe-color.js';
+import { portMovedLine } from './automation-port-note.js';
 
 /**
  * Resolve the display color for a single active jarId against the live
@@ -69,12 +70,15 @@ function resolveJarColor(jarId, containers) {
  *   activeJarIds?: Array<string | null | undefined>,
  *   adminActive?: boolean,
  *   containers?: Array<{ id?: any, color?: any }>,
+ *   port?: { configured?: any, bound?: any } | null,
  * }} input
  * @returns {{
  *   visible: boolean,
  *   count: number,
  *   mode: 'idle' | 'jar' | 'multi' | 'admin',
  *   color: string | null,
+ *   portMoved: boolean,
+ *   portLine: string | null,
  * }}
  */
 export function buildAutomationIndicatorModel(input) {
@@ -84,8 +88,14 @@ export function buildAutomationIndicatorModel(input) {
   const adminKeyEnabled = !!opts.adminKeyEnabled;
   const visible = jarKeyCount > 0 || adminKeyEnabled;
 
+  // Mission 23 Flight 2 (leg `port-and-permissions`, flight DD5): when the server is listening on a port
+  // other than the configured one, say so. `port` absent (automation off, or an older snapshot) or not
+  // listening (`bound: null`) is "nothing to say", never a throw.
+  const portLine = portMovedLine(opts.port && opts.port.configured, opts.port && opts.port.bound);
+  const portMoved = portLine !== null;
+
   if (!visible) {
-    return { visible: false, count: 0, mode: 'idle', color: null };
+    return { visible: false, count: 0, mode: 'idle', color: null, portMoved: false, portLine: null };
   }
 
   // Admin trumps everything else, but only when the admin key is BOTH enabled
@@ -93,21 +103,21 @@ export function buildAutomationIndicatorModel(input) {
   // (shouldn't happen; a live admin session implies a valid key) falls through
   // to the jar/multi/idle resolution below rather than rendering rainbow.
   if (adminKeyEnabled && opts.adminActive) {
-    return { visible: true, count: jarKeyCount, mode: 'admin', color: null };
+    return { visible: true, count: jarKeyCount, mode: 'admin', color: null, portMoved, portLine };
   }
 
   const distinctActive = [...new Set((opts.activeJarIds || []).filter((id) => typeof id === 'string' && id))];
 
   if (distinctActive.length === 1) {
     const color = resolveJarColor(distinctActive[0], opts.containers);
-    if (color) return { visible: true, count: jarKeyCount, mode: 'jar', color };
+    if (color) return { visible: true, count: jarKeyCount, mode: 'jar', color, portMoved, portLine };
     // Stale/unknown jarId or an unsafe stored color — neutral, never throw.
-    return { visible: true, count: jarKeyCount, mode: 'multi', color: null };
+    return { visible: true, count: jarKeyCount, mode: 'multi', color: null, portMoved, portLine };
   }
 
   if (distinctActive.length > 1) {
-    return { visible: true, count: jarKeyCount, mode: 'multi', color: null };
+    return { visible: true, count: jarKeyCount, mode: 'multi', color: null, portMoved, portLine };
   }
 
-  return { visible: true, count: jarKeyCount, mode: 'idle', color: null };
+  return { visible: true, count: jarKeyCount, mode: 'idle', color: null, portMoved, portLine };
 }

@@ -5,6 +5,12 @@
 **Created**: 2026-07-20
 **Last Run**: never
 
+> **Vault file version 2 (Mission 23 Flight 2, leg `vault-format-v2`, 2026-11-14).** The
+> headless fixture builder calls the store, so the profile it stages is now **version 2**
+> (files bound to their slot id) and does NOT exercise version 1; the released-commit
+> generator in the flight scratchpad (`vault-format-v2/generate.cjs`) makes a version-1
+> profile for that. Step 8 reads the envelope set, which is the same at both versions.
+
 ## Intent
 
 Verify the password manager's **fill-only MCP automation surface** end-to-end against the
@@ -64,7 +70,7 @@ scope property — none of which a unit test can observe.
 | 5 | Read the filled form via `readDom`/`evaluate` on that tab. | The username field holds the item's username and the password field's value is populated (non-empty); input events fired (field reflects a real value, not a placeholder). The form was **not** submitted — the page did not navigate. |
 | 6 | Call `vaultTotp` for the TOTP-carrying Login item. | Returns a 6-digit (or item-configured length) numeric code as text, and **nothing else** — no stored secret. |
 | 7 | From a **second** MCP session using the **second jar's** transport key, call `vaultUnlock` presenting the **second jar's** vault access key, then attempt to `vaultList`/`vaultTotp` the **global** and the **test-jar** vaults' items. | The second jar's key unlocks only its own vault; it **cannot** read the global vault or the test jar's vault (not present in its list). |
-| 8 | (Filesystem) Read the **global** `.gfvault` file and enumerate its envelope set by the per-envelope plaintext key-ids; also read `manager.json`. | Under the MRK model the global `.gfvault` carries an `mrk` envelope (+ only access envelopes explicitly minted on global) and **no envelope whose key-id is the second jar's (or test jar's) per-jar access key**; `manager.json` holds the `master`/`recovery`/`admin` envelopes over the MRK. The scope property is *absent envelope*, verified by key-id, not a runtime refusal. |
+| 8 | (Filesystem) Read the **global** `.gfvault` file (a profile built by this tree: `version: 2`, `vaultId: global`; the envelope set below is the same at either version — the access-envelope AAD is pinned at its version-1 string, so a minted access key's envelope looks and works the same in a version-2 file)  and enumerate its envelope set by the per-envelope plaintext key-ids; also read `manager.json`. | Under the MRK model the global `.gfvault` carries an `mrk` envelope (+ only access envelopes explicitly minted on global) and **no envelope whose key-id is the second jar's (or test jar's) per-jar access key**; `manager.json` holds the `master`/`recovery`/`admin` envelopes over the MRK. The scope property is *absent envelope*, verified by key-id, not a runtime refusal. |
 | 9 | From an **admin** MCP session, read the automation-activity indicator via `getChromeTarget` + `readDom`/`evaluate` and confirm the unlock, fill, and TOTP operations from steps 1–6 are reflected (with origin + jar). | The activity record shows the unlock, fill, and TOTP-issuance events for the correct jar/origin; no entry carries secret material (password, TOTP secret, or vault key). |
 | 10 | Tear down the first MCP session (close the transport). Open a fresh session with the same per-jar transport key and, **without** calling `vaultUnlock`, call `vaultList`. | The vault is locked again: `vaultList` returns nothing (or refuses) until a fresh `vaultUnlock`. The prior session's unlock state did not survive teardown. |
 

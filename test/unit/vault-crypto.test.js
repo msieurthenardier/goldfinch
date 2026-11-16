@@ -13,7 +13,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 
-const vc = require('../../src/main/vault/vault-crypto');
+const vc = require('../helpers/vault-crypto-v1');
 
 // Fast scrypt params for functional round-trips (memory-cheap, quick).
 const FAST_SCRYPT = { algo: 'scrypt', N: 2 ** 14, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
@@ -376,7 +376,7 @@ test('parseVault: rejects an unknown / missing version', () => {
   const key = vc.newVaultKey();
   const items = vc.encryptItems({}, key);
   const base = { format: 'gfvault', vaultId: 'x', kdf: FAST_SCRYPT, envelopes: [], items };
-  assert.throws(() => vc.parseVault(JSON.stringify({ ...base, version: 2 })), vc.VaultFormatError);
+  assert.throws(() => vc.parseVault(JSON.stringify({ ...base, version: 3 })), vc.VaultFormatError);
   assert.throws(() => vc.parseVault(JSON.stringify(base)), vc.VaultFormatError); // no version
 });
 

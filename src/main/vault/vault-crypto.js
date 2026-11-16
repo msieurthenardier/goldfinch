@@ -40,8 +40,22 @@ const crypto = require('node:crypto');
 
 /** The `.gfvault` format identifier. */
 const FORMAT = 'gfvault';
-/** The current on-disk format version. `parseVault` rejects any other value. */
-const VERSION = 1;
+/**
+ * The `.gfvault` document versions this build can READ. `parseVault` rejects any
+ * other value (unless a caller passes its own `readable` set — how tests reach a
+ * later version without a test-only export).
+ * @type {ReadonlySet<number>}
+ */
+const READABLE_VAULT_VERSIONS = new Set([1, 2]);
+/** The version every newly-written document is stamped with. A member of the readable set. */
+const WRITE_VAULT_VERSION = 2;
+/**
+ * The version in an ACCESS envelope's AAD, pinned for good. An access envelope can
+ * be re-wrapped only by its key's holder (the app keeps no copy of the secret), so
+ * if this followed the document's version, every existing access key would stop
+ * working the moment a document was upgraded.
+ */
+const ACCESS_ENVELOPE_AAD_VERSION = 1;
 
 /**
  * Production scrypt parameters (flight DD11). Benchmarked on the dev rig at
@@ -144,6 +158,19 @@ class VaultFormatError extends Error {
   }
 }
 
+/**
+ * A document of a LATER version whose own `vaultId` field is not the id of the
+ * slot it was read from. A subclass of {@link VaultFormatError}, so every
+ * `instanceof VaultFormatError` mapping (the vault sheet's error tables) treats
+ * it as a format error unchanged. The message names no id.
+ */
+class VaultWrongVaultError extends VaultFormatError {
+  constructor() {
+    super('vault file belongs to a different vault');
+    this.name = 'VaultWrongVaultError';
+  }
+}
+
 // ---------------------------------------------------------------------------
 // AAD construction
 // ---------------------------------------------------------------------------
@@ -161,12 +188,53 @@ function envelopeAad(keyId, type, version) {
 }
 
 /**
- * Authenticated header for the items blob: the document version.
+ * Authenticated header for the items blob: the document version (and, from
+ * version 2, the vault's id). The id is required for every version.
  * @param {number} version
+ * @param {string} vaultId
  * @returns {Buffer}
  */
-function itemsAad(version) {
-  return Buffer.from(`gfvault/items/${version}`, 'utf8');
+function itemsAad(version, vaultId) {
+  assertVaultIdArg(vaultId, 'itemsAad');
+  if (version === 1) return Buffer.from(`gfvault/items/${version}`, 'utf8');
+  if (version === 2) return Buffer.from(`gfvault/items/2/${vaultId}`, 'utf8');
+  throw new VaultFormatError(`itemsAad: unsupported version "${version}"`);
+}
+
+/**
+ * Authenticated header for a vault's own key envelope (the one the master key
+ * wraps, stored in the vault's file). Version 1 binds only the version; version 2
+ * also binds the vault's id. The id is required for EVERY version (version 1
+ * ignores it) so a call site that forgets it cannot work now and break later.
+ * @param {number} version
+ * @param {string} vaultId
+ * @returns {Buffer}
+ */
+function mrkEnvelopeAad(version, vaultId) {
+  assertVaultIdArg(vaultId, 'mrkEnvelopeAad');
+  if (version === 1) return Buffer.from(`gfvault/mrk-env/v${version}`, 'utf8');
+  if (version === 2) return Buffer.from(`gfvault/mrk-env/v2/${vaultId}`, 'utf8');
+  throw new VaultFormatError(`mrkEnvelopeAad: unsupported version "${version}"`);
+}
+
+/**
+ * @param {unknown} vaultId
+ * @param {string} who
+ */
+function assertVaultIdArg(vaultId, who) {
+  if (typeof vaultId !== 'string' || vaultId.length === 0) {
+    throw new VaultFormatError(`${who}: vaultId must be a non-empty string`);
+  }
+}
+
+/**
+ * @param {unknown} version
+ * @param {string} who
+ */
+function assertVersionArg(version, who) {
+  if (typeof version !== 'number' || !Number.isInteger(version)) {
+    throw new VaultFormatError(`${who}: version is required`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -246,11 +314,12 @@ function newVaultKey() {
  * as AAD. Each call draws a fresh IV — successive calls on one key differ.
  * @param {ItemsPayload} payload  any JSON-serializable value.
  * @param {Buffer} vaultKey
- * @param {number} [version]  defaults to the current format version.
+ * @param {number} version  the document's own version — no default.
+ * @param {string} vaultId  the vault the document is for — no default.
  * @returns {GcmBlob}
  */
-function encryptItems(payload, vaultKey, version = VERSION) {
-  return gcmEncrypt(Buffer.from(JSON.stringify(payload), 'utf8'), vaultKey, itemsAad(version));
+function encryptItems(payload, vaultKey, version, vaultId) {
+  return gcmEncrypt(Buffer.from(JSON.stringify(payload), 'utf8'), vaultKey, itemsAad(version, vaultId));
 }
 
 /**
@@ -258,11 +327,12 @@ function encryptItems(payload, vaultKey, version = VERSION) {
  * `version` throws {@link VaultAuthError}.
  * @param {GcmBlob} blob
  * @param {Buffer} vaultKey
- * @param {number} [version]
+ * @param {number} version
+ * @param {string} vaultId
  * @returns {ItemsPayload}
  */
-function decryptItems(blob, vaultKey, version = VERSION) {
-  const plain = gcmDecrypt(blob, vaultKey, itemsAad(version));
+function decryptItems(blob, vaultKey, version, vaultId) {
+  const plain = gcmDecrypt(blob, vaultKey, itemsAad(version, vaultId));
   try {
     return JSON.parse(plain.toString('utf8'));
   } catch {
@@ -341,14 +411,15 @@ function unwrapVaultKey(blob, wrappingKey, aad) {
  * Wrap the vault key under the scrypt-derived master key. Async (scrypt).
  * @param {Buffer} vaultKey
  * @param {string | Buffer} password
- * @param {Object} [opts]
- * @param {number} [opts.version]
+ * @param {Object} opts
+ * @param {number} opts.version  the document's own version — required, no default.
  * @param {Buffer} [opts.salt]  defaults to 16 fresh random bytes.
  * @param {ScryptParams} [opts.params]
  * @returns {Promise<Envelope>}
  */
-async function wrapMaster(vaultKey, password, opts = {}) {
-  const version = opts.version ?? VERSION;
+async function wrapMaster(vaultKey, password, opts) {
+  const version = /** @type {number} */ (opts?.version);
+  assertVersionArg(version, 'wrapMaster');
   const salt = opts.salt ?? crypto.randomBytes(16);
   const wrappingKey = await deriveMasterKey(password, salt, opts.params ?? SCRYPT_PARAMS);
   const blob = wrapVaultKey(vaultKey, wrappingKey, envelopeAad(KEYID_MASTER, TYPE_MASTER, version));
@@ -359,13 +430,14 @@ async function wrapMaster(vaultKey, password, opts = {}) {
  * Open the master envelope with the password. Async.
  * @param {Envelope} env
  * @param {string | Buffer} password
- * @param {Object} [opts]
- * @param {number} [opts.version]
+ * @param {Object} opts
+ * @param {number} opts.version  the document's own version — required, no default.
  * @param {ScryptParams} [opts.params]
  * @returns {Promise<Buffer>}
  */
-async function unwrapMaster(env, password, opts = {}) {
-  const version = opts.version ?? VERSION;
+async function unwrapMaster(env, password, opts) {
+  const version = /** @type {number} */ (opts?.version);
+  assertVersionArg(version, 'unwrapMaster');
   if (typeof env.salt !== 'string') throw new VaultFormatError('master envelope: missing salt');
   const wrappingKey = await deriveMasterKey(password, Buffer.from(env.salt, 'base64'), opts.params ?? SCRYPT_PARAMS);
   return unwrapVaultKey(env, wrappingKey, envelopeAad(env.keyId, env.type, version));
@@ -375,13 +447,14 @@ async function unwrapMaster(env, password, opts = {}) {
  * Wrap the vault key under the HKDF-derived recovery key.
  * @param {Buffer} vaultKey
  * @param {Buffer} recoveryMaterial  the 20-byte recovery-key material.
- * @param {Object} [opts]
- * @param {number} [opts.version]
+ * @param {Object} opts
+ * @param {number} opts.version  the document's own version — required, no default.
  * @param {Buffer} [opts.salt]
  * @returns {Envelope}
  */
-function wrapRecovery(vaultKey, recoveryMaterial, opts = {}) {
-  const version = opts.version ?? VERSION;
+function wrapRecovery(vaultKey, recoveryMaterial, opts) {
+  const version = /** @type {number} */ (opts?.version);
+  assertVersionArg(version, 'wrapRecovery');
   const salt = opts.salt ?? crypto.randomBytes(16);
   const wrappingKey = deriveHkdfKey(recoveryMaterial, salt, HKDF_RECOVERY_INFO);
   const blob = wrapVaultKey(vaultKey, wrappingKey, envelopeAad(KEYID_RECOVERY, TYPE_RECOVERY, version));
@@ -392,12 +465,13 @@ function wrapRecovery(vaultKey, recoveryMaterial, opts = {}) {
  * Open the recovery envelope with the recovery material.
  * @param {Envelope} env
  * @param {Buffer} recoveryMaterial
- * @param {Object} [opts]
- * @param {number} [opts.version]
+ * @param {Object} opts
+ * @param {number} opts.version  the document's own version — required, no default.
  * @returns {Buffer}
  */
-function unwrapRecovery(env, recoveryMaterial, opts = {}) {
-  const version = opts.version ?? VERSION;
+function unwrapRecovery(env, recoveryMaterial, opts) {
+  const version = /** @type {number} */ (opts?.version);
+  assertVersionArg(version, 'unwrapRecovery');
   if (typeof env.salt !== 'string') throw new VaultFormatError('recovery envelope: missing salt');
   const wrappingKey = deriveHkdfKey(recoveryMaterial, Buffer.from(env.salt, 'base64'), HKDF_RECOVERY_INFO);
   return unwrapVaultKey(env, wrappingKey, envelopeAad(env.keyId, env.type, version));
@@ -406,43 +480,41 @@ function unwrapRecovery(env, recoveryMaterial, opts = {}) {
 /**
  * Wrap the vault key under an HKDF-derived per-jar access key. The `keyId` is
  * assigned at mint (independent of the secret) and becomes the envelope's
- * plaintext id for revoke/reference.
+ * plaintext id for revoke/reference. The AAD version is pinned at
+ * {@link ACCESS_ENVELOPE_AAD_VERSION} (an access envelope is never re-wrapped
+ * by an upgrade), so this takes no version.
  * @param {Buffer} vaultKey
  * @param {string} accessSecret  the mint's base64url secret.
  * @param {string} keyId  the mint's assigned key-id.
  * @param {Object} [opts]
- * @param {number} [opts.version]
  * @param {Buffer} [opts.salt]
  * @returns {Envelope}
  */
 function wrapAccess(vaultKey, accessSecret, keyId, opts = {}) {
-  const version = opts.version ?? VERSION;
   if (typeof keyId !== 'string' || keyId.length === 0) {
     throw new VaultFormatError('access envelope: keyId must be a non-empty string');
   }
   const salt = opts.salt ?? crypto.randomBytes(16);
   const wrappingKey = deriveHkdfKey(Buffer.from(accessSecret, 'utf8'), salt, HKDF_ACCESS_INFO);
-  const blob = wrapVaultKey(vaultKey, wrappingKey, envelopeAad(keyId, TYPE_ACCESS, version));
+  const blob = wrapVaultKey(vaultKey, wrappingKey, envelopeAad(keyId, TYPE_ACCESS, ACCESS_ENVELOPE_AAD_VERSION));
   return { keyId, type: TYPE_ACCESS, salt: salt.toString('base64'), ...blob };
 }
 
 /**
- * Open a per-jar access envelope with its secret.
+ * Open a per-jar access envelope with its secret (AAD version pinned at
+ * {@link ACCESS_ENVELOPE_AAD_VERSION}, whatever the document's version).
  * @param {Envelope} env
  * @param {string} accessSecret
- * @param {Object} [opts]
- * @param {number} [opts.version]
  * @returns {Buffer}
  */
-function unwrapAccess(env, accessSecret, opts = {}) {
-  const version = opts.version ?? VERSION;
+function unwrapAccess(env, accessSecret) {
   if (typeof env.salt !== 'string') throw new VaultFormatError('access envelope: missing salt');
   const wrappingKey = deriveHkdfKey(
     Buffer.from(accessSecret, 'utf8'),
     Buffer.from(env.salt, 'base64'),
     HKDF_ACCESS_INFO
   );
-  return unwrapVaultKey(env, wrappingKey, envelopeAad(env.keyId, env.type, version));
+  return unwrapVaultKey(env, wrappingKey, envelopeAad(env.keyId, env.type, ACCESS_ENVELOPE_AAD_VERSION));
 }
 
 /**
@@ -452,12 +524,13 @@ function unwrapAccess(env, accessSecret, opts = {}) {
  * Only the admin private key opens the result.
  * @param {Buffer} vaultKey
  * @param {crypto.KeyObject} adminPublicKey  an X25519 public KeyObject.
- * @param {Object} [opts]
- * @param {number} [opts.version]
+ * @param {Object} opts
+ * @param {number} opts.version  the document's own version — required, no default.
  * @returns {Envelope}
  */
-function sealToAdmin(vaultKey, adminPublicKey, opts = {}) {
-  const version = opts.version ?? VERSION;
+function sealToAdmin(vaultKey, adminPublicKey, opts) {
+  const version = /** @type {number} */ (opts?.version);
+  assertVersionArg(version, 'sealToAdmin');
   const eph = crypto.generateKeyPairSync('x25519');
   const shared = crypto.diffieHellman({ privateKey: eph.privateKey, publicKey: adminPublicKey });
   const salt = crypto.randomBytes(16);
@@ -471,12 +544,13 @@ function sealToAdmin(vaultKey, adminPublicKey, opts = {}) {
  * Open an admin seal with the admin X25519 private key.
  * @param {Envelope} env
  * @param {crypto.KeyObject} adminPrivateKey  an X25519 private KeyObject.
- * @param {Object} [opts]
- * @param {number} [opts.version]
+ * @param {Object} opts
+ * @param {number} opts.version  the document's own version — required, no default.
  * @returns {Buffer}
  */
-function openAdminSeal(env, adminPrivateKey, opts = {}) {
-  const version = opts.version ?? VERSION;
+function openAdminSeal(env, adminPrivateKey, opts) {
+  const version = /** @type {number} */ (opts?.version);
+  assertVersionArg(version, 'openAdminSeal');
   if (typeof env.epk !== 'string') throw new VaultFormatError('admin envelope: missing epk');
   if (typeof env.salt !== 'string') throw new VaultFormatError('admin envelope: missing salt');
   let ephPub;
@@ -663,15 +737,25 @@ function assertUniqueKeyIds(envelopes) {
 
 /**
  * Serialize a vault into the single JSON `.gfvault` document. Stamps the format
- * id + current version; rejects a set with duplicate keyIds.
+ * id + the caller's stated `version` (required; refused outside the readable
+ * set); rejects a set with duplicate keyIds.
  * @param {Object} vaultObj
  * @param {string} [vaultObj.vaultId]  defaults to a fresh random hex id.
  * @param {ScryptParams} [vaultObj.kdf]  defaults to the production params.
  * @param {Envelope[]} vaultObj.envelopes
  * @param {GcmBlob} vaultObj.items
+ * @param {Object} opts
+ * @param {number} opts.version
+ * @param {ReadonlySet<number>} [opts.readable]  defaults to {@link READABLE_VAULT_VERSIONS}.
  * @returns {string}
  */
-function serializeVault(vaultObj) {
+function serializeVault(vaultObj, opts) {
+  const version = opts && opts.version;
+  const readable = (opts && opts.readable) || READABLE_VAULT_VERSIONS;
+  assertVersionArg(version, 'serializeVault');
+  if (!readable.has(/** @type {number} */ (version))) {
+    throw new VaultFormatError(`serializeVault: unsupported version "${version}"`);
+  }
   if (!vaultObj || typeof vaultObj !== 'object') {
     throw new VaultFormatError('serializeVault: expected a vault object');
   }
@@ -682,7 +766,7 @@ function serializeVault(vaultObj) {
   /** @type {VaultDocument} */
   const doc = {
     format: FORMAT,
-    version: VERSION,
+    version: /** @type {number} */ (version),
     vaultId: vaultId ?? crypto.randomBytes(16).toString('hex'),
     kdf: kdf ?? SCRYPT_PARAMS,
     envelopes,
@@ -696,9 +780,12 @@ function serializeVault(vaultObj) {
  * wrong format id, an unknown version, a bad shape, or duplicate keyIds with a
  * typed {@link VaultFormatError} — Leg 2's load-loudly rule depends on strictness.
  * @param {string | Buffer} input
+ * @param {Object} [opts]
+ * @param {ReadonlySet<number>} [opts.readable]  defaults to {@link READABLE_VAULT_VERSIONS}.
  * @returns {VaultDocument}
  */
-function parseVault(input) {
+function parseVault(input, opts) {
+  const readable = (opts && opts.readable) || READABLE_VAULT_VERSIONS;
   const text = Buffer.isBuffer(input) ? input.toString('utf8') : input;
   if (typeof text !== 'string') throw new VaultFormatError('parseVault: input must be a string or Buffer');
   let doc;
@@ -709,7 +796,7 @@ function parseVault(input) {
   }
   if (!doc || typeof doc !== 'object') throw new VaultFormatError('parseVault: document is not an object');
   if (doc.format !== FORMAT) throw new VaultFormatError(`parseVault: unknown format "${doc.format}"`);
-  if (doc.version !== VERSION) throw new VaultFormatError(`parseVault: unsupported version "${doc.version}"`);
+  if (!readable.has(doc.version)) throw new VaultFormatError(`parseVault: unsupported version "${doc.version}"`);
   if (!doc.kdf || typeof doc.kdf !== 'object') throw new VaultFormatError('parseVault: missing kdf');
   if (!Array.isArray(doc.envelopes)) throw new VaultFormatError('parseVault: envelopes must be an array');
   if (
@@ -914,11 +1001,18 @@ function parseOtpauth(uri) {
 module.exports = {
   // constants
   FORMAT,
-  VERSION,
+  READABLE_VAULT_VERSIONS,
+  WRITE_VAULT_VERSION,
+  ACCESS_ENVELOPE_AAD_VERSION,
   SCRYPT_PARAMS,
   // errors
   VaultAuthError,
   VaultFormatError,
+  VaultWrongVaultError,
+  // AAD builders
+  envelopeAad,
+  itemsAad,
+  mrkEnvelopeAad,
   // vault key + item crypto
   newVaultKey,
   encryptItems,

@@ -7,6 +7,7 @@ const { guestTakenOver } = require('../shared/load-failure');
 const { savePromptKeyAction } = require('./save-prompt-keys');
 const { focusActiveGuest } = require('./focus-active-guest');
 const { dismissesPickerContexts } = require('./vault/picker-dismissal');
+const { handleRevealInputEvent } = require('./reveal-gate');
 
 /**
  * Register the sole sanctioned Electron `closed` listener. The primitive id is
@@ -46,6 +47,9 @@ function createWindowFactory(deps) {
     computeSavePromptBounds,
     getVaultHuman,
     htmlFullscreen,
+    // Fix 1 of leg `hat-and-alignment`: optional (offline fakes omit them).
+    revealWindowInput,
+    injectedInput,
     authChallenges,
     computeFindOverlayBounds,
     getTabContents,
@@ -271,6 +275,20 @@ function createWindowFactory(deps) {
     chromeView.setBackgroundColor('#1e1f25');
     chromeView.setBounds({ x: 0, y: 0, width: initialWidth, height: initialHeight });
     chromeView.webContents.loadFile(paths.chromeHtml);
+    // Fix 1 of leg `hat-and-alignment`: a real press or key down in the chrome view cancels a pending
+    // reveal confirmation for this window. `input-event` (never `before-mouse-event`) - it fires for real
+    // input and cannot be prevented. `win` is only a map key downstream, never read.
+    if (revealWindowInput) {
+      chromeView.webContents.on('input-event', (_event, input) => {
+        handleRevealInputEvent({
+          input,
+          wcId: chromeView.webContents.id,
+          injectedInput,
+          win,
+          windowInput: revealWindowInput
+        });
+      });
+    }
 
     const record = registry.create({ win, chromeView, noBootTab });
     broadcastMoveTargetsChanged();

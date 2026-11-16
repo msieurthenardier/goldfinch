@@ -44,7 +44,14 @@ function createHtmlFullscreen(deps) {
   // pattern) — fires at the end of every restore, i.e. on EVERY exit edge (page
   // exit, Esc, force-exit, activation-away…). main.js wires it to the auth
   // pending-challenge store's notifyFullscreenExited re-present trigger.
-  const { registry, chromeForTab, logger, onExited = () => {}, vaultHuman = () => null } = deps;
+  const {
+    registry,
+    chromeForTab,
+    logger,
+    onExited = () => {},
+    vaultHuman = () => null,
+    revealTabInactive = null
+  } = deps;
 
   /**
    * The single restore path every exit edge funnels through. Clears the mode
@@ -135,7 +142,7 @@ function createHtmlFullscreen(deps) {
     // Sortie 06 Leg 1 (AC13/DD1): the page is taking over the screen - the corner save prompt
     // closes (`tab-hide`, BEFORE the capture drop so its reason wins over "expired") and this
     // tab's held captures are dropped.
-    closeSavePromptAndDrop(record, wcId, 'tab-hide', vaultHuman());
+    closeSavePromptAndDrop(record, wcId, 'tab-hide', vaultHuman(), revealTabInactive);
   }
 
   /**

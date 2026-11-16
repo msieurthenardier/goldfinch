@@ -177,7 +177,8 @@ function makeHarness() {
 // The parametric kind table: shared-semantics tests run once per row (AC — the
 // full DD2 matrix applies to BOTH kinds via the shared machinery).
 // `cancelArgs` pins the KIND-SPECIFIC cancel invocation shape (M14 F3 HAT
-// fix, live-measured on Electron 43): a 'login' callback cancels with ZERO
+// fix, live-measured on Electron 43; the 'login' half re-exercised on 45.3.2, the
+// certificate half NOT re-measured on 45): a 'login' callback cancels with ZERO
 // args (documented), but a select-client-certificate callback invoked with
 // zero args SIGSEGVs the main process — silent native death, no JS error.
 // Cert cancels must pass EXACTLY ONE argument, strictly null (the
@@ -377,7 +378,7 @@ test('client-cert silent cancels: contents-less / internal-session / non-guest e
   assert.equal(h.presents.length, 0, 'no guard path presents a chooser');
 });
 
-test('client-cert empty/non-array list cancels silently without presenting — DEFENSIVE-UNREACHABLE (Electron 43 continues cert-less before emitting the event)', () => {
+test('client-cert empty/non-array list cancels silently without presenting — DEFENSIVE-UNREACHABLE (Electron 43 continues cert-less before emitting the event; not re-verified on 45)', () => {
   const h = makeHarness();
   const record = h.makeRecord();
   record.activeTabWcId = 10;
@@ -807,7 +808,8 @@ test('selectCertFromSheet refuses when nothing is presented, and when the presen
 });
 
 // ---------------------------------------------------------------------------
-// M14 F3 HAT regression: cert-cancel invocation shape (Electron 43 SIGSEGV)
+// M14 F3 HAT regression: cert-cancel invocation shape (Electron 43 SIGSEGV; last measured
+// on Electron 43, not re-measured on 45 — client certificates were not run in that leg)
 // ---------------------------------------------------------------------------
 
 // The REAL Electron 43 Certificate shape, captured live during the M14 F3 HAT

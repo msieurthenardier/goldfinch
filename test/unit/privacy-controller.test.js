@@ -803,3 +803,29 @@ test('HAT-F1 a change while the panel is collapsed shows the button on open; a n
   controller.renderPrivacy();
   assert.equal(isShown(reloadBtnOf(q)), true, 'tab B was marked while inactive');
 });
+
+// Mission 23 Flight 2, leg `port-and-permissions` (DD5 / AC5): the moved-port note reaches the indicator's
+// tooltip and aria-label from the activity snapshot, and a later snapshot without a port clears it.
+test("the indicator tooltip carries the model's port line, and a snapshot with no port clears it", async () => {
+  const h = harness();
+  h.deps.buildAutomationIndicatorModel = (input) => {
+    h.state.models.push(input);
+    const moved = input.port && input.port.configured !== input.port.bound && input.port.bound != null;
+    return {
+      visible: true,
+      mode: 'idle',
+      color: null,
+      count: 1,
+      portMoved: !!moved,
+      portLine: moved ? 'Listening on ' + input.port.bound + ' - ' + input.port.configured + ' was in use' : null
+    };
+  };
+  await create(h);
+  h.callbacks.activity({ sessions: [], log: [], port: { configured: 49707, bound: 49708 } });
+  assert.deepEqual(h.state.models.at(-1).port, { configured: 49707, bound: 49708 });
+  assert.match(h.els.automationIndicator.title, /Listening on 49708 - 49707 was in use$/);
+  assert.match(h.els.automationIndicator.attributes.get('aria-label'), /49707 was in use$/);
+  h.callbacks.activity({ sessions: [], log: [] });
+  assert.equal(h.state.models.at(-1).port, undefined);
+  assert.doesNotMatch(h.els.automationIndicator.title, /was in use/);
+});

@@ -13,6 +13,7 @@ const { metadataOf } = require('../shared/vault-item-schema');
 const { VaultLockedError } = require('./vault/vault-store');
 const { mapVaultSheetError, VAULT_ITEM_COPY_CONFIG } = require('./vault/vault-sheet-errors');
 const { parseOtpauth, totp, normalizeTotpField, totpSecondsRemaining } = require('./vault/vault-crypto');
+const path = require('node:path');
 
 // The manager-wide global vault's display label (the store keys it by GLOBAL_ID).
 const GLOBAL_LABEL = 'Global';
@@ -59,6 +60,10 @@ function normalizeTotpForSave(item, unchangedSecrets) {
 /**
  * @param {object} args
  * @param {{ handle: (channel: string, fn: (...a: any[]) => any) => void }} args.ipcMain
+ * @param {{ confirm: (event: any, request: any, info?: { interrupted?: boolean }) => Promise<string>, applies?: (event: any) => boolean, epoch?: () => number }} args.revealGate
+ *        REQUIRED (leg `admin-reach`, DD2): the reveal gate (`reveal-gate.js`). Every handler here that
+ *        returns a secret or lets the caller choose where an encrypted bundle is written asks it first;
+ *        registration throws without it, so a registrar can never quietly skip the confirmation.
  * @param {(ipcMain: any, channel: string, handler: (...a: any[]) => any) => void} args.registerInternalHandler
  * @param {() => InstanceType<typeof import('./vault/vault-store').VaultStore>} args.getVaultStore
  *        Accessor for the memoized vault-store singleton (resolved per call so the
@@ -96,6 +101,7 @@ function normalizeTotpForSave(item, unchangedSecrets) {
  */
 function registerVaultIpc({
   ipcMain,
+  revealGate,
   registerInternalHandler,
   getVaultStore,
   jars,
@@ -113,6 +119,122 @@ function registerVaultIpc({
   // (offline tests omit it); a narrow bound function, never main's internals.
   broadcastVaultLockState
 }) {
+  if (!revealGate || typeof revealGate.confirm !== 'function') {
+    throw new Error('registerVaultIpc: revealGate is required (leg admin-reach, DD2)');
+  }
+  /** @param {string} decision */
+  const proceeds = (decision) => decision === 'not-applicable' || decision === 'confirmed';
+  /** Marker: the metadata lookup could not be completed (not "no such item"). */
+  const LOOKUP_FAILED = Symbol('lookup-failed');
+  /**
+   * The item's non-secret label from the metadata projection; `null` when there is genuinely no such
+   * item (today's no-dialog path); `LOOKUP_FAILED` when the projection cannot be read or the payload
+   * does not name an item by strings - the caller then refuses if the gate applies (fail-closed). A
+   * LOCKED vault throws `VaultLockedError` out of here so the caller answers `{ locked: true }` before
+   * any dialog.
+   * @param {unknown} vaultId
+   * @param {unknown} itemId
+   * @param {boolean} touch  false for the code poll: the projection read must not re-arm the idle timer
+   * @returns {{ title: string } | null | typeof LOOKUP_FAILED}
+   */
+  function itemMeta(vaultId, itemId, touch) {
+    if (typeof vaultId !== 'string' || typeof itemId !== 'string') return LOOKUP_FAILED;
+    try {
+      const meta = getVaultStore()
+        .listItemsMeta(vaultId, { touch })
+        .find((/** @type {any} */ m) => m && m.id === itemId);
+      return meta ? { title: typeof meta.title === 'string' ? meta.title : '' } : null;
+    } catch (err) {
+      if (err instanceof VaultLockedError) throw err;
+      return LOOKUP_FAILED;
+    }
+  }
+  /** The grant epoch, read before a confirmation opens (a lock bumps it). */
+  const epochNow = () => (typeof revealGate.epoch === 'function' ? revealGate.epoch() : 0);
+  /**
+   * True when the vault was locked and unlocked again while a confirmation was open: the operator
+   * confirmed for a vault session that no longer exists, so nothing is read. A vault that is locked NOW
+   * is not this case (the read answers `{ locked: true }` as ever).
+   * @param {number} epochAtOpen
+   */
+  function lockStraddled(epochAtOpen) {
+    if (epochNow() === epochAtOpen) return false;
+    const store = getVaultStore();
+    return typeof store.isUnlocked === 'function' ? store.isUnlocked() : true;
+  }
+  /**
+   * Today's handler body for one gated per-item read, with the gate in front of the store call. The
+   * locked mapping is explicit (the synchronous `catchLocked` cannot wrap an awaited gate): a locked
+   * vault answers before any dialog, and again if it locked while the dialog was up.
+   * @param {'reveal'|'code'} action
+   * @param {string} channel
+   * @param {{ code: null } | {}} refusal  the refusal shape (`refused` is added)
+   * @param {(vaultId: string, itemId: string) => any} read  the store-side read, run exactly as today
+   */
+  function gatedItemRead(action, channel, refusal, read) {
+    return async (/** @type {any} */ event, /** @type {any} */ payload) => {
+      const { vaultId, itemId } = payload || {};
+      try {
+        const meta = itemMeta(vaultId, itemId, action !== 'code');
+        if (meta === LOOKUP_FAILED) {
+          // Fail closed: when the gate applies, an unreadable lookup is a refusal, never an ungated read.
+          if (typeof revealGate.applies !== 'function' || revealGate.applies(event)) {
+            return { ...refusal, refused: 'not-confirmed' };
+          }
+        } else if (meta) {
+          const epochAtOpen = epochNow();
+          /** @type {{ interrupted?: boolean }} */
+          const info = {};
+          const decision = await revealGate.confirm(
+            event,
+            {
+              channel,
+              action,
+              subject: meta.title,
+              grant: { vaultId, itemId }
+            },
+            info
+          );
+          // `busy` (another dialog was open; nobody was asked) and a `gone` the operator did not cause (the
+          // tab is not in front, stopped being in front, or real input reached the window - fix 1 of leg
+          // `hat-and-alignment`) ride beside the usual refusal so the page can retry instead of latching
+          // "not shown"; every other decision keeps today's bare shape (a navigation `gone` included).
+          if (decision === 'busy' || (decision === 'gone' && info.interrupted === true)) {
+            return { ...refusal, refused: 'not-confirmed', busy: true };
+          }
+          if (!proceeds(decision) || lockStraddled(epochAtOpen)) return { ...refusal, refused: 'not-confirmed' };
+        }
+        return read(vaultId, itemId);
+      } catch (err) {
+        if (err instanceof VaultLockedError) return { locked: true };
+        throw err;
+      }
+    };
+  }
+  /**
+   * The vault(s) an export names, from main's own data (never the page's payload text).
+   * @param {unknown} target  a vault id, or null for the whole profile
+   */
+  function exportSubject(target) {
+    if (target === null || target === undefined) return 'the whole profile (every vault)';
+    if (target === GLOBAL_ID) return GLOBAL_LABEL;
+    try {
+      const jar = jars.list().find((j) => j.id === target);
+      if (jar) return jar.name;
+    } catch {
+      // fall through to the generic label
+    }
+    return 'one vault';
+  }
+  /**
+   * The destination folder's NAME for a pre-chosen save path (a path the page supplied): its parent
+   * folder's basename. No path (the save dialog runs later) names nothing.
+   * @param {unknown} savePath
+   */
+  function exportDestination(savePath) {
+    if (typeof savePath !== 'string' || savePath === '') return undefined;
+    return path.basename(path.dirname(savePath)) || undefined;
+  }
   // Page state: the manager-wide `global` vault followed by each persistent jar's
   // vault, as { vaultId, label }. When the store is UNLOCKED each row also carries
   // a metadata-only item `count` (via listItemsMeta — no secret, no plaintext); when
@@ -215,10 +337,9 @@ function registerVaultIpc({
   registerInternalHandler(
     ipcMain,
     'internal-vault-reveal',
-    catchLocked((_event, payload) => {
-      const { vaultId, itemId } = payload || {};
-      return { item: getVaultStore().revealItem(vaultId, itemId) };
-    })
+    gatedItemRead('reveal', 'internal-vault-reveal', {}, (vaultId, itemId) => ({
+      item: getVaultStore().revealItem(vaultId, itemId)
+    }))
   );
 
   // Full-item save with the OUT-OF-BAND unchanged-secret signal (DD3/DD6):
@@ -251,11 +372,10 @@ function registerVaultIpc({
   registerInternalHandler(
     ipcMain,
     'internal-vault-totp-code',
-    catchLocked((_event, payload) => {
-      const { vaultId, itemId } = payload || {};
+    gatedItemRead('code', 'internal-vault-totp-code', { code: null }, (vaultId, itemId) => {
       // `totp` is a login-only field carried verbatim on the opaque item payload; the
       // store's VaultItem typedef declares only the shared keys, so read it as `any`.
-      const item = /** @type {any} */ (getVaultStore().revealItem(vaultId, itemId));
+      const item = /** @type {any} */ (getVaultStore().revealItem(vaultId, itemId, { touch: false }));
       if (!item || !item.totp) return { code: null };
       const p = parseOtpauth(item.totp);
       const nowMs = Date.now();
@@ -346,9 +466,23 @@ function registerVaultIpc({
   // VaultLockedError is mapped here explicitly (the async wrapper would swallow catchLocked's
   // synchronous try/catch). Gated on the vaultSaveBundle injection (offline tests omit it).
   if (vaultSaveBundle) {
-    registerInternalHandler(ipcMain, 'internal-vault-export', async (_event, target, savePath) => {
+    registerInternalHandler(ipcMain, 'internal-vault-export', async (event, target, savePath) => {
       let bundle;
       try {
+        // Leg `admin-reach` (DD2): the caller picks where an encrypted bundle lands, so the gate sits
+        // BEFORE the bundle is built. A locked store answers first (no dialog for a request that would fail).
+        const store = getVaultStore();
+        if (typeof store.isUnlocked === 'function' && !store.isUnlocked()) return { locked: true };
+        const epochAtOpen = epochNow();
+        const decision = await revealGate.confirm(event, {
+          channel: 'internal-vault-export',
+          action: 'export',
+          subject: exportSubject(target),
+          destination: exportDestination(savePath)
+        });
+        if (!proceeds(decision) || lockStraddled(epochAtOpen)) {
+          return { ok: false, canceled: true, refused: 'not-confirmed' };
+        }
         // L3: the STORE's exportVault stays single-arg — the target-only build is the invariant a
         // unit test pins. The pre-chosen save PATH is handled entirely by the main-side save
         // delegate, never threaded into the store.
@@ -381,9 +515,22 @@ function registerVaultIpc({
   // (`vault.js:634-654`) consumes it directly as names, no id→name lookup needed any more (the
   // bundle's own vaults now carry opaque entryHandles, not name-slug ids).
   if (vaultSaveBundle) {
-    registerInternalHandler(ipcMain, 'internal-vault-export-profile', async (_event, savePath) => {
+    registerInternalHandler(ipcMain, 'internal-vault-export-profile', async (event, savePath) => {
       let built;
       try {
+        // Leg `admin-reach` (DD2): as internal-vault-export - confirm BEFORE the bundle is built.
+        const store = getVaultStore();
+        if (typeof store.isUnlocked === 'function' && !store.isUnlocked()) return { locked: true };
+        const epochAtOpen = epochNow();
+        const decision = await revealGate.confirm(event, {
+          channel: 'internal-vault-export-profile',
+          action: 'export',
+          subject: exportSubject(null),
+          destination: exportDestination(savePath)
+        });
+        if (!proceeds(decision) || lockStraddled(epochAtOpen)) {
+          return { ok: false, canceled: true, refused: 'not-confirmed' };
+        }
         built = getVaultStore().exportProfile();
       } catch (err) {
         if (err instanceof VaultLockedError) return { locked: true };

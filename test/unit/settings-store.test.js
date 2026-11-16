@@ -1897,3 +1897,184 @@ test('write-during-load synchrony: settings.load() can run mid-boot with app-db 
     removeTempDir(dir);
   }
 });
+
+// ---------------------------------------------------------------------------
+// Reserved key-map entries (Mission 23 F2, leg admin-key-name): an entry named
+// `admin` / `global` / `internal` / `default` / `burner*` is never an identity. The
+// store drops it PER ENTRY on load (persisting the repair once) and rejects it on set.
+// ---------------------------------------------------------------------------
+
+const RESERVED_NAMES = ['admin', 'global', 'internal', 'default', 'burner', 'burner-7'];
+
+// Count writes to the settings document row by wrapping the document store the
+// settings store opens.
+function withWriteCount(fn) {
+  const orig = appDb.createDocumentStore;
+  let writes = 0;
+  appDb.createDocumentStore = (name) => {
+    const real = orig.call(appDb, name);
+    return {
+      read: () => real.read(),
+      remove: () => real.remove(),
+      write: (...args) => {
+        if (name === 'settings') writes += 1;
+        return real.write(...args);
+      }
+    };
+  };
+  try {
+    return fn(() => writes);
+  } finally {
+    appDb.createDocumentStore = orig;
+  }
+}
+
+function seedHashRow(dir, hashes) {
+  const seed = freshStore();
+  seed.load(dir); // pin a default row
+  const row = JSON.parse(/** @type {string} */ (readRow(dir)));
+  row.automationKeyHashes = hashes;
+  const db = new DatabaseSync(path.join(dir, 'app.db'));
+  try {
+    db.prepare('UPDATE documents SET payload = ?1 WHERE store = ?2').run(JSON.stringify(row), 'settings');
+  } finally {
+    db.close();
+  }
+}
+
+for (const name of RESERVED_NAMES) {
+  test(`automationKeyHashes — load drops a "${name}" entry, keeps the others, persists the repair once`, () => {
+    const dir = makeTempDir();
+    appDb.open(dir);
+    try {
+      seedHashRow(dir, { work: HEX_A, [name]: HEX_B });
+      withWriteCount((writes) => {
+        const store = freshStore();
+        const result = store.load(dir);
+        assert.deepEqual(result.automationKeyHashes, { work: HEX_A });
+        assert.equal(writes(), 1, 'the repaired document is written back once');
+        assert.deepEqual(JSON.parse(/** @type {string} */ (readRow(dir))).automationKeyHashes, { work: HEX_A });
+
+        const again = freshStore();
+        assert.deepEqual(again.load(dir).automationKeyHashes, { work: HEX_A });
+        assert.equal(writes(), 1, 'a second load writes nothing');
+      });
+    } finally {
+      appDb.close();
+      removeTempDir(dir);
+    }
+  });
+
+  test(`automationKeyHashes — set rejects a "${name}" entry and keeps the prior map`, () => {
+    const dir = makeTempDir();
+    appDb.open(dir);
+    try {
+      const store = freshStore();
+      store.load(dir);
+      store.set('automationKeyHashes', { work: HEX_A });
+      assert.throws(
+        () => store.set('automationKeyHashes', { work: HEX_A, [name]: HEX_B }),
+        (err) => err instanceof TypeError && /invalid value/.test(err.message)
+      );
+      assert.deepEqual(store.get('automationKeyHashes'), { work: HEX_A });
+    } finally {
+      appDb.close();
+      removeTempDir(dir);
+    }
+  });
+}
+
+test('automationKeyHashes — a reserved entry beside a non-hex value still rejects the whole map', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    seedHashRow(dir, { admin: HEX_A, work: 'nope' });
+    const store = freshStore();
+    assert.deepEqual(store.load(dir).automationKeyHashes, {});
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+test('automationKeyHashes — a near-miss name ("Admin", "admin ") is an ordinary entry, kept as-is', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    seedHashRow(dir, { Admin: HEX_A, 'admin ': HEX_B });
+    withWriteCount((writes) => {
+      const store = freshStore();
+      assert.deepEqual(store.load(dir).automationKeyHashes, { Admin: HEX_A, 'admin ': HEX_B });
+      assert.equal(writes(), 0, 'nothing repaired, nothing written');
+    });
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+test('automationKeyHashes — a legacy settings.json import reaches the same strip', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    fs.writeFileSync(
+      path.join(dir, 'settings.json'),
+      JSON.stringify({ version: 3, automationKeyHashes: { admin: HEX_B, work: HEX_A } }),
+      'utf8'
+    );
+    const store = freshStore();
+    assert.deepEqual(store.load(dir).automationKeyHashes, { work: HEX_A });
+    assert.deepEqual(JSON.parse(/** @type {string} */ (readRow(dir))).automationKeyHashes, { work: HEX_A });
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+test('automationKeyHashes — a stored "__proto__" own entry is dropped on load and rejected on set', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    seedHashRow(dir, { work: HEX_A });
+    // JSON.parse makes "__proto__" an own key; hand-build the raw payload.
+    const db = new DatabaseSync(path.join(dir, 'app.db'));
+    try {
+      const row = JSON.parse(/** @type {string} */ (readRow(dir)));
+      const raw = JSON.stringify(row).replace(
+        '"automationKeyHashes":{',
+        `"automationKeyHashes":{"__proto__":"${HEX_B}",`
+      );
+      db.prepare('UPDATE documents SET payload = ?1 WHERE store = ?2').run(raw, 'settings');
+    } finally {
+      db.close();
+    }
+    const store = freshStore();
+    const loaded = store.load(dir).automationKeyHashes;
+    assert.deepEqual(Object.keys(loaded), ['work']);
+    const bad = JSON.parse(`{"__proto__":"${HEX_B}"}`);
+    assert.throws(() => store.set('automationKeyHashes', bad), /invalid value/);
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+test('the real store refuses a non-string key on set and get: nothing is written for a coercing key', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    const store = freshStore();
+    store.load(dir);
+    const before = JSON.stringify(store.getAll());
+    for (const name of ['automationKeyHashes', 'automationAdminKeyHash']) {
+      const value = name === 'automationKeyHashes' ? { admin: 'a'.repeat(64) } : 'a'.repeat(64);
+      for (const key of [[name], new String(name), { toString: () => name }, 7, null, undefined]) {
+        assert.throws(() => store.set(/** @type {any} */ (key), value), /key must be a string/);
+        assert.throws(() => store.get(/** @type {any} */ (key)), /key must be a string/);
+      }
+    }
+    assert.equal(JSON.stringify(store.getAll()), before);
+  } finally {
+    appDb.close();
+  }
+});

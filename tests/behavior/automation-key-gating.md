@@ -15,6 +15,8 @@
 > status strings re-checked against `src/renderer/pages/automation.js` (`Generate key`/`Rotate key`, `Revoke`, `key set`/`no key`,
 > `Generate admin key`/`Rotate admin key`, `Admin key set`/`No admin key` — unchanged). (6) New **Step 7 cleanup/restore**
 > and an Orchestrator B0 snapshot/restore instruction so the run leaves the profile as it found it. Steps 1–6 numbering kept.
+>
+> **Walked 2026-11-14 for the Mission 23 reveal gate (leg `admin-reach`): unchanged.** Every step only READS the mint buttons' `disabled` state (never clicks a mint control, Step 3 says so for admin); Step 6's Revoke and the toggle flips are not gated (the operator's kill switch).
 
 ## Intent
 Verify the F8 **DD9** contract on the `goldfinch://automation` page's Keys section: when the automation
@@ -128,7 +130,7 @@ OFF) is what makes Steps 2–6 observable over MCP — note it in the run log. N
   packaged-build behavior, covered by the F8 `verify-integration` + HAT legs, not this dev UI test.
 - **Key validity / auth gating over the wire** (a minted key authenticates; a revoked key 401s) —
   covered by `mcp-auth-gating` / `mcp-jar-scoping`.
-- **Show-once reveal + copy mechanics, rotate-produces-new-key** — covered by `settings-automation`
+- **Show-once reveal + copy mechanics, rotate-produces-new-key** — covered by `settings-automation` (Step 8b, operator-attended since the Mission 23 reveal gate)
   (Steps 8–10); this test asserts only the **enable/disable gating** of the mint controls.
 - **Persistence/restart behavior of keys** — out of scope.
 

@@ -20,7 +20,7 @@ const CONTAINERS = [WORK, PERSONAL];
 
 test('hidden when zero jar keys enabled and admin not enabled', () => {
   const model = buildAutomationIndicatorModel({ enabledJarKeyCount: 0, adminKeyEnabled: false });
-  assert.deepEqual(model, { visible: false, count: 0, mode: 'idle', color: null });
+  assert.deepEqual(model, { visible: false, count: 0, mode: 'idle', color: null, portMoved: false, portLine: null });
 });
 
 test('visible (idle) when >=1 jar key enabled, even with zero active connections', () => {
@@ -43,7 +43,7 @@ test('visible (idle) when ONLY the admin key is enabled, count is 0 (never count
     activeJarIds: [],
     adminActive: false
   });
-  assert.deepEqual(model, { visible: true, count: 0, mode: 'idle', color: null });
+  assert.deepEqual(model, { visible: true, count: 0, mode: 'idle', color: null, portMoved: false, portLine: null });
 });
 
 test('malformed/negative/non-integer enabledJarKeyCount clamps to 0, never throws', () => {
@@ -54,8 +54,22 @@ test('malformed/negative/non-integer enabledJarKeyCount clamps to 0, never throw
 });
 
 test('missing input object entirely never throws (all-defaults hidden)', () => {
-  assert.deepEqual(buildAutomationIndicatorModel(), { visible: false, count: 0, mode: 'idle', color: null });
-  assert.deepEqual(buildAutomationIndicatorModel(undefined), { visible: false, count: 0, mode: 'idle', color: null });
+  assert.deepEqual(buildAutomationIndicatorModel(), {
+    visible: false,
+    count: 0,
+    mode: 'idle',
+    color: null,
+    portMoved: false,
+    portLine: null
+  });
+  assert.deepEqual(buildAutomationIndicatorModel(undefined), {
+    visible: false,
+    count: 0,
+    mode: 'idle',
+    color: null,
+    portMoved: false,
+    portLine: null
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -70,7 +84,7 @@ test("mode=jar with the active jar's color when exactly one distinct active jar 
     adminActive: false,
     containers: CONTAINERS
   });
-  assert.deepEqual(model, { visible: true, count: 2, mode: 'jar', color: '#2196f3' });
+  assert.deepEqual(model, { visible: true, count: 2, mode: 'jar', color: '#2196f3', portMoved: false, portLine: null });
 });
 
 test('duplicate active sessions on the SAME jar still resolve to a single distinct jar (mode=jar)', () => {
@@ -130,7 +144,7 @@ test('mode=multi (neutral, no color) when more than one distinct jar is active s
     activeJarIds: ['work', 'personal'],
     containers: CONTAINERS
   });
-  assert.deepEqual(model, { visible: true, count: 2, mode: 'multi', color: null });
+  assert.deepEqual(model, { visible: true, count: 2, mode: 'multi', color: null, portMoved: false, portLine: null });
 });
 
 test('null/undefined/empty-string entries in activeJarIds are ignored when counting distinct jars', () => {
@@ -156,7 +170,7 @@ test('mode=admin (rainbow, no fixed color) when the admin key is enabled and act
     activeJarIds: [],
     containers: CONTAINERS
   });
-  assert.deepEqual(model, { visible: true, count: 2, mode: 'admin', color: null });
+  assert.deepEqual(model, { visible: true, count: 2, mode: 'admin', color: null, portMoved: false, portLine: null });
 });
 
 test('admin trumps a concurrently active single jar', () => {
@@ -202,4 +216,49 @@ test('admin enabled but NOT currently active, with no jar connections either, st
     containers: CONTAINERS
   });
   assert.equal(model.mode, 'idle');
+});
+
+// ---------------------------------------------------------------------------
+// Mission 23 Flight 2, leg `port-and-permissions` (DD5): the moved-port note.
+// ---------------------------------------------------------------------------
+
+const KEYED = { enabledJarKeyCount: 1, adminKeyEnabled: false };
+
+test('port: configured and bound differ -> portMoved and the line', () => {
+  const m = buildAutomationIndicatorModel({ ...KEYED, port: { configured: 49707, bound: 49708 } });
+  assert.equal(m.portMoved, true);
+  assert.equal(m.portLine, 'Listening on 49708 — 49707 was in use');
+});
+
+test('port: equal -> no note', () => {
+  const m = buildAutomationIndicatorModel({ ...KEYED, port: { configured: 49707, bound: 49707 } });
+  assert.equal(m.portMoved, false);
+  assert.equal(m.portLine, null);
+});
+
+test('port: not listening (bound null) -> no note', () => {
+  const m = buildAutomationIndicatorModel({ ...KEYED, port: { configured: 49707, bound: null } });
+  assert.equal(m.portMoved, false);
+  assert.equal(m.portLine, null);
+});
+
+test('port: absent, null or malformed never throws and shows no note', () => {
+  for (const port of [undefined, null, {}, { configured: 'x', bound: 5 }, { configured: 5 }, 'junk', 7]) {
+    const m = buildAutomationIndicatorModel({ ...KEYED, port });
+    assert.equal(m.portMoved, false);
+    assert.equal(m.portLine, null);
+  }
+});
+
+test('port: the note is carried in every visible mode, and absent when the indicator is hidden', () => {
+  const port = { configured: 1, bound: 2 };
+  assert.equal(buildAutomationIndicatorModel({ ...KEYED, port }).mode, 'idle');
+  assert.equal(buildAutomationIndicatorModel({ ...KEYED, port, activeJarIds: ['a', 'b'] }).portMoved, true);
+  assert.equal(
+    buildAutomationIndicatorModel({ enabledJarKeyCount: 0, adminKeyEnabled: true, adminActive: true, port }).portMoved,
+    true
+  );
+  const hidden = buildAutomationIndicatorModel({ enabledJarKeyCount: 0, adminKeyEnabled: false, port });
+  assert.equal(hidden.visible, false);
+  assert.equal(hidden.portMoved, false);
 });

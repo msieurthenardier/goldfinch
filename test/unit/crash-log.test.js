@@ -19,7 +19,19 @@ function makeFakeFs() {
     seed(p, content, mtime) {
       files.set(p, { content, mtime: mtime ?? ++seq });
     },
-    appendFileSync(p, data) {
+    appends: [],
+    chmods: [],
+    chmodSync(p, mode) {
+      this.chmods.push([p, mode]);
+      if (!files.has(p)) {
+        const err = new Error('ENOENT');
+        // @ts-ignore
+        err.code = 'ENOENT';
+        throw err;
+      }
+    },
+    appendFileSync(p, data, opts) {
+      this.appends.push([p, opts]);
       const cur = files.get(p);
       files.set(p, { content: (cur ? cur.content : '') + data, mtime: ++seq });
     },
@@ -368,4 +380,35 @@ test('pruneDumps never throws even if unlink fails', () => {
   };
   const crashLog = createCrashLog({ dir: DIR, fs, now: () => new Date(), keepDumps: 1 });
   assert.doesNotThrow(() => crashLog.pruneDumps(dumpDir));
+});
+
+// Leg `clipboard-and-file-modes` AC6/AC7/AC8: owner-only crash log.
+test('record appends with mode 0600 (applies on creation)', () => {
+  const fs = makeFakeFs();
+  createCrashLog({ dir: DIR, fs, now: () => new Date('2026-09-16T00:00:00.000Z') }).record({ kind: 'tab-crash' });
+  assert.deepEqual(fs.appends, [[LOG_PATH, { mode: 0o600 }]]);
+});
+
+test('an existing crash log is tightened to 0600 once at construction; a missing one is not an error', () => {
+  const fs = makeFakeFs();
+  const logger = makeLogger();
+  fs.seed(LOG_PATH, '');
+  createCrashLog({ dir: DIR, fs, now: () => new Date(), logger });
+  assert.deepEqual(fs.chmods, [[LOG_PATH, 0o600]]);
+  const fresh = makeFakeFs();
+  createCrashLog({ dir: DIR, fs: fresh, now: () => new Date(), logger });
+  assert.deepEqual(logger.warns, [], 'ENOENT is silent');
+});
+
+test('a chmod failure is logged once and never throws', () => {
+  const fs = makeFakeFs();
+  fs.seed(LOG_PATH, '');
+  fs.chmodSync = () => {
+    throw Object.assign(new Error('x'), { code: 'EPERM' });
+  };
+  const logger = makeLogger();
+  const log = createCrashLog({ dir: DIR, fs, now: () => new Date(), logger });
+  assert.equal(logger.warns.length, 1);
+  log.record({ kind: 'tab-crash' });
+  assert.equal(readLines(fs).length, 1);
 });

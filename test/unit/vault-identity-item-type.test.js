@@ -427,7 +427,7 @@ test('restoreProfile COMMIT: an unknown-type item lands the vault, reporting wha
     const { bundle } = src.store.exportProfile();
     const entries = entriesOf(bundle);
     let call = 0;
-    vc.decryptItems = (blob, key, version) => {
+    vc.decryptItems = (blob, key, version, vaultId) => {
       call++;
       if (call === 1) {
         // global entry's decrypted items.
@@ -436,7 +436,7 @@ test('restoreProfile COMMIT: an unknown-type item lands the vault, reporting wha
           { type: 'giftcard', id: 'g2', title: 'Unknown' }
         ];
       }
-      return original(blob, key, version);
+      return original(blob, key, version, vaultId);
     };
     const res = await dest.store.restoreProfile(JSON.parse(JSON.stringify(bundle)), {
       secret: Buffer.from(MASTER, 'utf8'),
@@ -472,13 +472,13 @@ test('restoreProfile COMMIT: LD2 merge collision â€” destination keeps its ident
     const { bundle } = src.store.exportProfile();
     const entries = entriesOf(bundle);
     let call = 0;
-    vc.decryptItems = (blob, key, version) => {
+    vc.decryptItems = (blob, key, version, vaultId) => {
       call++;
       if (call === 1) {
         // The bundle's OWN 'work' vault items â€” carries a colliding identity item.
         return [{ type: 'identity', id: 'incoming-identity', title: 'Me', fullName: 'Incoming Person' }];
       }
-      return original(blob, key, version); // the destination's own (real) items.
+      return original(blob, key, version, vaultId); // the destination's own (real) items.
     };
     const res = await dest.store.restoreProfile(JSON.parse(JSON.stringify(bundle)), {
       secret: Buffer.from(MASTER, 'utf8'),
@@ -527,7 +527,7 @@ test('restoreProfile COMMIT: a genuinely malformed entry fails ONLY that entry â
       home: bundle.vaults[2].entryHandle
     };
     let call = 0;
-    vc.decryptItems = (blob, key, version) => {
+    vc.decryptItems = (blob, key, version, vaultId) => {
       call++;
       if (call === 2) {
         return [
@@ -535,7 +535,7 @@ test('restoreProfile COMMIT: a genuinely malformed entry fails ONLY that entry â
           { type: 'login', id: 'dup', title: 'b', username: 'u2', password: 'p2' }
         ];
       }
-      return original(blob, key, version);
+      return original(blob, key, version, vaultId);
     };
     const res = await dest.restoreProfile(JSON.parse(JSON.stringify(bundle)), {
       secret: Buffer.from(MASTER, 'utf8'),
@@ -585,7 +585,7 @@ test('previewRestoreBundle: itemCount counts only KNOWN items; skippedTypes name
     const { bundle } = src.store.exportProfile();
     const entries = entriesOf(bundle);
     let call = 0;
-    vc.decryptItems = (blob, key, version) => {
+    vc.decryptItems = (blob, key, version, vaultId) => {
       call++;
       if (call === 1) {
         return [
@@ -594,7 +594,7 @@ test('previewRestoreBundle: itemCount counts only KNOWN items; skippedTypes name
           { type: 'punchcard', id: 'g3', title: 'Also unknown' }
         ];
       }
-      return original(blob, key, version);
+      return original(blob, key, version, vaultId);
     };
     const res = await dest.store.previewRestoreBundle(bundle, {
       secret: Buffer.from(MASTER, 'utf8'),
@@ -623,7 +623,7 @@ test('previewRestoreBundle: a bundle vault with two identity items reports itemC
     const { bundle } = src.store.exportProfile();
     const entries = entriesOf(bundle);
     let call = 0;
-    vc.decryptItems = (blob, key, version) => {
+    vc.decryptItems = (blob, key, version, vaultId) => {
       call++;
       if (call === 1) {
         return [
@@ -631,7 +631,7 @@ test('previewRestoreBundle: a bundle vault with two identity items reports itemC
           { type: 'identity', id: 'i2', title: 'Me', fullName: 'Second' }
         ];
       }
-      return original(blob, key, version);
+      return original(blob, key, version, vaultId);
     };
     const res = await dest.store.previewRestoreBundle(bundle, {
       secret: Buffer.from(MASTER, 'utf8'),
@@ -654,10 +654,10 @@ test('previewRestoreBundle: STILL fails the WHOLE preview on genuine corruption 
   try {
     const { bundle } = src.store.exportProfile();
     let call = 0;
-    vc.decryptItems = (blob, key, version) => {
+    vc.decryptItems = (blob, key, version, vaultId) => {
       call++;
       if (call === 1) return { not: 'an array' };
-      return original(blob, key, version);
+      return original(blob, key, version, vaultId);
     };
     await assert.rejects(
       dest.store.previewRestoreBundle(bundle, { secret: Buffer.from(MASTER, 'utf8'), secretKind: 'master' }),

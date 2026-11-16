@@ -41,3 +41,31 @@ test('a non-reserved id is NOT remapped (control)', () => {
   ]);
   assert.equal(result[0].id, 'personal');
 });
+
+// One predicate (leg admin-key-name AC7b): the key-map consumers and jars.js share
+// src/shared/reserved-ids.js; jars.js's behaviour is the drift guard.
+const { isReservedId, isReservedKeyName } = require('../../src/shared/reserved-ids');
+
+test('isReservedId — the whole reserved set, exact-match only', () => {
+  for (const id of ['burner', 'burner-1', 'admin', 'internal', 'default', 'global'])
+    assert.equal(isReservedId(id), true, id);
+  for (const id of ['Admin', 'admin ', 'personal', 'jar-admin', 'xburner', '', null, undefined, 3]) {
+    assert.equal(isReservedId(id), false, String(id));
+  }
+});
+
+test('isReservedKeyName — reserved ids plus the non-own-entry names', () => {
+  assert.equal(isReservedKeyName('admin'), true);
+  assert.equal(isReservedKeyName('__proto__'), true);
+  assert.equal(isReservedKeyName('constructor'), true);
+  assert.equal(isReservedKeyName('personal'), false);
+});
+
+test('drift guard — every id isReservedId rejects is remapped by jars.validateContainers', () => {
+  for (const id of ['burner', 'burner-1', 'admin', 'internal', 'default', 'global']) {
+    const [out] = jars.validateContainers([
+      { id, name: 'X', color: '#4caf50', partition: `persist:container:${id}-x` }
+    ]);
+    assert.equal(out.id, `jar-${id}`, id);
+  }
+});

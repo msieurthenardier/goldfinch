@@ -445,6 +445,22 @@ async function readAxTree(wcId, deps, { depth, properties } = {}) {
 }
 
 /**
+ * Leg `admin-reach` (DD2): record that automation is about to run script in this document. Called by
+ * `evaluate` and `injectScript` ONLY - after `resolveContents` and BEFORE `executeJavaScript`, so the mark
+ * stands when the script throws and a timer the script arms is already attributed. A reads-only op leaves
+ * nothing behind and never marks. A missing setter (offline tests) is a no-op, as `sheetMenuFor` is; the
+ * source-scan pin holds both production engine sites. A setter that throws fails the op (fail closed).
+ * @param {any} wc
+ * @param {{ markScripted?: (wc: any) => void }} deps
+ */
+function markScriptedDocument(wc, deps) {
+  if (typeof deps.markScripted !== 'function') return;
+  // No try/catch: a setter that throws fails the op BEFORE the script runs (fail closed - an unmarked
+  // script would escape condition (b) of the reveal gate).
+  deps.markScripted(wc);
+}
+
+/**
  * Evaluate an arbitrary expression in the target tab's MAIN WORLD via
  * wc.executeJavaScript (DD1/DD2 — ZERO CDP). Mirrors readDom: resolve →
  * wc.executeJavaScript(expression). internal-session admission is a TIER decision made
@@ -484,6 +500,7 @@ async function readAxTree(wcId, deps, { depth, properties } = {}) {
  *   chromeContents: any,
  *   isChromeContents?: (wc: any) => boolean,
  *   allowInternal?: boolean,
+ *   markScripted?: (wc: any) => void,
  * }} deps
  *   NOTE: deps.activate is deliberately NOT read here (F7 DD6) — see readDom.
  * @returns {Promise<any>} the JSON-serializable evaluated value
@@ -495,6 +512,7 @@ async function evaluate(wcId, expression, deps) {
   // op is reached for a non-admin key); the admin tier reaches internal
   // guests here by design, so there is no op-local internal-session check any more.
   const wc = resolveContents(wcId, deps);
+  markScriptedDocument(wc, deps);
   // executeJavaScript natively awaits a returned Promise; `await` here means the
   // RESOLVED value (never a Promise) reaches the serialization pre-flight.
   const value = await wc.executeJavaScript(expression);
@@ -545,11 +563,13 @@ async function evaluate(wcId, expression, deps) {
  *   chromeContents: any,
  *   isChromeContents?: (wc: any) => boolean,
  *   allowInternal?: boolean,
+ *   markScripted?: (wc: any) => void,
  * }} deps
  * @returns {Promise<void>}
  */
 async function injectScript(wcId, script, deps) {
   const wc = resolveContents(wcId, deps);
+  markScriptedDocument(wc, deps);
   // NO activate (DD2): injectScript skips foreground-to-act — it defines globals /
   // patches prototypes and needs no paint. Flight-2 DD1/DD2 pivot: internal-session is
   // a tier boundary enforced at resolve.js (non-admin refused there before this op

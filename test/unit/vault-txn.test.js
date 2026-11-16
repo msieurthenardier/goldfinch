@@ -92,12 +92,18 @@ async function buildFixture(dir) {
     kdf: FAST_SCRYPT,
     mrk: { master: masterEnv, recovery: recoveryEnv }
   });
-  const mrkAad = Buffer.from(`gfvault/mrk-env/v${vc.VERSION}`, 'utf8');
   function newVaultDoc(vaultId, title) {
     const key = vc.newVaultKey();
-    const env = { keyId: 'mrk', type: 'mrk', ...vc.wrapVaultKey(key, newMrk, mrkAad) };
+    const env = {
+      keyId: 'mrk',
+      type: 'mrk',
+      ...vc.wrapVaultKey(key, newMrk, vc.mrkEnvelopeAad(vc.WRITE_VAULT_VERSION, vaultId))
+    };
     const items = [{ id: 'x1', type: 'login', title, username: 'u', password: 'p', createdAt: 1, updatedAt: 1 }];
-    const doc = vc.serializeVault({ vaultId, envelopes: [env], items: vc.encryptItems(items, key) });
+    const doc = vc.serializeVault(
+      { vaultId, envelopes: [env], items: vc.encryptItems(items, key, vc.WRITE_VAULT_VERSION, vaultId) },
+      { version: vc.WRITE_VAULT_VERSION }
+    );
     key.fill(0);
     return doc;
   }

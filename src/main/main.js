@@ -14,7 +14,8 @@ const {
   net,
   clipboard,
   Menu,
-  crashReporter
+  crashReporter,
+  powerMonitor
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -56,6 +57,7 @@ const { parseMediaProxyUrl } = require('../shared/media-proxy');
 const { INTERNAL_PARTITION } = require('../shared/internal-page');
 const { createMediaProxyHandler } = require('./media-proxy-handler');
 const { createMediaProxyTokens } = require('./media-proxy-tokens');
+const { createRevealGate, createDocumentMarks } = require('./reveal-gate');
 const { initProfileAndStores } = require('./init-profile');
 const { sanitizeFilename, isWithinDir } = require('./download-path');
 const { createResolver } = require('./internal-assets');
@@ -94,8 +96,10 @@ const {
 // to chrome). Constructed once from the vault-store singleton + registry idioms.
 const { createVaultHuman } = require('./vault/vault-human');
 // Mission 23 Flight 1 (leg `vault-fill-trust`): main's witness of real pointer input on each tab guest.
+const { createInjectedInput } = require('./automation/injected-input');
 const { createGestureWitness } = require('./vault/gesture-witness');
 const { runVaultLockTeardown } = require('./vault-lock-teardown');
+const { createPowerLock } = require('./vault/power-lock');
 const { routeCaptureDropped } = require('./save-prompt-drop-router');
 const { createSavePromptManager } = require('./save-prompt-manager');
 const { computeSavePromptBounds } = require('./save-prompt-geometry');
@@ -139,6 +143,9 @@ const { createDefaultBrowser } = require('./default-browser');
 const { registerVaultIpc } = require('./register-vault-ipc');
 const { registerBrowserIpc } = require('./register-browser-ipc');
 const { registerAppLifecycle } = require('./app-lifecycle');
+const { createSecretClipboard } = require('./secret-clipboard');
+// The one OS-clipboard writer in main (leg `clipboard-and-file-modes`); `flush` runs first in before-quit.
+const secretClipboard = createSecretClipboard({ clipboard, logger: console });
 // F7 DD2: the pure, Electron-free row builder behind the enumerateWindows op.
 // Zero state — every field derives from the live records at call time.
 const { buildWindowCensus } = require('./window-census');
@@ -343,7 +350,7 @@ const isolateOperatorOverride = startupDecision.operatorOverride;
 // Mission 20 Flight 3 Leg 3 (DD8): Chromium's own minidump collector, started
 // at module load (before app.whenReady()) so early crashes are caught too —
 // but PLACED AFTER the dev-profile redirect (and the single-instance lock) above, never before
-// it. Electron 44 has no `crashesDirectory` option; the dump database path is
+// it. Electron has no `crashesDirectory` option (re-checked against Electron 45.3.2's `CrashReporterStartOptions`, 2026-11-14); the dump database path is
 // resolved from `userData` at `start()` time, so a call placed any earlier
 // would write dev-launch dumps into the operator's REAL profile (squawk 0017
 // / #121 isolation). NO `submitURL` key at all — `uploadToServer: false`
@@ -1022,6 +1029,8 @@ function getVaultStore() {
   if (_vaultStore === null) {
     _vaultStore = vaultStoreModule.load(app.getPath('userData'), {
       listJars: () => jars.list(),
+      // Diagnostics only (a vault file naming another vault's id; later, the upgrade).
+      log: (line) => console.warn(line),
       getAutoLockMinutes: () => settings.get('vaultAutoLockMinutes'),
       // M18 F3 Leg 3 (DD3 ruling 4): restoreProfile's 'new' directive create-then-verify
       // step — injected so vault-store.js stays jars.js-free (Electron-free discipline).
@@ -1039,6 +1048,8 @@ function getVaultStore() {
       // Sortie 07: the same hook also zeroizes every live MCP session's vault keys (isolated step
       // in runVaultLockTeardown) - the operator's lock is authoritative over automation.
       onLock: () => {
+        // Leg 07: a lock voids every reveal-gate per-item grant, so a locked-then-unlocked vault asks again.
+        documentMarks.clearGrants();
         _pendingVaultImports.dropAll();
         _pendingBrowserImports.dropAll();
         // Leg 1 (capture-hold-safety, DD5): drop every held capture too — the
@@ -1336,12 +1347,26 @@ async function vaultSaveBundleToFile(bundle, savePath) {
   try {
     // Exclusive create for a typed path (finding 7): 'wx' throws EEXIST rather than truncating a
     // file that appeared between validation and write. The dialog path keeps the default overwrite.
-    fs.writeFileSync(filePath, JSON.stringify(bundle), exclusive ? { encoding: 'utf8', flag: 'wx' } : 'utf8');
+    // Owner-only on creation (`mode` applies only when the file is created).
+    fs.writeFileSync(
+      filePath,
+      JSON.stringify(bundle),
+      exclusive ? { encoding: 'utf8', flag: 'wx', mode: 0o600 } : { encoding: 'utf8', mode: 0o600 }
+    );
   } catch (err) {
     if (exclusive && err && err.code === 'EEXIST') {
       return { ok: false, error: 'invalid-path', reason: 'exists' };
     }
     return { ok: false, error: 'write-failed' };
+  }
+  // Overwrite path (the dialog's "replace" choice): writeFileSync's mode does not apply to an existing
+  // file, so tighten it after the write. Best-effort; the bundle is already written either way.
+  if (!exclusive) {
+    try {
+      fs.chmodSync(filePath, 0o600);
+    } catch (err) {
+      console.warn('[vault-export] could not set owner-only mode (continuing):', err && err.code);
+    }
   }
   return { ok: true, path: filePath };
 }
@@ -1502,10 +1527,56 @@ function vaultImportSeverDismiss() {
 // switch as the gate's refusal trace); decisions only - no URL, title, coordinate or item data.
 const gestureTrace = process.env.GOLDFINCH_IPC_TRACE === '1' ? (line) => console.log(line) : () => {};
 const gestureWitness = createGestureWitness({ trace: gestureTrace });
+// Mission 23 Flight 2 (leg `automation-input`, DD4): ONE per-tab count of input automation is injecting.
+// Both createEngine sites bracket every sendInputEvent with it (input.js `withInjection`); guest-wiring.js
+// reads it so the click witness ignores injected input at every tier and a jar-scoped key's keys do not
+// run the browser's own shortcuts. Construction and wiring only (logic: automation/injected-input.js).
+const injectedInput = createInjectedInput();
 // Mission 23 Flight 1 (leg `jar-isolation`): per-tab, per-document media-proxy tokens - minted when a
 // tab's media list arrives (register-browser-ipc.js), invalidated at navigation / destruction
 // (guest-wiring.js) and resolved by the proxy handler (app-lifecycle.js). Never logged.
 const mediaProxyTokens = createMediaProxyTokens();
+// Mission 23 Flight 2 (leg `admin-reach`, DD2): the reveal gate. While an admin automation session is
+// attached - or script it evaluated in the calling internal page is still alive - reading a vault secret
+// or a cookie value, exporting a vault, or minting an automation key takes a native confirmation that no
+// automation tier can answer. Logic lives in reveal-gate.js; this is construction and wiring only.
+// `documentMarks` holds the per-document scripted mark and per-item grants: the engine's evaluate /
+// injectScript set the mark (both createEngine sites), guest-wiring.js drops it at commit / destroy.
+// `mcpServer` is read late (the server mounts later and conditionally; none reads false).
+const documentMarks = createDocumentMarks();
+const revealGate = createRevealGate({
+  hasAdminSession: () => mcpServer?.hasAdminSession?.() === true,
+  isTouched: (wcId) => documentMarks.isScripted(wcId),
+  hasGrant: (wcId, key) => documentMarks.hasGrant(wcId, key),
+  addGrant: (wcId, key, epoch) => documentMarks.grant(wcId, key, epoch),
+  grantEpoch: () => documentMarks.epoch(),
+  windowFor: (sender) => registry.getWindowForGuest(sender.id)?.win ?? null,
+  // Fix 1 of leg `hat-and-alignment`: a background tab gets no dialog - the same predicate ipc-gate's
+  // `activeOnly` uses (internal tabs are in `tabViews` too).
+  isActive: (sender) => registry.getWindowForGuest(sender.id)?.activeTabWcId === sender.id,
+  showConfirm: (win, options, signal) => dialog.showMessageBox(win, { ...options, signal }),
+  // The abort follows the sender's document and its window: a new main-frame document, the contents
+  // destroyed, or the window about to close. `close` (never `closed`) - the window is still readable.
+  watch: (sender, win, onGone) => {
+    sender.once('did-navigate', onGone);
+    sender.once('destroyed', onGone);
+    win.once('close', onGone);
+    return () => {
+      for (const [emitter, event] of [
+        [sender, 'did-navigate'],
+        [sender, 'destroyed'],
+        [win, 'close']
+      ]) {
+        try {
+          emitter.removeListener(event, onGone);
+        } catch {
+          // a disposed emitter has nothing left to remove
+        }
+      }
+    };
+  },
+  trace: process.env.GOLDFINCH_REVEAL_GATE_TRACE === '1' ? (line) => console.log(line) : () => {}
+});
 let _vaultHuman = null;
 function getVaultHuman() {
   if (_vaultHuman === null) {
@@ -1642,9 +1713,16 @@ async function startMcpServerInstance() {
         // Grep-pinned as a PAIR across both engine sites — see app-lifecycle.js's dev seam.
         isSheetContents: (wc) => registry.isSheetContents(wc),
         sheetMenuFor: (wc) => registry.sheetMenuFor(wc),
+        // Leg `admin-reach` (DD2): the scripted-document mark - set by evaluate / injectScript. MUST be
+        // present at BOTH production createEngine sites (grep-pinned): an omitted setter would silently
+        // lose condition (b) of the reveal gate.
+        markScripted: (wc) => documentMarks.markScripted(wc.id),
         // Sortie 06 (DD10): the corner save prompt is refused at EVERY tier. Grep-pinned as present
         // at BOTH engine sites (an absent injection is NOT refused by anything else at admin).
         isSavePromptContents: (wc) => registry.isSavePromptContents(wc),
+        // Leg `automation-input` (DD4): the shared injected-input counts. MUST be present at BOTH production
+        // createEngine sites (grep-pinned): an omitted store silently injects unbracketed.
+        injectedInput,
         // F7 DD6 (recon S1): owner routing + the window raise for activateTab. Without
         // BOTH, activateTab silently falls back to the pre-F7 last-focused dispatch —
         // a forgotten injection restores S1 with NO test failure anywhere, which is why
@@ -1782,18 +1860,26 @@ function rebindMcpServer() {
 // bound (DD3/DD4). Serialized through the shared `inFlight` chain in automationToggle
 // (Leg 7 / DD8(a)): two concurrent flip-ONs result in exactly ONE start (no
 // double-bind), and a flip concurrent with a rebind cannot stop()-on-null.
-function applyAutomationEnabledChange(enabled) {
-  return automationToggle.applyEnabledChange(enabled);
+async function applyAutomationEnabledChange(enabled) {
+  await automationToggle.applyEnabledChange(enabled);
+  // A bind announces itself (the server's own start()). A teardown has no instance left to do it, so say
+  // "nothing is listening, no port known" here - otherwise the indicator would keep a moved-port note for a
+  // listener that no longer exists. Flight 2 DD5.
+  if (!mcpServer) broadcastToChromeAndInternal('automation-activity-changed', { sessions: [], log: [] });
 }
 
 // Shared get-status return shape (Leg 7). `port` reflects the bound port when the
 // surface is active; when disabled, mcpStatus.port is null so we compute the
 // would-be resolved port. Host is hard-pinned to loopback (SC7).
 function currentAutomationStatus() {
+  const resolved = resolvePort(() => settings, { honorEnv: !app.isPackaged });
   return {
     enabled: mcpStatus.enabled,
     host: '127.0.0.1',
-    port: mcpStatus.port != null ? mcpStatus.port : resolvePort(() => settings, { honorEnv: !app.isPackaged }),
+    port: mcpStatus.port != null ? mcpStatus.port : resolved,
+    // Flight 2 DD5: the port the server was ASKED to bind, beside the one it holds (`port`). Read from the live
+    // instance when there is one; otherwise it is what a bind would use now.
+    configuredPort: mcpServer ? mcpServer.configuredPort : resolved,
     bound: mcpStatus.bound,
     error: mcpStatus.error
   };
@@ -1868,6 +1954,7 @@ const htmlFullscreen = createHtmlFullscreen({
   // Sortie 06 Leg 1 (AC13): lazy getter (the memoized reference - never force-constructs
   // vault-human); entering fullscreen drops the tab's captures + closes its corner prompt.
   vaultHuman: () => _vaultHuman,
+  revealTabInactive: (wcId) => revealGate.tabInactive(wcId),
   logger: console
 });
 
@@ -1951,6 +2038,10 @@ const { createWindow } = createWindowFactory({
   computeSavePromptBounds,
   getVaultHuman,
   htmlFullscreen,
+  // Fix 1 of leg `hat-and-alignment`: real input to the chrome view cancels a pending reveal confirmation
+  // (injected input excluded through `injectedInput`).
+  revealWindowInput: (win) => revealGate.windowInput(win),
+  injectedInput,
   authChallenges,
   computeFindOverlayBounds,
   getTabContents,
@@ -2034,8 +2125,14 @@ const { wireGuestContents, wireTabViewEvents } = createGuestWiring({
   vaultHuman: () => _vaultHuman,
   // Mission 23 Flight 1 (leg `vault-fill-trust`): the per-tab witness of real pointer input.
   gestureWitness,
+  // Mission 23 Flight 2 (leg `automation-input`): injected-input counts (witness gate, jar-key shortcut gate, destroy hook).
+  injectedInput,
+  // Fix 1 of leg `hat-and-alignment`: real input to a window cancels its pending reveal confirmation.
+  revealWindowInput: (win) => revealGate.windowInput(win),
   // Mission 23 Flight 1 (leg `jar-isolation`): the media-proxy token store (commit + destroy hooks).
   mediaProxyTokens,
+  // Mission 23 Flight 2 (leg `admin-reach`): the reveal gate's per-document state (commit + destroy hooks).
+  documentMarks,
   // Mission 20 Flight 1 (DD1/AC7): the ONE two-axis visibility helper, owned by
   // register-tab-ipc.js — threaded here so guest-wiring's own failure/clear
   // transitions call the SAME helper every other guest-show site does.
@@ -2294,6 +2391,8 @@ registerTabIpc({
   // `getVaultHuman` — that force-constructs, which a tab close in a
   // vault-untouched session must never do.
   vaultHuman: () => _vaultHuman,
+  // Fix 1 of leg `hat-and-alignment`: the reveal gate hears of every tab that stops being in front.
+  revealTabInactive: (wcId) => revealGate.tabInactive(wcId),
   logger: console
 });
 
@@ -2511,7 +2610,9 @@ registerOverlayIpc({
   },
   // M12 F3 Leg 4: the recovery-show Copy delegate — main owns the OS clipboard string
   // write (the chrome-clipboard-write precedent). Sender-validated in the handler.
-  writeClipboard: (text) => clipboard.writeText(String(text)),
+  // Every sheet Copy is a key display (the `menu-overlay:copy-text` row is pinned to the three
+  // key cards), so it is always a SECRET write: cleared after 20 s and at quit.
+  writeClipboard: (text) => secretClipboard.write(String(text), { secret: true }),
   // M14 F1 L2 (DD2): the auth-basic sheet's submit delegate — the store resolves
   // the presented challenge's native callback (exactly-once) and owns the
   // 'activated' sheet close; the handler owns the Buffer copy + dual-zeroize.
@@ -2746,6 +2847,7 @@ gate.owningChrome.handle(
 const { broadcastJarsChanged } = registerJarIpc({
   ipcMain,
   gate,
+  revealGate,
   jars,
   session,
   rerollSeed,
@@ -2867,6 +2969,7 @@ const { applySpellcheck, applyShields, pruneAllJars } = sessionRuntime;
 registerSettingsIpc({
   ipcMain,
   gate,
+  revealGate,
   registerInternalHandler,
   settings,
   shields,
@@ -2882,7 +2985,7 @@ registerSettingsIpc({
   currentAutomationStatus,
   rebindMcpServer,
   freePortInRange,
-  clipboard,
+  secretClipboard,
   jars,
   mintJarKey,
   revokeJarKey,
@@ -2906,6 +3009,7 @@ registerSettingsIpc({
 // store has no public vault-enumeration method (the handler composes 'global' + jars.list()).
 registerVaultIpc({
   ipcMain,
+  revealGate,
   registerInternalHandler,
   getVaultStore,
   jars,
@@ -2934,9 +3038,29 @@ registerVaultIpc({
   broadcastVaultLockState: () => broadcastVaultLockState()
 });
 
+// Leg `vault-lifecycle` (DD7): the vault locks on suspend / screen lock / user switch / shutdown and, on
+// resume, after a long sleep; and at quit. Logic in vault/power-lock.js; this is wiring only. The store is
+// read late through `_vaultStore` (a never-constructed store is a locked one; quit and power events must not load it) and `powerMonitor` is only touched after `app.ready`.
+const vaultPowerLock = createPowerLock({
+  powerMonitor,
+  lockNow: () => _vaultStore?.lockNow(),
+  isUnlocked: () => _vaultStore?.isUnlocked() === true,
+  isAutoLockSuspended: () => _vaultStore?.isAutoLockSuspended() === true,
+  deferLock: () => _vaultStore?.deferPowerLock(),
+  idleMs: () => _vaultStore?.idleMs() ?? null,
+  autoLockMs: () => _vaultStore?.autoLockMs() ?? 0,
+  trace: process.env.GOLDFINCH_IPC_TRACE === '1' ? (line) => console.log(line) : () => {},
+  logger: console
+});
+
 registerAppLifecycle({
   app,
   gate,
+  markScripted: (wc) => documentMarks.markScripted(wc.id),
+  injectedInput,
+  startVaultPowerLock: () => vaultPowerLock.register(),
+  flushSecretClipboard: () => secretClipboard.flush(),
+  lockVaultForQuit: () => _vaultStore?.lockNow(),
   extractLaunchUrls,
   filterLaunchUrls,
   queueChromeSend,

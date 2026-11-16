@@ -11,6 +11,12 @@ import { activeLog, windowPage, reduceAudit, pageList, pageCount } from './audit
 import { isSafeColor } from './safe-color.js';
 // @ts-ignore — serving-path vs disk-path mismatch (see above)
 import { initSectionScrollSpy } from './section-scroll-spy.js';
+// @ts-ignore — serving-path vs disk-path mismatch (see above)
+import { runKeyMint } from './automation-key-flow.js';
+// @ts-ignore — serving-path vs disk-path mismatch (see above)
+import { portMovedLine } from './automation-port-note.js';
+// @ts-ignore — serving-path vs disk-path mismatch (see above)
+import { renderPortMoved } from './automation-port-moved.js';
 
 /**
  * automation.js — controller for goldfinch://automation (sortie 05). The three
@@ -28,11 +34,26 @@ initSectionScrollSpy({ document, IntersectionObserver, window });
  * under contextIsolation + sandbox) falls back to the internal clipboardWrite
  * IPC. Shows a transient "Copied" / "Copy failed" message in messageEl. Declared
  * at file scope (not in any IIFE) so leg 3's key-copy IIFE calls it directly.
+ *
+ * `secret` (a show-once key): goes STRAIGHT to the bridge with `{ secret: true }` and never tries
+ * `navigator.clipboard` - main owns the clear it is responsible for (20 s and at quit); a page-side
+ * write would leave a copy no one clears. Exactly one call site passes it.
  * @param {string} text
  * @param {HTMLElement|null} [messageEl]
+ * @param {{ secret?: boolean }} [opts]
  * @returns {Promise<void>}
  */
-async function copyText(text, messageEl) {
+async function copyText(text, messageEl, opts) {
+  if (opts && opts.secret === true) {
+    try {
+      await window.goldfinchInternal.clipboardWrite(text, { secret: true });
+    } catch {
+      if (messageEl) messageEl.textContent = 'Copy failed';
+      return;
+    }
+    if (messageEl) messageEl.textContent = 'Copied';
+    return;
+  }
   try {
     await navigator.clipboard.writeText(text);
   } catch {
@@ -61,6 +82,7 @@ async function copyText(text, messageEl) {
   const portSaveBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('automation-port-save'));
   const findPortBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('automation-find-port'));
   const portNote = /** @type {HTMLElement|null} */ (document.getElementById('automation-port-note'));
+  const portMovedEl = /** @type {HTMLElement|null} */ (document.getElementById('automation-port-moved'));
   const messageEl = /** @type {HTMLElement|null} */ (document.getElementById('automation-message'));
   const configCodeEl = /** @type {HTMLElement|null} */ (document.getElementById('automation-mcp-config'));
   const copyConfigBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('automation-copy-config'));
@@ -84,7 +106,7 @@ async function copyText(text, messageEl) {
 
   // Module-local copy of the last status so onSettingsChanged can recompute the
   // pending-port note against the *active* bind (the note gates on status.bound).
-  /** @type {{ enabled: boolean, host: string, port: number, bound: boolean, error: (string|null) }|null} */
+  /** @type {{ enabled: boolean, host: string, port: number, configuredPort?: number, bound: boolean, error: (string|null) }|null} */
   let lastStatus = null;
 
   // The currently-persisted/active port — used to drive Save button dirty state.
@@ -113,7 +135,9 @@ async function copyText(text, messageEl) {
    */
   function recomputePortNote() {
     portNote.textContent =
-      lastStatus && lastStatus.bound && Number(portInput.value) !== lastStatus.port
+      lastStatus &&
+      lastStatus.bound &&
+      Number(portInput.value) !== (lastStatus.configuredPort != null ? lastStatus.configuredPort : lastStatus.port)
         ? '(unsaved — applies on Save)'
         : '';
   }
@@ -121,7 +145,7 @@ async function copyText(text, messageEl) {
   /**
    * Render the automation status into the address, status line, enabled-note,
    * and port note (AC4 / AC5).
-   * @param {{ enabled: boolean, host: string, port: number, bound: boolean, error: (string|null) }} status
+   * @param {{ enabled: boolean, host: string, port: number, configuredPort?: number, bound: boolean, error: (string|null) }} status
    */
   function renderStatus(status) {
     if (!status) return;
@@ -160,6 +184,7 @@ async function copyText(text, messageEl) {
     // immediately, so there is no "launch with a flag" caveat to surface.
     enabledNote.textContent = status.enabled ? '' : 'Binds the local automation surface.';
 
+    renderPortMoved({ el: portMovedEl, status, portMovedLine });
     recomputePortNote();
   }
 
@@ -231,8 +256,10 @@ async function copyText(text, messageEl) {
         renderStatus(status);
         // Advance the baseline to the now-active port so Save returns to
         // disabled (clean signal the save registered).
-        savedPort = status.port;
-        portInput.value = String(status.port);
+        // The SAVED port is the configured one; after a fallback the bound port differs (and the moved-port line
+        // says so), so the field must keep showing what was saved, not where the server landed.
+        savedPort = status.configuredPort != null ? status.configuredPort : status.port;
+        portInput.value = String(savedPort);
         updatePortSaveDirty();
       })
       .catch(() => {
@@ -518,10 +545,15 @@ function automationKeysOnce() {
       mintBtn.disabled = !automationEnabled;
       mintBtn.addEventListener('click', () => {
         clearReveal();
-        bridge
-          .automationJarKeyMint(jar.id)
-          .then(({ key }) => refresh().then(() => reveal(key)))
-          .catch(showErr);
+        runKeyMint({
+          mint: () => bridge.automationJarKeyMint(jar.id),
+          refresh,
+          reveal,
+          announce: (text) => {
+            keyMessageEl.textContent = text;
+          },
+          showErr
+        });
       });
       row.appendChild(mintBtn);
 
@@ -573,14 +605,15 @@ function automationKeysOnce() {
   // null key (env gate unset — defense-in-depth) shows no reveal.
   adminMintBtn.addEventListener('click', () => {
     clearReveal();
-    bridge
-      .automationAdminKeyMint()
-      .then(({ key }) =>
-        refresh().then(() => {
-          if (key) reveal(key);
-        })
-      )
-      .catch(showErr);
+    runKeyMint({
+      mint: () => bridge.automationAdminKeyMint(),
+      refresh,
+      reveal,
+      announce: (text) => {
+        keyMessageEl.textContent = text;
+      },
+      showErr
+    });
   });
 
   adminRevokeBtn.addEventListener('click', () => {
@@ -588,10 +621,10 @@ function automationKeysOnce() {
     bridge.automationAdminKeyRevoke().then(refresh).catch(showErr);
   });
 
-  // Copy the show-once key via the shared helper (navigator.clipboard with the
-  // clipboardWrite IPC fallback — DD4).
+  // Copy the show-once key via the shared helper, as a SECRET: straight to the bridge so main
+  // clears it (20 s, quit). The only secret call site.
   keyCopyBtn.addEventListener('click', () => {
-    copyText(keyValue.value, keyMessageEl);
+    copyText(keyValue.value, keyMessageEl, { secret: true });
   });
 
   // Dismiss the show-once reveal once the operator has copied the key. Clears the

@@ -91,10 +91,9 @@ function assertSnapshotUnchanged(dir, before, label) {
   }
 }
 
-// The store's mrk-envelope AAD, reconstructed for direct-GCM replay probes
-// (vault-store does not export it — the leg-2 fixture idiom).
-function mrkAad(version) {
-  return Buffer.from(`gfvault/mrk-env/v${version}`, 'utf8');
+// The store's mrk-envelope AAD for direct-GCM replay probes: the vault-crypto export.
+function mrkAad(version, vaultId) {
+  return vc.mrkEnvelopeAad(version, vaultId);
 }
 
 function tick() {
@@ -264,13 +263,13 @@ test('FULL SEVER: every captured old credential/material fails, new credentials 
       const newDoc = readVaultDoc(dir, id);
       const env = newDoc.envelopes.find((e) => e.keyId === 'mrk');
       assert.throws(
-        () => vc.unwrapVaultKey(env, fx.oldMrkBytes, mrkAad(newDoc.version)),
+        () => vc.unwrapVaultKey(env, fx.oldMrkBytes, mrkAad(newDoc.version, id)),
         auth,
         `${id}: the raw old MRK fails direct GCM against the new mrk envelope`
       );
     }
     assert.throws(
-      () => vc.decryptItems(readVaultDoc(dir, 'work').items, fx.oldWorkKeyBytes),
+      () => vc.decryptItems(readVaultDoc(dir, 'work').items, fx.oldWorkKeyBytes, 1, 'work'),
       auth,
       'the raw old vault key fails direct GCM against the rotated items blob'
     );
@@ -428,15 +427,22 @@ test('a foreign .gfvault (mrk envelope NOT under the old MRK) fails the rotation
     // mrk envelope cannot unwrap under this profile's old MRK.
     const foreignMrk = vc.newVaultKey();
     const foreignKey = vc.newVaultKey();
-    const env = { keyId: 'mrk', type: 'mrk', ...vc.wrapVaultKey(foreignKey, foreignMrk, mrkAad(vc.VERSION)) };
+    const env = {
+      keyId: 'mrk',
+      type: 'mrk',
+      ...vc.wrapVaultKey(foreignKey, foreignMrk, mrkAad(vc.WRITE_VAULT_VERSION, 'foreign'))
+    };
     fs.writeFileSync(
       path.join(fx.vdir, 'foreign.gfvault'),
-      vc.serializeVault({
-        vaultId: 'foreign',
-        kdf: FAST_SCRYPT,
-        envelopes: [env],
-        items: vc.encryptItems([], foreignKey)
-      }),
+      vc.serializeVault(
+        {
+          vaultId: 'foreign',
+          kdf: FAST_SCRYPT,
+          envelopes: [env],
+          items: vc.encryptItems([], foreignKey, vc.WRITE_VAULT_VERSION, 'foreign')
+        },
+        { version: vc.WRITE_VAULT_VERSION }
+      ),
       'utf8'
     );
     foreignMrk.fill(0);
@@ -463,16 +469,23 @@ test('UNION PIN: a .gfvault OUTSIDE the registry that unwraps under the old MRK 
     const fx = await severFixture(dir);
     // A vault file no jar names (registry drift) — wrapped under the REAL MRK.
     const ghostKey = vc.newVaultKey();
-    const env = { keyId: 'mrk', type: 'mrk', ...vc.wrapVaultKey(ghostKey, fx.store.mrk, mrkAad(vc.VERSION)) };
+    const env = {
+      keyId: 'mrk',
+      type: 'mrk',
+      ...vc.wrapVaultKey(ghostKey, fx.store.mrk, mrkAad(vc.WRITE_VAULT_VERSION, 'ghost'))
+    };
     const ghostItems = [loginItem({ id: 'gh1', title: 'GHOST-ITEM', createdAt: 1, updatedAt: 1 })];
     fs.writeFileSync(
       path.join(fx.vdir, 'ghost.gfvault'),
-      vc.serializeVault({
-        vaultId: 'ghost',
-        kdf: FAST_SCRYPT,
-        envelopes: [env],
-        items: vc.encryptItems(ghostItems, ghostKey)
-      }),
+      vc.serializeVault(
+        {
+          vaultId: 'ghost',
+          kdf: FAST_SCRYPT,
+          envelopes: [env],
+          items: vc.encryptItems(ghostItems, ghostKey, vc.WRITE_VAULT_VERSION, 'ghost')
+        },
+        { version: vc.WRITE_VAULT_VERSION }
+      ),
       'utf8'
     );
     const ghostCtBefore = readVaultDoc(dir, 'ghost').items.ct;
@@ -483,13 +496,13 @@ test('UNION PIN: a .gfvault OUTSIDE the registry that unwraps under the old MRK 
     const newDoc = readVaultDoc(dir, 'ghost');
     assert.notEqual(newDoc.items.ct, ghostCtBefore, 'ghost item ciphertext rotated');
     assert.throws(
-      () => vc.unwrapVaultKey(newDoc.envelopes[0], fx.oldMrkBytes, mrkAad(newDoc.version)),
+      () => vc.unwrapVaultKey(newDoc.envelopes[0], fx.oldMrkBytes, mrkAad(newDoc.version, 'ghost')),
       (e) => e instanceof vs.VaultAuthError,
       'the old MRK no longer opens the drifted vault'
     );
     // ...and the ghost key itself was rotated (the captured key fails the new blob)...
     assert.throws(
-      () => vc.decryptItems(newDoc.items, ghostKey),
+      () => vc.decryptItems(newDoc.items, ghostKey, newDoc.version, 'ghost'),
       (e) => e instanceof vs.VaultAuthError,
       'the pre-rotation ghost vault key is severed'
     );

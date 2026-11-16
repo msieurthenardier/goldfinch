@@ -24,6 +24,7 @@ const path = require('path');
 const { isSafeTabUrl } = require('../shared/url-safety');
 const { SEARCH_ENGINE_IDS } = require('../shared/search-engines');
 const appDb = require('./app-db');
+const { isReservedKeyName } = require('../shared/reserved-ids');
 
 // ---------------------------------------------------------------------------
 // Schema defaults
@@ -225,7 +226,11 @@ const VALIDATORS = {
     v !== null &&
     typeof v === 'object' &&
     !Array.isArray(v) &&
-    Object.values(/** @type {object} */ (v)).every((x) => typeof x === 'string' && HEX64.test(x)),
+    Object.values(/** @type {object} */ (v)).every((x) => typeof x === 'string' && HEX64.test(x)) &&
+    // No entry under a reserved identity name (`admin`, `global`, …): the launch flag
+    // is the only door to the admin tier. `set()` rejects such a map; `load()` strips
+    // the entry per entry BEFORE this runs (see stripReservedKeyEntries).
+    !Object.keys(/** @type {object} */ (v)).some(isReservedKeyName),
 
   // automationAdminKeyHash: '' (no admin key) or a 64-char lowercase-hex digest.
   automationAdminKeyHash: (v) => typeof v === 'string' && (v === '' || HEX64.test(v)),
@@ -282,14 +287,45 @@ let codec = { serialize: defaultSerialize, deserialize: defaultDeserialize };
 // ---------------------------------------------------------------------------
 
 /**
+ * Copy a stored `automationKeyHashes` map without its reserved-name entries
+ * (own keys only), reporting whether anything was dropped. Anything that is not a
+ * plain object passes through untouched for the validator to reject as before.
+ * Per ENTRY, never the whole map: the validator rejects a map whole, which would
+ * reset every jar's key because of one planted entry.
+ * @param {any} val
+ * @returns {{ value: any, changed: boolean }}
+ */
+function stripReservedKeyEntries(val) {
+  if (val === null || typeof val !== 'object' || Array.isArray(val)) return { value: val, changed: false };
+  /** @type {Record<string, any>} */
+  const out = {};
+  let changed = false;
+  for (const name of Object.keys(val)) {
+    if (isReservedKeyName(name)) {
+      changed = true;
+      continue;
+    }
+    out[name] = val[name];
+  }
+  return { value: changed ? out : val, changed };
+}
+
+/**
  * @param {any} stored
- * @returns {Settings}
+ * @returns {{ config: Settings, repaired: boolean }} `repaired`: a per-entry repair
+ *   dropped something from the stored bytes, so the caller must persist the result.
  */
 function repairConfig(stored) {
   const merged = /** @type {any} */ (freshDefaults());
+  let repaired = false;
   for (const key of /** @type {(keyof typeof DEFAULTS)[]} */ (Object.keys(DEFAULTS))) {
     if (Object.prototype.hasOwnProperty.call(stored, key)) {
-      const val = stored[key];
+      let val = stored[key];
+      if (key === 'automationKeyHashes') {
+        const stripped = stripReservedKeyEntries(val);
+        val = stripped.value;
+        if (stripped.changed) repaired = true;
+      }
       const validator = Object.hasOwn(VALIDATORS, key) ? VALIDATORS[key] : null;
       const normalizer = Object.hasOwn(NORMALIZERS, key) ? NORMALIZERS[key] : null;
       if (validator) {
@@ -309,7 +345,7 @@ function repairConfig(stored) {
       }
     }
   }
-  return merged;
+  return { config: merged, repaired };
 }
 
 // ---------------------------------------------------------------------------
@@ -390,7 +426,8 @@ function migrateStored(stored) {
 function parseAndRepair(raw) {
   try {
     const { stored, migrated } = migrateStored(codec.deserialize(raw));
-    return { config: repairConfig(stored), needsPersist: migrated };
+    const { config: repairedConfig, repaired } = repairConfig(stored);
+    return { config: repairedConfig, needsPersist: migrated || repaired };
   } catch {
     return { config: freshDefaults(), needsPersist: true };
   }
@@ -506,6 +543,9 @@ function save(nextConfig = config) {
  * @returns {any}
  */
 function get(key) {
+  // A key is a string, never something that coerces to one (array, String object,
+  // object with toString): refused here so no caller can repeat that class of bug.
+  if (typeof key !== 'string') throw new TypeError('settings key must be a string');
   return config[key];
 }
 
@@ -531,7 +571,7 @@ function getAll() {
  *
  * Throws:
  *   Error       — if called before load() (dir is null)
- *   TypeError   — if key is not in DEFAULTS (unknown key)
+ *   TypeError   — if key is not a string, or not in DEFAULTS (unknown key)
  *   TypeError   — if the value fails the key's validator
  *
  * On success: mutates config (copy-on-write), persists atomically, returns
@@ -546,6 +586,9 @@ function getAll() {
 function set(key, value) {
   if (dir === null) {
     throw new Error('settings-store: set before load');
+  }
+  if (typeof key !== 'string') {
+    throw new TypeError('settings key must be a string');
   }
   if (!Object.prototype.hasOwnProperty.call(DEFAULTS, key)) {
     throw new TypeError('unknown settings key: "' + key + '"');

@@ -24,7 +24,7 @@ const find = require('./find');
  *   F7 DD3: takes an OPTIONAL windowId — omitted → the last-focused record (the
  *   pre-F7 contract every existing caller relies on); supplied → that window's
  *   chrome, or null when the id names no registered window.
- * @param {{ allowInternal?: boolean, getDownloads?: (() => any) | null, grabWindow?: ((windowId?: number) => Promise<string|null>) | null, listWindows?: (() => Array<{ windowId: number, chrome: any, booted: boolean, ownsTab: (wcId: number) => boolean }>) | null, listPopups?: (() => any[]) | null, enumerateWindows?: (() => any[]) | null, isTabViewWcId?: ((id: number) => boolean) | null, isPopupWcId?: ((id: number) => boolean) | null, isChromeContents?: ((wc: any) => boolean) | null, isSheetContents?: ((wc: any) => boolean) | null, isSavePromptContents?: ((wc: any) => boolean) | null, sheetMenuFor?: ((wc: any) => ({ menuType: string, token: number } | null)) | null, chromeForTab?: ((id: number) => any) | null, raiseWindowForTab?: ((id: number) => void) | null, getHistoryReads?: ({ listRecent: (jarId: string, opts: any) => any, search: (jarId: string, query: string, opts: any) => any }) | null, isKnownJar?: ((jarId: string) => boolean) | null }} [opts]
+ * @param {{ allowInternal?: boolean, getDownloads?: (() => any) | null, grabWindow?: ((windowId?: number) => Promise<string|null>) | null, listWindows?: (() => Array<{ windowId: number, chrome: any, booted: boolean, ownsTab: (wcId: number) => boolean }>) | null, listPopups?: (() => any[]) | null, enumerateWindows?: (() => any[]) | null, isTabViewWcId?: ((id: number) => boolean) | null, isPopupWcId?: ((id: number) => boolean) | null, isChromeContents?: ((wc: any) => boolean) | null, isSheetContents?: ((wc: any) => boolean) | null, isSavePromptContents?: ((wc: any) => boolean) | null, sheetMenuFor?: ((wc: any) => ({ menuType: string, token: number } | null)) | null, markScripted?: ((wc: any) => void) | null, chromeForTab?: ((id: number) => any) | null, raiseWindowForTab?: ((id: number) => void) | null, getHistoryReads?: ({ listRecent: (jarId: string, opts: any) => any, search: (jarId: string, query: string, opts: any) => any }) | null, isKnownJar?: ((jarId: string) => boolean) | null, injectedInput?: { begin: Function } | null, jarTier?: boolean }} [opts]
  *   allowInternal — one of admin's TWO relaxations (DD6 / Leg 2 + M05 F8 DD8):
  *   when true, deps carry allowInternal so resolveContents (a) lets the internal
  *   goldfinch://settings session through AND (b) skips the non-tab-contents
@@ -42,6 +42,16 @@ const find = require('./find');
  *   second window's chrome must not classify 'guest' — the leg-1 spike
  *   residual) and resolveContents/resolveContentsForJar apply their chrome
  *   exemption/exclusion to every registered chrome. Absent → identity-only.
+ *   injectedInput — (leg `automation-input`, DD4) main.js's ONE per-tab injected-input counts object
+ *   (`injected-input.js`). Every `sendInputEvent` in input.js is bracketed by it so the click witness and
+ *   the guest's shortcut handler can tell automation's input from the operator's. Absent (offline tests) →
+ *   input is injected unbracketed. ⚠ SILENT FALLBACK — grep-pinned at BOTH production createEngine sites.
+ *   jarTier — (leg `automation-input`, DD4) true ONLY for the per-session engine the MCP server builds
+ *   for a non-admin identity (`getEngine({ jarTier: identity !== 'admin' })`). Its OWN option: it is
+ *   not `allowInternal` (the dev chrome channel's engine never sets that and is not a jar key). Raises
+ *   the jar count, which suppresses the browser's own shortcuts for that injected key.
+ *   markScripted — (leg `admin-reach`, DD2) `(wc) => void`: records that automation ran script in this
+ *   document; read by the reveal gate. Absent (offline tests) → no mark.
  *   sheetMenuFor — window-registry's live `(wc) => {menuType, token} | null` reader for the
  *   menu-overlay sheet (M15 F3 L1, DD1/DD1b). It is the menuType HALF of the sheet gate;
  *   the op half is the `allowSheet` opt-in below. Threaded as a LIVE READER rather than a
@@ -121,10 +131,13 @@ function createEngine(
     isSheetContents = null,
     isSavePromptContents = null,
     sheetMenuFor = null,
+    markScripted = null,
     chromeForTab = null,
     raiseWindowForTab = null,
     getHistoryReads = null,
-    isKnownJar = null
+    isKnownJar = null,
+    injectedInput = null,
+    jarTier = false
   } = {}
 ) {
   const fromId = (/** @type {number} */ id) => webContents.fromId(id);
@@ -201,6 +214,13 @@ function createEngine(
       ...(typeof isSheetContents === 'function' ? { isSheetContents } : {}),
       ...(typeof isSavePromptContents === 'function' ? { isSavePromptContents } : {}),
       ...(typeof sheetMenuFor === 'function' ? { sheetMenuFor } : {}),
+      // Leg `admin-reach` (DD2): the scripted-document mark. Set by evaluate / injectScript (and only by
+      // them) AFTER resolve and BEFORE the script runs, so a timer a script arms is still attributed.
+      // Same conditional-spread idiom; grep-pinned at BOTH production createEngine sites.
+      ...(typeof markScripted === 'function' ? { markScripted } : {}),
+      // Leg `automation-input` (DD4): the injected-input counts + the jar-tier flag, same conditional-spread idiom.
+      ...(injectedInput && typeof injectedInput.begin === 'function' ? { injectedInput } : {}),
+      ...(jarTier === true ? { jarTier: true } : {}),
       ...(typeof chromeForTab === 'function' ? { chromeForTab } : {}),
       ...(typeof raiseWindowForTab === 'function' ? { raiseWindowForTab } : {})
     };

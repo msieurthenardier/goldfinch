@@ -36,8 +36,8 @@ import { PALETTE } from './jar-page-model.js';
  * @param {{
  *   bridge: {
  *     pickSavePath: (target: string) => Promise<{ path?: string, canceled?: boolean }>,
- *     exportProfile: (savePath?: string) => Promise<{ ok?: boolean, path?: string, carried?: string[], canceled?: boolean, locked?: boolean, error?: string, reason?: string }>,
- *     exportVault: (target: string, savePath?: string) => Promise<{ ok?: boolean, path?: string, canceled?: boolean, locked?: boolean, error?: string, reason?: string }>,
+ *     exportProfile: (savePath?: string) => Promise<{ ok?: boolean, path?: string, carried?: string[], canceled?: boolean, locked?: boolean, error?: string, reason?: string, refused?: string }>,
+ *     exportVault: (target: string, savePath?: string) => Promise<{ ok?: boolean, path?: string, canceled?: boolean, locked?: boolean, error?: string, reason?: string, refused?: string }>,
  *     pickImportFile: () => Promise<{ ok?: boolean, path?: string, importHandle?: string, canceled?: boolean, error?: string }>,
  *     beginImportUnlock: () => Promise<{ ok: boolean }>,
  *     clearPendingImport: (handle?: string) => Promise<{ ok: boolean }>,
@@ -227,6 +227,13 @@ export function createVaultRestoreController(deps) {
               // Shared close+refresh: refresh() paints the notice (locked branch above closes+refreshes itself and returns early, so no double-close).
               handle.close();
               refresh();
+              return;
+            }
+            if (res && res.refused) {
+              // Leg `admin-reach` (DD2): not confirmed (admin automation attached) - nothing was written.
+              // Checked BEFORE `canceled` (the refusal reply also carries canceled:true).
+              handle.setStatus('Export not confirmed - nothing was written.');
+              handle.setSubmitEnabled(true);
               return;
             }
             if (res && res.error === 'invalid-path') {

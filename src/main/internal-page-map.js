@@ -32,10 +32,15 @@ function createInternalPageMap({ baseDir, path }) {
       '/': rendererPage('automation.html'),
       '/automation.css': rendererPage('automation.css'),
       '/automation.js': rendererPage('automation.js'),
+      // Mission 23 Flight 2 (leg `admin-reach`): the mint flow, extracted so a refused mint is unit-tested.
+      '/automation-key-flow.js': rendererPage('automation-key-flow.js'),
       '/settings.css': rendererPage('settings.css'),
       '/section-scroll-spy.js': rendererPage('section-scroll-spy.js'),
       '/audit-paging.js': shared('audit-paging.js'),
-      '/safe-color.js': shared('safe-color.js')
+      '/safe-color.js': shared('safe-color.js'),
+      // Mission 23 Flight 2 (leg `port-and-permissions`): the moved-port line, one sentence shared with the chrome.
+      '/automation-port-note.js': shared('automation-port-note.js'),
+      '/automation-port-moved.js': rendererPage('automation-port-moved.js')
     },
     // App-level downloads surface; save-path authority remains main-side.
     downloads: {
@@ -100,7 +105,11 @@ function createInternalPageMap({ baseDir, path }) {
       '/vault-filter-controller.js': rendererPage('vault-filter-controller.js'),
       // Sortie 04: the row-action modals (delete / revoke confirms + Copy-to…) — an injected-deps
       // controller with no static src/shared import, so it needs no shared route of its own.
-      '/vault-item-actions-controller.js': rendererPage('vault-item-actions-controller.js')
+      '/vault-item-actions-controller.js': rendererPage('vault-item-actions-controller.js'),
+      // Mission 23 Flight 2 (leg `admin-reach`): the per-field Reveal / Copy and the one-time-code
+      // widget, extracted so a refused read is handled (and unit-tested) in one place. Injected deps, no
+      // static src/shared import, so no shared route of its own.
+      '/vault-secret-reads-controller.js': rendererPage('vault-secret-reads-controller.js')
     }
   };
 }

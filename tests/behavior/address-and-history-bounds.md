@@ -3,7 +3,7 @@
 **Slug**: `address-and-history-bounds`
 **Status**: active
 **Created**: 2026-11-14
-**Last Run**: 2026-11-14 — pass (8/8), [run log](address-and-history-bounds/runs/2026-11-14-06-00-24.md)
+**Last Run**: 2026-11-14 — pass (8/8) on Electron 45.3.2, [run log](address-and-history-bounds/runs/2026-11-14-20-43-12.md)
 
 ## Intent
 

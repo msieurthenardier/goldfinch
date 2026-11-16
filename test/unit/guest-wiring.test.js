@@ -71,7 +71,14 @@ class FakeContents extends EventEmitter {
   }
 }
 
-function setup({ vaultHuman, realShortcutPipeline, gestureWitness, mediaProxyTokens } = {}) {
+function setup({
+  vaultHuman,
+  realShortcutPipeline,
+  gestureWitness,
+  mediaProxyTokens,
+  documentMarks,
+  injectedInput
+} = {}) {
   const sends = [];
   const calls = [];
   // Mission 20 Flight 1 (AC3): a THIRD, independent log — additive only, so no
@@ -201,7 +208,9 @@ function setup({ vaultHuman, realShortcutPipeline, gestureWitness, mediaProxyTok
     // nothing). Tests that care pass it explicitly via `setup({ vaultHuman })`.
     vaultHuman,
     gestureWitness,
+    injectedInput,
     mediaProxyTokens,
+    documentMarks,
     logger: { warn() {} }
   });
   return {
@@ -2399,4 +2408,263 @@ test('media-proxy token: with the dependency omitted the wiring is unaffected', 
     wc.emit('did-navigate');
     wc.emit('destroyed');
   });
+});
+
+// Mission 23 Flight 2 (leg `admin-reach`, AC11): the reveal gate's scripted mark and per-item grants follow
+// the tab's DOCUMENT - for INTERNAL tabs as well as web tabs (the bridge lives on internal pages).
+
+test("document marks: an INTERNAL tab's did-navigate drops its mark and grants; in-page keeps them; destroyed forgets", () => {
+  const { createDocumentMarks } = require('../../src/main/reveal-gate');
+  const marks = createDocumentMarks();
+  const h = setup({ documentMarks: marks });
+  const wc = new FakeContents(90);
+  wc.session = { __goldfinchInternal: true };
+  h.records.set(90, { activeTabWcId: 90 });
+  h.wiring.wireTabViewEvents({ webContents: wc }, 90, 'persist:goldfinch-internal');
+  marks.markScripted(90);
+  marks.grant(90, 'v\u0000i');
+  wc.emit('did-navigate-in-page');
+  assert.equal(marks.isScripted(90), true, 'a same-document navigation keeps the script alive, so keeps the mark');
+  assert.equal(marks.hasGrant(90, 'v\u0000i'), true);
+  wc.emit('did-navigate');
+  assert.equal(marks.isScripted(90), false, 'a cross-document commit (a reload included) ends the script');
+  assert.equal(marks.hasGrant(90, 'v\u0000i'), false);
+  marks.markScripted(90);
+  wc.emit('destroyed');
+  assert.equal(marks.isScripted(90), false, 'destroy forgets the tab');
+});
+
+test('document marks: a WEB tab behaves the same; with the dependency omitted the wiring is unaffected', () => {
+  const { createDocumentMarks } = require('../../src/main/reveal-gate');
+  const marks = createDocumentMarks();
+  const h = setup({ documentMarks: marks });
+  const wc = new FakeContents(91);
+  h.records.set(91, { activeTabWcId: 91 });
+  h.wiring.wireTabViewEvents({ webContents: wc }, 91, 'persist:jar-a');
+  marks.markScripted(91);
+  wc.emit('did-navigate');
+  assert.equal(marks.isScripted(91), false);
+
+  const bare = setup();
+  const wc2 = new FakeContents(92);
+  bare.records.set(92, { activeTabWcId: 92 });
+  bare.wiring.wireTabViewEvents({ webContents: wc2 }, 92, 'persist:jar-a');
+  assert.doesNotThrow(() => {
+    wc2.emit('did-navigate');
+    wc2.emit('destroyed');
+  });
+});
+
+// ---- Mission 23 Flight 2, leg `automation-input` (DD4): injected input is automation's, not the operator's ----
+
+const { createInjectedInput } = require('../../src/main/automation/injected-input');
+const { createGestureWitness } = require('../../src/main/vault/gesture-witness');
+
+/** An injected-input store on a fake clock (no timers needed: the allowance is timestamp-based). */
+function countsOnClock() {
+  let t = 1000;
+  const timers = [];
+  const counts = createInjectedInput({
+    now: () => t,
+    setTimer: (fn) => timers.push(fn) && timers.length,
+    clearTimer: () => {}
+  });
+  return {
+    counts,
+    advance: (ms) => {
+      t += ms;
+    }
+  };
+}
+
+test('automation-input AC5: the witness listener ignores input while ANY tier is injecting, and again after the allowance', () => {
+  for (const jar of [false, true]) {
+    const c = countsOnClock();
+    const witness = witnessFake();
+    const h = setup({ gestureWitness: witness, injectedInput: c.counts });
+    const wc = new FakeContents(80);
+    h.wiring.wireTabViewEvents({ webContents: wc }, 80, 'persist:jar-a');
+    const release = c.counts.begin(80, { jar });
+    wc.emit('input-event', {}, { type: 'mouseDown', button: 'left', x: 1, y: 2 });
+    wc.emit('input-event', {}, { type: 'mouseUp', button: 'left', x: 1, y: 2 });
+    assert.deepEqual(witness.calls, [], `injected input never reaches the witness (jar=${jar})`);
+    release();
+    wc.emit('input-event', {}, { type: 'mouseDown', button: 'left', x: 1, y: 2 });
+    assert.deepEqual(witness.calls, [], 'still inside the trailing allowance');
+    c.advance(1000);
+    wc.emit('input-event', {}, { type: 'mouseDown', button: 'left', x: 1, y: 2 });
+    assert.deepEqual(witness.calls, [['input', 80, 'mouseDown']], 'the operator is witnessed again');
+  }
+});
+
+test('automation-input AC5: an injected click on the icon ends in no-real-input; an earlier real click is NOT erased by it', () => {
+  const c = countsOnClock();
+  let t = 5000;
+  const lines = [];
+  const real = createGestureWitness({ now: () => t, trace: (l) => lines.push(l) });
+  const h = setup({ gestureWitness: real, injectedInput: c.counts });
+  const wc = new FakeContents(81);
+  h.wiring.wireTabViewEvents({ webContents: wc }, 81, 'persist:jar-a');
+  const admit = (kind) =>
+    real.admit({
+      kind,
+      wcId: 81,
+      message: { box: { x: 100, y: 50, width: 30, height: 16 } },
+      zoom: 1,
+      origin: 'https://example.com'
+    });
+  const press = (type, button = 'left') => wc.emit('input-event', {}, { type, button, x: 115, y: 58 });
+  // 1. An injected click (press and release) on the icon, then the page's gesture message.
+  const release = c.counts.begin(81, { jar: false });
+  press('mouseDown');
+  press('mouseUp');
+  press('mouseDown', 'right');
+  release();
+  t += 10;
+  assert.deepEqual(admit('gesture'), { ok: false, reason: 'no-real-input' });
+  assert.deepEqual(admit('icon-menu'), { ok: false, reason: 'no-real-input' }, 'the right-press path is covered too');
+  assert.equal(lines.at(-1), '[vault-icon-menu] refused reason=no-real-input');
+  // 2. A real click made BEFORE an injection began stays on record through it (ignore, not clear).
+  c.advance(1000);
+  t += 1000;
+  press('mouseDown');
+  t += 50;
+  press('mouseUp');
+  const release2 = c.counts.begin(81, { jar: true });
+  t += 20;
+  wc.emit('input-event', {}, { type: 'mouseDown', button: 'left', x: 400, y: 400 });
+  release2();
+  assert.deepEqual(admit('gesture'), { ok: true }, 'the earlier real press and release still admit');
+  // 3. A real release that lands DURING an injection is dropped, leaving a press with no release: refused.
+  c.advance(1000);
+  t += 3000;
+  press('mouseDown');
+  const release3 = c.counts.begin(81, { jar: false });
+  t += 30;
+  press('mouseUp');
+  release3();
+  assert.deepEqual(admit('gesture'), { ok: false, reason: 'no-real-input' }, 'fail-safe');
+});
+
+test('automation-input AC5: the witness wiring without injected-input behaves exactly as before', () => {
+  const witness = witnessFake();
+  const h = setup({ gestureWitness: witness });
+  const wc = new FakeContents(82);
+  h.wiring.wireTabViewEvents({ webContents: wc }, 82, 'persist:jar-a');
+  wc.emit('input-event', {}, { type: 'mouseDown', button: 'left', x: 1, y: 2 });
+  assert.deepEqual(witness.calls, [['input', 82, 'mouseDown']]);
+});
+
+// The chords AC6 names: Ctrl+T, Ctrl+W, F12, F6, Ctrl+P and a zoom chord (separate branches), plus Ctrl+L,
+// find, downloads, DevTools and the fullscreen Escape.
+const SHORTCUT_CHORDS = [
+  ['Ctrl+T', { key: 't', control: true }],
+  ['Ctrl+W', { key: 'w', control: true }],
+  ['F12', { key: 'F12' }],
+  ['F6', { key: 'F6' }],
+  ['Ctrl+L', { key: 'l', control: true }],
+  ['Ctrl+P', { key: 'p', control: true }],
+  ['Ctrl+=', { key: '=', control: true }],
+  ['Ctrl+F', { key: 'f', control: true }],
+  ['Ctrl+J', { key: 'j', control: true }],
+  ['Ctrl+Shift+I', { key: 'I', control: true, shift: true }]
+];
+
+function keyCase({ jar, admin, popup = false, chord }) {
+  const c = countsOnClock();
+  const h = setup({ realShortcutPipeline: true, injectedInput: c.counts });
+  const wc = new FakeContents(popup ? 91 : 90, false);
+  h.wiring.wireGuestContents(wc);
+  if (jar) c.counts.begin(wc.id, { jar: true });
+  else if (admin) c.counts.begin(wc.id, { jar: false });
+  const event = inputEvent();
+  wc.emit('before-input-event', event, { type: 'keyDown', ...chord });
+  return { h, event, wc };
+}
+
+test('automation-input AC6: the three cases side by side - operator, admin-injected, jar-injected', () => {
+  for (const [name, chord] of SHORTCUT_CHORDS) {
+    const operator = keyCase({ chord });
+    const admin = keyCase({ admin: true, chord });
+    const jar = keyCase({ jar: true, chord });
+    assert.equal(operator.event.prevented, true, `${name}: the operator's own key runs the shortcut`);
+    assert.equal(admin.event.prevented, true, `${name}: an admin-injected key runs it exactly as today`);
+    assert.equal(
+      jar.event.prevented,
+      false,
+      `${name}: a jar-injected key is NOT prevented (it still reaches the page)`
+    );
+    assert.deepEqual(jar.h.sends, [], `${name}: nothing was forwarded to the chrome for a jar key`);
+    assert.equal(
+      jar.h.calls.some((x) => Array.isArray(x) && ['devtools', 'zoom'].includes(x[0])),
+      false,
+      `${name}: no DevTools or zoom for a jar key`
+    );
+    assert.equal(jar.h.calls.includes('focus-chrome'), false, `${name}: no cross-view focus hop for a jar key`);
+    assert.equal(jar.wc.printCalls, 0, `${name}: no print for a jar key`);
+    assert.equal(
+      operator.wc.printCalls,
+      name === 'Ctrl+P' ? 1 : 0,
+      `${name}: the operator's print runs only for Ctrl+P`
+    );
+  }
+});
+
+test("automation-input AC6: a jar-injected Escape does not run the fullscreen exit; the operator's Escape still does", () => {
+  const c = countsOnClock();
+  const h = setup({ injectedInput: c.counts });
+  const wc = new FakeContents(92, false);
+  h.wiring.wireGuestContents(wc);
+  h.fullscreenIds.add(92);
+  const executed = [];
+  wc.executeJavaScript = (code) => {
+    executed.push(code);
+    return Promise.resolve();
+  };
+  const release = c.counts.begin(92, { jar: true });
+  wc.emit('before-input-event', inputEvent(), { type: 'keyDown', key: 'Escape' });
+  assert.deepEqual(executed, []);
+  release();
+  c.advance(1000);
+  wc.emit('before-input-event', inputEvent(), { type: 'keyDown', key: 'Escape' });
+  assert.equal(executed.length, 1, "the operator's Escape exits fullscreen as before");
+});
+
+test('automation-input AC6: the jar gate covers a POPUP (one handler serves tabs and popups) and lifts after the allowance', () => {
+  const popup = keyCase({ jar: true, popup: true, chord: { key: 'F12' } });
+  assert.equal(popup.event.prevented, false);
+  const c = countsOnClock();
+  const h = setup({ realShortcutPipeline: true, injectedInput: c.counts });
+  const wc = new FakeContents(93, false);
+  h.wiring.wireGuestContents(wc);
+  const release = c.counts.begin(93, { jar: true });
+  release();
+  const during = inputEvent();
+  wc.emit('before-input-event', during, { type: 'keyDown', key: 't', control: true });
+  assert.equal(during.prevented, false, 'inside the trailing allowance');
+  c.advance(1000);
+  const after = inputEvent();
+  wc.emit('before-input-event', after, { type: 'keyDown', key: 't', control: true });
+  assert.equal(after.prevented, true, "the operator's shortcut runs again");
+});
+
+test('automation-input: a jar injection and an admin injection overlapping in one tab suppress shortcuts (accepted); destroyed forgets the counts', () => {
+  const c = countsOnClock();
+  const h = setup({ realShortcutPipeline: true, injectedInput: c.counts });
+  const wc = new FakeContents(94, false);
+  h.wiring.wireGuestContents(wc);
+  const a = c.counts.begin(94, { jar: false });
+  const j = c.counts.begin(94, { jar: true });
+  const e1 = inputEvent();
+  wc.emit('before-input-event', e1, { type: 'keyDown', key: 't', control: true });
+  assert.equal(e1.prevented, false, 'the jar count is up, so the admin key is suppressed too for that window');
+  j();
+  c.advance(1000);
+  const e2 = inputEvent();
+  wc.emit('before-input-event', e2, { type: 'keyDown', key: 't', control: true });
+  assert.equal(e2.prevented, true, 'only the admin injection remains: its shortcuts run');
+  a();
+  c.counts.begin(94, { jar: true });
+  wc.emit('destroyed');
+  assert.equal(c.counts.isJarInjecting(94), false, 'forget on destroyed clears the tab');
 });

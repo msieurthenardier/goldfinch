@@ -760,3 +760,157 @@ test('pressKey: unknown key name → throws before any send', () => {
   );
   assert.equal(guestWc._received.length, 0);
 });
+
+// ---------------------------------------------------------------------------
+// Mission 23 Flight 2, leg `automation-input` (DD4): every injection is bracketed by the injected-input counts
+// ---------------------------------------------------------------------------
+
+/** A fake counts object that logs begin/release into a shared ordered log. */
+function fakeCounts(log) {
+  return {
+    begin(wcId, opts) {
+      log.push(['begin', wcId, { jar: opts.jar, menu: opts.menuTarget ? opts.menuTarget.id : null }]);
+      return () => log.push(['release', wcId]);
+    }
+  };
+}
+
+function loggedWc(id, log) {
+  const wc = makeGuestWc(id);
+  wc.sendInputEvent = (ev) => log.push(['send', ev.type]);
+  return wc;
+}
+
+test('injection bracket: begin comes AFTER activate and BEFORE the first event; release after the last (click)', async () => {
+  const log = [];
+  const wc = loggedWc(30, log);
+  const deps = {
+    fromId: makeFakeFromId({ 30: wc }),
+    chromeContents: null,
+    activate: async (id) => {
+      log.push(['activate', id]);
+      await new Promise((r) => setImmediate(r));
+      log.push(['activated', id]);
+    },
+    injectedInput: fakeCounts(log)
+  };
+  await click(30, 5, 5, deps);
+  assert.deepEqual(log, [
+    ['activate', 30],
+    ['activated', 30],
+    ['begin', 30, { jar: false, menu: null }],
+    ['send', 'mouseMove'],
+    ['send', 'mouseDown'],
+    ['send', 'mouseUp'],
+    ['release', 30]
+  ]);
+});
+
+test('injection bracket: a throw before begin (internal target, dead contents) leaves the counts untouched', async () => {
+  const log = [];
+  const deps = {
+    fromId: makeFakeFromId({ 31: makeInternalWc(31) }),
+    chromeContents: null,
+    injectedInput: fakeCounts(log)
+  };
+  await assert.rejects(click(31, 1, 1, deps), /internal-session/);
+  assert.throws(() => sendInput(31, { type: 'mouseMove', x: 1, y: 1 }, deps), /internal-session/);
+  await assert.rejects(typeText(99, 'x', deps), /no-such-contents/);
+  assert.deepEqual(log, []);
+});
+
+test('injection bracket: a throw INSIDE the sequence (tab closed between events) still releases', async () => {
+  const log = [];
+  const wc = loggedWc(32, log);
+  let n = 0;
+  wc.sendInputEvent = (ev) => {
+    log.push(['send', ev.type]);
+    if (++n === 2) throw new Error('Object has been destroyed');
+  };
+  const deps = { fromId: makeFakeFromId({ 32: wc }), chromeContents: null, injectedInput: fakeCounts(log) };
+  await assert.rejects(click(32, 1, 1, deps), /destroyed/);
+  assert.deepEqual(
+    log.map((e) => e[0]),
+    ['begin', 'send', 'send', 'release']
+  );
+});
+
+test('injection bracket: the paced drag holds the count across every step, then releases once', async () => {
+  const log = [];
+  const wc = loggedWc(33, log);
+  const deps = { fromId: makeFakeFromId({ 33: wc }), chromeContents: null, injectedInput: fakeCounts(log) };
+  await dragPointer(33, { x: 0, y: 0 }, { x: 10, y: 10 }, deps, { steps: 3, stepDelayMs: 2 });
+  assert.equal(log[0][0], 'begin');
+  assert.equal(log.at(-1)[0], 'release');
+  assert.equal(log.filter((e) => e[0] === 'begin').length, 1);
+  assert.equal(log.filter((e) => e[0] === 'release').length, 1);
+  assert.equal(log.filter((e) => e[0] === 'send').length, 1 + 1 + 3 + 1);
+  assert.equal(
+    log.slice(1, -1).every((e) => e[0] === 'send'),
+    true,
+    'nothing but sends between begin and release: the count is held across the macrotask yields'
+  );
+});
+
+test('injection bracket: typeText, pressKey and the raw sendInput are bracketed too', async () => {
+  const log = [];
+  const wc = loggedWc(34, log);
+  const deps = { fromId: makeFakeFromId({ 34: wc }), chromeContents: null, injectedInput: fakeCounts(log) };
+  await typeText(34, 'hi', deps);
+  await pressKey(34, 'Tab', undefined, deps);
+  sendInput(34, { type: 'mouseMove', x: 1, y: 1 }, deps);
+  assert.deepEqual(
+    log.map((e) => e[0]),
+    ['begin', 'send', 'send', 'release', 'begin', 'send', 'send', 'release', 'begin', 'send', 'release']
+  );
+});
+
+test('injection bracket: the jar flag is deps.jarTier === true only; a jar KEY injection names the target for the menu hold', async () => {
+  for (const [jarTier, expectJar] of [
+    [true, true],
+    [false, false],
+    [undefined, false],
+    ['yes', false]
+  ]) {
+    const log = [];
+    const wc = loggedWc(35, log);
+    const deps = { fromId: makeFakeFromId({ 35: wc }), chromeContents: null, injectedInput: fakeCounts(log), jarTier };
+    await pressKey(35, 'W', ['control'], deps);
+    await click(35, 1, 1, deps);
+    const begins = log.filter((e) => e[0] === 'begin');
+    assert.equal(begins[0][2].jar, expectJar);
+    assert.equal(begins[0][2].menu, expectJar ? 35 : null, 'only a jar-tier key injection holds the menu');
+    assert.equal(begins[1][2].menu, null, 'a mouse injection never does');
+  }
+});
+
+test('injection bracket: an engine built without the counts injects unbracketed, as before', async () => {
+  const wc = makeGuestWc(36);
+  const deps = { fromId: makeFakeFromId({ 36: wc }), chromeContents: null };
+  await click(36, 1, 1, deps);
+  assert.equal(wc._received.length, 3);
+});
+
+test('withInjection: a synchronous fn releases immediately; a rejecting async fn releases and rethrows', async () => {
+  const { withInjection } = require('../../src/main/automation/input');
+  const log = [];
+  const deps = { injectedInput: fakeCounts(log) };
+  assert.equal(
+    withInjection(1, deps, { id: 1 }, [], () => 'v'),
+    'v'
+  );
+  assert.deepEqual(
+    log.map((e) => e[0]),
+    ['begin', 'release']
+  );
+  await assert.rejects(
+    withInjection(1, deps, { id: 1 }, [], async () => {
+      throw new Error('boom');
+    }),
+    /boom/
+  );
+  assert.deepEqual(
+    log.map((e) => e[0]),
+    ['begin', 'release', 'begin', 'release']
+  );
+});

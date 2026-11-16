@@ -22,6 +22,7 @@ const { registerJarDataIpc } = require('./jar-data-ipc');
  *   settings: { get: (k: string) => any, set: (k: string, v: any) => any, getAll: () => any },
  *   broadcast: (channel: string, payload: unknown) => void,
  *   historyStore: typeof import('./history-store'),
+ *   revealGate: { confirm: (event: any, request: any) => Promise<string> },
  *   getVaultStore?: () => any,
  *   bookmarksStore?: typeof import('./bookmarks-store'),
  *   certTrust?: any,
@@ -31,6 +32,8 @@ const { registerJarDataIpc } = require('./jar-data-ipc');
 function registerJarIpc({
   ipcMain,
   gate,
+  // Leg `admin-reach` (DD2): REQUIRED, handed to registerJarDataIpc (the cookie-value reveal).
+  revealGate,
   jars,
   session,
   rerollSeed,
@@ -88,6 +91,7 @@ function registerJarIpc({
   registerJarDataIpc({
     ipcMain,
     gate,
+    revealGate,
     jars,
     session,
     historyStore,

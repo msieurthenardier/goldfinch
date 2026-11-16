@@ -1470,3 +1470,16 @@ body:has(.vault-modal-backdrop) {
   gap: 8px;
   flex-wrap: wrap;
 }
+
+/* A secret read the browser asked the operator about and was not allowed (admin automation attached):
+   a quiet status line under the field / code widget. Empty = no space taken. */
+.vault-field-status,
+.vault-totp-status {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+.vault-field-status:empty,
+.vault-totp-status:empty {
+  display: none;
+}

@@ -157,6 +157,12 @@ test('AC10: the vault route gained exactly two entries (jar-page-model.js, vault
     assert.ok(vaultBody.includes(entry), `Sortie 04 entry present: ${entry}`);
   }
 
+  // Mission 23 Flight 2 (leg `admin-reach`): the per-field secret reads + code poller controller.
+  const mission23Flight2 = ["'/vault-secret-reads-controller.js': rendererPage('vault-secret-reads-controller.js')"];
+  for (const entry of mission23Flight2) {
+    assert.ok(vaultBody.includes(entry), `Mission 23 Flight 2 entry present: ${entry}`);
+  }
+
   // No other route (settings/downloads/jars) changed in this leg — a coarse sanity that
   // the vault route's entry count is EXACTLY preExisting + added + the later HAT fix + the
   // later restore-controller extraction + the later filter-controller extraction.
@@ -168,9 +174,10 @@ test('AC10: the vault route gained exactly two entries (jar-page-model.js, vault
       legThreeHatFix.length +
       flight2Leg1.length +
       mission22Flight1.length +
-      sortie04.length,
+      sortie04.length +
+      mission23Flight2.length,
     'vault route entry count matches this leg’s two additions plus the Leg 3 HAT-fix burner.js route, ' +
-      'the Flight 2 Leg 1 restore-controller route, the Mission 22 Flight 1 filter-controller route, and the Sortie 04 item-actions-controller route'
+      'the Flight 2 Leg 1 restore-controller route, the Mission 22 Flight 1 filter-controller route, the Sortie 04 item-actions-controller route, and the Mission 23 Flight 2 secret-reads-controller route'
   );
 });
 

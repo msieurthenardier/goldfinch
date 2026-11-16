@@ -3,7 +3,7 @@
 **Slug**: `cross-jar-fetch-isolation`
 **Status**: active
 **Created**: 2026-07-24
-**Last Run**: 2026-11-14-04-24-25 (pass, 10/10, batched; first run with steps 8–10; see runs/2026-11-14-04-24-25.md)
+**Last Run**: 2026-11-14 — pass (10/10) on Electron 45.3.2, [run log](cross-jar-fetch-isolation/runs/2026-11-14-20-39-26.md)
 
 ## Intent
 

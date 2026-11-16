@@ -65,6 +65,16 @@ function jarKindOf(partition) {
 function createCrashLog({ dir, fs, now, cap = 200, keepDumps = 20, logger }) {
   const filePath = path.join(dir, CRASH_LOG_FILE);
 
+  // Owner-only (leg `clipboard-and-file-modes`): an existing log is tightened once, at construction;
+  // new lines are appended with mode 0600 (applies on creation). Best-effort - never throws.
+  try {
+    fs.chmodSync(filePath, 0o600);
+  } catch (err) {
+    if (/** @type {any} */ (err)?.code !== 'ENOENT') {
+      logger?.warn?.('[crash-log] could not set owner-only mode (logged once):', err && /** @type {any} */ (err.code));
+    }
+  }
+
   /**
    * Rotation: on a write that pushes the file over `cap` lines, keep only
    * the newest `cap / 2`. Fail-soft — a read/write failure here must never
@@ -104,7 +114,7 @@ function createCrashLog({ dir, fs, now, cap = 200, keepDumps = 20, logger }) {
         windowId: windowId ?? null,
         recovery: RECOVERY_VALUES.has(recovery) ? recovery : 'ignored'
       };
-      fs.appendFileSync(filePath, JSON.stringify(entry) + '\n');
+      fs.appendFileSync(filePath, JSON.stringify(entry) + '\n', { mode: 0o600 });
       logger?.warn?.('[crash-log]', entry.kind, entry.reason, entry.recovery);
       rotateIfNeeded();
     } catch (err) {

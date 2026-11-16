@@ -47,6 +47,7 @@ const { createSuppressionHolder } = require('../../src/main/vault/autolock-suppr
 const { createCompromiseRevealStore } = require('../../src/main/vault/pending-compromise-reveals');
 const { selectVaultView, compromiseCardRows } = require('../../src/shared/vault-page-model.js');
 const { mapVaultSheetError, VAULT_COMPROMISE_ROTATE_CONFIG } = require('../../src/main/vault/vault-sheet-errors');
+const { makeTestRevealGate } = require('../helpers/reveal-gate-fixture');
 
 const FAST_SCRYPT = { algo: 'scrypt', N: 2 ** 12, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 const OLD_MASTER = 'old compromised master';
@@ -149,6 +150,7 @@ function readPageView(store, main) {
   const handlers = new Map();
   registerVaultIpc({
     ipcMain: { handle: (ch, fn) => handlers.set(ch, fn) },
+    revealGate: makeTestRevealGate().gate,
     registerInternalHandler: (ipc, ch, fn) => ipc.handle(ch, fn),
     getVaultStore: () => store,
     jars: {

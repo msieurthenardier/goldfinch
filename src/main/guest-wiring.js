@@ -19,6 +19,7 @@ const PDF_VIEWER_EXTENSION_ID = 'mhjfbmdgcfjbbpaeojofohoefgiehjai';
 // no cycle (it never requires this module).
 const { onWindowClosed } = require('./window-factory');
 const { isBurnerPartition } = require('../shared/burner');
+const { handleRevealInputEvent } = require('./reveal-gate');
 // Mission 20 Flight 1 (DD2/DD4): the shared classification predicates and the
 // entry-URL substitution helper — both Electron-free, both required at the
 // established main-side CJS-of-ESM pattern (`settings-store.js:24` et al.).
@@ -91,6 +92,8 @@ function createGuestWiring(deps) {
     toggleDevTools,
     applyZoom,
     isInternalContents,
+    // Fix 1 of leg `hat-and-alignment`: optional; real input to a tab cancels its window's pending confirmation.
+    revealWindowInput,
     getHistoryRecorder,
     broadcastMoveTargetsChanged,
     faviconFetcher,
@@ -141,10 +144,21 @@ function createGuestWiring(deps) {
     // input (`src/main/vault/gesture-witness.js`, built once in main.js and shared with the fill
     // icon's two gesture handlers). Optional: an offline harness that omits it is unaffected.
     gestureWitness,
+    // Mission 23 Flight 2 (leg `automation-input`, DD4): the per-tab counts of input AUTOMATION is
+    // injecting (`automation/injected-input.js`, built once in main.js, bracketed around every
+    // sendInputEvent). The witness listener below ignores input while `isInjecting`; the guest's
+    // `before-input-event` handler skips every shortcut branch for a key while `isJarInjecting`.
+    // Optional: an offline harness that omits it is unaffected.
+    injectedInput,
     // Mission 23 Flight 1 (leg `jar-isolation`): the per-tab media-proxy token store. A cross-document
     // main-frame commit invalidates the tab's token unless it was minted for the now-current document;
     // destruction drops it. Optional: an offline harness that omits it is unaffected.
     mediaProxyTokens,
+    // Mission 23 Flight 2 (leg `admin-reach`): the per-document state of the reveal gate (the scripted
+    // mark and the per-item grants), keyed on the tab's webContents id. Dropped on a cross-document
+    // main-frame commit and when the contents is destroyed - for WEB and INTERNAL tabs alike (the mark
+    // matters on internal pages, where the bridge lives). Optional: an offline harness omits it.
+    documentMarks,
     logger
   } = deps;
 
@@ -465,8 +479,17 @@ function createGuestWiring(deps) {
       popupWc.on('destroyed', teardown);
     });
 
+    // Leg `automation-input` (DD4): the counts follow the contents (tab or popup) and are dropped with it.
+    if (injectedInput) contents.once('destroyed', () => injectedInput.forget(contents.id));
+
     contents.on('before-input-event', (event, input) => {
       if (input.type !== 'keyDown') return;
+      // Leg `automation-input` (DD4): a key injected for a JAR-SCOPED automation key must not run the
+      // browser's own shortcuts - cross-view hops, chrome shortcuts, DevTools, print, find, downloads, zoom,
+      // the fullscreen Escape - so this returns BEFORE every branch. Deliberately NO preventDefault: the key
+      // still reaches the page. The admin tier and the operator's own keys are unaffected (the jar count is
+      // raised only by the engine built for a jar identity). One handler serves tabs and popups.
+      if (injectedInput?.isJarInjecting(contents.id)) return;
       if (handleCrossView(event, input, contents)) return;
       if (handleChromeShortcut(event, input, 'web', contents)) return;
 
@@ -550,26 +573,52 @@ function createGuestWiring(deps) {
     // fields) or a torn-down/absent record both resolve `undefined`, never throw.
     const resolveEntry = () => registry.getWindowForGuest(wcId)?.tabViews?.get(wcId);
 
-    // Mission 23 Flight 1 (leg `vault-fill-trust`, revised DD4): main witnesses the guest's own REAL
-    // pointer input. `input-event` fires for real input only (an MCP `click` is injected below the
-    // page, so it counts; `element.click()` / `dispatchEvent` never reach it), ahead of the page, with
-    // no page code involved, and it cannot block delivery (`before-mouse-event` can - never use that
-    // one here). Only a tab web guest is wired (never a popup, never an internal tab). The witness
-    // keeps just the last real left press, left release and right press; every other event type
-    // returns on the first line. The record is cleared when the tab's contents is destroyed (tab
-    // close, window close) and follows the tab on a window move (same wcId).
+    // Mission 23 Flight 1 (leg `vault-fill-trust`, revised DD4; corrected by Flight 2 leg `automation-input`):
+    // main witnesses the guest's own REAL pointer input. `input-event` fires for every input the guest
+    // receives - an automation `click` is injected with `sendInputEvent` and reaches it exactly like a
+    // physical one - ahead of the page, with no page code involved, and it cannot block delivery
+    // (`before-mouse-event` can - never use that one here). So the listener does NOT feed the witness while
+    // automation is injecting into this tab (`injectedInput.isInjecting`, every tier, plus a short trailing
+    // allowance): an injected click is never the operator's click. "Ignore", not "clear" - a real press and
+    // release recorded before the injection began stay on record. A real release that lands during an
+    // injection is dropped too, leaving a press with no release, which the verifier refuses (fail-safe).
+    // `element.click()` / `dispatchEvent` never reach `input-event`. Only a tab web guest is wired (never a
+    // popup, never an internal tab). The witness keeps just the last real left press, left release and right
+    // press; every other event type returns on the first line. The record is cleared when the tab's contents
+    // is destroyed (tab close, window close) and follows the tab on a window move (same wcId).
     if (gestureWitness && !isInternalContents(wc)) {
       wc.on('input-event', (_event, input) => {
         if (input.type !== 'mouseDown' && input.type !== 'mouseUp') return;
+        if (injectedInput?.isInjecting(wcId)) return;
         gestureWitness.onInput(wcId, input);
       });
       wc.once('destroyed', () => gestureWitness.forget(wcId));
+    }
+
+    // Fix 1 of leg `hat-and-alignment`: the reveal gate's own `input-event` listener - on EVERY tab guest
+    // (internal tabs included, unlike the witness above). A real mouse press or key down (not auto-repeat,
+    // never input automation is injecting) means a pending native confirmation is not holding the window,
+    // so the gate cancels it. The gate ignores the first 400 ms after the dialog opened.
+    if (revealWindowInput) {
+      wc.on('input-event', (_event, input) => {
+        handleRevealInputEvent({
+          input,
+          wcId,
+          injectedInput,
+          win: registry.getWindowForGuest(wcId)?.win,
+          windowInput: revealWindowInput
+        });
+      });
     }
 
     // Mission 23 Flight 1 (leg `jar-isolation`): the media-proxy token follows the tab's DOCUMENT. It is
     // dropped when the webContents is destroyed (tab close, window close); a move between windows keeps
     // the same webContents and so the same token. The commit half is on `did-navigate` below.
     if (mediaProxyTokens) wc.once('destroyed', () => mediaProxyTokens.forget(wcId));
+    // Leg `admin-reach`: the same lifetime for the reveal gate's per-document state. Registered for every
+    // tab (internal included - this function runs for trusted tabs too, register-tab-ipc.js); the commit
+    // half is on `did-navigate` below, which fires for cross-document commits and reloads, never in-page.
+    if (documentMarks) wc.once('destroyed', () => documentMarks.forget(wcId));
 
     // M14 F1 L2 (DD2): navigation-away is a pending-auth-challenge RESOLUTION
     // trigger — main-frame, non-same-document navigations only (a hash change
@@ -812,6 +861,9 @@ function createGuestWiring(deps) {
         // from THIS document already minted one (it can arrive before the commit event). The current main
         // frame's frame token is read as a plain value; unreadable means invalidate (fail closed).
         mediaProxyTokens?.onCommit(wcId, mainFrameTokenOf(wc));
+        // Leg `admin-reach`: the script that was evaluated in the previous document, and everything the
+        // operator confirmed for it, died with that document.
+        documentMarks?.onCommit(wcId);
         const gestureOffers = vaultHuman?.()?.captureRelease(wcId) || [];
         // Sortie 06 Leg 1 (DD5/AC12): the offer carries its tab's `wcId`, and is sent ONLY
         // while that tab is its window's ACTIVE tab; otherwise the held capture is dropped

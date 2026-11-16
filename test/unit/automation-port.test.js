@@ -246,3 +246,88 @@ test('freePortInRange — skips an occupied port and returns the next free one',
     await new Promise((resolve) => srv.close(resolve));
   }
 });
+
+// ---- Mission 23 Flight 2, leg `port-and-permissions` (DD5): configured vs bound, and the broadcast ----
+
+test('configuredPort and listening: strict bind on the asked port', async () => {
+  const occupied = await occupyEphemeralPort();
+  const free = occupied.port;
+  await new Promise((resolve) => occupied.server.close(resolve));
+  const server = createMcpServer({ port: free });
+  assert.equal(server.configuredPort, free);
+  assert.equal(server.listening, false, 'not listening before start()');
+  assert.equal(server.getActivity().port.bound, null);
+  try {
+    await server.start();
+    assert.equal(server.listening, true);
+    assert.deepEqual(server.getActivity().port, { configured: free, bound: free });
+  } finally {
+    await server.stop();
+  }
+  assert.equal(server.listening, false, 'not listening after stop()');
+  assert.equal(server.getActivity().port.bound, null);
+});
+
+test('fallback: configured stays the asked port while bound moves; each start() broadcasts the pair with no call between', async () => {
+  const occupied = await occupyEphemeralPort();
+  const getSettings = () => ({ get: (k) => (k === 'automationPort' ? occupied.port : undefined) });
+  const seen = [];
+  await withEnvAsync(undefined, async () => {
+    const server = createMcpServer({ getSettings, honorEnv: true, broadcast: (p) => seen.push(p) });
+    try {
+      await server.start();
+      assert.equal(server.configuredPort, occupied.port);
+      assert.notEqual(server.port, occupied.port);
+      assert.equal(server.listening, true);
+      assert.deepEqual(server.getActivity().port, { configured: occupied.port, bound: server.port });
+      assert.equal(seen.length, 1, 'one broadcast, from start() itself');
+      assert.deepEqual(seen[0].port, { configured: occupied.port, bound: server.port });
+      assert.deepEqual(seen[0].sessions, []);
+    } finally {
+      await server.stop();
+    }
+  });
+  await new Promise((resolve) => occupied.server.close(resolve));
+});
+
+test("a re-bind to another port reaches the chrome-side snapshot from the NEW instance's start(), no tool call in between", async () => {
+  const a = await occupyEphemeralPort();
+  const b = await occupyEphemeralPort();
+  const freeA = a.port;
+  const freeB = b.port;
+  await new Promise((resolve) => a.server.close(resolve));
+  await new Promise((resolve) => b.server.close(resolve));
+  let configuredNow = freeA;
+  const getSettings = () => ({ get: (k) => (k === 'automationPort' ? configuredNow : undefined) });
+  const chromeSide = []; // what the chrome would hold: the last broadcast wins
+  const make = () => createMcpServer({ getSettings, honorEnv: false, broadcast: (p) => chromeSide.push(p) });
+  let server = make();
+  await server.start();
+  assert.deepEqual(chromeSide.at(-1).port, { configured: freeA, bound: freeA });
+  await server.stop();
+  configuredNow = freeB;
+  server = make();
+  assert.equal(chromeSide.length, 1, 'the constructor broadcasts nothing');
+  await server.start();
+  try {
+    assert.equal(chromeSide.length, 2);
+    assert.deepEqual(chromeSide.at(-1).port, { configured: freeB, bound: freeB });
+  } finally {
+    await server.stop();
+  }
+});
+
+test('a failed (strict) bind still broadcasts: configured with bound null; a stop() mid-start does not', async () => {
+  const occupied = await occupyEphemeralPort();
+  const seen = [];
+  const server = createMcpServer({ port: occupied.port, broadcast: (p) => seen.push(p) });
+  try {
+    await assert.rejects(() => server.start(), /in use/);
+    assert.equal(seen.length, 1);
+    assert.deepEqual(seen[0].port, { configured: occupied.port, bound: null });
+    assert.equal(server.listening, false);
+  } finally {
+    await server.stop();
+    await new Promise((resolve) => occupied.server.close(resolve));
+  }
+});

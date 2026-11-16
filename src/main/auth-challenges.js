@@ -20,7 +20,8 @@
 //     kind-split (M14 F3 HAT fix): basic-auth cancels callback() (zero args,
 //     documented); client-cert cancels callback(null) — a zero-arg call on a
 //     select-client-certificate callback SIGSEGVs the main process on
-//     Electron 43 (see resolveOnce). ANY sheet-close reason not in the
+//     Electron 43 (last measured there; not re-measured on 45 — client certificates
+//     were not run in the Electron 45 leg) (see resolveOnce). ANY sheet-close reason not in the
 //     occlusion set maps here — the FAIL-SAFE default is resolve-cancel,
 //     never a hung callback (unit-pinned).
 //   OCCLUSION (challenge survives — sheet hidden, callback still pending):
@@ -90,6 +91,8 @@
  * @typedef {{ queue: Challenge[], presented: Challenge | null }} WindowAuthState
  */
 
+const { cleanDisplayText } = require('./display-text');
+
 // DD2 bucket sets (unit-pinned). Anything OUTSIDE both sets maps to RESOLUTION
 // (fail-safe cancel) — a new close reason can delay a prompt, never leak a
 // hung callback.
@@ -116,22 +119,7 @@ const REALM_MAX_CHARS = 120;
  * @returns {string}
  */
 function cleanRealm(realm) {
-  if (typeof realm !== 'string' || realm.length === 0) return '';
-  // Bound the work first: nothing past a generous window can survive the cap anyway.
-  const cleaned = realm
-    .slice(0, REALM_MAX_CHARS * 8)
-    .replace(/\s+/gu, ' ')
-    .replace(
-      /[\p{Cc}\p{Cf}\p{Cs}"\u201C\u201D\u201E\u201F\u2033\u2036\u275D\u275E\u301D\u301E\u301F\uFF02\u00AB\u00BB]/gu,
-      ''
-    )
-    .replace(/\s+/gu, ' ')
-    .trim();
-  if (cleaned.length <= REALM_MAX_CHARS) return cleaned;
-  let end = REALM_MAX_CHARS - 1;
-  const last = cleaned.charCodeAt(end - 1);
-  if (last >= 0xd800 && last <= 0xdbff) end -= 1;
-  return cleaned.slice(0, end).trimEnd() + '\u2026';
+  return cleanDisplayText(realm, REALM_MAX_CHARS);
 }
 
 /**
@@ -250,8 +238,9 @@ function createAuthChallenges({ registry, chromeForTab, popupRegistry = null, lo
       // answers (cert) — the raw Electron Certificate object, main-side only.
       //
       // ⚠️ CANCEL SHAPES DIFFER BY KIND (M14 F3 HAT fix, live-measured on
-      // Electron 43): a basic-auth ('login') callback cancels with ZERO args —
-      // documented, exercised live. A select-client-certificate callback
+      // Electron 43; the basic-auth half re-exercised on 45.3.2 by navigating away from
+      // and closing a tab with a pending challenge — sheet closed, no crash): a basic-auth
+      // ('login') callback cancels with ZERO args — documented, exercised live. A select-client-certificate callback
       // invoked with ZERO args SIGSEGVs the main process (silent death, no JS
       // error to catch — native argument-count bug); an explicit `cb(null)`
       // takes the intended continue-WITHOUT-certificate path (Chrome-parity
@@ -399,7 +388,7 @@ function createAuthChallenges({ registry, chromeForTab, popupRegistry = null, lo
    * as design-review corrected: an APP-level event, routed like 'login'). The
    * caller has already preventDefault()ed. Same routing ladder as handleLogin
    * (null-check, internal exclusion, non-guest cancel) plus a DEFENSIVE
-   * empty-list cancel — verified against Electron 43 source: an empty list
+   * empty-list cancel — verified against Electron 43 source (not re-verified on 45): an empty list
    * never reaches the handler (electron_browser_client.cc continues cert-less
    * before emitting the event), so that guard is unreachable-by-construction;
    * pinned anyway. The queue record carries subject/issuer DISPLAY STRINGS for

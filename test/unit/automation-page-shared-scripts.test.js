@@ -50,7 +50,14 @@ test('automation.js imports its flat siblings with @ts-ignore and each is routed
   const js = fs.readFileSync(path.join(PAGES_DIR, 'automation.js'), 'utf8');
   const map = createInternalPageMap({ baseDir: MAIN_DIR, path }).automation;
   const imports = [...js.matchAll(/^import\s*\{[^}]*\}\s*from\s*'\.\/([^']+)';/gm)].map((m) => m[1]);
-  assert.deepEqual(imports.sort(), ['audit-paging.js', 'safe-color.js', 'section-scroll-spy.js']);
+  assert.deepEqual(imports.sort(), [
+    'audit-paging.js',
+    'automation-key-flow.js',
+    'automation-port-moved.js',
+    'automation-port-note.js',
+    'safe-color.js',
+    'section-scroll-spy.js'
+  ]);
   for (const i of imports) assert.ok(map['/' + i], i);
   assert.match(js, /initSectionScrollSpy\(\s*\{\s*document,\s*IntersectionObserver,\s*window\s*\}\s*\)/);
 });
@@ -102,4 +109,64 @@ test('Settings no longer carries the Automation section, nav entry, or its scrip
   assert.doesNotMatch(SETTINGS_HTML, /audit-paging\.js|safe-color\.js/);
   const js = fs.readFileSync(path.join(PAGES_DIR, 'settings.js'), 'utf8');
   assert.doesNotMatch(js, /automation|copyText|audit-paging|safe-color/);
+});
+
+// Leg `clipboard-and-file-modes` AC5: the show-once key copy is a SECRET write straight to the bridge.
+function loadCopyText(globals) {
+  const src = fs.readFileSync(path.join(PAGES_DIR, 'automation.js'), 'utf8');
+  const m = /async function copyText\([\s\S]*?\n\}\n/.exec(src);
+  assert.ok(m, 'copyText is a file-scope function');
+  return new Function('navigator', 'window', `${m[0]}\nreturn copyText;`)(globals.navigator, globals.window);
+}
+
+test('copyText with { secret: true } uses the bridge with { secret: true } and never navigator.clipboard', async () => {
+  const calls = [];
+  const copyText = loadCopyText({
+    navigator: { clipboard: { writeText: async () => calls.push(['navigator']) } },
+    window: { goldfinchInternal: { clipboardWrite: async (...a) => calls.push(['bridge', ...a]) } }
+  });
+  const msg = { textContent: '' };
+  await copyText('key-123', msg, { secret: true });
+  assert.deepEqual(calls, [['bridge', 'key-123', { secret: true }]]);
+  assert.equal(msg.textContent, 'Copied');
+});
+
+test('copyText secret: a bridge failure shows Copy failed and does not fall back to navigator.clipboard', async () => {
+  const calls = [];
+  const copyText = loadCopyText({
+    navigator: { clipboard: { writeText: async () => calls.push('navigator') } },
+    window: {
+      goldfinchInternal: {
+        clipboardWrite: async () => {
+          throw new Error('x');
+        }
+      }
+    }
+  });
+  const msg = { textContent: '' };
+  await copyText('k', msg, { secret: true });
+  assert.deepEqual(calls, []);
+  assert.equal(msg.textContent, 'Copy failed');
+});
+
+test('copyText without the flag keeps navigator-first order with the bridge fallback (no secret flag)', async () => {
+  const calls = [];
+  const copyText = loadCopyText({
+    navigator: {
+      clipboard: {
+        writeText: async () => {
+          calls.push('navigator');
+          throw new Error('blocked');
+        }
+      }
+    },
+    window: { goldfinchInternal: { clipboardWrite: async (...a) => calls.push(['bridge', ...a]) } }
+  });
+  await copyText('addr', null);
+  assert.deepEqual(calls, ['navigator', ['bridge', 'addr']]);
+});
+
+test('automation.js has exactly one secret copyText call site', () => {
+  const js = fs.readFileSync(path.join(PAGES_DIR, 'automation.js'), 'utf8');
+  assert.equal((js.match(/copyText\([^)]*\{\s*secret:\s*true\s*\}/g) || []).length, 1);
 });

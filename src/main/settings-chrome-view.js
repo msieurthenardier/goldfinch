@@ -13,6 +13,8 @@
 // untouched, and no internal page reads a hash from the broadcast (the Automation page lists
 // keys through `automation:list-keys`).
 
+const { isReservedKeyName } = require('../shared/reserved-ids');
+
 const WITHHELD_KEYS = Object.freeze(['automationKeyHashes', 'automationAdminKeyHash']);
 
 /**
@@ -24,7 +26,10 @@ function projectSettingsForChrome(all) {
   const hashes = out.automationKeyHashes && typeof out.automationKeyHashes === 'object' ? out.automationKeyHashes : {};
   const adminSet = !!out.automationAdminKeyHash;
   for (const key of WITHHELD_KEYS) delete out[key];
-  out.automationKeyState = { jarIdsWithKey: Object.keys(hashes), adminKeyEnabled: adminSet };
+  out.automationKeyState = {
+    jarIdsWithKey: Object.keys(hashes).filter((id) => !isReservedKeyName(id)),
+    adminKeyEnabled: adminSet
+  };
   return out;
 }
 

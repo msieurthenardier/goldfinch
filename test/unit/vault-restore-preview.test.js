@@ -173,10 +173,10 @@ test('previewRestoreBundle: a GCM-authentic bundle whose plaintext is malformed 
   try {
     const { bundle } = src.store.exportProfile();
     let call = 0;
-    vc.decryptItems = (blob, key, version) => {
+    vc.decryptItems = (blob, key, version, vaultId) => {
       call++;
       if (call === 2) return { not: 'an array' }; // malformed plaintext — GCM already "passed".
-      return original(blob, key, version);
+      return original(blob, key, version, vaultId);
     };
     await assert.rejects(
       dest.store.previewRestoreBundle(bundle, { secret: Buffer.from(MASTER, 'utf8'), secretKind: 'master' }),
@@ -197,7 +197,7 @@ test('previewRestoreBundle: a duplicate item id within one bundle vault is caugh
   try {
     const { bundle } = src.store.exportProfile();
     let call = 0;
-    vc.decryptItems = (blob, key, version) => {
+    vc.decryptItems = (blob, key, version, vaultId) => {
       call++;
       if (call === 2) {
         return [
@@ -205,7 +205,7 @@ test('previewRestoreBundle: a duplicate item id within one bundle vault is caugh
           { type: 'login', id: 'dup', title: 'b', username: 'u2', password: 'p2' }
         ];
       }
-      return original(blob, key, version);
+      return original(blob, key, version, vaultId);
     };
     await assert.rejects(
       dest.store.previewRestoreBundle(bundle, { secret: Buffer.from(MASTER, 'utf8'), secretKind: 'master' }),

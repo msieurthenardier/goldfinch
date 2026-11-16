@@ -22,6 +22,9 @@ test('createInternalPageMap returns the exact current host/path allowlist', () =
   assert.deepEqual(Object.keys(map.automation).sort(), [
     '/',
     '/audit-paging.js',
+    '/automation-key-flow.js',
+    '/automation-port-moved.js',
+    '/automation-port-note.js',
     '/automation.css',
     '/automation.js',
     '/safe-color.js',
@@ -61,6 +64,7 @@ test('createInternalPageMap returns the exact current host/path allowlist', () =
     '/vault-nav-controller.js',
     '/vault-page-model.js',
     '/vault-restore-controller.js',
+    '/vault-secret-reads-controller.js',
     '/vault.css',
     '/vault.js'
   ]);

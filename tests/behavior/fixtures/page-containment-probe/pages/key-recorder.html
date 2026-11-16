@@ -1,0 +1,39 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>key-recorder</title>
+<!-- Fixture for behavior spec jar-key-shortcut-containment (Mission 23 Flight 2, leg automation-input).
+     It records every keydown the page itself receives (window.__keys) and every mousedown with the
+     mouse-event fields an injected event might carry (window.__mice), so a spec can prove a chord that
+     the browser did not act on still REACHED the page. Nothing secret is here. -->
+<script>
+  window.__keys = [];
+  window.__mice = [];
+  window.addEventListener(
+    'keydown',
+    function (e) {
+      window.__keys.push({ key: e.key, ctrl: e.ctrlKey, shift: e.shiftKey, alt: e.altKey, meta: e.metaKey, trusted: e.isTrusted });
+    },
+    true
+  );
+  window.addEventListener(
+    'mousedown',
+    function (e) {
+      window.__mice.push({ x: e.clientX, y: e.clientY, mx: e.movementX, my: e.movementY, trusted: e.isTrusted });
+    },
+    true
+  );
+  window.keyLog = function () {
+    return JSON.stringify(window.__keys);
+  };
+  window.keyCount = function () {
+    return window.__keys.length;
+  };
+  window.keyReset = function () {
+    window.__keys.length = 0;
+    window.__mice.length = 0;
+  };
+</script>
+<body style="margin: 0; font-family: sans-serif">
+  <h1 style="margin: 20px">key-recorder</h1>
+  <input id="f" type="text" style="margin: 20px; width: 300px; height: 28px" />
+</body>

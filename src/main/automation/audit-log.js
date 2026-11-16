@@ -24,6 +24,29 @@
 // decision above. Bounded so a long-running session can't grow memory unbounded.
 const DEFAULT_CAPACITY = 500;
 
+// Longest stored `op` / `errorCode` / `detail` (leg `automation-bounds`): code points, not UTF-16 units.
+// `op` is the tool name straight off the wire and `detail` is built from tool arguments, so a key holder
+// could otherwise park 500 megabyte strings in the ring. `sessionId` and `identity` are NOT clipped: the
+// page joins sessions to log rows on them byte-for-byte against what `noteSessionOpen` recorded.
+const MAX_FIELD_CODE_POINTS = 256;
+
+/**
+ * Coerce to a string and clip to MAX_FIELD_CODE_POINTS code points (an ellipsis replaces the cut; never
+ * splits a surrogate pair). null/undefined stay null.
+ * @param {any} v
+ * @returns {string | null}
+ */
+function clipField(v) {
+  if (v === null || v === undefined) return null;
+  const str = typeof v === 'string' ? v : String(v);
+  // Cheap bound first: a code point is at most 2 units, so a string this short cannot exceed the cap.
+  if (str.length <= MAX_FIELD_CODE_POINTS) return str;
+  // Only the head is ever split into code points, so a megabyte input costs a constant.
+  const head = Array.from(str.slice(0, MAX_FIELD_CODE_POINTS * 2));
+  if (head.length <= MAX_FIELD_CODE_POINTS && str.length <= MAX_FIELD_CODE_POINTS * 2) return str;
+  return head.slice(0, MAX_FIELD_CODE_POINTS - 1).join('') + '\u2026';
+}
+
 /**
  * Derive the {kind, jarId} pair from a bound identity. `'admin'` → the admin
  * tier (no jar); any other string is a jarId.
@@ -101,11 +124,11 @@ function createAuditLog(opts = {}) {
       ts: now(),
       sessionId: e.sessionId ?? null,
       identity: e.identity,
-      op: e.op,
+      op: clipField(e.op) ?? '',
       targetWcId: e.targetWcId ?? null,
       outcome: e.outcome,
-      errorCode: e.errorCode ?? null,
-      detail: e.detail ?? null
+      errorCode: clipField(e.errorCode),
+      detail: clipField(e.detail)
     });
     while (ring.length > capacity) ring.shift();
     fire();
@@ -138,4 +161,4 @@ function createAuditLog(opts = {}) {
   return { record, noteSessionOpen, noteSessionClose, recentEntries, activeSessions, snapshot };
 }
 
-module.exports = { createAuditLog, DEFAULT_CAPACITY };
+module.exports = { createAuditLog, DEFAULT_CAPACITY, MAX_FIELD_CODE_POINTS, clipField };

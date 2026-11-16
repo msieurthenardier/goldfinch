@@ -12,6 +12,9 @@ const { cookieUrl, originFromIndexedDbDirname, mergeOriginTiers } = require('./j
 function registerJarDataIpc({
   ipcMain,
   gate,
+  // Leg `admin-reach` (DD2): REQUIRED. `internal-jars-cookies-value` returns a cookie's value, so it asks
+  // the reveal gate first; registration throws without it.
+  revealGate,
   registerInternal = registerInternalHandler,
   jars,
   session,
@@ -27,6 +30,9 @@ function registerJarDataIpc({
   // offline tests that omit it skip the step (injection-gated precedent).
   bookmarksStore
 }) {
+  if (!revealGate || typeof revealGate.confirm !== 'function') {
+    throw new Error('registerJarDataIpc: revealGate is required (leg admin-reach, DD2)');
+  }
   // Per-jar data controls (M06 Flight 4, Leg 1 / DD2, DD3). Partition lookup is
   // inline `jars.list().find(...)` (the store deliberately exposes no `get(id)`
   // helper — do not add one for these two call sites). Burner is never a store
@@ -326,7 +332,7 @@ function registerJarDataIpc({
   // shape carrying no CHIPS/partitioned-cookie field — verified on Electron
   // 43.2.0, 2026-08-27 (squawk 0019); re-check this assumption on any
   // Electron version bump.
-  async function handleCookiesValue(_e, p) {
+  async function handleCookiesValue(e, p) {
     if (p === null || typeof p !== 'object') return { ok: false, error: 'jars: cookies-value — malformed-payload' };
     const entry = jars.list().find((j) => j.id === p.id);
     if (!entry) return { ok: false, error: 'jars: cookies-value — unknown-jar' };
@@ -343,7 +349,31 @@ function registerJarDataIpc({
     }
     const match = raw.find((c) => c.name === p.name && c.domain === p.domain && c.path === p.path);
     if (!match) return { ok: false, error: 'jars: cookies-value — not-found' };
-    return { ok: true, value: match.value };
+    // Leg `admin-reach` (DD2): the gate is consulted only once a cookie was FOUND (validation and the
+    // lookup ran first, so no dialog for a request that would fail). The label is the cookie's name and
+    // domain as MAIN read them from the session - never the payload's text. The value is not in the reply
+    // unless the operator confirmed; after a confirmation the cookie is read again (the first read may be
+    // a minute old) and a cookie that vanished meanwhile is `not-found`, as today.
+    const decision = await revealGate.confirm(e, {
+      channel: 'internal-jars-cookies-value',
+      action: 'cookie',
+      subject: `${match.name} (${match.domain})`
+    });
+    if (decision === 'not-applicable') return { ok: true, value: match.value };
+    if (decision !== 'confirmed') return { ok: false, error: 'jars: cookies-value — not-confirmed' };
+    /** @type {any[]} */
+    let again;
+    try {
+      again = await ses.cookies.get({});
+    } catch (err) {
+      return {
+        ok: false,
+        error: `jars: cookies-value — session-failure: ${String(err && err.message ? err.message : err)}`
+      };
+    }
+    const fresh = again.find((c) => c.name === p.name && c.domain === p.domain && c.path === p.path);
+    if (!fresh) return { ok: false, error: 'jars: cookies-value — not-found' };
+    return { ok: true, value: fresh.value };
   }
 
   // handleSiteDataList: composite union (DD3 VERDICT) of (i) an IndexedDB-dir

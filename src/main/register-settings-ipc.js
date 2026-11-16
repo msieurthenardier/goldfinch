@@ -10,6 +10,10 @@ const { projectSettingsForChrome, chromeSettingsGet } = require('./settings-chro
 function registerSettingsIpc({
   ipcMain,
   gate,
+  // Leg `admin-reach` (DD2): REQUIRED. Minting an automation key asks the reveal gate first (the key is
+  // returned to the calling page); registration throws without it. Revokes and the automation toggle are
+  // the operator's kill switch and are NOT gated.
+  revealGate,
   registerInternalHandler,
   settings,
   shields,
@@ -23,7 +27,7 @@ function registerSettingsIpc({
   currentAutomationStatus,
   rebindMcpServer,
   freePortInRange,
-  clipboard,
+  secretClipboard,
   jars,
   mintJarKey,
   revokeJarKey,
@@ -35,6 +39,9 @@ function registerSettingsIpc({
   app,
   env = process.env
 }) {
+  if (!revealGate || typeof revealGate.confirm !== 'function') {
+    throw new Error('registerSettingsIpc: revealGate is required (leg admin-reach, DD2)');
+  }
   // DD13: the chrome never receives the automation key hashes; see settings-chrome-view.js.
   const broadcastSettings = () => broadcast('settings-changed', projectSettingsForChrome(settings.getAll()));
 
@@ -113,6 +120,16 @@ function registerSettingsIpc({
     key ? settings.get(key) : settings.getAll()
   );
   registerInternalHandler(ipcMain, 'internal-settings-set', async (_event, key, value) => {
+    // The two key-hash settings are written ONLY by mint / revoke (main-side, through
+    // the store directly) — never by a page call, for any caller including the admin
+    // tier: the launch flag is the only door to the admin tier (Mission 23 F2, DD3).
+    // Refused before `settings.set`: nothing written, nothing broadcast.
+    // A non-string key would skip the comparison below yet be coerced to the same
+    // property name by the store, so it is refused first.
+    if (typeof key !== 'string') throw new Error('internal-settings-set: key must be a string');
+    if (key === 'automationKeyHashes' || key === 'automationAdminKeyHash') {
+      throw new Error('internal-settings-set: "' + key + '" cannot be written through a settings call');
+    }
     const config = settings.set(key, value);
     broadcastSettings();
     if (key === 'automationEnabled') await applyAutomationEnabledChange(value === true);
@@ -153,38 +170,12 @@ function registerSettingsIpc({
   registerInternalHandler(ipcMain, 'automation:find-free-port', async () => ({ port: await freePortInRange() }));
 
   // clipboard:write is the generic internal clipboard sink: the vault's secret Copy
-  // (vault.js) AND the settings page's navigator.clipboard fallback (DD4/copyText)
-  // both ride it. Squawk 0021: a copied vault SECRET must not sit in the OS
-  // clipboard forever. Scoped via an explicit `opts.secret` flag (an optional 3rd
-  // arg — every existing caller that omits it keeps its exact prior behavior, no
-  // bridge-shape change) rather than a new channel. One pending timer, re-armed per
-  // copy; cleared only if the clipboard STILL holds exactly what we wrote (never
-  // clobber a later copy). Electron-free / no injection seam by design (the
-  // capture-timeout.js precedent): the only ambient dependency is the global
-  // setTimeout/clearTimeout pair, driven in tests by node:test MockTimers.
-  const CLIPBOARD_SECRET_CLEAR_MS = 20000;
-  /** @type {ReturnType<typeof setTimeout>|null} */
-  let clipboardClearTimer = null;
+  // (vault.js) AND the automation page's copyText fallback both ride it. Squawk 0021 / leg
+  // `clipboard-and-file-modes`: a copied SECRET (`opts.secret`, an optional 3rd arg) is cleared
+  // by the one helper (`secret-clipboard.js`) after 20 s and at quit; every other caller keeps
+  // its plain write.
   registerInternalHandler(ipcMain, 'clipboard:write', (_event, text, opts) => {
-    const value = String(text == null ? '' : text);
-    clipboard.writeText(value);
-
-    if (clipboardClearTimer !== null) {
-      clearTimeout(clipboardClearTimer);
-      clipboardClearTimer = null;
-    }
-
-    if (opts && opts.secret === true) {
-      clipboardClearTimer = setTimeout(() => {
-        clipboardClearTimer = null;
-        // Only clear if the clipboard still holds exactly what we copied — an
-        // empty/changed clipboard means the operator copied something else since,
-        // and that copy must never be clobbered.
-        if (clipboard.readText() === value) clipboard.writeText('');
-      }, CLIPBOARD_SECRET_CLEAR_MS);
-      if (typeof clipboardClearTimer.unref === 'function') clipboardClearTimer.unref();
-    }
-
+    secretClipboard.write(text, { secret: !!opts && opts.secret === true });
     return { ok: true };
   });
 
@@ -201,7 +192,18 @@ function registerSettingsIpc({
       adminKeySet: (settings.get('automationAdminKeyHash') || '') !== ''
     };
   });
-  registerInternalHandler(ipcMain, 'automation:jar-key-mint', (_event, jarId) => {
+  registerInternalHandler(ipcMain, 'automation:jar-key-mint', async (event, jarId) => {
+    // Gate first; a refusal writes nothing and broadcasts nothing. The label is the jar's own name from
+    // the registry; an unknown id has no label and goes straight to the mint, which refuses it as today.
+    const jar = jars.list().find((j) => j.id === jarId);
+    if (jar) {
+      const decision = await revealGate.confirm(event, {
+        channel: 'automation:jar-key-mint',
+        action: 'jar-key-mint',
+        subject: jar.name
+      });
+      if (decision !== 'not-applicable' && decision !== 'confirmed') return { key: null, refused: 'not-confirmed' };
+    }
     const key = mintJarKey(jarId, settings, jars);
     broadcastSettings();
     return { key };
@@ -211,7 +213,12 @@ function registerSettingsIpc({
     broadcastSettings();
     return { ok: true };
   });
-  registerInternalHandler(ipcMain, 'automation:admin-key-mint', () => {
+  registerInternalHandler(ipcMain, 'automation:admin-key-mint', async (event) => {
+    const decision = await revealGate.confirm(event, {
+      channel: 'automation:admin-key-mint',
+      action: 'admin-key-mint'
+    });
+    if (decision !== 'not-applicable' && decision !== 'confirmed') return { key: null, refused: 'not-confirmed' };
     const key = mintAdminKey(settings);
     broadcastSettings();
     return { key };
@@ -236,7 +243,7 @@ function registerSettingsIpc({
   gate.chrome.handle(
     'chrome-clipboard-write',
     (_event, text) => {
-      clipboard.writeText(String(text == null ? '' : text));
+      secretClipboard.write(text);
     },
     'throw'
   );

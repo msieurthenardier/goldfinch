@@ -246,7 +246,7 @@ test('zeroize discipline: a mid-loop throw leaves zero live bundle-vault-key buf
     const original = vc.decryptItems;
     const seenKeys = [];
     let call = 0;
-    vc.decryptItems = (blob, key, version) => {
+    vc.decryptItems = (blob, key, version, vaultId) => {
       call++;
       if (call === 2) {
         // Capture the SAME buffer reference (not a copy!) so we can observe the
@@ -254,7 +254,7 @@ test('zeroize discipline: a mid-loop throw leaves zero live bundle-vault-key buf
         seenKeys.push(key);
         throw new Error('injected mid-loop failure');
       }
-      return original(blob, key, version);
+      return original(blob, key, version, vaultId);
     };
     try {
       const destDir = tmpDir();

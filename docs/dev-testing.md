@@ -131,12 +131,22 @@ rose"; never type a master password):
    tabs; take the wcId from the return value). The icon exists only for a persistent jar.
 2. On the chrome target (`getChromeTarget`) `evaluate` `window.goldfinch.focusActiveGuest()`
    (the chrome's own guest-focus call). If the page needs the preload's IPC object (the
-   `vault-gesture-trust` fixture does), also `window.goldfinch.rescanMedia({ wcId })` once.
+   `vault-gesture-trust` fixture does; on Electron 45.3.2 the known probe does not obtain it, so the
+   spec records the reach and the page-sent steps read NOT EXERCISED), also `window.goldfinch.rescanMedia({ wcId })` once.
 3. MCP `click` on the field, then `evaluate` `document.hasFocus()` on the tab as the **positive
    control** — it must be `true`. After any tab switch or sheet close, repeat step 2 first.
 4. Read the icon's box with `getBoundingClientRect()` (viewport CSS pixels) and click its centre.
    At zoom `z` the **driver coordinates are the CSS coordinates times `z`** (main sees
-   `clientX x zoomFactor`; measured identical at 1, 1.5 and 0.67).
+   `clientX x zoomFactor`; measured identical at 1, 1.5 and 0.67). Zoom is per origin and
+   persists across tabs: reset it (`setZoom` factor 1) before computing coordinates after a
+   zoom-chord run.
+
+**An automation click does NOT raise the picker** (Mission 23 Flight 2 `automation-input`): main
+ignores input automation injects into a tab when it feeds the click witness, at every tier, so
+the click above ends in `[vault-gesture] refused reason=no-real-input` and `sheetVisible` stays
+`false` - that refusal is the unattended result. The accept path (a real click raises the
+sheet, exactly one `[vault-gesture] accepted`) needs a physical click and is `[by-eye]`. Use
+this recipe to make the icon appear and to read its box, not to open the picker.
 
 The icon is removed when the field loses focus but its listeners stay on the kept element;
 `GOLDFINCH_IPC_TRACE=1` prints the gesture decisions (`[vault-gesture] accepted` / `refused
@@ -242,6 +252,37 @@ leg `vault-fill-trust`): one line per gesture message — `[vault-gesture] accep
 chrome-facing vault channels, `[vault-gesture] context-refused reason=<missing|stale|origin>`. A
 decision only: no URL, title, coordinate or item data. Recipe: *Making the vault fill icon appear
 under automation*.
+
+`GOLDFINCH_IPC_TRACE=1` also prints the vault power-lock listener's lines (leg `vault-lifecycle`):
+`[vault-power-lock] registered events=6` once after `app.ready`, then `[vault-power-lock] event=<name>
+lock` (or `deferred=key-surfacing`) when a power event reaches an unlocked vault. `suspend` cannot be
+raised on WSL; Linux has no screen-lock event.
+
+### `GOLDFINCH_REVEAL_GATE_TRACE`
+
+Opt-in trace of the reveal gate's decisions (`src/main/reveal-gate.js`, Mission 23 Flight 2, leg
+`admin-reach`). OFF by default.
+
+```bash
+GOLDFINCH_REVEAL_GATE_TRACE=1 GOLDFINCH_AUTOMATION_DEV_MINT=1 GOLDFINCH_AUTOMATION_ADMIN=1 npm run dev:automation
+```
+
+Prints ONE line per decision **other than** `not-applicable`:
+`[reveal-gate] channel=<channel> decision=<decision> reason=<admin-attached|touched>` where the
+decision is `confirmed`, `denied`, `timeout`, `busy`, `gone` or `refused-frame` and the reason says
+which condition applied (an admin session made a request in the last ten minutes / script was evaluated in the calling
+document). Never an item name, cookie name, path, id or value.
+
+What it means for a live run: while an admin client is active (a request in the last ten minutes), a gated bridge call
+(`vaultReveal`, `vaultTotpCode`, `jarsCookiesValue`, `vaultExport*`, `automationJarKeyMint`,
+`automationAdminKeyMint`) raises a **real native dialog on the operator's screen** that no automation
+tier can answer, so it stays pending for up to 60 s and then resolves with the refusal shape
+(`{ refused: 'not-confirmed' }` etc. — `docs/mcp-automation.md`). Give the `callTool` request a
+timeout above 60 s (`c.callTool(params, undefined, { timeout: 150000 })`; the SDK default is 60 s),
+**do not click the dialog** from a script, and make sure none is left open (each aborts itself).
+A second gated call on the same window while one dialog is up resolves `busy` at once. Live specs
+that mint, reveal or export through an admin key (`settings-automation`, `vault-copy-item`,
+`admin-reach-refusal`) are written around this.
 
 ## Crash records and dumps
 
