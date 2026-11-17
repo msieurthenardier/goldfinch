@@ -30,6 +30,28 @@ or download **v0.19.15** directly:
 > builds are Apple Silicon only for now.
 <!-- DOWNLOADS:END -->
 
+### Verify your download
+
+Each release page lists a SHA-256 digest beside every installer. Compare it with your copy
+(`sha256sum <file>` on Linux, `shasum -a 256 <file>` on macOS, `Get-FileHash <file>` in PowerShell).
+
+Releases built by the current release workflow are meant to carry a build provenance attestation on each installer,
+starting with the first release after v0.19.15 (v0.19.15 and earlier have digests only, and a release without an
+attestation makes the command below report that none was found). With a recent [GitHub CLI](https://cli.github.com/)
+that has the `gh attestation` command:
+
+```bash
+gh attestation verify <file> -R msieurthenardier/goldfinch \
+  --signer-workflow msieurthenardier/goldfinch/.github/workflows/build.yml
+```
+
+Once a release is immutable, `gh release verify <tag>` and `gh release verify-asset <tag> <file>` check
+the release's own attestation and that an asset is the one that was published.
+
+This shows that the file was built by this repository's release workflow from the commit the attestation
+names. It does not show that the code is safe, and it is not an operating-system signature: Windows
+SmartScreen and macOS Gatekeeper will still warn.
+
 ## Features
 
 - **Standard browser chrome**: multi-tab browsing, back/forward/reload, address
@@ -220,6 +242,30 @@ or download **v0.19.15** directly:
   client read access to its own jar's browsing-history memory. See
   [`docs/mcp-automation.md`](docs/mcp-automation.md) for the full consumer
   reference.
+
+## Known limits
+
+Decisions made on purpose, so that nobody has to discover them. The full list, with the reason and who decided each
+one, is the *Dispositions* section of
+[`missions/23-security-review-remediation/mission.md`](missions/23-security-review-remediation/mission.md).
+
+- **Cookies are stored unencrypted on disk.** Chromium's cookie-encryption fuse was measured and not turned on: it protects
+  little without an operating-system keyring, it is one-way, and it could not be checked on macOS.
+- **Builds are not code-signed** (see *Download* above), and Goldfinch does not check the integrity of its own files on disk
+  (`asar: false` is load-bearing).
+- **Updates are never automatic.** The app only tells you a newer release exists ([`docs/updates.md`](docs/updates.md)).
+- **Downloads are not confirmed by Goldfinch before you open them.** Whether the operating system warns is the system's job;
+  Goldfinch does not add an executable-type list or its own prompt.
+- **Some prompts accept input at once.** The sign-in card and the certificate-error Proceed button are not delayed;
+  `user:pass@` addresses still load (the bar shows the real host without the credentials); a very long subdomain is not
+  shortened in the address bar.
+- **In-page navigation is not rate-limited** for history recording (Chromium throttles it; address length and duplicates are
+  bounded). The browser's own views (toolbar, menus) are not pinned to their own document.
+- **Launch switches.** A packaged build refuses or ignores the switches that turn off its protections, but still honours
+  `--no-sandbox`, `--proxy-server` and the `GOLDFINCH_AUTOMATION_ADMIN` variable; see [`docs/RELEASING.md`](docs/RELEASING.md)
+  *Launch switches* for what is not covered.
+- **Vault:** an older copy of a vault file is not detected as older, and revoking an access key or changing the master
+  password does not re-key ([`docs/vault.md`](docs/vault.md)).
 
 ## Run
 

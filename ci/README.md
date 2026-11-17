@@ -3,7 +3,8 @@
 CI runs on the **local Concourse** instance (`http://localhost:8080`, team `goldfinch`)
 instead of GitHub Actions, to conserve GitHub Actions minutes. GitHub Actions
 `ci.yml` is disabled (manual `workflow_dispatch` only); `build.yml` (the real
-release path, incl. macOS) is **untouched** and still owns releases.
+release path, incl. macOS and Windows) is **not run here** and owns releases and every
+Windows and macOS installer (`docs/RELEASING.md`).
 
 ## What runs where
 
@@ -90,9 +91,22 @@ docker buildx imagetools inspect node:22 --format '{{.Manifest.Digest}}'
 
 ### Accepted advisories
 
-None currently. (`minimatch` GHSA-g3hv-75wg-m249 in `electron-builder` and
-`eslint` is fixed by the range-keyed `minimatch@…` entries in `package.json`
-`overrides`; remove them when those tools declare a patched range themselves.)
+None currently.
+
+**Temporary overrides (not an acceptance).** `minimatch` GHSA-g3hv-75wg-m249 reaches `electron-builder`
+(through `app-builder-lib` and `@electron/universal`) and `eslint` (through `@eslint/config-array`); those tools
+declared vulnerable ranges, and the advisory is fixed only in `minimatch` 11. The range-keyed
+`minimatch@<range>` entries in `package.json` `overrides` move just those consumers to `^11.0.1` (a blanket
+override, or per-package nesting, breaks `glob@7` and its neighbours). The tools are dev-only; nothing ships.
+
+**Remove them when** `electron-builder` and `eslint` each declare a patched `minimatch` range themselves. To check:
+in a scratch copy of the repository (never the working tree), delete the four `minimatch@…` lines from
+`overrides`, run `npm install`, then `npm ls minimatch` and `npm audit`. When no `minimatch` below 11 appears
+in the tree and `npm audit` stays at zero, the entries can go. (The release workflow's manual dispatch build, run `44116887492`, built all three
+platforms with the overrides in place; whether `@electron/universal`'s merge path itself ran there was not checked.)
+
+**`@hono/node-server`.** The runtime advisories in `hono` and `@hono/node-server` were fixed by a plain lockfile
+update inside the MCP SDK's declared ranges (`@hono/node-server` 2.x); no override was needed and none exists.
 
 ### Set or update the pipeline
 
@@ -107,7 +121,7 @@ Concourse resolves `((var.field))` from Vault at `concourse/goldfinch/goldfinch/
 
 | Vault path | Fields | Used by |
 |---|---|---|
-| `concourse/goldfinch/goldfinch/git-key` | `private_key` (read-only, repo-scoped SSH deploy key) | `repo` git resource (SSH clone of the private repo) |
+| `concourse/goldfinch/goldfinch/git-key` | `private_key` (read-only, repo-scoped SSH deploy key) | `repo` git resource (SSH clone of the repository; the repository is public, the key is read-only) |
 | `concourse/goldfinch/goldfinch/minio` | `endpoint`, `access_key`, `secret_key`, `bucket` | `linux-installers` s3 resource |
 
 > MinIO `endpoint` is `http://172.19.0.20:9000`, **not** `minio:9000`. Build

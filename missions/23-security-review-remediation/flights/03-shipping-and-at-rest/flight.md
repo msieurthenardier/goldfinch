@@ -193,7 +193,7 @@ Drawn up before the leg list (Flight 2 debrief, recommendation 2): one leg per d
 6. `update-notice` — DD1's visible half: About, the kebab item, the chrome wiring; behavior spec `update-notice` authored at leg design and run once as a test of the spec before it gates the leg.
 7. `release-build-split` — DD4; Q7 answered at leg design; smoke-tested by a manual dispatch run (build only, publishes nothing).
 8. `release-integrity` — DD3; Q6 answered at leg design. **Checkpoint: operator applies repository settings.**
-9. `cookie-encryption` — DD6, only on an "on" ruling. Alone.
+9. ~~`cookie-encryption`~~ — **not flown.** Operator ruling 2026-11-17 on DD6, after leg `packaged-measurements`: "accept cookies as not fixed". Recorded in the disposition table with the measured reasons (nominal on a host with no keyring; one-way; unverifiable on macOS, where the keychain entry is tied to a per-build ad-hoc signature).
 10. `dispositions-and-docs` — the table of findings 1–22 (fixed-and-pinned with the pinning test, or accepted with the reason) written into `mission.md`; the sweep of CLAUDE.md and `docs/` for any claim a finding named as false; the two standing planning rules from the Flight 2 debrief added to CLAUDE.md's *Project-specific planning rules*; the release checklist in `docs/RELEASING.md` given an owner and the items this walk covers struck from it afterwards. *Tier: low.*
 11. `hat-and-alignment` *(interactive)* — DD8.
 

@@ -67,6 +67,13 @@ Planning. No leg has flown.
 - 2026-11-17 — Review fixes landed (four items, each neuter-verified; gates green, 7,209 passing). The changed upload-job steps were read by the Flight Director: directory names are compared with the exact three before anything is read, and the token-holding step passes `gh` only bare, already-verified file names from inside each literal directory. They are re-covered by the flight-end review. **Flight held at leg 07's checkpoint**: the operator's word is needed to commit, push the branch and dispatch the workflow.
 - 2026-11-17 — Operator: "go ahead and commit and push the branch", then "go ahead and run them". Committed `4779b6e` (legs 01–07) and pushed `flight/03-shipping-and-at-rest`; manual dispatch run 44115982561: three `build` jobs green, `upload` red — the Windows runner's `sha256sum` writes `hash *name`, and the cross-check compared the marker with the file name. Fixed by a Developer at both ends, committed `09302d9` with the review fixes, pushed, re-dispatched under the same authorisation.
 - 2026-11-17 — **Leg 07 AC8 met — run 44116887492 green.** Read from the logs: each `build` job's token is `Contents: read` / `Metadata: read`; `check-fuses: ok` on macOS, Linux and Windows; macOS `codesign` — `valid on disk`, `satisfies its Designated Requirement`, `Signature=adhoc` (Q5, as far as a runner can show it); `start check: running=1 app.db=1 crash-log=0` on all three, Linux with the real sandbox (`kernel.apparmor_restrict_unprivileged_userns = 0` applied, no `--no-sandbox` warning); names on disk exactly the five, Windows space-free; artifacts of 128 MB, 239 MB and 250 MB uploaded and downloaded (Q7: storage is not a blocker); `upload` verified five installers and printed "nothing uploaded to any release"; `create-release` and `publish-release` skipped; no new release or tag exists (latest is still v0.19.15). Leg 07 `landed`. Not exercised, by construction: the tag-only steps — their first run is the acceptance candidate.
+- 2026-11-17 — Operator rulings: (1) the release sequence — "we cut a release by updating it then tagging it after merge to main"; leg 08 is designed around it. (2) DD6 — "accept cookies as not fixed"; leg 09 `cookie-encryption` is **not flown** and the finding is recorded as accepted with the measured reasons. Two defaults stand, having been put to the operator twice without objection: releases carry no updater metadata; the update request's `Accept-Language` header is accepted and documented. Leg 08 re-audited against the workflow as built; Developer design review spawned.
+- 2026-11-17 — Leg 08 design review: approve with changes — two high (the existing test pins `upload`'s permissions exactly; this host's `gh` 2.45.0 has no `attestation` or `release verify` commands, so the documented verification commands cannot be run before the walk), six medium, three low; incorporated in one cycle, leg `ready`. Consequences for leg `hat-and-alignment`, which now carries every measurement that needs a tag push: the attestation step's first run and its permission set; `GITHUB_SHA` and the job token on the compare call; a deliberately refused stable-looking tag on a non-`main` commit; whether the tag ruleset lets the workflow create its release; prerelease immutability (second candidate); and the documented `gh` commands run verbatim on a downloaded file with a current `gh`. Leg 10 `dispositions-and-docs` drafted (tier low), flown after 08. Developer spawned for leg 08.
+- 2026-11-17 — Leg 08 `[LAND:leg]` accepted: attestation step (tag-only, after the upload, subjects exactly the verified installers), the stable-tag check with its function test, the README verify section, `docs/RELEASING.md` rewritten around the operator's sequence, the operator runbook (in the leg's log entry). Gates green (7,221 passing). Nothing in it that needs a tag push has run — the Developer's twelve-item "first real run at the acceptance walk" list is the walk's agenda. One tightening handed to the flight-end fix pass: no test pins "no `${{ }}` inside any `run:` block" for the whole workflow (true today, pinned only for the new step). Developer spawned for leg 10.
+- 2026-11-17 — Leg 10 `[LAND:leg]` accepted: the `## Dispositions` section is in `mission.md` with every named proof checked to exist and the 67 named unit files run (1,605 passing). The Developer reported what it could not source instead of filling it in: finding 14b has no disposition in any flight; NF6 is only open squawk 0187; 13d was accepted by the Flight 2 plan with no separate operator ruling; `admin-reach-refusal` has never passed in full; finding 5 rests on the open confirmation-primitive design call. These go to the operator.
+- 2026-11-17 — Final review, legs 08 and 10 (Reviewer, Sonnet): **`[HANDOFF:confirmed]`**, nothing blocking; gates green (7,221 passing); no source file changed since the first review. The Reviewer could not construct an input that makes the stable-tag check allow an unreachable commit, traced the attestation subjects to the verified list only, and found nothing claimed as verified that has not run — except one present-tense sentence in the README. Non-blocking items sent to a Developer: a whole-workflow pin for "no expression inside a `run:` block"; stderr kept out of the compare answer; a fallback sentence in the ruleset runbook; the README sentence; two stale pointers; and three disposition rows whose word was more generous than their own reason (1, 5, 3a → fixed in part). No ruling overturned; the Reviewer asks that 14b and NF6 be decided before the mission is called complete.
+- 2026-11-17 — Final review fixes landed (seven items; gates green, 7,223 passing; no file under `src/` changed). Dispositions recounted: 6 fixed, 16 fixed in part. Four rulings put to the operator and still open: finding 14b, NF6 / squawk 0187, 13d, and the update request's `Accept-Language`.
+- 2026-11-17 — **Operator, verbatim: "you can do all of that except Ill install the release candidate"** — in answer to the Flight Director's list: commit and push legs 08 and 10; apply the tag ruleset; push the candidate tags; the refusal test; turn on immutable releases; run the verification commands. This lifts, for this leg, the flight's standing rule that no one but the operator pushes a tag or changes a repository setting. The operator installs the candidate themselves. Leg 11 `hat-and-alignment` written and `in-flight`.
 
 ---
 
@@ -252,3 +259,140 @@ Four non-blocking mid-flight review items, fixed before push.
 2. Build-job no-token test pattern now also matches `github\.token` (case-insensitive). Neuter: `${{ github.token }}` added to the build job, red, restored.
 3. `settings.js` About controller: the boot `settingsGet('updateCheckEnabled')` is ignored once a `settings-changed` push was seen; a rejected `settingsSet` reverts the checkbox to the last known value. Patched in place. Observation (not changed): older controllers in the file have the same boot-read/push race and no revert on rejection.
 4. `launch-switches-placement.test.js`: new assertion that `src/main/launch-switches.js` (comment-masked, throws if unreadable) contains no `appendSwitch(`; the TLS-flag exemption stays. Neuter: appended `app.appendSwitch('x');`, red, restored.
+
+## Leg 08 — release-integrity
+
+**Status**: landed on the workflow, tests, docs and runbook (AC7, the operator applying the settings and cutting candidates, is not part of this landing).
+
+**Built.** `.github/workflows/build.yml`: (1) `create-release` gains step *Require a stable tag to be on the default branch* (after *Validate semver tag and classify stability*, whose `semver=` line is untouched; `if: steps.ver.outputs.is_stable == 'true'`; `GH_TOKEN` and `DEFAULT_BRANCH` through `env:`; one small function `stable_tag_on_default sha default` over `gh api repos/$GITHUB_REPOSITORY/compare/<default>...<sha> --jq .status`: `identical`/`behind` allow, everything else refuses, one retry after 10 s except on an `HTTP 403`, prints the answer and commit on every path). (2) `upload`: *Verify names and digests* gained `id: verify` and, after every check passed, writes a multi-line step output `subjects` from its own verified `dir|file` list (`sed 's#|#/#'`: five `artifacts/<dir>/<name>` paths, never `VERSION`/`SHA256SUMS`, no glob); new step *Attest build provenance* after *Upload to the draft release*, tag-gated; the job's permissions are `contents: write`, `id-token: write`, `attestations: write`; the comment beside the token now says the attest step reads the job token by default. `artifact-metadata: write` is left out. Header comment extended.
+
+**Attest step as written**
+```yaml
+      - name: Attest build provenance
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ steps.verify.outputs.subjects }}
+```
+Tag -> SHA: `gh api repos/actions/attest/git/ref/tags/v4.2.2` -> `commit 1e69f48acb82d1966a394da916b4c1698aa569d6` (lightweight tag; `releases/latest` is `v4.2.2`), resolved 2026-11-17.
+
+**Tests.** `release-workflow-invariants.test.js`: the old `deepEqual(…, ['contents: write'])` line removed from the upload test and replaced by *exact permission set; the signing permissions live nowhere else* (exact three; `id-token`/`attestations:` absent from every other job and the top level; no `actions/attest` in `build`) and *one attest step, after the upload, tag-gated, subjects are the verified list only* (exactly one attest step; order; `if`; `subject-path` is exactly the step output; no glob, no `artifacts/`, no `VERSION`/`SHA256SUMS` in the step; the verify step has `id: verify` and writes the output from the upload list). New `stable-tag-check.test.js`: the function is extracted from the workflow and run under bash with a fake `gh` and a stubbed `sleep`: identical/behind allow with one call; ahead, diverged, empty, junk, `null` refuse after two calls and one `sleep 10`; 404 and 502 refuse after a retry; 403 refuses with one call and no sleep; ahead-then-identical and 404-then-identical allow on the retry; an error whose text is `identical` still refuses; the step is gated on `is_stable == 'true'`, takes the default branch through `env:`, has no `${{` in its run block, sits after the semver step and before the draft. The *Validate semver…* block is also run for `v1.2.3`, `v1.2.3+build.5` (stable), `v1.2.3-rc.1`, `v1.2.3-rc.1+x` (prerelease), `v1.2` (rc 1). `update-readme.test.js`: text after the generated block survives the script unchanged; the real README's verify section sits after `DOWNLOADS:END`, once, and the unsigned sentence is not repeated. Neuter runs are listed in the report of this leg (each mutation restored and diffed).
+
+**AC3 — the function against the live compare endpoint** (read-only GETs; `GITHUB_REPOSITORY=msieurthenardier/goldfinch`, default `main`):
+
+| Commit | Answer | Result |
+| --- | --- | --- |
+| `v0.19.15` commit `f401407e…` | `identical` | ALLOWED |
+| `v0.19.0` commit `20d3025e…` | `behind` | ALLOWED |
+| flight branch head on the remote, `09302d92…` | `ahead` (both attempts, one `sleep 10`) | REFUSED |
+| local HEAD `6cebcac2…` (not pushed) | `{"message":"Not Found",…,"status":"404"}` HTTP 404 (both attempts) | REFUSED |
+| made-up `01234567…` | HTTP 404 (both attempts) | REFUSED |
+
+Note the 404 body itself contains `"status":"404"`; the function reads only a success answer's `.status`, and the error text is not mistaken for an answer. **This is a substitute**: the tag-push path (`GITHUB_SHA` for an annotated tag, the job token's right to call compare, the default-branch value from the event payload) runs first at the acceptance walk, where a stable-looking tag on a commit that is not on `main` should be pushed to watch `create-release` refuse (no release is created; the operator deletes the tag), and the real release tag later passes. A prerelease candidate cannot exercise the check (prereleases skip it). Both go to `hat-and-alignment`.
+
+**Release sequence, re-proved in a scratch clone** (nothing pushed): `git switch -c release-prep/vX` then `npm version patch --no-git-tag-version` printed `> version` / `README download section updated to v0.19.16` and `v0.19.16`; afterwards `git status` showed `README.md` staged and `package.json` / `package-lock.json` unstaged, `git tag --points-at HEAD` empty, HEAD unchanged (no commit). Hence the doc's `git commit -a -m "release-prep: bump to X.Y.Z"`.
+
+**Docs.** `docs/RELEASING.md`: intro; job table (create-release's check, upload's permissions and attest); *what a release carries* incl. no updater metadata (AC5b) and "nothing about attestations has run yet"; new *The stable-tag rule*; *Cut a release* rewritten as branch -> `npm version --no-git-tag-version` -> commit -> PR -> squash-merge -> `pull --ff-only` -> tag the merged commit -> push the tag; new *Rollback*, *One-time repository settings*, *Verifying a release*; *Windows HAT build* replaced by *Release candidates and hands-on builds*; the *Notes* bullet about a direct push to `main` replaced. `CLAUDE.md` *Release / CI*: least-privilege bullet (upload's two extra permissions) and the *Cutting a release* paragraph (PR-then-tag sequence, stable-tag check, rollback = next patch, rc used once, dispatch artifacts for hands-on builds, attestation, one-time settings). `docs/updates.md`: the request's `Accept-Language` / `Sec-Fetch-*` stated as an accepted disclosure (AC5b). `README.md`: new *Verify your download* section after the generated block. `ci/README.md` describes no release flow beyond "build.yml owns releases": unchanged.
+
+**Not run (this host's `gh` is 2.45.0, no `gh attestation`, no `gh release verify`):** the attest step, every `gh attestation verify` / `gh release verify` / `verify-asset` command (their flags are from the published manual, not `--help`), the tag path of `create-release`, the ruleset and immutability calls. See *First real run at the acceptance walk* in the leg report.
+
+### Leg 08 operator runbook
+
+For the repository owner. Nothing here has been run; the two `POST`/`PUT` calls change repository settings. `R=msieurthenardier/goldfinch`.
+
+**Order, and why.** (1) the tag ruleset; (2) cut the **first candidate** `vX.Y.Z-rc.1` — proves the tag path, the attest step, and whether the ruleset lets the workflow create its draft release; (3) turn on immutable releases; (4) cut a **second candidate** `-rc.2` to see a prerelease is immutable too. A release published while immutability is on stays immutable and its tag name stays spent, even if the setting is later turned off.
+
+**1. Tag ruleset on `v*`** (restrict creation, update, deletion; the repository-administrator role may bypass, which is what lets the owner's own tag push through). Body from the REST reference and this repository's `main` ruleset (administrator role is `actor_id` 5):
+
+```bash
+gh api -X POST repos/msieurthenardier/goldfinch/rulesets --input - <<'JSON'
+{"name":"release-tags","target":"tag","enforcement":"active","conditions":{"ref_name":{"include":["refs/tags/v*"],"exclude":[]}},"rules":[{"type":"creation"},{"type":"update","parameters":{"update_allows_fetch_and_merge":false}},{"type":"deletion"}],"bypass_actors":[{"actor_id":5,"actor_type":"RepositoryRole","bypass_mode":"always"}]}
+JSON
+```
+- Settings path instead: repository Settings -> Rules -> Rulesets -> New ruleset -> New tag ruleset; name `release-tags`; Enforcement Active; Bypass list: Repository admin (Always allow); target tags matching `v*`; tick Restrict creations, Restrict updates, Restrict deletions.
+- Confirm: `gh api repos/msieurthenardier/goldfinch/rulesets -q '.[] | "\(.id) \(.name) \(.target) \(.enforcement)"'` lists `release-tags tag active` beside `main branch active`.
+- Undo: `gh api -X DELETE repos/msieurthenardier/goldfinch/rulesets/<id>` (the id from the listing), or set enforcement to Disabled in Settings.
+- The `update` rule's `parameters.update_allows_fetch_and_merge` is documented for the endpoint but not verified for a `target: "tag"` ruleset: if the `POST` is rejected naming that parameter, re-send with the `update` rule as `{"type":"update"}` alone, and record which form was accepted.
+
+**2. Immutable releases** (after the first candidate):
+
+```bash
+gh api -X PUT repos/msieurthenardier/goldfinch/immutable-releases
+```
+- Settings path instead: repository Settings -> Releases (General) -> Enable release immutability.
+- Confirm: `gh api repos/msieurthenardier/goldfinch/immutable-releases` answers `{"enabled":true,…}` (today `{"enabled":false,"enforced_by_owner":false}`).
+- Undo: `gh api -X DELETE repos/msieurthenardier/goldfinch/immutable-releases`. Releases already published while it was on stay immutable.
+
+If the first candidate fails at `create-release`'s first step because the ruleset blocks the workflow's token, stop: the fix (a bypass entry for the GitHub Actions integration) is a decision with the Flight Director.
+
+## Leg 10 — dispositions-and-docs
+
+**Status**: landed (2026-11-17). Documentation only; no file under `src/`, `test/`, `scripts/`, `.github/` or `ci/tasks/` was changed by this leg (the leg-08 changes already in the working tree were left as they were).
+
+**Built.** `mission.md` gained `## Dispositions` (findings 1–22 with sub-rows per part, and a second table for the Flight 1 audit's NF items). `release-notes-draft.md` (this directory). Corrections: `CLAUDE.md` (two planning rules; the attestation sentence); `README.md` (new *Known limits* section; the verify section no longer says every installer carries an attestation); `docs/RELEASING.md` (new *Accepted, not fixed (release side)* and *Release checklist: by-eye items*; the fuse paragraph names the cookie ruling); `docs/vault.md` (the fill-payload acceptance); `ci/README.md` (public repository; *Accepted advisories* rewritten; the stale "untouched" sentence).
+
+**Counts (finding level):** fixed 6 (4, 9, 10, 11, 20, 21); fixed in part 16 (1, 2, 3, 5, 6, 7, 8, 12, 13, 14, 15, 16, 17, 18, 19, 22) [recounted in the final review fixes: 1, 3 and 5 moved from fixed]; accepted 0 as a whole finding (every accepted item is a sub-row of a finding that also changed something); struck 0. Sub-rows marked accepted: 2c, 2d, 3c, 3d, 6c, 7d, 8b, 8c, 12c, 13d, 15d, 16c, 19c, 19d, 22b. Sub-rows built-not-exercised or awaiting the operator: 7a, 7c, 7b (read-back), 13a, 18a, 18b, 18d.
+
+**AC2 run list.** Every path in the section was checked with `ls` (the proof files, the ten run logs, the specs, the squawks, `ci/pipeline.yml`; `ci/tasks/build-windows.yml` is absent and a grep for `build-windows` in `ci docs CLAUDE.md README.md .github` is empty). The 67 unit files named were run together with `node --test`: 1,605 tests, 1,605 pass, 0 fail. Files: ipc-gate, ipc-gate-invariant, preload-channel-literals, register-settings-ipc, gesture-verifier, gesture-witness, picker-context, picker-dismissal, vault-human-context, vault-human-confirm, sheet-arming, vault-confirmed-origins, update-version, update-check, register-update-ipc, update-notice-model, media-proxy, media-proxy-tokens, media-list, media-proxy-handler, the five reveal-gate files, download-path, register-download-ipc, download-retry, release-workflow-invariants, stable-tag-check, artifact-names, update-readme, check-fuses, history-store, history-recorder, reserved-ids, automation-auth, settings-store, vault-kdf-rewrap, vault-store-kdf-read-validation, vault-binding, vault-format-v2, vault-upgrade, vault-v1-vector, vault-power-lock, secret-clipboard, auth-challenges, display-url, cert-picker-template, automation-mcp-server, automation-audit-log, automation-port-moved, injected-input, injected-input-invariant, automation-input, ci-image-pins, launch-switches, launch-switches-placement, file-modes, vault-store-file-modes, sheet-menu-type-guard, tab-create-validate, session-runtime, register-tab-ipc, register-browser-ipc, origin-match, vault-picker-controls-template, jar-registry-ipc, history-ipc. Not run: `npm audit` (reaches an outside host; finding 20's proof is the leg 01 record); the behavior specs (their latest run logs are named, with their status stated honestly: `guest-ipc-refusal` halted on Electron 45, `admin-reach-refusal` partial, `vault-gesture-trust` reduced).
+
+**AC3 — accepted or not-covered item -> where an operator would look.**
+
+| Item | Where stated |
+| --- | --- |
+| 3c no automatic download or install | `docs/updates.md` (opening paragraph) |
+| 3d address and `Accept-Language` seen by GitHub | `docs/updates.md` *What the request carries* |
+| 7d no code signing | `README.md` (Download note, Verify section); `docs/RELEASING.md` *Accepted, not fixed* |
+| 8b cookies at rest | `README.md` *Known limits* (new); `docs/RELEASING.md` *Runtime fuses* and *Accepted, not fixed* (new) |
+| 8c `asar: false`, no code-on-disk integrity | `docs/RELEASING.md` *Runtime fuses*, *Accepted, not fixed*; `README.md` *Known limits* |
+| 19c `--no-sandbox`, `--proxy-server`, admin variable | `docs/RELEASING.md` *Launch switches*; `README.md` *Known limits* |
+| 19d process-launcher family, local attacker | `docs/RELEASING.md` *Launch switches* ("Not covered") |
+| 2c fill payload through the page's world | `docs/vault.md` (new bullet beside the box residual) |
+| 2d page-supplied icon box | `docs/vault.md` ("Stated residual") |
+| 6c no download confirmation | `README.md` *Known limits* (new); `docs/RELEASING.md` checklist item 1 |
+| 12c rollback of one vault | `docs/vault.md` ("the existing rollback limit") |
+| 13d no re-key on revoke or master change | `docs/vault.md` ("What is NOT re-keyed"); `README.md` *Known limits* |
+| 15d prompt arming, `user:pass@`, long subdomains | `README.md` *Known limits* (new) |
+| 16c in-page navigation not rate-limited; 22b browser views not pinned | `README.md` *Known limits* (new) |
+| 17a port fallback kept, shown | `docs/mcp-automation.md` (production-port row) |
+| 17c read-back of a filled password; 5 residuals | `docs/mcp-automation.md` (the read-back paragraph; *What each tier can reach*) |
+| 7a/7c/18a/18b awaiting a tag push or the operator's settings | `docs/RELEASING.md` *The release workflow*, *Accepted, not fixed*, *One-time repository settings* |
+
+**AC4 — false-claim sweep.** CLAUDE.md, `README.md`, `docs/**`, `ci/README.md` searched.
+
+| Claim | Where it was | Result |
+| --- | --- | --- |
+| Finding 22: four guards on every state-changing sheet channel | CLAUDE.md *Menu-overlay sheet* | already true as written (the gate owns guards 1 and 3; `sheet-menu-type-guard.test.js`) |
+| `settings-get` carries non-secret data only (1i) | CLAUDE.md | already true as written (`automationKeyState`); no "non-secret only" wording remains |
+| Admin reach into internal pages "by design" (5) | `docs/mcp-automation.md` | already true as written: it now says reach is not unrestricted (reveal gate); the by-design clause is about `evaluate` reaching the page |
+| "The vault locks at quit" (a Flight 2 false premise) | a store comment, then CLAUDE.md | already true: the quit lock was built (`lockVaultForQuit`); `docs/vault.md` states it |
+| "205" channel count | CLAUDE.md | already true: 209 (counted from `CHANNEL_CLASS` in this leg); `flight.md` still says 205 in a historical sentence, left alone |
+| "private repo" | `ci/README.md` | corrected (the Concourse secrets table) |
+| `build.yml` is "untouched" | `ci/README.md` opening paragraph | corrected |
+| Attestation on every installer | `README.md`, CLAUDE.md | corrected to say releases up to v0.19.15 have none and the step has not yet run |
+| A manual dispatch yields no installer | `docs/RELEASING.md`, CLAUDE.md | already true: both say a dispatch stages real installers as one-day artifacts and publishes nothing |
+| A tag can be reused / re-tag as rollback | `docs/RELEASING.md`, CLAUDE.md | already true: "never re-tag; publish the next patch"; the one `--cleanup-tag` sentence is limited to releases published before immutability |
+| Fuse/launch-switch statements | `docs/RELEASING.md`, `docs/dev-testing.md` | already true as written; the Windows and macOS gaps are stated |
+| Cookies "the operator's separate decision" (fuse paragraph) | `docs/RELEASING.md` | corrected: now says accepted, 2026-11-17 |
+| Release checklist with seven unowned items | `docs/RELEASING.md` Notes | corrected: gathered under *Release checklist: by-eye items* with platform and walk owner |
+
+**AC5 — the two rules as written (CLAUDE.md, *Project-specific planning rules*).**
+1. "A refusal that compares an IPC-supplied value rejects a non-string BEFORE comparing, and its tests send an array and an object through the real store, not only a mock (Mission 23: a `===` guard on a key name was bypassed by a non-string the store then coerced, found at Flight 1's review and built again in Flight 2's `admin-key-name` leg)."
+2. "Every claim that existing code already does something — in a design decision, a platform check or a leg's context — cites the call site that does it (Mission 23 Flight 2: "the vault is locked at quit" rested on a comment about a hook that was never wired, and "an unknown session id gets the wrong status" was already handled; both fell to "show me the line")."
+
+**AC6.** The checklist has thirteen rows. Walk column: items 1–7 (Flight 1's mark and Flight 2's six) and the new 8 (kebab item), 9 (refused-switch box) and 12 (About spacing) are planned for leg `hat-and-alignment` per the plan (DD8, line 221, and the flight log's carried note); item 10 (Windows `/switch`) is not named in the plan; item 11 (macOS on hardware) is not walkable by the operator (ruling 2026-11-17); item 13 (Flight 1 groups 2–6, Flight 2 groups 3–7) is not in the plan's seven and has no owner. Nothing was struck.
+
+**AC7.** `release-notes-draft.md`: Before you upgrade (the vault note, verbatim from the checklist), What you will notice, What changed underneath, macOS users please tell us, Verify your download, Operator notes. **AC8.** `ci/README.md` *Accepted advisories*: the four `minimatch@…` overrides, why, the removal condition and the command; the `@hono/node-server` line. **AC9.** See below.
+
+**Not verified here.** Nothing in this leg ran the app, a packaged build, a port or an outside host. The Concourse digest form, the attestation step, the stable-tag check on a real tag, the tag ruleset, immutable releases and the documented `gh attestation verify` / `gh release verify` commands are described as unexercised or awaiting the operator.
+
+**Reported to the Flight Director (could not source):** finding 14b (no disposition anywhere in the three flights' artifacts); NF6 (open as squawk 0187, no acceptance recorded); no operator ruling is recorded for 13d (the flight plan accepted it under the mission's permission); no owner for checklist rows 10 and 13; the `admin-reach-refusal` spec has never passed in full.
+
+### Final review fixes (legs 08, 10)
+
+1. **No `${{ }}` in any `run:` body.** `test/unit/release-workflow-invariants.test.js` gained one test scanning only `run:` bodies (block and single-line) of `build.yml` and `ci.yml`; throws on zero blocks. `ci.yml` has no expression in a run body, so both are covered. Neuter: `${{ github.ref_name }}` put in the dispatch step's run body went red ("build.yml: run block 14 holds an expression"); restored from a copy, identical.
+2. **`stable_tag_on_default` stderr.** `gh` stderr now goes to a temp file (`${RUNNER_TEMP:-${TMPDIR:-/tmp}}`), printed as `stderr='…'` on the diagnostic line; allow still needs rc 0 and exactly `identical`/`behind`; the 403 check reads the status and the stderr text (live finding: `gh` writes the HTTP text to stderr and the JSON error body to stdout, so both are inspected). `stable-tag-check.test.js` fakes now take an optional stderr; error cases put their text on stderr; one new case: success plus a stderr notice is allowed. Live read-only compare calls through the edited function (rc/answer as printed): `v0.19.15` commit `f401407…` rc=0 `identical` -> ALLOWED; remote head `09302d9…` of this branch rc=0 `ahead` (both attempts) -> REFUSED; made-up SHA rc=1, stderr `gh: Not Found (HTTP 404)` (both attempts) -> REFUSED.
+3. **Runbook.** One sentence added under the ruleset step (above) on `update_allows_fetch_and_merge`; `docs/RELEASING.md` does not carry the body, so nothing to mirror.
+4. **README** *Verify your download*: attestation wording is now "meant to carry ... starting with the first release after v0.19.15 ... a release without one makes the command report none was found".
+5. **`docs/RELEASING.md` row 6** now points at the vault-upgrade release note under *Notes* below.
+6. **`release-notes-draft.md`** first operator-notes bullet corrected: the sentence lives in `README.md`, not the draft.
+7. **Dispositions.** Rows 1, 3a and 5 now read "fixed in part"; counts recounted from the table: finding level fixed 6 (4, 9, 10, 11, 20, 21), fixed in part 16, accepted 0, struck 0 (22 total); the Leg 10 entry matches. Row 13d now names the Flight 2 plan (Flight Director) under the mission's permission, no separate operator ruling; row 3d says a default put to the operator and not objected to, pending an explicit ruling. No criterion ticked; 14b and NF6 untouched.

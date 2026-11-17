@@ -22,7 +22,8 @@ anything: it only remembers a version number and offers to open the release page
 ## What the request carries
 
 `GET` with `User-Agent: Goldfinch-update-check` and `Accept: application/vnd.github+json`, plus what
-Chromium's network stack adds (`Accept-Encoding`, `Accept-Language`, `Sec-Fetch-*`). It sends **no
+Chromium's network stack adds (`Accept-Encoding`, `Accept-Language`, `Sec-Fetch-*`; the last two reveal
+the browser's language preference and that the request is a fetch, an accepted disclosure). It sends **no
 cookies** (credentials omitted, a sign-in challenge is never answered), **no `Referer`, no `Origin`,
 no `Authorization`**, is never served from or stored in a cache, and carries neither the app version
 nor an `Electron/` token. It goes through the main process, not through any cookie jar or tab, and

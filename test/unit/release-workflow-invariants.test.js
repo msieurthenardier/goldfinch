@@ -110,8 +110,45 @@ test('upload job: no checkout and no npm / npx / node run line', () => {
   assert.ok(jobs.upload, 'no upload job');
   assert.doesNotMatch(jobs.upload, /actions\/checkout/);
   assert.doesNotMatch(runLines(jobs.upload), /(?:^|[\s;&|(`$])(?:npm|npx|node)(?=\s|$)/m);
-  assert.deepEqual(jobPermissions(jobs.upload), ['contents: write']);
   assert.match(jobs.upload, /actions\/download-artifact@/);
+});
+
+/** The text of the step whose `- name:` line contains `name`, up to the next step or the job end. */
+function stepOf(job, name) {
+  const lines = job.split('\n');
+  const at = lines.findIndex((l) => /^ {6}- name:/.test(l) && l.includes(name));
+  assert.ok(at >= 0, `no step named like "${name}"`);
+  let end = at + 1;
+  while (end < lines.length && !/^ {6}- name:/.test(lines[end])) end++;
+  return lines.slice(at, end).join('\n');
+}
+
+test('upload job: exact permission set; the signing permissions live nowhere else', () => {
+  assert.deepEqual(jobPermissions(jobs.upload), ['contents: write', 'id-token: write', 'attestations: write']);
+  for (const [name, job] of Object.entries(jobs)) {
+    if (name === 'upload') continue;
+    assert.doesNotMatch(job, /id-token|attestations\s*:/, `${name}: holds a signing permission`);
+  }
+  assert.doesNotMatch(build.split('\njobs:\n')[0], /id-token|attestations\s*:/, 'top level holds a signing permission');
+  assert.doesNotMatch(jobs.build, /actions\/attest/, 'the build job must not attest');
+});
+
+test('upload job: one attest step, after the upload, tag-gated, subjects are the verified list only', () => {
+  const attests = jobs.upload.match(/uses: actions\/attest@/g) || [];
+  assert.equal(attests.length, 1, 'expected exactly one attest step');
+  const upload = jobs.upload.indexOf('- name: Upload to the draft release');
+  const attest = jobs.upload.indexOf('- name: Attest build provenance');
+  assert.ok(upload >= 0 && attest >= 0, 'steps not found');
+  assert.ok(upload < attest, 'the attest step must come after the upload step');
+  const step = stepOf(jobs.upload, 'Attest build provenance');
+  assert.match(step, /^\s+if: startsWith\(github\.ref, 'refs\/tags\/v'\)\s*$/m);
+  assert.match(step, /^\s+subject-path: \$\{\{ steps\.verify\.outputs\.subjects \}\}\s*$/m);
+  assert.doesNotMatch(step, /[*?]|artifacts\//, 'no glob or bare artifacts path in the attest step');
+  assert.doesNotMatch(step, /VERSION|SHA256SUMS/);
+  const verify = stepOf(jobs.upload, 'Verify names and digests');
+  assert.match(verify, /^\s+id: verify\s*$/m);
+  assert.match(verify, /subjects<<SUBJECTS_EOF/);
+  assert.match(verify, /upload-list\.txt" *\n\s+echo 'SUBJECTS_EOF'/);
 });
 
 test('upload job: artifact directory names are pinned to the exact three before any file is read', () => {
@@ -255,3 +292,34 @@ test(
     }
   }
 );
+
+/** Every `run:` body in a workflow text (multi-line block bodies and single-line values), nothing else. */
+function runBodiesOf(text) {
+  const lines = text.split('\n');
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^( *(?:- )?)run:[ \t]*(.*)$/);
+    if (!m) continue;
+    const keyCol = m[1].length;
+    if (/^[|>][+-]?\s*$/.test(m[2])) {
+      const body = [];
+      for (let j = i + 1; j < lines.length; j++) {
+        if (lines[j].trim() === '' || lines[j].search(/\S/) > keyCol) body.push(lines[j]);
+        else break;
+      }
+      out.push(body.join('\n'));
+    } else {
+      out.push(m[2]);
+    }
+  }
+  return out;
+}
+
+test('no workflow expression inside any run: body (build.yml and ci.yml)', () => {
+  for (const f of ['build.yml', 'ci.yml']) {
+    const bodies = runBodiesOf(read(f));
+    assert.ok(bodies.length > 0, `${f}: no run blocks found`);
+    bodies.forEach((b, i) => assert.doesNotMatch(b, /\$\{\{/, `${f}: run block ${i + 1} holds an expression`));
+  }
+  assert.ok(runBodiesOf(read('build.yml')).length >= 10, 'build.yml: fewer run blocks than expected');
+});
