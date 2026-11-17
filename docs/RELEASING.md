@@ -4,6 +4,36 @@ Releases are **tag-driven**: pushing a `vX.Y.Z` tag runs `.github/workflows/buil
 which builds installers for Windows/macOS/Linux and publishes a GitHub Release with them
 attached. Nothing else is needed to ship the binaries.
 
+## The release workflow
+
+Four jobs. The one that runs project code (dependency install scripts, the build) cannot write
+to the repository or the release; the one that writes runs none of it.
+
+| Job | Runs on | Permissions | May do |
+| --- | --- | --- | --- |
+| `create-release` (tags only) | Linux | `contents: write` | Validates the tag as strict semver, classifies stable vs prerelease, creates the **draft** release. `gh` only; no checkout. |
+| `build` (mac / linux / win) | one runner each | `contents: read`, no token or secret anywhere in the job | Checkout (credentials not persisted), `npm ci`, version from the tag, `electron-builder --publish never`, fuse check on the unpacked app, macOS ad-hoc signature verification, one start of the unpacked app, then stages that platform's installers **by exact name** with their SHA-256 list and the version, and uploads them as a one-day, uncompressed Actions artifact. |
+| `upload` | Linux | `contents: write` | No checkout, no `node` / `npm`. Downloads the three artifacts, recomputes every digest, asserts the file names are exactly the five expected for the tag's version, then `gh release upload` into the draft (the token is given to that one step). |
+| `publish-release` (tags only) | Linux | `contents: write` | Flips the draft to published: stable tag -> latest, prerelease tag -> prerelease. Only after `upload` succeeded. |
+
+The digest comparison proves the files were not changed between jobs; it does not prove the build
+job was honest (that job is the party being contained).
+
+**A release holds five installers and nothing else**: `Goldfinch-Setup-X.exe`, `Goldfinch-X-arm64.dmg`,
+`Goldfinch-X-arm64-mac.zip`, `Goldfinch-X.AppImage`, `goldfinch_X_amd64.deb`. The updater metadata the
+builder can write (`latest*.yml`, `*.blockmap`) is no longer published: the app notifies about a new
+version, it does not self-update. The names are set per target in `package.json` (`artifactName`) and
+are the ones `scripts/update-readme.mjs` links (`test/unit/artifact-names.test.js`).
+
+**A manual dispatch runs everything except the upload and the release steps**: it builds, checks and
+stages the installers and runs the `upload` job's name and digest checks, and publishes nothing. The
+staged installers stay on the run as one-day artifacts.
+
+The invariants (every `uses:` pinned to a full SHA with a `# vX.Y.Z` comment; the build job's
+`contents: read`, no token and no persisted checkout credentials; the upload job running no project
+code; `--publish always` appearing nowhere; one-day, uncompressed artifacts) are pinned by
+`test/unit/release-workflow-invariants.test.js`, a text scan of the workflow files.
+
 ## Cut a release
 
 From an up-to-date `main` with green gates (`npm test`, `npm run typecheck`, `npm run lint`):
@@ -43,9 +73,8 @@ download links go live.
 ## Windows HAT build (prerelease tag)
 
 WSL can't build the NSIS installer, and a manual `workflow_dispatch` run of `build.yml` is a
-build-only smoke check (`--publish never`, no artifact upload — see the workflow header for the
-storage-quota history): it proves compilation but yields no installer. To get one for a human
-acceptance test, push a strict-semver **prerelease** tag on the commit under test:
+smoke check that builds, checks and stages the installers but uploads them to no release (see *The
+release workflow* above). To get a published installer for a human acceptance test, push a strict-semver **prerelease** tag on the commit under test:
 
 ```bash
 git tag -a vX.Y.Z-rc.N <commit> -m "Windows HAT build"
@@ -63,6 +92,100 @@ git tag -d vX.Y.Z-rc.N
 ```
 
 This is **outward-facing** — the prerelease is public — so only tag commits you're willing to publish.
+
+## Runtime fuses
+
+Packaged builds ship with three Electron fuses turned off (`package.json` `build.electronFuses`;
+electron-builder flips them while packing, on every platform it packs):
+
+| Fuse | Off means |
+| --- | --- |
+| `runAsNode` | `ELECTRON_RUN_AS_NODE=1 goldfinch -e '...'` no longer runs the binary as a plain Node interpreter. |
+| `enableNodeOptionsEnvironmentVariable` | `NODE_OPTIONS` is not consulted. |
+| `enableNodeCliInspectArguments` | `--inspect` / `--inspect-brk` open no debugger port. |
+
+Deliberately left alone: `enableEmbeddedAsarIntegrityValidation` and `onlyLoadAppFromAsar` (they need
+`asar`, and `asar: false` is load-bearing), `grantFileProtocolExtraPrivileges` (stays on: the chrome is a
+`file://` page), `enableCookieEncryption` (the operator's separate decision; one-way, see the flight
+notes), and `WasmTrapHandlers` (Electron's own default, on). `scripts/check-fuses.mjs` pins the whole
+table, so any of these changing by accident fails the packaging step too.
+
+- **Check a build:** `node scripts/check-fuses.mjs <path-to-binary>` (CI runs it on
+  `dist/linux-unpacked/goldfinch` after packing: `ci/tasks/package-linux.yml`, and the *Check Electron
+  fuses* step of `.github/workflows/ci.yml`; the release workflow's `build` job runs it on every
+  platform's unpacked app). Exit 0 only when the table matches.
+- **Read them from an installed build:** `npx electron-fuses read --app <path-to-binary>` (the `goldfinch`
+  binary on Linux, `Goldfinch.exe` on Windows, the `.app` on macOS).
+- **macOS:** changing the binary breaks the ad-hoc signature an Apple-silicon build needs, so
+  `resetAdHocDarwinSignature: true` makes the fuse step re-sign it. That cannot be run on Linux; it is
+  checked on the macOS build runner of the release workflow (`codesign --verify --deep --strict` and an
+  ad-hoc-signature check, then one start of the unpacked app), not on hardware.
+- The dev app runs the unmodified `node_modules/electron` binary and is unaffected.
+
+## Launch switches
+
+An **installed** (packaged) build does not obey the command-line switches that turn off its protections.
+The threat is the app being repurposed through its command line by something that is not a local attacker
+with a debugger: a shortcut, a wrapper script, a URL-handler argument. Someone who can edit the files on
+disk already runs code as the operator; that is not defended. A dev launch (`npm start`,
+`npm run dev:automation`) is unaffected: the decision runs only when `app.isPackaged`.
+
+`src/main/launch-switches.js` holds two tables; the block in `main.js` applies them before the
+single-instance lock, so a refused launch opens no store, takes no lock and hands nothing to a running
+instance. Chromium's own parser decides what counts as a switch (bare, `=value`, a `/` prefix on Windows),
+through `app.commandLine.hasSwitch`.
+
+**Stripped** (removed before `ready`; removal was measured to stop the effect on the packaged Linux build,
+except where noted). One stderr line, `goldfinch: ignored launch switches: --a, --b`, lists what was removed.
+
+| Switch | What it would otherwise allow |
+| --- | --- |
+| `remote-debugging-port`, `remote-debugging-pipe` | A full DevTools-protocol connection to the browser and every page. |
+| `remote-debugging-address`, `remote-allow-origins`, `remote-debugging-targets` | Widen or reshape the above; meaningless once it is stripped (not measured on their own). |
+| `ignore-certificate-errors` | Accept any TLS certificate. |
+| `disable-web-security` | Same-origin policy off. |
+| `host-rules`, `host-resolver-rules` | Redirect any hostname to an address of the launcher's choosing. |
+| `load-extension`, `disable-extensions-except` | Electron ignores `--load-extension` (measured: no effect); listed so a later Electron that honours it is covered. |
+
+**Refused** (the launch stops): the removal was measured insufficient, or was not measured, and refusing
+needs no proof that removal is in time. One stderr line, `goldfinch: refusing to start: --a (exit 64)`,
+then a native error box titled *Goldfinch cannot start with these options* (on Linux, before `ready`,
+Electron writes the box to stderr instead: a second pair of lines), then `app.exit(64); process.exit(64)`
+(64 is `EX_USAGE`). Names come from the tables only, never from the command line.
+
+| Switch | What it would otherwise allow |
+| --- | --- |
+| `js-flags` | Arbitrary V8 flags. Measured: removal reaches the renderers but not the main process. |
+| `ignore-certificate-errors-spki-list`, `unsafely-treat-insecure-origin-as-secure` | Trust chosen keys or treat chosen origins as secure. Unmeasured. |
+| `disable-site-isolation-trials`, `disable-site-isolation-for-policy` | Site isolation off. Unmeasured. |
+| `disable-features` naming `IsolateOrigins`, `SitePerProcess` or `site-per-process` | Site isolation off (exact, case-sensitive tokens after splitting on commas and trimming, a `<study` or `:params` suffix cut off). Other entries keep working, including `ForceThirdPartyCookieBlockingEnabled`. |
+| `allow-running-insecure-content` | Mixed content. Unmeasured. |
+| `ssl-key-log-file`, `log-net-log` | Write TLS session secrets or a full network capture to a file of the launcher's choosing. Unmeasured. |
+
+Everything in the refused table beyond `js-flags` is unmeasured and refused by default. A switch whose
+removal fails (the call throws, or the switch is still present afterwards) is promoted to a refusal.
+
+**Deliberately still honoured.** `--no-sandbox` and `--disable-gpu-sandbox` (some Linux hosts cannot start
+the sandbox; running without it lowers protection and is the operator's choice). `--proxy-server` and its
+relatives (operator ruling 2026-11-17). `GOLDFINCH_AUTOMATION_ADMIN`: whoever can set it already has full
+access, and the admin tier still needs automation turned on and a minted key. `--user-data-dir`,
+`--enable-features`, and `--disable-features` in general. `--allow-file-access-from-files` is on neither
+list: Electron adds it to every launch itself while the `GrantFileProtocolExtraPrivileges` fuse is on (the
+chrome is a `file://` page), so an operator-supplied copy changes nothing and listing it would refuse every
+start.
+
+**Not covered.** The process-launcher family (`--gpu-launcher`, `--renderer-cmd-prefix`,
+`--utility-cmd-prefix`, `--browser-subprocess-path`): whether a refusal at the top of `main.js` is early
+enough for them was not measured, so no protection is claimed; Electron's own argument check for URL-handler
+launches is the existing defence. A local attacker who can edit files or the environment. Windows `/switch`
+forms and case are handled by Chromium's parser; they were not run on Windows.
+
+A relaunch (Shields *Restart now*) re-passes the original arguments, so a stripped switch is stripped again
+and a launch that passed passes again.
+
+**Adding a switch** is a table row plus a measurement of whether `removeSwitch` before `ready` stops its
+effect (`docs/dev-testing.md` *Packaged build on a dev host*; observe the effect from outside the app). When
+in doubt it goes in the refused table.
 
 ## Notes
 

@@ -1286,3 +1286,21 @@ test('a destroyed owning-record chrome makes the popup present a harmless no-op 
     assert.equal(h.presents[0].payload.realm, 'evil. Trust me.');
   });
 }
+
+// Leg `update-check` (AC8): the update check omits credentials, so no `login` event is expected; if one
+// ever arrived for a request with no webContents (the checker's shape) it is cancelled silently.
+test('leg update-check: a login challenge with no webContents (the update request) cancels silently, once, with no prompt', () => {
+  const h = makeHarness();
+  const cb = makeCallback();
+  h.store.handleLogin(
+    undefined,
+    { url: 'https://api.github.com/repos/o/r/releases/latest' },
+    { isProxy: false, host: 'api.github.com', port: 443, scheme: 'basic', realm: 'x' },
+    cb
+  );
+  assert.deepEqual(cb.calls, [[]]);
+  assert.equal(h.presents.length, 0);
+  const proxyCb = makeCallback();
+  h.store.handleLogin(undefined, { url: 'http://127.0.0.1:1/' }, { isProxy: true }, proxyCb);
+  assert.deepEqual(proxyCb.calls, [[]]);
+});

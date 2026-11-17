@@ -78,7 +78,7 @@ or download **v0.19.15** directly:
   with a sticky left section-nav and three titled sections: Startup & appearance,
   Privacy & Shields, and About; the **Privacy & Shields** section has working
   global Shields toggles and the **Startup & appearance** section has an editable
-  Home page — both persisted and kept in sync with the slide-out Shields panel),
+  Home page — both persisted and kept in sync with the slide-out Shields panel; **About** shows the running version and, when a newer release exists, says so with a link to its release page — a once-a-day check you can turn off there, which downloads and installs nothing; the menu also gains an **Update available** item at the top while one exists),
   **Downloads**, **Cookie jars**, **Automation** (each opens its `goldfinch://`
   page in a tab), and **Vault**; **Print…**; and **Exit** (quits Goldfinch).
   Keyboard-operable: focus the button and press `Enter`, `Space`, or `↓` to

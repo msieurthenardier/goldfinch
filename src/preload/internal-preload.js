@@ -276,6 +276,14 @@ if (INTERNAL_ORIGINS.has(location.origin)) {
      */
     offAutomationActivity: (h) => off(h),
 
+    // Update check (leg `update-check`). State is main's; opening takes NO argument.
+    updateGetState: () => ipcRenderer.invoke('update:get-state'),
+    /** @param {(state: object) => void} cb @returns {number} */
+    onUpdateStateChanged: (cb) => on('update-state-changed', cb),
+    /** @param {number} h */
+    offUpdateStateChanged: (h) => off(h),
+    updateOpenReleasePage: () => ipcRenderer.invoke('internal-update-open-release-page'),
+
     // Downloads surface (Flight 5, Leg 2). The goldfinch://downloads page is the only
     // caller; these are inert on the settings page. The actionable savePath is NEVER
     // passed from the renderer — main resolves it by id from the trusted manager/store

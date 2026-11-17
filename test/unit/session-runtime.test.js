@@ -776,3 +776,33 @@ test('prune and sweep errors are isolated from the cadence caller', async () => 
   await new Promise((resolve) => setImmediate(resolve));
   assert.ok(rejected.log.some((entry) => entry[0] === 'error'));
 });
+
+// Leg `update-check` (AC9): the update check's request goes through `net.fetch` on the default session,
+// whose listeners see it. They must leave it alone: no cancel, no redirect, nothing recorded.
+test('leg update-check: the default session listeners leave the update-check request untouched and unrecorded', () => {
+  const realShields = require('../../src/main/shields');
+  const { LATEST_RELEASE_API_URL } = require('../../src/shared/update-version.js');
+  const h = setup({
+    blockTrackers: true,
+    shields: { active: () => true, stripUrl: (url) => realShields.stripUrl(url) }
+  });
+  const { session, handlers } = fakeSession(h.log);
+  h.runtime.onSessionCreated(session);
+  for (const resourceType of [undefined, 'other', 'xhr', 'mainFrame']) {
+    let response;
+    handlers.beforeRequest({ url: LATEST_RELEASE_API_URL, resourceType, method: 'GET' }, (value) => {
+      response = value;
+    });
+    assert.deepEqual(response, {}, 'no cancel, no redirectURL for resourceType ' + resourceType);
+  }
+  let headers;
+  handlers.beforeSendHeaders(
+    { url: LATEST_RELEASE_API_URL, requestHeaders: { 'User-Agent': 'Goldfinch-update-check' } },
+    (value) => {
+      headers = value.requestHeaders;
+    }
+  );
+  assert.deepEqual(headers, { 'User-Agent': 'Goldfinch-update-check' });
+  h.flushPrivacy();
+  assert.equal(h.chromeSends.length, 0, 'nothing recorded or pushed for a request with no webContents');
+});

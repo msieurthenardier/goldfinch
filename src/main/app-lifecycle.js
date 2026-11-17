@@ -40,6 +40,11 @@ function registerAppLifecycle({
   // Leg `clipboard-and-file-modes`: `() => Promise` - the pending secret-clipboard clear; FIRST in `before-quit`.
   flushSecretClipboard,
   lockVaultForQuit,
+  // Leg `update-check`: `() => void` - reads the stored `updateCheckEnabled` and starts the checker; runs in
+  // the ready chain after `initProfileAndStores` (the settings store is loaded there). `stopUpdateCheck`
+  // runs in `before-quit`. Both optional, no-op defaults (the lifecycle suite builds its deps by hand).
+  startUpdateCheck = () => {},
+  stopUpdateCheck = () => {},
   wireDownloadHandler,
   applyShields,
   applySpellcheck,
@@ -358,6 +363,11 @@ function registerAppLifecycle({
     } catch (error) {
       logger.error('[vault-power-lock] registration failed:', error);
     }
+    try {
+      startUpdateCheck();
+    } catch (error) {
+      logger.error('[update-check] start failed:', error);
+    }
 
     // Mission 20 Flight 3 Leg 3 (DD8/AC7): prune old minidumps to the newest
     // 20 at every ready — after initProfileAndStores, so `app.getPath(
@@ -542,6 +552,13 @@ function registerAppLifecycle({
       );
     } catch (error) {
       logger.error('[secret-clipboard] before-quit flush failed:', error);
+    }
+    // Leg `update-check`: stops the daily timer and aborts a request in flight. Touches no store, so its
+    // place after the clipboard flush does not matter; its own try.
+    try {
+      stopUpdateCheck();
+    } catch (error) {
+      logger.error('[update-check] before-quit stop failed:', error);
     }
     setSessionQuitting(true);
     // Squawk 0073: cancel the continuous-snapshot debounce timer FIRST — otherwise a

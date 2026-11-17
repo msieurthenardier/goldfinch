@@ -46,6 +46,7 @@ menu-side observables (menu closes, `aria-expanded` resets) — see the Print mo
 
 ## Preconditions
 
+- **No update notice**: run with `GOLDFINCH_UPDATE_CHECK_URL` unset (the default) — the kebab's extra "Update available" first row (leg `update-notice`) appears only while a newer release is known, and the default rows asserted here hold only without it.
 - **Apparatus — admin MCP surface.** Goldfinch is running via `npm run dev:automation` with
   `GOLDFINCH_AUTOMATION_DEV_MINT=1 GOLDFINCH_AUTOMATION_ADMIN=1 GOLDFINCH_MCP_PORT=49707`. At
   launch, the app prints `AUTOMATION_DEV_MINT { "key": "...", "adminKey": "..." }` to stdout —

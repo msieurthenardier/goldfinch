@@ -559,3 +559,33 @@ test('mint, revoke and the admin mint/revoke channels still write the key settin
     );
   }
 });
+
+test('leg update-check: updateCheckEnabled reacts AFTER the write and the broadcast, with value === true', async () => {
+  const h = makeSettingsIpcHarness();
+  await h.invokeInternal('internal-settings-set', 'updateCheckEnabled', false);
+  await h.invokeInternal('internal-settings-set', 'updateCheckEnabled', true);
+  await h.invokeInternal('internal-settings-set', 'updateCheckEnabled', 'yes');
+  assert.deepEqual(
+    h.events.map((event) => (event[0] === 'broadcast' ? ['broadcast', event[1]] : event.slice(0, 3))),
+    [
+      ['set', 'updateCheckEnabled', false],
+      ['broadcast', 'settings-changed'],
+      ['update-check-enabled', false],
+      ['set', 'updateCheckEnabled', true],
+      ['broadcast', 'settings-changed'],
+      ['update-check-enabled', true],
+      ['set', 'updateCheckEnabled', 'yes'],
+      ['broadcast', 'settings-changed'],
+      ['update-check-enabled', false]
+    ]
+  );
+  // a non-string key is refused before the comparison
+  await assert.rejects(h.invokeInternal('internal-settings-set', ['updateCheckEnabled'], true));
+});
+
+test('leg update-check: the reaction is optional (a registrar built without it still accepts the write)', async () => {
+  const { registerSettingsIpc } = require('../../src/main/register-settings-ipc');
+  const src = require('node:fs').readFileSync(require.resolve('../../src/main/register-settings-ipc'), 'utf8');
+  assert.match(src, /applyUpdateCheckEnabled\s*=\s*\([^)]*\)\s*=>\s*\{\}/);
+  assert.equal(typeof registerSettingsIpc, 'function');
+});

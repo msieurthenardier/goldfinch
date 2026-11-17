@@ -110,6 +110,7 @@ function makeSettingsIpcHarness(overrides = {}) {
     broadcast: (channel, payload) => events.push(['broadcast', channel, payload]),
     applyAutomationEnabledChange: async (enabled) => events.push(['automation-enabled', enabled]),
     applySpellcheck: (session, enabled) => events.push(['spellcheck', session.id, enabled]),
+    applyUpdateCheckEnabled: (enabled) => events.push(['update-check-enabled', enabled]),
     getDefaultSession: () => {
       defaultSessionReads++;
       return defaultSession;

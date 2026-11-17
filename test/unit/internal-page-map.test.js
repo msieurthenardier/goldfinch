@@ -17,7 +17,9 @@ test('createInternalPageMap returns the exact current host/path allowlist', () =
     '/section-scroll-spy.js',
     '/settings.css',
     '/settings.js',
-    '/shields-isolation-model.js'
+    '/shields-isolation-model.js',
+    '/update-notice-model.js',
+    '/update-version.js'
   ]);
   assert.deepEqual(Object.keys(map.automation).sort(), [
     '/',

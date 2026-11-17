@@ -11,6 +11,8 @@ import { initSectionScrollSpy } from './section-scroll-spy.js';
 import { SEARCH_ENGINES, normalizeHomePageInput } from './search-engines.js';
 // @ts-ignore — serving-path vs disk-path mismatch (see above)
 import { defaultBrowserRowModel } from './default-browser-row-model.js';
+// @ts-ignore — serving-path vs disk-path mismatch (see above)
+import { updateNoticeModel } from './update-notice-model.js';
 import {
   isolationModel,
   restartControl,
@@ -627,4 +629,85 @@ initSectionScrollSpy({ document, IntersectionObserver, window });
     if (all && typeof all.bookmarksBarEnabled === 'boolean') el.checked = all.bookmarksBarEnabled;
   });
   window.addEventListener('pagehide', () => window.goldfinchInternal.offSettingsChanged(h), { once: true });
+})();
+
+/* ---- About / update notice controller (Mission 23 F3 leg `update-notice`) ---- */
+
+(function () {
+  // Renders ONLY from main's validated update state, through the pure model. Patch-in-place
+  // (textContent / hidden / aria-label) — the button is never rebuilt, so it keeps focus across a
+  // push. The button calls the no-argument bridge method and nothing else; the page never fetches
+  // or builds an address.
+  if (!window.goldfinchInternal) return;
+  const bridge = window.goldfinchInternal;
+  const versionEl = document.getElementById('about-version');
+  const statusEl = document.getElementById('about-update-status');
+  const btn = /** @type {HTMLButtonElement|null} */ (document.getElementById('about-update-open'));
+  const check = /** @type {HTMLInputElement|null} */ (document.getElementById('update-check-enabled'));
+  if (!versionEl || !statusEl || !btn || !check) return;
+
+  let pushed = false;
+
+  function render(state) {
+    const m = updateNoticeModel(state);
+    if (versionEl.textContent !== m.versionText) versionEl.textContent = m.versionText;
+    if (statusEl.textContent !== m.noticeText) statusEl.textContent = m.noticeText;
+    if (btn.textContent !== m.openLabel && m.showNotice) btn.textContent = m.openLabel;
+    if (m.showNotice) btn.setAttribute('aria-label', m.openAriaLabel);
+    else btn.removeAttribute('aria-label');
+    const hadFocus = document.activeElement === btn;
+    statusEl.hidden = !m.showNotice;
+    btn.hidden = !m.showNotice;
+    // A hidden focused control drops focus to the document: move it to the checkbox instead.
+    if (hadFocus && !m.showNotice) check.focus();
+  }
+
+  render(null);
+  if (typeof bridge.updateGetState === 'function') {
+    bridge
+      .updateGetState()
+      .then((s) => {
+        // A push that already arrived is newer than this boot read.
+        if (!pushed) render(s);
+      })
+      .catch(() => {});
+  }
+  if (typeof bridge.onUpdateStateChanged === 'function') {
+    const hUpdate = bridge.onUpdateStateChanged((s) => {
+      pushed = true;
+      render(s);
+    });
+    window.addEventListener('pagehide', () => bridge.offUpdateStateChanged?.(hUpdate), { once: true });
+  }
+
+  btn.addEventListener('click', () => {
+    bridge.updateOpenReleasePage().catch(() => {});
+  });
+
+  // The checkbox follows the stored setting (never .click()/dispatchEvent — that would echo).
+  // A push seen before the boot read resolves wins (the read is older); a rejected write reverts
+  // the box to the last known stored value.
+  let checkPushSeen = false;
+  let checkKnown = false;
+  bridge
+    .settingsGet('updateCheckEnabled')
+    .then((v) => {
+      if (checkPushSeen) return;
+      checkKnown = v === true;
+      check.checked = checkKnown;
+    })
+    .catch(() => {});
+  check.addEventListener('change', () => {
+    bridge.settingsSet('updateCheckEnabled', !!check.checked).catch(() => {
+      check.checked = checkKnown;
+    });
+  });
+  const hSettings = bridge.onSettingsChanged((all) => {
+    if (all && typeof all.updateCheckEnabled === 'boolean') {
+      checkPushSeen = true;
+      checkKnown = all.updateCheckEnabled;
+      check.checked = checkKnown;
+    }
+  });
+  window.addEventListener('pagehide', () => bridge.offSettingsChanged(hSettings), { once: true });
 })();

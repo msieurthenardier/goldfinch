@@ -15,7 +15,6 @@ release path, incl. macOS) is **untouched** and still owns releases.
 | Dependency audit | `tasks/audit.yml` | "Dependency audit" |
 | Package smoke (`--dir`) | `tasks/package-linux.yml` | "Package (no installers)" |
 | Linux installers (AppImage+deb) | `tasks/build-linux.yml` | (fallback only — `build.yml` owns releases) |
-| Windows installer (nsis) | `tasks/build-windows.yml` | (fallback only) |
 
 ## Daily use
 
@@ -43,16 +42,17 @@ and runs the full suite in parallel. Watch it at
 
 ### 3. Fallback installers (on demand)
 
-The `build-linux` / `build-windows` jobs are **manual** (`passed: [ci]`, no
+The `build-linux` job is **manual** (`passed: [ci]`, no
 auto-trigger) so they don't tie up workers on every push. Build when you want a
-local installer (e.g. GH Actions minutes are exhausted):
+local Linux installer (e.g. GH Actions minutes are exhausted). Windows installers
+come only from the GitHub release workflow (`build.yml`); there is no Concourse
+Windows build.
 
 ```bash
-fly -t local-goldfinch trigger-job -j goldfinch/build-linux   -w
-fly -t local-goldfinch trigger-job -j goldfinch/build-windows -w
+fly -t local-goldfinch trigger-job -j goldfinch/build-linux -w
 ```
 
-They push a per-build archive to MinIO (bucket `goldfinch-installers`). Grab it:
+It pushes a per-build archive to MinIO (bucket `goldfinch-installers`). Grab it:
 
 ```bash
 # via the MinIO console at http://localhost:9001 (minioadmin / minioadmin), or:
@@ -63,15 +63,36 @@ docker exec concourse-local-minio-1 \
 Or build ad-hoc straight to a local dir (no MinIO, no pipeline):
 
 ```bash
-fly -t local-goldfinch execute -c ci/tasks/build-linux.yml   -i repo=. -o installers=./out
-fly -t local-goldfinch execute -c ci/tasks/build-windows.yml -i repo=. -o installers=./out
+fly -t local-goldfinch execute -c ci/tasks/build-linux.yml -i repo=. -o installers=./out
 ```
 
-> `build-windows` runs on the Concourse `windows` worker (Node 22 + git +
-> python preinstalled). `--publish never` keeps both build tasks off GitHub
-> Releases.
+> `--publish never` keeps the build task off GitHub Releases.
 
 ## Setup / maintenance
+
+### Updating the Node image
+
+Every task's `image_resource` names `node` by tag (`'22'`, for readers) **and**
+pins it by `version.digest` — the multi-platform index digest, the same in all
+six task files (`test`, `typecheck`, `lint`, `audit`, `package-linux`,
+`build-linux`), so a moved tag cannot change what CI runs. The form is the
+registry-image resource's documented anonymous-resource pin
+(<https://github.com/concourse/registry-image-resource#use-in-tasks>).
+`test/unit/ci-image-pins.test.js` fails if a file lacks the digest or the files
+disagree.
+
+To update: print the current digest, then replace the one `digest:` line in each
+of the six files (and the date in its comment).
+
+```bash
+docker buildx imagetools inspect node:22 --format '{{.Manifest.Digest}}'
+```
+
+### Accepted advisories
+
+None currently. (`minimatch` GHSA-g3hv-75wg-m249 in `electron-builder` and
+`eslint` is fixed by the range-keyed `minimatch@…` entries in `package.json`
+`overrides`; remove them when those tools declare a patched range themselves.)
 
 ### Set or update the pipeline
 
@@ -87,7 +108,7 @@ Concourse resolves `((var.field))` from Vault at `concourse/goldfinch/goldfinch/
 | Vault path | Fields | Used by |
 |---|---|---|
 | `concourse/goldfinch/goldfinch/git-key` | `private_key` (read-only, repo-scoped SSH deploy key) | `repo` git resource (SSH clone of the private repo) |
-| `concourse/goldfinch/goldfinch/minio` | `endpoint`, `access_key`, `secret_key`, `bucket` | `linux-installers` / `windows-installers` s3 resources |
+| `concourse/goldfinch/goldfinch/minio` | `endpoint`, `access_key`, `secret_key`, `bucket` | `linux-installers` s3 resource |
 
 > MinIO `endpoint` is `http://172.19.0.20:9000`, **not** `minio:9000`. Build
 > containers reach MinIO at its static compose-network IP `172.19.0.20` because

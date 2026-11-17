@@ -22,6 +22,8 @@ function registerSettingsIpc({
   broadcast,
   applyAutomationEnabledChange,
   applySpellcheck,
+  // Leg `update-check`: `(enabled: boolean) => void`, late-bound in main.js; no-op default.
+  applyUpdateCheckEnabled = (/** @type {boolean} */ _enabled) => {},
   getDefaultSession,
   getAllWebContents,
   currentAutomationStatus,
@@ -133,6 +135,7 @@ function registerSettingsIpc({
     const config = settings.set(key, value);
     broadcastSettings();
     if (key === 'automationEnabled') await applyAutomationEnabledChange(value === true);
+    if (key === 'updateCheckEnabled') applyUpdateCheckEnabled(value === true);
     if (key === 'spellcheck') {
       const enabled = value === true;
       applySpellcheck(getDefaultSession(), enabled);

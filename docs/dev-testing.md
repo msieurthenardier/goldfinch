@@ -84,6 +84,35 @@ Tiers: a jar key drives only its own jar's tabs; the admin key adds chrome/windo
 targeting and the app-level tools. Admin-tier scope and the still-refused-even-for-admin
 list: `mcp-automation.md` → *Dogfooding / dev key acquisition* and *Tool reference*.
 
+## Packaged build on a dev host
+
+A packaged build (`npm run pack` -> `dist/linux-unpacked/goldfinch`) is run only against a scratch profile.
+Measured recipe (flight 03):
+
+- **Redirect BOTH `HOME` and `XDG_CONFIG_HOME`** to scratch directories, and refuse to start unless both are
+  set. The profile lands in `$XDG_CONFIG_HOME/goldfinch` (a dev launch uses `goldfinch-dev`); `XDG_CONFIG_HOME`
+  alone is honoured, `HOME` is belt and braces. A launch without them opens the operator's real profile.
+- Switches: `--no-sandbox` (the unpacked build has no setuid sandbox helper), `--ozone-platform=wayland` when
+  `src/main/ozone-platform.js` `decideOzonePlatform` says so (plus its `WAYLAND_DISPLAY`), and
+  `--proxy-server=http://127.0.0.1:9` so a restored outside tab cannot reach a real host (loopback bypasses it).
+- **Driving it over MCP** (jar and admin tier work; packaged binds on the persisted setting only,
+  `GOLDFINCH_MCP_PORT` is ignored): (1) in a dev launch under the same kind of scratch dirs, with
+  `GOLDFINCH_AUTOMATION_ADMIN=1 GOLDFINCH_AUTOMATION_DEV_MINT=1`, capture the `AUTOMATION_DEV_MINT` line, stop it;
+  (2) copy `<dev xdg>/goldfinch-dev/app.db` **with `app.db-wal` and `app.db-shm`** to `<packaged xdg>/goldfinch/`;
+  (3) in the copy, set the `settings` document's `automationEnabled: true` and `automationPort: <free port>`
+  (`node:sqlite`, then `pragma wal_checkpoint(truncate)`); (4) launch the packaged build with
+  `GOLDFINCH_AUTOMATION_ADMIN=1` for the admin tier and `connectAutomation({ port, key })`.
+- **Launch switches** (flight 03 leg `launch-switches`; lists in `docs/RELEASING.md` *Launch switches*): a packaged
+  build strips or refuses the switches that turn off its protections, so a packaged launch with
+  `--remote-debugging-port`, `--ignore-certificate-errors` and the like does NOT behave as a dev launch does. A
+  refused launch exits 64 before the lock, a store or a window; `--no-sandbox` and `--proxy-server` are honoured.
+  Observe a switch's effect from outside the app (the port answering, a fixture receiving a request), against
+  an unpackaged dev launch as the positive control. To compare "no store, no lock", run a copy of the build whose
+  `main.js` exits at its first statement once and list the scratch `HOME` and `XDG_CONFIG_HOME` after it.
+  A mapped `.test` host behind the dead proxy needs `--proxy-bypass-list=<that host>` to reach a loopback fixture.
+- A second launch with a URL hands it to the first instance and exits; the Shields restart-to-apply relaunch
+  keeps the same keys working. Stop by recorded pid; leave no process or port.
+
 ## Web-compat triage
 
 A site "doesn't work in Goldfinch" (blank embed, "browser isn't supported", login loop).

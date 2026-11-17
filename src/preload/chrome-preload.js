@@ -128,6 +128,11 @@ contextBridge.exposeInMainWorld('goldfinch', {
   automationGetActivity: () => ipcRenderer.invoke('automation:get-activity'),
   onAutomationActivity: (cb) => ipcRenderer.on('automation-activity-changed', (_e, d) => cb(d)),
 
+  // --- update check (leg `update-check`): state is main's; opening takes NO argument ---
+  updateGetState: () => ipcRenderer.invoke('update:get-state'),
+  onUpdateStateChanged: (cb) => ipcRenderer.on('update-state-changed', (_e, d) => cb(d)),
+  updateOpenReleasePage: () => ipcRenderer.invoke('update:open-release-page'),
+
   // --- cookie jars / identities ---
   jarsList: () => ipcRenderer.invoke('jars-list'),
   jarsAdd: (payload) => ipcRenderer.invoke('jars-add', payload),

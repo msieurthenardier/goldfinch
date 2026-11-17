@@ -1,7 +1,13 @@
 'use strict';
 
-const { test } = require('node:test');
+const { test, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
+
+// Kebab update state is module-scope: never leak it between cases.
+afterEach(async () => {
+  const { resetKebabUpdateState } = await import('../../src/renderer/chrome/overlay-menus.js');
+  resetKebabUpdateState();
+});
 
 async function makeHarness() {
   const { createOverlayMenus, fixedTriggerMenu } = await import('../../src/renderer/chrome/overlay-menus.js');
@@ -387,16 +393,113 @@ async function kebabHarness({ active = null } = {}) {
   return { h, actions };
 }
 
-test('kebabActions: keys match every non-separator buildKebabModel id (drift guard)', async () => {
-  const { buildKebabModel } = await import('../../src/renderer/chrome/overlay-menus.js');
+const DEFAULT_KEBAB = [
+  { id: 'new-window', label: 'New window' },
+  { type: 'separator' },
+  { id: 'settings', label: 'Settings' },
+  { id: 'downloads', label: 'Downloads' },
+  { id: 'jars', label: 'Cookie jars' },
+  { id: 'automation', label: 'Automation' },
+  { id: 'vault', label: 'Vault' },
+  { type: 'separator' },
+  { id: 'print', label: 'Print…' },
+  { id: 'exit', label: 'Exit' }
+];
+const NEWER = {
+  current: '0.19.15',
+  available: '0.19.16',
+  releaseUrl: 'https://github.com/msieurthenardier/goldfinch/releases/tag/v0.19.16',
+  checkEnabled: true
+};
+const idsOf = (model) => model.filter((item) => item.type !== 'separator').map((item) => item.id);
+
+test('kebabActions: keys equal the default model ids plus update; with a notice the model equals the keys (drift guard)', async () => {
+  const { buildKebabModel, setKebabUpdateState } = await import('../../src/renderer/chrome/overlay-menus.js');
   const { actions } = await kebabHarness();
-  const ids = buildKebabModel()
-    .filter((item) => item.type !== 'separator')
-    .map((item) => item.id)
-    .sort();
+  const ids = idsOf(buildKebabModel()).sort();
   assert.ok(ids.length > 0);
-  assert.deepEqual(Object.keys(actions.kebabActions).sort(), ids);
-  for (const id of ids) assert.equal(typeof actions.kebabActions[id], 'function', id);
+  assert.deepEqual(Object.keys(actions.kebabActions).sort(), [...ids, 'update'].sort());
+  setKebabUpdateState(NEWER);
+  assert.deepEqual(idsOf(buildKebabModel()).sort(), Object.keys(actions.kebabActions).sort());
+  for (const id of Object.keys(actions.kebabActions)) assert.equal(typeof actions.kebabActions[id], 'function', id);
+});
+
+test("buildKebabModel: with no notice the list is exactly today's", async () => {
+  const { buildKebabModel } = await import('../../src/renderer/chrome/overlay-menus.js');
+  assert.deepEqual(buildKebabModel(), DEFAULT_KEBAB);
+});
+
+test('buildKebabModel: a notice adds the item and a separator first, the rest unchanged; clearing removes it', async () => {
+  const { buildKebabModel, setKebabUpdateState } = await import('../../src/renderer/chrome/overlay-menus.js');
+  setKebabUpdateState(NEWER);
+  const m = buildKebabModel();
+  assert.deepEqual(m.slice(0, 2), [{ id: 'update', label: 'Update available — 0.19.16' }, { type: 'separator' }]);
+  assert.deepEqual(m.slice(2), DEFAULT_KEBAB);
+  setKebabUpdateState(null);
+  assert.deepEqual(buildKebabModel(), DEFAULT_KEBAB);
+});
+
+test('setKebabUpdateState ignores a state the model rejects', async () => {
+  const { buildKebabModel, setKebabUpdateState } = await import('../../src/renderer/chrome/overlay-menus.js');
+  setKebabUpdateState(NEWER);
+  setKebabUpdateState({ ...NEWER, available: '<b>x' });
+  assert.deepEqual(buildKebabModel(), DEFAULT_KEBAB);
+  setKebabUpdateState({ ...NEWER, releaseUrl: null });
+  assert.deepEqual(buildKebabModel(), DEFAULT_KEBAB);
+});
+
+test('kebabActions.update: calls the bridge with no arguments', async () => {
+  const { h, actions } = await kebabHarness();
+  h.window.goldfinch.updateOpenReleasePage = (...args) => h.calls.push(['updateOpenReleasePage', args]);
+  actions.kebabActions.update();
+  assert.deepEqual(h.calls, [['updateOpenReleasePage', []]]);
+});
+
+test('boot wiring: a push is applied; a boot read that resolves later is dropped', async () => {
+  const { createChromePageActions, buildKebabModel } = await import('../../src/renderer/chrome/overlay-menus.js');
+  const h = pageActionsHarness();
+  let push;
+  let resolveRead;
+  h.window.goldfinch.onUpdateStateChanged = (cb) => {
+    push = cb;
+  };
+  h.window.goldfinch.updateGetState = () =>
+    new Promise((r) => {
+      resolveRead = r;
+    });
+  createChromePageActions({
+    ...h,
+    activeTab: () => null,
+    isInternalPageUrl: () => false,
+    deriveSiteInfo: () => ({}),
+    openNewTab: () => {}
+  });
+  push(NEWER);
+  assert.equal(buildKebabModel()[0].id, 'update');
+  resolveRead({ current: '0.19.15', available: null, releaseUrl: null, checkEnabled: true });
+  await new Promise((r) => setImmediate(r));
+  assert.equal(buildKebabModel()[0].id, 'update');
+});
+
+test('boot wiring: a boot read alone sets the state; a rejecting read is no notice', async () => {
+  const { createChromePageActions, buildKebabModel } = await import('../../src/renderer/chrome/overlay-menus.js');
+  const mk = (read) => {
+    const h = pageActionsHarness();
+    h.window.goldfinch.updateGetState = read;
+    createChromePageActions({
+      ...h,
+      activeTab: () => null,
+      isInternalPageUrl: () => false,
+      deriveSiteInfo: () => ({}),
+      openNewTab: () => {}
+    });
+  };
+  mk(() => Promise.reject(new Error('gone')));
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(buildKebabModel(), DEFAULT_KEBAB);
+  mk(() => Promise.resolve(NEWER));
+  await new Promise((r) => setImmediate(r));
+  assert.equal(buildKebabModel()[0].id, 'update');
 });
 
 test('buildKebabModel: Automation sits directly above Vault, labelled Automation', async () => {

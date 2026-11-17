@@ -24,7 +24,11 @@ function createInternalPageMap({ baseDir, path }) {
       // Sortie 01 leg 2: pure copy model for the Default browser row.
       '/default-browser-row-model.js': shared('default-browser-row-model.js'),
       // Sortie 02 leg 2: pure model for the restart-to-apply Shields notes + Restart now.
-      '/shields-isolation-model.js': shared('shields-isolation-model.js')
+      '/shields-isolation-model.js': shared('shields-isolation-model.js'),
+      // Mission 23 F3 leg `update-notice`: the About section's notice model, and the
+      // `update-version.js` it imports (a shared module's own import needs its own route).
+      '/update-notice-model.js': shared('update-notice-model.js'),
+      '/update-version.js': shared('update-version.js')
     },
     // Sortie 05: the MCP automation surface (moved out of Settings). Shares settings.css
     // for the sidebar shell + shared controls (DD3).

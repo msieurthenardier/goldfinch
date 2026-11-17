@@ -43,6 +43,13 @@ interface AutomationActivity {
   log: AutomationLogEntry[];
 }
 
+interface UpdateState {
+  current: string;
+  available: string | null;
+  releaseUrl: string | null;
+  checkEnabled: boolean;
+}
+
 interface GoldfinchBridge {
   // --- platform ---
   platform: string;
@@ -192,6 +199,9 @@ interface GoldfinchBridge {
 
   // --- automation activity (chrome-trusted read + subscribe; SC10/DD6) ---
   automationGetActivity(): Promise<AutomationActivity>;
+  updateGetState(): Promise<UpdateState>;
+  onUpdateStateChanged(cb: (state: UpdateState) => void): void;
+  updateOpenReleasePage(): Promise<boolean>;
   onAutomationActivity(cb: (snap: AutomationActivity) => void): void;
 
   // --- page zoom ---
@@ -724,6 +734,10 @@ interface GoldfinchInternalBridge {
   automationAdminKeyMint(): Promise<{ key: string | null; refused?: 'not-confirmed' }>;
   automationAdminKeyRevoke(): Promise<{ ok: boolean }>;
   automationGetActivity(): Promise<AutomationActivity>;
+  updateGetState(): Promise<UpdateState>;
+  onUpdateStateChanged(cb: (state: UpdateState) => void): number;
+  offUpdateStateChanged(h: number): void;
+  updateOpenReleasePage(): Promise<boolean>;
   onAutomationActivity(cb: (snap: AutomationActivity) => void): number;
   offAutomationActivity(h: number): void;
   // --- downloads surface (Flight 5, Leg 2) ---

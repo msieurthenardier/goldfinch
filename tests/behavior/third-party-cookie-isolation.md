@@ -3,7 +3,7 @@
 **Slug**: `third-party-cookie-isolation`
 **Status**: active
 **Created**: 2026-10-05
-**Last Run**: 2026-11-14 — pass on Electron 45.3.2 / Chrome 156 (14/14 judged, step 9 struck; the final `appQuit` teardown was not exercised), [run log](third-party-cookie-isolation/runs/2026-11-14-20-30-13.md)
+**Last Run**: 2026-11-17 — pass on Electron 45.3.3 / Chrome 156 (14/14 judged, step 9 struck; teardown ran in full), [run log](third-party-cookie-isolation/runs/2026-11-17-14-48-23.md)
 
 ## Intent
 

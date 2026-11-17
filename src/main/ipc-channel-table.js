@@ -217,6 +217,10 @@ const CHANNEL_CLASS = Object.freeze({
   'unpin-toolbar-item': 'chrome',
   'toggle-bookmarks-bar': 'chrome',
   'chrome-welcome-set': 'chrome',
+  // register-update-ipc.js
+  'update:get-state': 'chrome-or-internal',
+  'update:open-release-page': 'chrome',
+  'internal-update-open-release-page': 'internal',
   // register-tab-ipc.js
   'tab-create': 'chrome',
   'tab-close': 'owning-chrome',
