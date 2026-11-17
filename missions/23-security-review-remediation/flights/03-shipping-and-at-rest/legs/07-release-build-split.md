@@ -1,6 +1,6 @@
 # Leg: release-build-split
 
-**Status**: in-flight
+**Status**: landed
 **Flight**: [Shipping and At-Rest](../flight.md)
 
 > Developer design review 2026-11-17: **approve with changes**, incorporated — only the Windows name differs on disk today, and an explicit `artifactName` changes how the builder treats the architecture, so the exact per-target settings are given; "five installers and nothing else" is done by staging exactly those five files, not by trusting the builder's output; the start check proves the app got as far as opening its database, not merely that a process exists; the profile is redirected with `--user-data-dir`; the exact `codesign` commands; `compression-level: 0`; the `upload` job needs the same `always()` condition `build` has; an existing test reads this workflow's `semver=` line; the invariant test is text-based.
