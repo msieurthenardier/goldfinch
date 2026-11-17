@@ -220,3 +220,38 @@ test(
     }
   }
 );
+
+// ---- the upload job's digest-list parser, extracted from the workflow text and run ----
+
+test(
+  'listed_names: text and binary-marker lists give the file names; a list naming a missing file differs',
+  { skip: !bashOk && 'no bash' },
+  () => {
+    const m = jobs.upload.match(/^( +)listed_names\(\) \{\n[\s\S]*?^\1\}\n/m);
+    assert.ok(m, 'listed_names function not found in the upload job');
+    const fn = m[0]
+      .split('\n')
+      .map((l) => l.slice(m[1].length))
+      .join('\n');
+    const hash = 'a'.repeat(64);
+    const present = ['Goldfinch-Setup-1.2.3.exe'];
+    const dir = mkdtempSync(path.join(tmpdir(), 'goldfinch-wf-'));
+    try {
+      const listedFor = (content) => {
+        writeFileSync(path.join(dir, 'SHA256SUMS'), content);
+        return execFileSync('bash', ['-c', `${fn}\nlisted_names "$1"`, 'bash', path.join(dir, 'SHA256SUMS')], {
+          encoding: 'utf8'
+        })
+          .split('\n')
+          .filter(Boolean);
+      };
+      const matches = (content) => listedFor(content).join('\n') === present.join('\n');
+      assert.ok(matches(`${hash}  Goldfinch-Setup-1.2.3.exe\n`), 'text form passes');
+      assert.ok(matches(`${hash} *Goldfinch-Setup-1.2.3.exe\n`), 'binary form passes');
+      assert.ok(!matches(`${hash}  Goldfinch-Setup-1.2.4.exe\n`), 'a missing file fails');
+      assert.ok(!matches(`${hash}  **Goldfinch-Setup-1.2.3.exe\n`), 'only one marker is stripped');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+);

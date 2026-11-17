@@ -234,6 +234,14 @@ Gates: `npm test` 7195 pass / 0 fail, typecheck, lint, format:check clean. All p
 
 **Not provable locally:** that Windows and macOS write the five names; the no-token build; fuse and start checks on Windows/macOS; `codesign` verification; the Linux sandbox sysctl; `upload-artifact` / `download-artifact` behaviour and Q7 (artifact storage on a public repository); the `upload` job's checks and its skipped upload; bash-on-Windows details (`cygpath`, `/proc/<pid>/winpid`, `taskkill`).
 
+### Dispatch run 1 fix
+
+The first manual dispatch of `build.yml` went green on all three `build` jobs and red in `upload`, step "Verify names and digests": `artifacts/installers-win: the digest list does not match the files present`. Cause (from the run log): Git-for-Windows' `sha256sum` writes binary mode (`<hash> *<name>`), Linux and macOS write `<hash>  <name>`; `sha256sum -c` accepts both, but the upload job's `awk '{print $2}'` cross-check compared `*Goldfinch-Setup-0.19.15.exe` with the file name.
+
+Fix at both ends, `build.yml` only. Stage step: the list is written to `SHA256SUMS.raw`, then `sed -E 's/^([0-9a-fA-F]+) [ *]/\1  /'` rewrites either marker to two spaces (chosen over `--text`, which was not confirmed for every build; macOS keeps its `shasum -a 256` fallback, whose output is already the text form). Upload step: new `listed_names()` takes the name as everything after the hash and the first run of spaces, minus one leading `*`; the five-name comparison is unchanged. New test `listed_names` in `release-workflow-invariants.test.js` extracts the function and runs it on text form, binary form, a missing-file list and a double-marker list.
+
+Local outcomes (scratch trees, the real edited verify block run under bash): good tree with a `*`-form win list passes (rc 0); list naming a missing file fails (rc 1, at `sha256sum -c`); extra unlisted file fails (rc 1, "digest list does not match the files present"). Not provable locally: the Windows runner's actual output.
+
 ### Review fixes (legs 01–07)
 
 Four non-blocking mid-flight review items, fixed before push.

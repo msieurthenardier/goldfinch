@@ -263,7 +263,13 @@ jobs:
           done
           printf '%s\n' "$VERSION" > stage/VERSION
           cd stage
-          if command -v sha256sum >/dev/null; then sha256sum $names > SHA256SUMS; else shasum -a 256 $names > SHA256SUMS; fi
+          # One portable list form on every platform: `<hash>  <name>` (two spaces, no `*`).
+          # Git-for-Windows' sha256sum writes binary mode (`<hash> *<name>`); coreutils on Linux
+          # and `shasum -a 256` on macOS write the two-space text form. The sed rewrites either
+          # marker to two spaces rather than relying on a `--text` flag that not every build has.
+          if command -v sha256sum >/dev/null; then sha256sum $names > SHA256SUMS.raw; else shasum -a 256 $names > SHA256SUMS.raw; fi
+          sed -E 's/^([0-9a-fA-F]+) [ *]/\1  /' SHA256SUMS.raw > SHA256SUMS
+          rm SHA256SUMS.raw
           cat SHA256SUMS
           ls -la
 
@@ -302,6 +308,11 @@ jobs:
             case "$p" in mac | all) echo "Goldfinch-${v}-arm64.dmg"; echo "Goldfinch-${v}-arm64-mac.zip" ;; esac
             case "$p" in linux | all) echo "Goldfinch-${v}.AppImage"; echo "goldfinch_${v}_amd64.deb" ;; esac
           }
+          # The name is everything after the hash and the first run of spaces, minus ONE leading
+          # `*` (the binary-mode marker a Windows sha256sum writes), so a name is never truncated.
+          listed_names() {
+            sed -E -e 's/^[0-9a-fA-F]+ +//' -e 's/^\*//' "$1" | sort
+          }
           fail() { echo "::error::$1"; exit 1; }
           dirs=(artifacts/*/)
           [ "${#dirs[@]}" -eq 3 ] || fail "expected 3 artifacts, found ${#dirs[@]}"
@@ -324,7 +335,7 @@ jobs:
             d="${d%/}"
             ( cd "$d" && sha256sum -c SHA256SUMS )
             files="$(cd "$d" && ls -1 | grep -v -x -e VERSION -e SHA256SUMS | sort)"
-            listed="$(awk '{print $2}' "$d/SHA256SUMS" | sort)"
+            listed="$(listed_names "$d/SHA256SUMS")"
             [ "$files" = "$listed" ] || fail "$d: the digest list does not match the files present"
             while IFS= read -r f; do
               echo "$f" >> "$RUNNER_TEMP/found.txt"
