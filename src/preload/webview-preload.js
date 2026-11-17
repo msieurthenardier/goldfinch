@@ -798,7 +798,11 @@ function farbleImageData(d) {
       GL.prototype.getParameter = function (p) {
         if (p === 37445 || p === 37446) {
           bumpFp('webgl');
-          if (FARBLE) return p === 37445 ? 'Google Inc.' : 'ANGLE (Generic GPU)'; // generic vendor/renderer
+          // Native first: a real browser returns null until WEBGL_debug_renderer_info is enabled and
+          // throws on an illegal receiver. Substitute the generic value only for a real string.
+          const real = gp.apply(this, arguments);
+          if (FARBLE && typeof real === 'string') return p === 37445 ? 'Google Inc.' : 'ANGLE (Generic GPU)'; // generic vendor/renderer
+          return real;
         }
         return gp.apply(this, arguments);
       };
