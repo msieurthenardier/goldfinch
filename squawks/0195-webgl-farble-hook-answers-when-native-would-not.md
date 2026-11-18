@@ -50,7 +50,8 @@ Repro (Windows only — see Verification): clean profile, Shields default, open 
 - **Real-site before/after on Windows: PASSED** (2026-11-17, Flight Director). The branch build ran under Electron 45.3.2 for Windows on a fresh dev profile each time, Shields at their defaults (enabled, block, strip, isolate and farble all on), driven over the MCP surface with a per-launch minted key.
   - After (this fix): `https://www.suncountry.com/` renders its booking page; the token request answers `201` and its follow-up `200`. In the same tab the page reads `Google Inc.` / `ANGLE (Generic GPU)` once the extension is enabled, `null` for `getParameter(37446)` before it, a `TypeError` from `getParameter.call({}, 37446)`, and `hardwareConcurrency` 8.
   - Before (the old early return restored in a throwaway copy of the generated bundle, same build, fresh profile): the page stays at "Skip to main content" and the token request never completes; `getParameter(37446)` answers `ANGLE (Generic GPU)` before the extension is enabled and for an illegal receiver.
-  - Not checked: the installed build, and recovery of a jar that was flagged before the fix (expected to need its `suncountry.com` cookies cleared once).
+  - Not checked at sign-off: the installed build, and recovery of a jar that was flagged before the fix (expected to need its `suncountry.com` cookies cleared once).
+- **Installed build: confirmed by the operator** (2026-11-17). Released as v0.19.15; the operator reports `https://www.suncountry.com/` works on the installed Windows build. Whether the existing jar needed its cookies cleared first was not recorded.
 
 Required:
 - One new unit test. The farbling hooks have no unit coverage today (they run in the page main world; `tests/behavior/farbling-correctness.md` is a never-run draft).
