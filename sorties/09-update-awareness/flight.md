@@ -1,6 +1,6 @@
 # Sortie: Update awareness — a "Check now" button and an update dot on the kebab
 
-**Status**: in-flight
+**Status**: landed
 
 > Architect design review 2026-11-17: **approve with changes**, incorporated — `checkNow` shares `runCheck` by making it return its outcome and moving the on/off test to its callers; `lastCheck` is emitted on every completion, not through `apply()`; the gap tolerates a clock that steps backward; the dot is applied in the closures that already hold `window`, not in the module-level setter; the kebab keeps its accessible name "More" and gains a description; "Last checked" shows a clock time, so it never goes stale; the state says whether checking is possible at all; the work is two legs plus the walk, with the controller moved verbatim before anything is added to it.
 
@@ -68,12 +68,12 @@ A scheduled check and a check-now share one in-flight slot (the timer firing dur
 
 - [x] v0.19.16 released with the update check, Settings About and the kebab item (`567a2a5`).
 - [x] The `update-notice` behavior spec and its fixture exist and pass (run `tests/behavior/update-notice/runs/2026-11-17-23-53-08.md`).
-- [ ] For the acceptance walk: a way to show the operator the dot on an installed build — a release candidate below the current stable (`v0.19.16-rc.1`) is offered v0.19.16 by the real endpoint, as in Flight 3. Needs the operator's go to tag.
+- [x] For the acceptance walk: a way to show the operator the dot on an installed build — a release candidate below the current stable (`v0.19.16-rc.1`) is offered v0.19.16 by the real endpoint, as in Flight 3. Needs the operator's go to tag.
 
 ### Pre-Flight Checklist
 
-- [ ] Architect design review incorporated.
-- [ ] Operator go.
+- [x] Architect design review incorporated.
+- [x] Operator go.
 
 ---
 
@@ -105,10 +105,10 @@ Two implementation legs and a walk. Leg 01 is main-side and testable on its own;
 
 ### Completion Checklist
 
-- [ ] All legs completed
+- [x] All legs completed
 - [ ] Code merged
-- [ ] Tests passing
-- [ ] Documentation updated
+- [x] Tests passing
+- [x] Documentation updated
 
 ### Verification
 

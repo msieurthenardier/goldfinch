@@ -82,3 +82,12 @@ Two look-and-feel fixes to Settings -> About's Check now result line, from the b
 - **Duplicate line.** A `newer` answer's result line now reads `Found a newer version — see above.` (`CHECK_NOW_COPY.newer` in `update-notice-model.js`) instead of repeating the notice. The `isStableVersion(available)` guard stays (no claim once the notice has cleared); the notice text is unchanged. Updated `update-notice-model.test.js`, `settings-about-controller.test.js`, `docs/updates.md`, CLAUDE.md and `tests/behavior/update-notice.md` row 10.
 - **Stale result.** `settings-about-controller.js` ties the page's last answer to a check by `lastCheck.at` (`answerAt`; `adoptFrom` covers an answer that arrives before its own push, a too-soon/unavailable/rejected answer binds to the `at` already on record). A push with a different `at` clears it; so does the notice going from showing to not showing (setting turned off). A new press clears the old answer first. Four new controller tests: own push after, own push before, too-soon then later check, setting off.
 - Live (dev mode, fixture, dead proxy): press -> `Found a newer version — see above.`; second press -> `Checked moments ago…`; setting off and on -> result line hidden. Gates: test, typecheck, lint, format:check pass.
+
+### Leg 03 — hat-and-alignment
+
+- 2026-11-18 — Operator: "yes on the tag". `v0.19.16-rc.1` tagged on `271889e`; release run green; published as an immutable prerelease with five installers; `releases/latest` still v0.19.16.
+- Operator installed it on Windows and walked the five steps (the dot, About, Check now with checks on and off, the look). Verdict, verbatim: **"pass"**. No fix needed during the walk. Not walked: macOS and Linux installed builds.
+
+### Sortie landed
+
+All three legs completed. Reviewed once (legs 01–02, confirmed); behavior spec `update-notice` 14/14 with a clean accessibility audit; two Validator findings fixed before the walk; walk passed. Charter criteria: the dot appears and clears in every window without a restart; Check now asks once even with automatic checks off and schedules nothing; the result line and "Last checked" show; the request and what is believed are unchanged (unit-pinned on both paths, observed on the wire). `[COMPLETE:flight]`

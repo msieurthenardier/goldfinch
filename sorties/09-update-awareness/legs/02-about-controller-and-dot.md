@@ -1,6 +1,6 @@
 # Leg: about-controller-and-dot
 
-**Status**: landed
+**Status**: completed
 **Flight**: [Update awareness](../flight.md)
 
 ## Objective

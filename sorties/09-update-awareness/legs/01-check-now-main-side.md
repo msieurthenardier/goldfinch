@@ -1,6 +1,6 @@
 # Leg: check-now-main-side
 
-**Status**: landed
+**Status**: completed
 **Flight**: [Update awareness](../flight.md)
 
 ## Objective
