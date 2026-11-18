@@ -1,10 +1,10 @@
 # Squawk 0110: One-off flake in vault `listItemsMeta` test
 
-**Status**: deferred
+**Status**: completed
 **Type**: defect
 **Severity**: routine
 **Reported**: 2026-09-29
-**Completed**: —
+**Completed**: 2026-11-18 (closed without a fix — see Ledger Sweep)
 
 ## Report
 During Sortie 01 leg 1, one full `npm test` run failed `listItemsMeta returns metadata for all three types with NO secret field/value`; it passed on immediate re-run and in every later full run (FD re-run 5722/0; flight Reviewer 5748/0). Not reproducible on demand.
@@ -22,3 +22,6 @@ During Sortie 01 leg 1, one full `npm test` run failed `listItemsMeta returns me
 
 ## Disposition
 **Deferred**: single unreproduced occurrence; no failure output was captured — revisit when it recurs (capture the failing assertion and seed/timing), or the next time `vault-item-management.test.js` or `listItemsMeta` is touched.
+
+## Ledger Sweep (routine maintenance, 2026-11-18)
+**Closed without a fix — no corrective action was taken.** It was a single occurrence with no captured output. It has not recurred in the 50 days since, and two consecutive full `npm test` runs on 2026-11-18 (7,323 tests each) were flake-free. `completed` is the ledger's only terminal state and does not mean a fix landed. If it recurs, log a new squawk with the failing assertion. See `maintenance/2026-11-18.md`.

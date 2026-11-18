@@ -1,10 +1,10 @@
 # Squawk 0089: Synthetic input and capture non-functional under a broken compositor
 
-**Status**: deferred
+**Status**: completed
 **Type**: defect
 **Severity**: routine
 **Reported**: 2026-09-19
-**Completed**: —
+**Completed**: 2026-11-18 (closed without a fix — see Ledger Sweep)
 
 ## Report
 
@@ -56,3 +56,6 @@ change and would be a flight, not this squawk.
 ## Sign-Off
 
 *(n/a — deferred)*
+
+## Ledger Sweep (routine maintenance, 2026-11-18)
+**Closed without a fix — no corrective action was taken.** It has not recurred in the 60 days since: MCP input and capture have worked in every live run since then (Mission 23, sorties 05–10). It was most likely a rig artefact. `completed` is the ledger's only terminal state and does not mean a fix landed. If it recurs on native hardware, log a new squawk. See `maintenance/2026-11-18.md`.
