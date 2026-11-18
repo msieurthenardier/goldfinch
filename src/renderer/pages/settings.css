@@ -254,6 +254,17 @@ main section #about-update-status {
 main section #about-update-hint {
   margin-top: 8px;
 }
+/* Check now (sortie 09): a block of its own under the notice — the button starts a new line, the
+   result and "Last checked" follow; gaps ride the later element so a hidden result leaves none. */
+#about-check-now {
+  margin-top: 12px;
+}
+main section #about-check-result {
+  margin-top: 8px;
+}
+main section #about-last-checked {
+  margin-top: 8px;
+}
 .update-check-group {
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   padding-top: 12px;

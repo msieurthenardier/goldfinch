@@ -6,6 +6,7 @@
 //   update:open-release-page            chrome, invoke.
 //   internal-update-open-release-page   internal, invoke.
 //   internal-update-download            internal, invoke (leg `update-download`). No arguments.
+//   internal-update-check-now           internal, invoke (leg `check-now-main-side`). No arguments.
 //
 // Both open channels ignore every argument. They read main's OWN state, answer `false` when there is
 // no `releaseUrl`, and otherwise send `open-external-urls` with exactly that one address to the chrome
@@ -42,7 +43,8 @@ const START_LATCH_MS = 10 * 1000;
  *   gate: any,
  *   registerInternalHandler: Function,
  *   registry: any,
- *   getState: () => { current: string, available: string | null, releaseUrl: string | null, checkEnabled: boolean, downloadName?: string | null },
+ *   getState: () => { current: string, available: string | null, releaseUrl: string | null, checkEnabled: boolean, downloadName?: string | null, lastCheck?: any, canCheck?: boolean },
+ *   checkNow?: () => Promise<{ outcome: string, retryAt?: number }>,
  *   queueChromeSend: (record: any, build: () => [string, any]) => void,
  *   startUpdateDownload?: (url: string) => boolean,
  *   getDownloadsManager?: () => ({ listAll: () => any[] } | null),
@@ -55,6 +57,7 @@ function registerUpdateIpc({
   registerInternalHandler,
   registry,
   getState,
+  checkNow = async () => ({ outcome: 'unavailable' }),
   queueChromeSend,
   startUpdateDownload = () => false,
   getDownloadsManager = () => null,
@@ -159,6 +162,16 @@ function registerUpdateIpc({
     openFor(registry.getWindowForGuest(event.sender && event.sender.id))
   );
   registerInternalHandler(ipcMain, 'internal-update-download', () => startDownload());
+  // Check now: ignores every argument and answers the checker's own short outcome. No reveal-gate call:
+  // no secret, no key, no caller-chosen value, and the checker allows at most one request per 30 s.
+  registerInternalHandler(ipcMain, 'internal-update-check-now', async () => {
+    try {
+      const r = await checkNow();
+      return r && typeof r === 'object' ? { ...r } : { outcome: 'unavailable' };
+    } catch {
+      return { outcome: 'unavailable' };
+    }
+  });
 }
 
 module.exports = { registerUpdateIpc };

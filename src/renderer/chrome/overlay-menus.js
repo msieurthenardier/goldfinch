@@ -21,6 +21,30 @@ export function resetKebabUpdateState() {
   updatePushed = false;
 }
 
+/**
+ * The kebab BUTTON's update dot (sortie 09). Lives here, not in renderer.js (at its line budget), and is
+ * called only from createChromePageActions' two closures (push and boot read) — never from the setter.
+ * Decides from the same model as the menu item; the title and the note's text are written only when they
+ * change; `aria-label` stays "More". Tolerates a window with no document or no #kebab.
+ * @param {any} window
+ * @param {any} state
+ */
+export function applyKebabDot(window, state) {
+  const doc = window?.document;
+  const kebab = doc?.getElementById?.('kebab');
+  if (!kebab) return;
+  const on = updateNoticeModel(state).showNotice;
+  const title = on ? 'More — update available' : 'More';
+  if (kebab.title !== title) kebab.title = title;
+  kebab.classList.toggle('update-waiting', on);
+  kebab.setAttribute('aria-describedby', 'kebab-update-note');
+  const note = doc.getElementById('kebab-update-note');
+  if (note) {
+    const text = on ? 'Update available' : '';
+    if (note.textContent !== text) note.textContent = text;
+  }
+}
+
 export function buildKebabModel() {
   // Two separators group the menu into three bands: window-scoped (New window) /
   // internal-page destinations (Settings, Downloads, Cookie jars, Automation, Vault) /
@@ -157,12 +181,15 @@ export function createChromePageActions({
     window.goldfinch.onUpdateStateChanged((state) => {
       updatePushed = true;
       setKebabUpdateState(state);
+      applyKebabDot(window, state);
     });
   }
   if (typeof window?.goldfinch?.updateGetState === 'function') {
     Promise.resolve(window.goldfinch.updateGetState())
       .then((state) => {
-        if (!updatePushed) setKebabUpdateState(state);
+        if (updatePushed) return;
+        setKebabUpdateState(state);
+        applyKebabDot(window, state);
       })
       .catch(() => {});
   }

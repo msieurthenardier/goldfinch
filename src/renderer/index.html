@@ -317,6 +317,9 @@
       <button id="kebab" class="icon-btn" title="More" aria-label="More" aria-haspopup="menu" aria-expanded="false">
         ⋮
       </button>
+      <!-- Description for #kebab while an update is waiting (sortie 09): a sibling, not a child, so the
+           button's name and text are unchanged. .sr-only is the page's visually-hidden utility. -->
+      <span id="kebab-update-note" class="sr-only"></span>
     </div>
 
     <!-- Bookmarks bar (M15 F1 Leg 3, DD7/DD8). Hidden via .hidden (bookmarksBarEnabled,

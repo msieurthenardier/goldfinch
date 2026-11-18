@@ -235,6 +235,14 @@
           View release notes
         </button>
         <p id="about-update-hint" class="muted" hidden></p>
+        <!-- Check now (sortie 09 leg about-controller-and-dot): a one-off check through the no-argument
+             bridge call. The result line is deliberately NOT a live region — the button keeps focus and the
+             answer is read where the operator is. -->
+        <button id="about-check-now" class="settings-btn settings-btn--secondary" type="button" disabled>
+          Check now
+        </button>
+        <p id="about-check-result" hidden></p>
+        <p id="about-last-checked" class="muted"></p>
         <fieldset class="shields-group update-check-group">
           <legend class="sr-only">Update check</legend>
           <label class="shield-row update-check-row"

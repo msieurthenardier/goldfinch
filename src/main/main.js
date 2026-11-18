@@ -3121,6 +3121,7 @@ registerUpdateIpc({
   registerInternalHandler,
   registry,
   getState: () => updateChecker.getState(),
+  checkNow: () => updateChecker.checkNow(),
   queueChromeSend,
   // Leg `update-download`: the one place the update download starts. The browser's own default session
   // carries the `will-download` handler (app-lifecycle wires it); it holds no site cookies, and the

@@ -43,7 +43,7 @@ const GATE_FILE = 'ipc-gate.js';
 /** @type {readonly string[]} */
 const RAW_EXCEPTIONS = Object.freeze([]);
 const EXPECTED_RAW_EXCEPTIONS = 0;
-const EXPECTED_CHANNELS = 210;
+const EXPECTED_CHANNELS = 211;
 
 const GATE_CLASS = {
   chrome: 'chrome',
@@ -61,7 +61,7 @@ const EXPECTED_CLASS_COUNTS = {
   chrome: 62,
   'owning-chrome': 30,
   'chrome-or-internal': 2,
-  internal: 76,
+  internal: 77,
   'tab-guest': 13,
   sheet: 19,
   find: 1,

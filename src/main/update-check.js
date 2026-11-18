@@ -7,7 +7,7 @@
 // Nothing from the response but a validated version number is believed (src/shared/update-version.js). Electron-free: `fetch`, the version,
 // timers and the sinks are injected, so the whole thing runs under `node --test` with fakes.
 //
-// State: { current, available, releaseUrl, checkEnabled, downloadName }. `downloadName` is COMPUTED
+// State: { current, available, releaseUrl, checkEnabled, downloadName, lastCheck, canCheck }. `downloadName` is COMPUTED
 // in getState() from `available` and the injected platform / arch / appImage facts (null when nothing
 // is available or this machine has no direct installer), so it cannot drift from `available`. A `newer` answer sets available /
 // releaseUrl, a valid `current` answer clears them, every failure leaves them alone. `checkEnabled`
@@ -26,6 +26,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const FIRST_CHECK_DELAY_MS = 60 * 1000;
 const DEV_FIRST_CHECK_DELAY_MS = 1000;
 const REQUEST_TIMEOUT_MS = 15 * 1000;
+// Check now refuses a press this soon after the last COMPLETED check (leg `check-now-main-side`).
+const MIN_CHECK_GAP_MS = 30 * 1000;
 
 const REQUEST_HEADERS = Object.freeze({
   'User-Agent': 'Goldfinch-update-check',
@@ -70,6 +72,7 @@ function decideUpdateCheck({ isPackaged, env }) {
  *   initialDelayMs?: number,
  *   intervalMs?: number,
  *   timeoutMs?: number,
+ *   now?: () => number,
  *   logger?: { error: (...a: any[]) => void }
  * }} deps
  */
@@ -87,6 +90,7 @@ function createUpdateChecker({
   initialDelayMs = FIRST_CHECK_DELAY_MS,
   intervalMs = DAY_MS,
   timeoutMs = REQUEST_TIMEOUT_MS,
+  now = () => Date.now(),
   logger = console
 }) {
   const inert = typeof url !== 'string' || url === '';
@@ -95,15 +99,19 @@ function createUpdateChecker({
   let releaseUrl = /** @type {string | null} */ (null);
   let timer = /** @type {any} */ (null);
   let stopped = false;
-  /** @type {{ controller: AbortController, abortedBy: string | null } | null} */
+  /** @type {{ controller: AbortController, abortedBy: string | null, promise?: Promise<string> } | null} */
   let run = null;
+  /** The last check that ended with any outcome but `aborted`. In memory only. */
+  let lastCheck = /** @type {{ at: number, outcome: 'newer' | 'current' | 'failed' } | null} */ (null);
 
   const getState = () => ({
     current: getVersion(),
     available,
     releaseUrl,
     checkEnabled,
-    downloadName: available === null ? null : installerNameFor({ platform, arch, appImage, version: available })
+    downloadName: available === null ? null : installerNameFor({ platform, arch, appImage, version: available }),
+    lastCheck: lastCheck === null ? null : { ...lastCheck },
+    canCheck: !inert && !stopped
   });
   const emit = () => {
     try {
@@ -123,7 +131,7 @@ function createUpdateChecker({
       timer = null;
       // Re-arm first (24 h from THIS start); a check still in flight drops the second trigger.
       arm(intervalMs);
-      void runCheck();
+      if (checkEnabled) void runCheck();
     }, ms);
     if (timer && typeof timer.unref === 'function') timer.unref();
   };
@@ -168,10 +176,23 @@ function createUpdateChecker({
     return new TextDecoder().decode(all);
   }
 
-  async function runCheck() {
-    if (stopped || inert || !checkEnabled || run) return;
-    const mine = { controller: new AbortController(), abortedBy: /** @type {string | null} */ (null) };
+  /** The ONE request path. Returns the in-flight record's promise of the outcome code (joins a check already running). */
+  function runCheck() {
+    if (stopped || inert) return Promise.resolve('aborted');
+    if (run) return /** @type {Promise<string>} */ (run.promise);
+    const mine = {
+      controller: new AbortController(),
+      abortedBy: /** @type {string | null} */ (null),
+      promise: /** @type {Promise<string> | undefined} */ (undefined)
+    };
     run = mine;
+    // `execute` runs synchronously up to its first await, so the record is set before anything yields.
+    mine.promise = execute(mine);
+    return mine.promise;
+  }
+
+  /** @param {{ controller: AbortController, abortedBy: string | null }} mine */
+  async function execute(mine) {
     let timedOut = false;
     const limit = setT(() => {
       timedOut = true;
@@ -179,6 +200,8 @@ function createUpdateChecker({
     }, timeoutMs);
     /** @type {string} */
     let outcome;
+    /** @type {{ a: string | null, u: string | null } | null} */
+    let toApply = null;
     try {
       const res = await fetch(/** @type {string} */ (url), {
         method: 'GET',
@@ -206,10 +229,10 @@ function createUpdateChecker({
             outcome = parsed.reason;
           } else if (run === mine && isNewer(parsed.version, getVersion())) {
             outcome = 'newer';
-            apply(parsed.version, releaseUrlFor(parsed.version));
+            toApply = { a: parsed.version, u: releaseUrlFor(parsed.version) };
           } else {
             outcome = 'current';
-            if (run === mine) apply(null, null);
+            if (run === mine) toApply = { a: null, u: null };
           }
         }
       }
@@ -222,15 +245,25 @@ function createUpdateChecker({
       if (run === mine) run = null;
     }
     // A late answer from an aborted request changes nothing and is not reported as a result.
-    if (mine.abortedBy === null) trace(outcome);
-    else trace('aborted');
+    if (mine.abortedBy !== null) {
+      trace('aborted');
+      return 'aborted';
+    }
+    // lastCheck is set BEFORE apply(), so one emit per completion carries both; when apply() did not
+    // emit (a repeat answer, a failure) the completion emits once for lastCheck alone.
+    lastCheck = { at: now(), outcome: outcome === 'newer' || outcome === 'current' ? outcome : 'failed' };
+    const emitted = toApply ? apply(toApply.a, toApply.u) : false;
+    if (!emitted) emit();
+    trace(outcome);
+    return outcome;
   }
 
   function apply(/** @type {string | null} */ nextAvailable, /** @type {string | null} */ nextUrl) {
-    if (nextAvailable === available && nextUrl === releaseUrl) return;
+    if (nextAvailable === available && nextUrl === releaseUrl) return false;
     available = nextAvailable;
     releaseUrl = nextUrl;
     emit();
+    return true;
   }
 
   function classifyFailure(/** @type {any} */ error) {
@@ -272,6 +305,24 @@ function createUpdateChecker({
       arm(intervalMs);
       void runCheck();
     },
+    /**
+     * On-demand check for a Settings page. Works with automatic checks on or off; never touches the
+     * daily timer. Order: unavailable, join an in-flight check, too-soon, a fresh check.
+     * @returns {Promise<{ outcome: 'newer' | 'current' | 'failed' | 'too-soon' | 'unavailable', retryAt?: number }>}
+     */
+    async checkNow() {
+      if (stopped || inert) return { outcome: 'unavailable' };
+      if (!run) {
+        if (lastCheck !== null) {
+          const elapsed = now() - lastCheck.at;
+          if (elapsed >= 0 && elapsed < MIN_CHECK_GAP_MS) {
+            return { outcome: 'too-soon', retryAt: lastCheck.at + MIN_CHECK_GAP_MS };
+          }
+        }
+      }
+      const raw = await runCheck();
+      return { outcome: raw === 'newer' || raw === 'current' ? raw : 'failed' };
+    },
     /** Quit: clears the timer, aborts, fires nothing. Safe twice. */
     stop() {
       stopped = true;
@@ -288,5 +339,6 @@ module.exports = {
   DAY_MS,
   FIRST_CHECK_DELAY_MS,
   DEV_FIRST_CHECK_DELAY_MS,
-  REQUEST_TIMEOUT_MS
+  REQUEST_TIMEOUT_MS,
+  MIN_CHECK_GAP_MS
 };

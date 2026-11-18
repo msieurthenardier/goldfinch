@@ -11,7 +11,7 @@ const RELEASE = 'https://github.com/msieurthenardier/goldfinch/releases/tag/v0.1
 const DEB = 'goldfinch_0.19.16_amd64.deb';
 const DEB_URL = 'https://github.com/msieurthenardier/goldfinch/releases/download/v0.19.16/' + DEB;
 
-function setup({ releaseUrl = RELEASE, pausedSecond = false, downloadName = DEB, startResult = true } = {}) {
+function setup({ releaseUrl = RELEASE, pausedSecond = false, downloadName = DEB, startResult = true, checkNow } = {}) {
   const handlers = new Map();
   const ipcMain = { handle: (c, fn) => handlers.set(c, fn), on() {} };
   const chromeA = { id: 'chrome-a' };
@@ -42,6 +42,7 @@ function setup({ releaseUrl = RELEASE, pausedSecond = false, downloadName = DEB,
     registerInternalHandler,
     registry,
     getState: () => state,
+    ...(checkNow ? { checkNow } : {}),
     queueChromeSend: (record, build) => sends.push([record.id, ...build()]),
     startUpdateDownload: (url) => {
       started.push(url);
@@ -58,9 +59,10 @@ function setup({ releaseUrl = RELEASE, pausedSecond = false, downloadName = DEB,
   return { handlers, chromeA, chromeB, sends, state, internalEvent, started, records, clock };
 }
 
-test('registers exactly the four channels', () => {
+test('registers exactly the five channels', () => {
   const h = setup();
   assert.deepEqual([...h.handlers.keys()].sort(), [
+    'internal-update-check-now',
     'internal-update-download',
     'internal-update-open-release-page',
     'update:get-state',
@@ -315,4 +317,45 @@ test('source: the download call is injected, the registrar has no electron sessi
   const code = src.replace(/\/\/.*$/gm, '');
   assert.doesNotMatch(code, /downloadURL|require\('electron'\)|session\./);
   assert.match(src, /does not call the reveal gate either/);
+});
+
+test('internal-update-check-now: zero arguments reach checkNow, the result is a passed-through copy', async () => {
+  const calls = [];
+  const result = { outcome: 'too-soon', retryAt: 5 };
+  const h = setup({
+    checkNow: async (...args) => {
+      calls.push(args);
+      return result;
+    }
+  });
+  for (const arg of ['x', { evil: 1 }, [1, 2], 42]) {
+    const r = await h.handlers.get('internal-update-check-now')(h.internalEvent(101), arg, arg);
+    assert.deepEqual(r, result);
+    assert.notEqual(r, result);
+  }
+  assert.equal(calls.length, 4);
+  assert.ok(calls.every((a) => a.length === 0));
+});
+
+test('internal-update-check-now: a web tab is refused; a throw or rejection answers unavailable; default is unavailable', async () => {
+  let n = 0;
+  const h = setup({
+    checkNow: async () => {
+      n++;
+      throw new Error('boom');
+    }
+  });
+  await assert.rejects(async () => h.handlers.get('internal-update-check-now')(guestEvent(101)));
+  assert.equal(n, 0);
+  assert.deepEqual(await h.handlers.get('internal-update-check-now')(h.internalEvent(101)), { outcome: 'unavailable' });
+  const sync = setup({
+    checkNow: () => {
+      throw new Error('sync');
+    }
+  });
+  assert.deepEqual(await sync.handlers.get('internal-update-check-now')(sync.internalEvent(101)), {
+    outcome: 'unavailable'
+  });
+  const d = setup();
+  assert.deepEqual(await d.handlers.get('internal-update-check-now')(d.internalEvent(101)), { outcome: 'unavailable' });
 });

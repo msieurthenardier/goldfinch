@@ -546,3 +546,145 @@ test('kebabActions.new-window / exit call the window.goldfinch bridge', async ()
   actions.kebabActions.exit();
   assert.deepEqual(h.calls, [['windowCreate'], ['appQuit']]);
 });
+
+// ---------------------------------------------------------------------------
+// Kebab dot (sortie 09 leg `about-controller-and-dot`): the button's class / title / description,
+// driven through createChromePageActions' push and boot-read closures with a fake document.
+// ---------------------------------------------------------------------------
+
+function fakeKebabDocument({ withKebab = true, withNote = true } = {}) {
+  const classes = new Set();
+  const writes = { title: 0, note: 0 };
+  let title = 'More';
+  let noteText = '';
+  const kebab = {
+    classList: {
+      toggle: (name, on) => (on ? classes.add(name) : classes.delete(name)),
+      contains: (name) => classes.has(name)
+    },
+    attrs: new Map([['aria-label', 'More']]),
+    setAttribute(k, v) {
+      this.attrs.set(k, v);
+    },
+    get title() {
+      return title;
+    },
+    set title(v) {
+      writes.title++;
+      title = v;
+    }
+  };
+  const note = {
+    get textContent() {
+      return noteText;
+    },
+    set textContent(v) {
+      writes.note++;
+      noteText = v;
+    }
+  };
+  const doc = {
+    getElementById: (id) => (id === 'kebab' && withKebab ? kebab : id === 'kebab-update-note' && withNote ? note : null)
+  };
+  return { doc, kebab, note, writes, classes };
+}
+
+async function dotHarness(doc, { read } = {}) {
+  const { createChromePageActions } = await import('../../src/renderer/chrome/overlay-menus.js');
+  const h = pageActionsHarness();
+  let push = null;
+  h.window.document = doc;
+  h.window.goldfinch.onUpdateStateChanged = (cb) => {
+    push = cb;
+  };
+  h.window.goldfinch.updateGetState = read || (() => Promise.resolve(null));
+  createChromePageActions({
+    ...h,
+    activeTab: () => null,
+    isInternalPageUrl: () => false,
+    deriveSiteInfo: () => ({}),
+    openNewTab: () => {}
+  });
+  return { push: (s) => push(s) };
+}
+
+const settle = () => new Promise((r) => setImmediate(r));
+
+test('kebab dot: on for a valid notice, off for cleared / null / rejected states', async () => {
+  const f = fakeKebabDocument();
+  const d = await dotHarness(f.doc);
+  d.push(NEWER);
+  assert.equal(f.classes.has('update-waiting'), true);
+  assert.equal(f.kebab.title, 'More — update available');
+  assert.equal(f.note.textContent, 'Update available');
+  assert.equal(f.kebab.attrs.get('aria-describedby'), 'kebab-update-note');
+  assert.equal(f.kebab.attrs.get('aria-label'), 'More');
+  for (const off of [{ ...NEWER, available: null }, null, { available: '1.0.0-evil', releaseUrl: 'x' }, 'junk']) {
+    d.push(NEWER);
+    d.push(off);
+    assert.equal(f.classes.has('update-waiting'), false);
+    assert.equal(f.kebab.title, 'More');
+    assert.equal(f.note.textContent, '');
+    assert.equal(f.kebab.attrs.get('aria-label'), 'More');
+  }
+});
+
+test('kebab dot: title and note are written only when they change', async () => {
+  const f = fakeKebabDocument();
+  const d = await dotHarness(f.doc);
+  d.push(NEWER);
+  d.push({ ...NEWER, lastCheck: { at: 1, outcome: 'newer' } });
+  d.push({ ...NEWER, lastCheck: { at: 2, outcome: 'newer' } });
+  assert.equal(f.writes.title, 1);
+  assert.equal(f.writes.note, 1);
+});
+
+test('kebab dot: the boot read applies it, and is dropped after a push', async () => {
+  const f = fakeKebabDocument();
+  await dotHarness(f.doc, { read: () => Promise.resolve(NEWER) });
+  await settle();
+  assert.equal(f.classes.has('update-waiting'), true);
+  const g = fakeKebabDocument();
+  let resolve;
+  const d = await dotHarness(g.doc, { read: () => new Promise((r) => (resolve = r)) });
+  d.push({ ...NEWER, available: null });
+  resolve(NEWER); // older than the push
+  await settle();
+  assert.equal(g.classes.has('update-waiting'), false);
+  assert.equal(g.kebab.title, 'More');
+});
+
+test('kebab dot: a missing #kebab, a missing note and a window with no document are tolerated', async () => {
+  const none = fakeKebabDocument({ withKebab: false });
+  const d = await dotHarness(none.doc);
+  assert.doesNotThrow(() => d.push(NEWER));
+  const noNote = fakeKebabDocument({ withNote: false });
+  const e = await dotHarness(noNote.doc);
+  e.push(NEWER);
+  assert.equal(noNote.classes.has('update-waiting'), true);
+  const { applyKebabDot } = await import('../../src/renderer/chrome/overlay-menus.js');
+  assert.doesNotThrow(() => applyKebabDot({}, NEWER));
+  assert.doesNotThrow(() => applyKebabDot(undefined, NEWER));
+});
+
+test('kebab dot: the menu item still follows the same state', async () => {
+  const { buildKebabModel } = await import('../../src/renderer/chrome/overlay-menus.js');
+  const f = fakeKebabDocument();
+  const d = await dotHarness(f.doc);
+  d.push(NEWER);
+  assert.equal(buildKebabModel()[0].id, 'update');
+  d.push(null);
+  assert.equal(buildKebabModel()[0].id, 'new-window');
+});
+
+test('kebab dot: styles.css carries the dot as top-level, class-qualified rules (no stray text in a neighbouring selector)', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const css = fs.readFileSync(path.join(__dirname, '../../src/renderer/styles.css'), 'utf8');
+  assert.match(css, /\n#kebab\.update-waiting\s*\{\s*position:\s*relative;\s*\}/);
+  assert.match(css, /\n#kebab\.update-waiting::after\s*\{[^}]*position:\s*absolute;[^}]*var\(--accent\)[^}]*\}/);
+  // The rules sit between complete rules: the text before the first one ends a rule, not a selector.
+  const before = css.slice(0, css.indexOf('/* Update-waiting dot on the kebab')).trimEnd();
+  assert.ok(before.endsWith('}'));
+  assert.ok(!/#newtab-pill\s*\/\*/.test(css));
+});
