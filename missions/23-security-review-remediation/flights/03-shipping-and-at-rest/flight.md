@@ -1,6 +1,6 @@
 # Flight: Shipping and At-Rest
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Security Review Remediation](../../mission.md)
 
 > Architect design review: **approve with changes** (2026-11-16). Incorporated: the macOS ad-hoc signature is reset after the fuse flip (DD2); the build is three jobs so that neither write access nor the right to attest sits beside dependency install scripts, and asset names are fixed and asserted (DD3, DD4); the stable-tag check no longer depends on checkout depth (DD3); the update notice is one `net.fetch` on the default session, has a read channel as well as a push, reacts to its setting mid-run, opens its link through a no-argument channel, and is split into two legs (DD1); the switch list is widened and the admin environment flag recorded as accepted (DD5); the acceptance candidate is tagged below the current stable version so the real notice shows (DD8); `release-pipeline` split in two.
