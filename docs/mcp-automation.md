@@ -800,7 +800,10 @@ connection has been active recently and will be able to read what is shown. No a
   returns a secret); the vault fill channels (refused by Flight 1's picker context). **`internal-settings-get`
   still returns the automation key hashes to internal pages** - hashes of 256-bit keys, documented, not
   gated. An admin script can also still change `vaultAutoLockMinutes` and `automationPort` (neither yields a
-  secret; both are visible in settings).
+  secret; both are visible in settings). **An admin script in the Settings page can press the update
+  download** (`updateDownload`, `internal-update-download`): it starts one ordinary download of a fixed,
+  app-built installer address into the downloads folder. No secret, key or caller-chosen address or path is
+  involved, so there is no reveal-gate call (`docs/updates.md`).
 - **A key holder can read back a password from a page it filled** (Mission 23 finding 17c): `vaultFill` is
   login-only and never returns a password, but a key holder that fills a login form can `readDom` / `evaluate`
   that page's own field. That is the fill feature working as designed, not an internal-bridge reach.

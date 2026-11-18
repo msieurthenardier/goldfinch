@@ -16,6 +16,7 @@
     <script src="search-engines.js" type="module"></script>
     <!-- Sortie 01 leg 2: pure copy model for the Default browser row (settings.js). -->
     <script src="default-browser-row-model.js" type="module"></script>
+    <script src="update-notice-model.js" type="module"></script>
     <script src="shields-isolation-model.js" type="module"></script>
     <script src="settings.js" type="module"></script>
   </head>
@@ -217,7 +218,34 @@
       </section>
       <section id="about">
         <h2>About</h2>
-        <p>Version information and credits will appear here.</p>
+        <!-- Update notice (Mission 23 F3 leg update-notice): rendered ONLY from main's validated
+             update state through update-notice-model.js. Ids are stable (behavior spec). -->
+        <p id="about-version"></p>
+        <p id="about-update-status" role="status" hidden></p>
+        <button
+          id="about-update-download"
+          class="settings-btn"
+          type="button"
+          aria-describedby="about-update-hint"
+          hidden
+        >
+          Download now
+        </button>
+        <button id="about-update-open" class="settings-btn settings-btn--secondary" type="button" hidden>
+          View release notes
+        </button>
+        <p id="about-update-hint" class="muted" hidden></p>
+        <fieldset class="shields-group update-check-group">
+          <legend class="sr-only">Update check</legend>
+          <label class="shield-row update-check-row"
+            ><span>Check for new versions</span
+            ><input type="checkbox" id="update-check-enabled" aria-describedby="update-check-note"
+          /></label>
+        </fieldset>
+        <p id="update-check-note" class="muted">
+          Asks GitHub once a day whether a newer release exists. Nothing is downloaded unless you ask, and nothing is
+          installed for you.
+        </p>
       </section>
     </main>
   </body>

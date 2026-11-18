@@ -1,6 +1,25 @@
 import { VAULT_BLUR_SURVIVAL_MENU_TYPES } from '../../shared/vault-blur-survival.js';
+import { updateNoticeModel } from '../../shared/update-notice-model.js';
 
 const BLUR_REOPEN_SUPPRESS_MS = 300;
+
+// Update-notice state for the kebab (Mission 23 F3 leg `update-notice`). Held here, not in
+// renderer.js (which is at its line budget); fed by createChromePageActions' boot wiring.
+// `buildKebabModel()` stays parameterless and reads this.
+/** @type {any} */
+let updateState = null;
+let updatePushed = false;
+
+/** Set the latest update state (a state the model rejects clears it). @param {any} state */
+export function setKebabUpdateState(state) {
+  updateState = updateNoticeModel(state).showNotice ? state : null;
+}
+
+/** Back to no notice and no applied push (test hygiene). */
+export function resetKebabUpdateState() {
+  updateState = null;
+  updatePushed = false;
+}
 
 export function buildKebabModel() {
   // Two separators group the menu into three bands: window-scoped (New window) /
@@ -9,7 +28,10 @@ export function buildKebabModel() {
   // The sheet renders `type:'separator'` as role="separator" (menu-overlay.js) and
   // the roving-tabindex/arrow-nav skips it for free (no role="menuitem"), the same
   // idiom the page-context menu uses.
+  const notice = updateNoticeModel(updateState);
+  const updateRows = notice.showNotice ? [{ id: 'update', label: notice.kebabLabel }, { type: 'separator' }] : [];
   return [
+    ...updateRows,
     { id: 'new-window', label: 'New window' },
     { type: 'separator' },
     { id: 'settings', label: 'Settings' },
@@ -129,6 +151,22 @@ export function createChromePageActions({
   deriveSiteInfo,
   openNewTab
 }) {
+  // Boot wiring for the kebab's update item: subscribe first, then one read; a read that
+  // resolves after a push is dropped. Guarded so harnesses with `window: { goldfinch: {} }` work.
+  if (typeof window?.goldfinch?.onUpdateStateChanged === 'function') {
+    window.goldfinch.onUpdateStateChanged((state) => {
+      updatePushed = true;
+      setKebabUpdateState(state);
+    });
+  }
+  if (typeof window?.goldfinch?.updateGetState === 'function') {
+    Promise.resolve(window.goldfinch.updateGetState())
+      .then((state) => {
+        if (!updatePushed) setKebabUpdateState(state);
+      })
+      .catch(() => {});
+  }
+
   function openDownloads() {
     createTab('goldfinch://downloads', null, { trusted: true });
   }
@@ -149,6 +187,9 @@ export function createChromePageActions({
   // consumed by the sheet's channel-6 activation via createOverlayDispatch.
   /** @type {{ [id: string]: () => void }} */
   const kebabActions = {
+    update: () => {
+      window.goldfinch.updateOpenReleasePage();
+    },
     'new-window': () => {
       window.goldfinch.windowCreate();
     },

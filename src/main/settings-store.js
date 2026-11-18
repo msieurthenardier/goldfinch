@@ -40,6 +40,7 @@ const { isReservedKeyName } = require('../shared/reserved-ids');
  *   automationAdminKeyHash: string,
  *   automationPort: number,
  *   spellcheck: boolean,
+ *   updateCheckEnabled: boolean,
  *   restoreSession: boolean,
  *   vaultAutoLockMinutes: number,
  *   bookmarksBarEnabled: boolean,
@@ -143,7 +144,11 @@ const DEFAULTS = {
   // comment above): a fresh profile has no engine chosen, and the welcome
   // surface asks the first time a search actually needs one, rather than the
   // app silently sending it to a provider the user never picked.
-  searchEngine: null
+  searchEngine: null,
+  // Daily update check (Mission 23 Flight 3, leg `update-check`). Additive boolean — no version
+  // bump; the typeof-match fallback in load() repairs a non-boolean to this default. Read by main at
+  // ready (`startUpdateCheck`) and live through `internal-settings-set`.
+  updateCheckEnabled: true
 };
 
 // SHA-256 hex digests are exactly 64 lowercase hex chars.

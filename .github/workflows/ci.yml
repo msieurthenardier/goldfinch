@@ -61,3 +61,6 @@ jobs:
 
       - name: Package (no installers)
         run: npx electron-builder --linux --dir
+
+      - name: Check Electron fuses
+        run: node scripts/check-fuses.mjs dist/linux-unpacked/goldfinch

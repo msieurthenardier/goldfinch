@@ -238,6 +238,31 @@ main section p {
   padding-left: 0;
 }
 
+/* About (update notice): the same standalone-row treatment as Spellcheck above — divider, no
+   sub-row indent. The notice and its button sit in their own block above it; the gaps ride the
+   elements that follow, so a hidden notice leaves no empty space. */
+main section #about-update-status {
+  margin-top: 12px;
+}
+#about-update-download,
+#about-update-open {
+  margin-top: 8px;
+}
+#about-update-download {
+  margin-right: 8px;
+}
+main section #about-update-hint {
+  margin-top: 8px;
+}
+.update-check-group {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 12px;
+  margin-top: 16px;
+}
+.shield-row.update-check-row {
+  padding-left: 0;
+}
+
 /* ── Search engine radio group (M16 F1 Leg 2 / DD7) ─────────────────────────────
    Rows built by settings.js from SEARCH_ENGINES; this file styles the shell only
    (no engine-specific selectors). Divider above + no indent, same standalone-
@@ -558,7 +583,8 @@ main section p {
 .settings-btn {
   background: var(--accent);
   color: var(--accent-fg);
-  border: none;
+  /* Same 1px box as the secondary variant, so a primary and a secondary side by side match. */
+  border: 1px solid transparent;
   border-radius: 6px;
   padding: 6px 14px;
   font-size: 14px;

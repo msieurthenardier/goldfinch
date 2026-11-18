@@ -525,6 +525,12 @@ business logic and no privileged APIs; it renders a model and runs the APG keybo
   target; the credential still reaches only that page. The picker's own controls (below,
   *The picker's controls*) are the defence against a misdirected click. Known and not fixed here: a touch tap produces no mouse press for the witness (so it
   raises nothing), and Ctrl+click as a context-menu trigger arrives as a left press.
+- **Stated and accepted - the fill payload passes through the page's world.** Main cannot hand a value to the
+  isolated world through Electron's own calls without page code in the path (measured, Mission 23 Flight 1), so a
+  page that has patched its own built-ins can see a credential in transit; the guarantee is that the page receives
+  only the item the operator chose, after seeing where it was going, and that the value then sits in the page's
+  own field either way. Operator ruling 2026-11-13; the dispositions table is in the Mission 23 file, *Dispositions*
+  (`missions/23-security-review-remediation/mission.md`, finding 2c).
 - **The per-open picker context.** An accepted gesture (or an accepted "Fill login..." from
   the native icon menu) makes main mint a context (`picker-context.js`, held on the
   vault-human object beside its per-tab capture drops): an unguessable id, the tab, the
@@ -1054,6 +1060,8 @@ never offered; the existing `CAPTURE_DROP_MS` safety-timeout continues to cover 
 state via the same drop choke point Leg 1 hardened (vault lock, window close, tab close, TTL).
 Origin is derived and **frozen at gesture time** — never re-derived at settle, since the tab may
 already show a different origin by the time a navigation-commit settle fires.
+
+**Stated and accepted - the capture is planned and sent from the page's world.** The values are read in the isolated world, but the step that plans the capture and sends it to main (`onCaptureGesture`, `planCaptures` and the send loop in `webview-preload.js`) runs in the page's own world. A page that controls its own built-ins can therefore make main hold a capture of the page's choosing for that page's own tab, so the save prompt may offer a username and password the page picked. It cannot read anything from the vault, affect another site, or save without the operator's click on the prompt. Operator ruling 2026-11-17 (Mission 23 finding 14b). The remedy, if it is ever scheduled, is to plan and send the capture from the isolated world.
 
 ### The save prompt (Sortie 06): a non-blocking corner prompt, not a sheet
 

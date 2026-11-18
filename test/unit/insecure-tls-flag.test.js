@@ -67,6 +67,10 @@ test('source pin: the switch literal lives ONLY in the helper — dev-launch.mjs
       for (const entry of fs.readdirSync(cur, { withFileTypes: true })) {
         const p = path.join(cur, entry.name);
         if (entry.isDirectory()) stack.push(p);
+        // The one exemption: the packaged build's launch-switch table NAMES the switch in order to
+        // strip it (and its --spki-list sibling to refuse it); it enables nothing (no appendSwitch,
+        // pinned in launch-switches-placement.test.js).
+        else if (p === path.join(repoRoot, 'src/main/launch-switches.js')) continue;
         else if (/\.(js|mjs|cjs|ts|html)$/.test(entry.name)) {
           assert.equal(
             fs.readFileSync(p, 'utf8').includes('ignore-certificate-errors'),

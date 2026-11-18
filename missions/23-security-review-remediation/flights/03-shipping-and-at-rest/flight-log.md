@@ -1,0 +1,597 @@
+# Flight Log: Shipping and At-Rest
+
+**Flight**: [Shipping and At-Rest](flight.md)
+
+## Summary
+
+Planning. No leg has flown.
+
+---
+
+## Reconnaissance Report
+
+2026-11-16, against `main` at `e282eaf` (Flight 2 merged as #288), `package.json` version 0.19.14, Electron 45.3.2. Done by the Flight Director from the repository, `npm audit`, and the repository's settings read through `gh api`. Nothing was run in the app. Presented to the operator the same day.
+
+| Item | Classification | Evidence | Recommendation |
+| --- | --- | --- | --- |
+| 3a no updater and no in-app update check | confirmed-live | the only network calls in `src/main/**` are the favicon fetch (`guest-wiring.js`), the internal-page file read (`main.js`) and the media proxy (`media-proxy-handler.js`); no settings key for it in `settings-store.js` `DEFAULTS` | build the notify-only check |
+| 3b Electron patch lag | partially-satisfied | `package.json` pins `electron` 45.3.2 (Flight 2); `npm outdated` shows 45.3.3 | take the patch; the standing answer is the update notice plus Dependabot |
+| 7a no checksums, signatures or provenance on release assets | confirmed-live | `.github/workflows/build.yml` has no checksum or attestation step and no `id-token` / `attestations` permission | checksums file plus build provenance attestation |
+| 7b releases mutable | confirmed-live | `gh api repos/…/immutable-releases` → `{"enabled":false}` | turn on (repository setting, operator) |
+| 7c unsigned on macOS and Windows | confirmed-live, accepted at planning | `mac.identity: null`; `CSC_IDENTITY_AUTO_DISCOVERY: 'false'` | documented, not fixed (operator decision 2026-11-12) |
+| 8a no Electron fuses flipped | confirmed-live | no `electronFuses` in `package.json` `build`; no `afterPack` hook; the installed electron-builder (26.x) accepts `electronFuses` (`app-builder-lib/out/configuration.d.ts`) and `@electron/fuses` 1.8.0 is already in the tree | set fuses through the builder's own option |
+| 8b cookies plaintext at rest | confirmed-live | no cookie-encryption fuse; the fuse's own documentation calls it a one-way transition | design call: turn on, or accept |
+| 8c `asar:false`, no integrity check | confirmed-live, by design | `package.json` `"asar": false`; CLAUDE.md: `src/**` must stay unpacked | expected acceptance, written down |
+| 18a `v*` tags unprotected | confirmed-live | one ruleset, `main`, target `branch` (deletion, non-fast-forward, pull request; repository-admin bypass); no tag ruleset | tag ruleset (operator) |
+| 18b the `build` job holds `contents: write` while `npm ci` runs install scripts, with persisted credentials | confirmed-live | `build.yml` `build` job: `permissions: contents: write`, `npm ci` with scripts, checkout without `persist-credentials: false`, `GH_TOKEN` on the builder step | split build from upload |
+| 18c Concourse images unpinned | confirmed-live | six `ci/tasks/*.yml` use `node` tag `'22'` with no digest | pin by digest |
+| 18d the Windows fallback build runs on a host holding a signing certificate | confirmed-live in the task file; host not verifiable from the repository | `ci/tasks/build-windows.yml` comment: the worker "has a cert in its machine store, so signtool still signs the fallback build" | needs-human-recheck: what the certificate is, and whether the fallback job should exist |
+| 19 the packaged build honours `--remote-debugging-port`, `--inspect`, `--ignore-certificate-errors`, `--no-sandbox`, `--disable-web-security` | confirmed-live by absence | no switch is refused or removed anywhere in `src/main/**` (the only `commandLine` uses read `ozone-platform` and compose `enable-features`); `--inspect` is covered by a fuse; whether `removeSwitch` before `ready` takes effect for the others is unmeasured | measure first, then decide per switch |
+| 20a two moderate runtime advisories through the MCP SDK | confirmed-live | `npm audit --omit=dev`: `hono`, `@hono/node-server`; "fix available via `npm audit fix`" | bump within the SDK's ranges |
+| 20b moderate advisories in the full tree | confirmed-live, changed (11 → 10) | all `minimatch`, through `electron-builder` and `eslint`; the offered fix is a breaking downgrade of electron-builder | override or wait; not shipped code |
+| Dependabot #286 (Electron 44.10.0 → 45.3.0) | already-satisfied | `main` is on 45.3.2 | close as superseded |
+
+**Carried in from earlier flights, sharing this flight's surface:** the release checklist in `docs/RELEASING.md` (seven by-eye items, no owner); the internet-origin-mark check on Windows and macOS installers; the final disposition table for findings 1–22 and the documentation sweep (mission criterion 10).
+
+---
+
+## Flight Director Notes
+
+- 2026-11-16 — Planning opened on `flight/03-shipping-and-at-rest` from `main` at `e282eaf`. Reconnaissance above done directly by the Flight Director (repository and settings reads only).
+- 2026-11-16 — Operator rulings at the interview: cookies at rest — measure, then decide; update notice — Settings → About plus a kebab item; launch switches — refuse the dangerous ones, keep `--no-sandbox`; acceptance walk — yes, on a release-candidate prerelease.
+- 2026-11-16 — Architect design review (Sonnet): **approve with changes**, 14 issues (3 high), all incorporated; no second cycle (each change is the reviewer's own remedy). High: the macOS ad-hoc signature is not restored after a fuse flip under `mac.identity: null`; a separate upload job would rename the Windows installer and break the README links; attesting in the build job would put attestation rights beside install scripts. Leg list went from nine to eleven (`update-notice` and `release-pipeline` each split in two). The Architect said which files it read in part or skipped (`ci/README.md`, `ci.yml`, two order-pin tests, `docs/dev-testing.md`).
+- 2026-11-16 — Flight Director calls made from the review, for the operator to overturn: the candidate is tagged `v0.19.14-rc.N` so the real endpoint offers v0.19.14; `GOLDFINCH_AUTOMATION_ADMIN` stays honoured in a packaged build (recorded as accepted); `mac.identity` stays `null` with `resetAdHocDarwinSignature`; `--proxy-server` is not refused.
+- 2026-11-17 — Hotfix on `main` after planning: squawk 0195 (#289, WebGL farble hook calls the native first — `src/preload/webview-preload.js` and one new unit test) and the bump to 0.19.15 (#290, released as v0.19.15). The flight branch was fast-forwarded to `f401407`; it held no commits. Effect on this plan: the candidate tag becomes `v0.19.15-rc.N` (DD8) and the digest evidence for item 7 was re-read on v0.19.15 (one SHA-256 per asset). No leg touches the hotfix's file. Squawks 0196 (WebGPU adapter, deferred) and 0197 (app token on page-script requests, open) are farbling / User-Agent defects outside this flight; 0197 is noted for leg `update-check` only because that leg sets its own fixed User-Agent on a main-process request, which the guest-session defect does not reach.
+- 2026-11-17 — Operator rulings, one at a time. (1) Candidate tag `v0.19.15-rc.N`: **keep**. (2) `GOLDFINCH_AUTOMATION_ADMIN` in a packaged build: **keep honoured** — "I only use dev only, but somebody might want that option for automation and if someone can change it they already have full access". (3) `mac.identity`: **keep null** with the ad-hoc re-sign. (4) Q5 macOS launch: "I dont have an apple for testing, we'll have to skip, I can rely on others to tell me post deploy" — fuses ship on macOS unverified, recorded as such. (5) `--proxy-server`: **agreed**, not refused. (6) Q8 Windows fallback builder: "just remove it" — folded into leg `dependencies`. (7) Dependabot #286: "fold it in" — read by the Flight Director as: the flight covers its bump and the flight's pull request closes it on merge.
+- 2026-11-17 — Operator go ("begin"). Flight `in-flight`. Execution under `/mission-control:agentic-workflow`; crew file `.flightops/agent-crews/leg-execution.md` loaded and well-formed (Developer and Reviewer on Sonnet). Eleven legs.
+- 2026-11-17 — Leg 01 `dependencies` designed. Tier: **low**, said out loud — lockfile and CI configuration only, no source change. The one unknown is that the only patched `@hono/node-server` is a new major (1.x → 2.x, inside the SDK's declared range) and the MCP transport's request listener is built on it; a design review cannot settle that by reading, so the leg carries a stop rule (`[BLOCKED:node-server-major]`) and a live smoke of every apparatus primitive instead. No design-review spawn. Developer spawned to implement.
+- 2026-11-17 — Leg 01 `[LAND:leg]` accepted. Spot-checked by the Flight Director: `npm audit` 0, the override keys, the digest form in `ci/tasks/audit.yml`, the staged deletion. Carried forward: the pinned-digest form is **not verified on the Concourse worker** (`fly` not authorised; nobody logged in) — the operator's first `fly execute` or pipeline run is the check; Electron 45.3.3 moved the bundled Node, the store suites pass, and the `third-party-cookie-isolation` spec is re-run in leg `launch-switches` as already planned; the `minimatch` overrides on the macOS merge path (`@electron/universal`) are first exercised by the manual dispatch build in leg `release-build-split`. Two doc candidates handed to leg `dispositions-and-docs` rather than logged as squawks: `ci/README.md` still calls the repository private, and the `minimatch` overrides need a removal note.
+- 2026-11-17 — Leg 02 `packaged-measurements` designed while leg 01 flew. Tier: **low** — no repository source change. Two additions to the flight's plan made at leg design: every launch redirects `HOME` as well as `XDG_CONFIG_HOME`, so Q1 is answered by which scratch directory fills, never by watching the real profile; and the leg tests whether a packaged build can be driven over MCP from a scratch profile seeded by a dev-mode mint (the flight's apparatus table assumed it cannot). Probe code for Q3 goes only into a scratch copy of the unpacked build. Developer spawned.
+- 2026-11-17 — Leg 05 `update-check` designed ahead of its turn (it does not depend on the measurements), tier **high**. Developer design review: approve with changes, eight issues (four medium), all incorporated in one cycle — the ready chain lives in `app-lifecycle.js`, so start and stop are optional lifecycle dependencies; channel counts 206 → 209 (CLAUDE.md's 205 was already stale); a 401 raises nothing because credentials are omitted; the default session's listeners see the request; undocumented `net.fetch` options each get a live check and a stop rule. Flight Director answers to the reviewer's two questions: the open channel returns `false` for a paused chrome; `checkEnabled` is the setting only. For leg `update-notice`: its criteria must drive the open from the real click, not the bridge call.
+- 2026-11-17 — Leg 02 `[LAND:leg]` accepted; results in `packaged-measurements.md`. What it changes downstream: a packaged build **is** drivable over MCP from a seeded scratch profile (recipe in the document), so legs `runtime-fuses` and `launch-switches` verify on the packaged build through the automation surface, not only from outside; every listed switch is removable before it takes effect except `--js-flags` (the main process keeps it — that one exits) and `--load-extension` (Electron ignores it — no refusal needed); the three runtime fuses break nothing, restart-to-apply included. **Checkpoint: DD6 put to the operator** with the leg's three-line summary. Not measured and carried to leg `launch-switches` design: the bare and space-separated switch forms, and the DD5 switches outside the measured list.
+- 2026-11-17 — Order changed: leg 05 `update-check` flies now, ahead of 03 and 04, which are designed from leg 02's results while it flies. No file conflict in that order (05 adds nothing to the startup block; 03 is `package.json` `build` and one CI task).
+- 2026-11-17 — Leg 03 `runtime-fuses` designed, tier **low** (a build key and a check script; behaviour measured in leg 02). One addition to the flight's plan: the check also fails on any *other* fuse changing unexpectedly. Noted for leg `release-build-split`: the macOS build runner can verify the ad-hoc signature and launch the app briefly — the only macOS evidence available since the operator has no Apple hardware.
+- 2026-11-17 — Leg 04 `launch-switches` designed, tier **high**; Developer design review spawned (read-only, while leg 05 flies). Flight Director design calls: the decision asks `app.commandLine.hasSwitch` instead of parsing `argv` (Chromium's parser defines what a switch is, including Windows `/` forms); two sets — *stripped* where leg 02 measured removal in time, *refused* (exit 64, one line, an error box) for `--js-flags` and for every listed switch whose removal was not measured; the block goes before the single-instance lock so a refused launch hands nothing to a running instance; `--disable-features` naming site isolation is refused rather than edited, leaving the `enable-features` composition alone; the process-launcher switch family is out and documented as not covered.
+- 2026-11-17 — Leg 04 design review: approve with changes; three medium and three low, all incorporated in one cycle (see the leg's header note). Leg `ready`; it flies after 05 and 03.
+- 2026-11-17 — Leg 06 `update-notice` drafted (status `planning`) with behavior spec `tests/behavior/update-notice.md` (draft, ten checkpoints, kebab item `[by-eye]`). Tier **high**; its design review waits for leg 05 to land so it reads the real bridge. Flight Director rule added to both update legs and the spec: **no live step may reach an outside host** — the dev app is launched behind a dead proxy so the release-page tab fails locally and only its address is asserted; sent to leg 05's Developer mid-flight.
+- 2026-11-17 — Leg 05 `[LAND:leg]` accepted with one recorded deviation: a `407` answered by a direct origin traces `network`, not `http-407` (Chromium treats an unsolicited proxy challenge as a transport failure). Accepted by the Flight Director — the property AC8 protects (no sign-in card, state unchanged, silent) held; the trace code is a label. All four undocumented `net.fetch` options were observed honoured on Electron 45.3.3; no stop rule fired. The Developer added `start(enabled)` beside `setEnabled` so the first check waits its delay — within the leg's intent. Noted: the dev profile restores outside-site tabs at launch, so the dead proxy is now standard for this flight's live runs. Developer spawned for leg 03; Developer design review spawned for leg 06 (read-only, in parallel).
+- 2026-11-17 — Leg 06 design review: approve with changes — two high (the spec's hidden-notice assertion was vacuous for failure modes; a boot read could overwrite a newer push in the kebab state), five medium, four low; all incorporated in one cycle, leg `ready`. Flight Director answers: the model checks versions with the existing `parseStableTag('v' + …)`; a malformed `current` renders as `Goldfinch` alone. The Developer ends leg 06 with `[HANDOFF:review-needed]`, not `[LAND:leg]` — the spec run is the Flight Director's and precedes landing. GitHub documentation read for Q6/Q7 (web fetch, public pages only): a deleted immutable release's tag **cannot be reused**; title, notes and the prerelease / latest flags stay editable after publishing; a release attestation is generated automatically and checked with `gh release verify`; artifact storage for public repositories is **not stated** either way, so Q7 is settled by the first manual dispatch run in leg `release-build-split`, with the single-job shape as the fallback.
+- 2026-11-17 — Leg 07 `release-build-split` designed, tier **high**, and reviewed: approve with changes (two high — an explicit `artifactName` changes the builder's architecture handling; the builder emits more than the five installers so they are staged by name — plus six medium, six low), incorporated in one cycle; leg `ready`. Flight Director calls: updater metadata (`latest*.yml`, blockmaps) is no longer published — put to the operator to overturn; each platform's build is started once on its runner, and the macOS runner's signature verification is this flight's only macOS evidence; the leg ends at a checkpoint that needs the operator to push the branch and dispatch the workflow.
+- 2026-11-17 — Leg 03 `[LAND:leg]` accepted. First full run of the automation surface on a packaged build: every primitive answered, no difference from dev. Finding carried forward: Electron 45's fuse wire has a ninth fuse (`WasmTrapHandlers`) that `@electron/fuses` 1.8.0 does not name; the check script pins it by index. Not verified on the Concourse worker (operator's next pipeline run). Developer spawned for leg 04.
+- 2026-11-17 — Leg 04 `[LAND:leg]` accepted, with three Developer deviations ruled on by the Flight Director: (1) `allow-file-access-from-files` is on **neither** list — Electron itself adds that switch on every launch while the `file://`-privileges fuse is on (the chrome is a `file://` page), so refusing it refused every launch and an operator-supplied copy adds nothing; accepted, documented. (2) `insecure-tls-flag.test.js` gained one exemption for `launch-switches.js`, whose strip table must contain the text `ignore-certificate-errors`; accepted, and flagged for the flight-end Reviewer. (3) the `disable-features` token match also strips a `<study` / `:params` suffix before comparing — stricter, accepted. The four existing order pins passed unmodified. Next: the `third-party-cookie-isolation` spec, run by the Flight Director before leg 06 touches the tree.
+- 2026-11-17 — `third-party-cookie-isolation` re-run after leg 04 and the Electron 45.3.3 bump: **pass, 14/14 judged** (step 9 struck), run log `tests/behavior/third-party-cookie-isolation/runs/2026-11-17-14-48-23.md`. Isolation in force; both app-driven restarts attested. Six spec-quality observations from the Validator are in the run log, not acted on in this flight. Leg 08 `release-integrity` drafted (status `planning`) while the run was in progress; it needs the operator's real release sequence and leg 07's built workflow before it is marked ready. Developer spawned for leg 06.
+- 2026-11-17 — Leg 06 Developer `[HANDOFF:review-needed]`: built, own smoke and gates green (7,195 tests), `renderer.js` byte-identical, seam 41; the behavior spec finalised without weakening an assertion (launch command completed, click recipe gained a scroll-settle wait, trace codes listed). Leg stays `in-flight` for AC8. First run of spec `update-notice` started (batched Executor, then a separate Validator). Candidate squawk from the Developer, not in this flight's path and not yet confirmed as pre-existing: `location.reload()` on the chrome target through admin `evaluate` leaves the window with only a Welcome tab and an empty tab census — that reload is not the main-initiated chrome-recovery path. The Flight Director's AC9 asked for that reload; it was a poor choice of apparatus and is not in the spec.
+- 2026-11-17 — Spec `update-notice`, first run: **pass, 10/10** (run log `tests/behavior/update-notice/runs/2026-11-17-15-04-26.md`). Leg 06 marked `landed` by the Flight Director (AC8 met). The spec was corrected from the Validator's findings without weakening a row and is now `active`. Two product observations carried to leg `hat-and-alignment`: the About block's spacing (the checkbox row sits directly under the button), and that the update request carries `Accept-Language` and `Sec-Fetch-*` headers added by the network stack — a locale signal to GitHub that the operator should accept or have removed. Developer spawned for leg 07 (to its checkpoint).
+- 2026-11-17 — Leg 07 Developer `[HANDOFF:review-needed]`: workflow split written, names fixed and proved for Linux by a local build, invariant test with fourteen neuter runs, new actions pinned from their repositories (`upload-artifact` v7.0.2, `download-artifact` v8.0.2). Leg stays `in-flight` at its checkpoint (AC8, a manual dispatch run). Flight Director ruling on the one design call raised: the Linux start check's single retry with `--no-sandbox` after a visible warning is accepted — it is the leg's stated fallback, and the warning keeps the sandbox result on record. **Order changed again, said out loud**: the dispatch needs the branch pushed, and nothing should be pushed unreviewed, so the Reviewer is run now over legs 01–07 rather than only at flight end; legs 08–10 get a second, smaller review. The commit and push remain the operator's to authorise.
+- 2026-11-17 — Mid-flight review of legs 01–07 (Reviewer, Sonnet, no knowledge of the Developers' reasoning): **`[HANDOFF:confirmed]`**, no blocking issue, gates green as the Reviewer ran them (7,207 passing). No ruling overturned. Four non-blocking items sent to a Developer to fix before any push: artifact directory names unvalidated before the token-holding upload step; the no-token test missed `github.token`; the new Settings checkbox had the stale-boot-read race and no revert on a failed write; the `insecure-tls-flag` exemption needed a counter-pin. Recorded, not fixed: the workflow's tag-only steps get their first real run on the candidate tag; the `@hono/node-server` major bump deserves a release-note line (leg `dispositions-and-docs`).
+- 2026-11-17 — Review fixes landed (four items, each neuter-verified; gates green, 7,209 passing). The changed upload-job steps were read by the Flight Director: directory names are compared with the exact three before anything is read, and the token-holding step passes `gh` only bare, already-verified file names from inside each literal directory. They are re-covered by the flight-end review. **Flight held at leg 07's checkpoint**: the operator's word is needed to commit, push the branch and dispatch the workflow.
+- 2026-11-17 — Operator: "go ahead and commit and push the branch", then "go ahead and run them". Committed `4779b6e` (legs 01–07) and pushed `flight/03-shipping-and-at-rest`; manual dispatch run 44115982561: three `build` jobs green, `upload` red — the Windows runner's `sha256sum` writes `hash *name`, and the cross-check compared the marker with the file name. Fixed by a Developer at both ends, committed `09302d9` with the review fixes, pushed, re-dispatched under the same authorisation.
+- 2026-11-17 — **Leg 07 AC8 met — run 44116887492 green.** Read from the logs: each `build` job's token is `Contents: read` / `Metadata: read`; `check-fuses: ok` on macOS, Linux and Windows; macOS `codesign` — `valid on disk`, `satisfies its Designated Requirement`, `Signature=adhoc` (Q5, as far as a runner can show it); `start check: running=1 app.db=1 crash-log=0` on all three, Linux with the real sandbox (`kernel.apparmor_restrict_unprivileged_userns = 0` applied, no `--no-sandbox` warning); names on disk exactly the five, Windows space-free; artifacts of 128 MB, 239 MB and 250 MB uploaded and downloaded (Q7: storage is not a blocker); `upload` verified five installers and printed "nothing uploaded to any release"; `create-release` and `publish-release` skipped; no new release or tag exists (latest is still v0.19.15). Leg 07 `landed`. Not exercised, by construction: the tag-only steps — their first run is the acceptance candidate.
+- 2026-11-17 — Operator rulings: (1) the release sequence — "we cut a release by updating it then tagging it after merge to main"; leg 08 is designed around it. (2) DD6 — "accept cookies as not fixed"; leg 09 `cookie-encryption` is **not flown** and the finding is recorded as accepted with the measured reasons. Two defaults stand, having been put to the operator twice without objection: releases carry no updater metadata; the update request's `Accept-Language` header is accepted and documented. Leg 08 re-audited against the workflow as built; Developer design review spawned.
+- 2026-11-17 — Leg 08 design review: approve with changes — two high (the existing test pins `upload`'s permissions exactly; this host's `gh` 2.45.0 has no `attestation` or `release verify` commands, so the documented verification commands cannot be run before the walk), six medium, three low; incorporated in one cycle, leg `ready`. Consequences for leg `hat-and-alignment`, which now carries every measurement that needs a tag push: the attestation step's first run and its permission set; `GITHUB_SHA` and the job token on the compare call; a deliberately refused stable-looking tag on a non-`main` commit; whether the tag ruleset lets the workflow create its release; prerelease immutability (second candidate); and the documented `gh` commands run verbatim on a downloaded file with a current `gh`. Leg 10 `dispositions-and-docs` drafted (tier low), flown after 08. Developer spawned for leg 08.
+- 2026-11-17 — Leg 08 `[LAND:leg]` accepted: attestation step (tag-only, after the upload, subjects exactly the verified installers), the stable-tag check with its function test, the README verify section, `docs/RELEASING.md` rewritten around the operator's sequence, the operator runbook (in the leg's log entry). Gates green (7,221 passing). Nothing in it that needs a tag push has run — the Developer's twelve-item "first real run at the acceptance walk" list is the walk's agenda. One tightening handed to the flight-end fix pass: no test pins "no `${{ }}` inside any `run:` block" for the whole workflow (true today, pinned only for the new step). Developer spawned for leg 10.
+- 2026-11-17 — Leg 10 `[LAND:leg]` accepted: the `## Dispositions` section is in `mission.md` with every named proof checked to exist and the 67 named unit files run (1,605 passing). The Developer reported what it could not source instead of filling it in: finding 14b has no disposition in any flight; NF6 is only open squawk 0187; 13d was accepted by the Flight 2 plan with no separate operator ruling; `admin-reach-refusal` has never passed in full; finding 5 rests on the open confirmation-primitive design call. These go to the operator.
+- 2026-11-17 — Final review, legs 08 and 10 (Reviewer, Sonnet): **`[HANDOFF:confirmed]`**, nothing blocking; gates green (7,221 passing); no source file changed since the first review. The Reviewer could not construct an input that makes the stable-tag check allow an unreachable commit, traced the attestation subjects to the verified list only, and found nothing claimed as verified that has not run — except one present-tense sentence in the README. Non-blocking items sent to a Developer: a whole-workflow pin for "no expression inside a `run:` block"; stderr kept out of the compare answer; a fallback sentence in the ruleset runbook; the README sentence; two stale pointers; and three disposition rows whose word was more generous than their own reason (1, 5, 3a → fixed in part). No ruling overturned; the Reviewer asks that 14b and NF6 be decided before the mission is called complete.
+- 2026-11-17 — Final review fixes landed (seven items; gates green, 7,223 passing; no file under `src/` changed). Dispositions recounted: 6 fixed, 16 fixed in part. Four rulings put to the operator and still open: finding 14b, NF6 / squawk 0187, 13d, and the update request's `Accept-Language`.
+- 2026-11-17 — **Operator, verbatim: "you can do all of that except Ill install the release candidate"** — in answer to the Flight Director's list: commit and push legs 08 and 10; apply the tag ruleset; push the candidate tags; the refusal test; turn on immutable releases; run the verification commands. This lifts, for this leg, the flight's standing rule that no one but the operator pushes a tag or changes a repository setting. The operator installs the candidate themselves. Leg 11 `hat-and-alignment` written and `in-flight`.
+
+---
+
+## Leg Entries
+
+## Leg 01 — dependencies
+
+**2026-11-17. Landed. Not committed.**
+
+**Baseline (main f401407, 0.19.15):** `npm audit --omit=dev` 2 moderate (`hono` 4.13.14, `@hono/node-server` 1.19.17); `npm audit` 10 moderate (those 2 + 8 on one advisory, `minimatch` GHSA-g3hv-75wg-m249 via electron-builder / eslint; installed copies 9.0.9 and 10.2.6). Electron 45.3.2.
+
+**After:** `npm audit --omit=dev` 0; `npm audit` 0.
+
+- **AC1.** A plain lockfile update, no override: `npm update hono @hono/node-server` resolved `hono` **4.13.19** and `@hono/node-server` **2.1.9** (both inside the SDK's declared ranges). `@modelcontextprotocol/sdk` stays exactly `1.32.2`. `@hono/node-server` 2.x raises its engines floor to node >=20 (Electron 45 ships Node 24; CI image is node 22: fine).
+- **AC2.** The suites importing `mcp-server.js` (`automation-mcp-server`, `automation-port`, `browser-import-boundary`, `injected-input-invariant`, `vault-context`, `window-closed-invariant`) 198/198 pass unchanged; `[BLOCKED:node-server-major]` not needed. Live proof under AC6.
+- **AC3.** Electron pinned exactly **45.3.3** (`node_modules/electron/package.json` reads 45.3.3; the dev app's UA reads `Electron/45.3.3`). Release notes v45.3.3 have two headings: *Fixes* (a DevTools extension `devtools_page` race) and *Other Changes* (**Updated Node.js to v24.22.3**). Nothing on cookies, third-party-cookie blocking, `enable-features` or permission handlers. **Flag for the Flight Director:** the bundled Node moved (the built-in `node:sqlite` rides it); the full unit suite, including every `app-db`/store suite, passes (7116 pass, 0 fail), and no `node:sqlite` change is named in the notes. Judged "no relevant change" for the cookie fuse; the `third-party-cookie-isolation` spec was not re-run here (not asked by the leg since the notes do not mention it).
+- **AC4.** `minimatch`: kept, as **range-keyed** `overrides` (`minimatch@^9.0.3`, `@^10.2.4`, `@^10.2.5`, `@^10.2.6` -> `^11.0.1`) so only the vulnerable-range consumers move (resolved 11.0.9; `@electron/universal`, `app-builder-lib`, `@eslint/config-array`, `eslint`). Lessons: first attempt (nested per-package overrides) cascaded into `@electron/asar`/`glob@7`, `dir-compare` and `filelist` and broke `glob@7` (`glob.sync` threw on minimatch 11); a blanket override would do the same. Range-keyed entries leave `glob@7`/`dir-compare`/`filelist` on their own 3.1.5 / 5.1.9. After the override: `npm run lint`, `npm test` (7116/0), `npm run typecheck`, `npm run pack` (exit 0, `dist/linux-unpacked`, not launched) all pass; `npm audit` 0, so nothing is recorded as accepted (`ci/README.md` *Accepted advisories* says "None currently" and names the override). Not exercised here: `electron-builder` Windows/macOS targets (`@electron/universal` is the macOS universal merge path) run only on the release workflow; the override should be removed when electron-builder / eslint declare patched ranges. `electron-builder` not downgraded.
+- **AC5.** Digest `sha256:e13726ca604184d7a91fcacab1fc09eefd642dc28e79ac34e85540dd93b78cfb` = the OCI image **index** (multi-platform) for `node:22`, resolved 2026-11-17 two ways that agreed: `docker buildx imagetools inspect node:22` and Docker Hub registry HTTP `docker-content-digest` header. Form: `image_resource.version.digest` beside `source.tag: '22'`, per the registry-image-resource README, section "Use in tasks" (anonymous resource `version: digest:`). All six files carry it; `ci/README.md` has *Updating the Node image* (`docker buildx imagetools inspect node:22 --format '{{.Manifest.Digest}}'`, one `digest:` line per file). New `test/unit/ci-image-pins.test.js` (structure scan, 2 tests; neuter-verified: changing one digest char fails it). **Not verified on the worker:** `fly -t local-goldfinch execute` answered "not authorized" (not logged in; I did not log in).
+- **AC6.** Dev mode (`GOLDFINCH_AUTOMATION_ADMIN=1 GOLDFINCH_AUTOMATION_DEV_MINT=1 npm run dev:automation`), env-style key from the launch line, `connectAutomation()` script in the session scratch directory, loopback page served by the script. All PASS: enumerateWindows, enumerateTabs, openTab, evaluate, readDom, readAxTree (14 nodes), captureScreenshot, captureWindow, click, typeText, pressKey, scroll, findInPage, stopFindInPage, setZoom/getZoom, navigate, goBack, goForward, reload, getHistory, downloadsList, closeTab; wrong key -> 401; foreign `Origin` -> 403. Runtime Electron read from the app: UA `Electron/45.3.3`. App stopped; no process, port 49707 free. No vault, clipboard, download or real profile touched (the `downloadsList` result held one pre-existing dev-profile entry).
+- **AC7.** `ci/tasks/build-windows.yml` removed; `build-windows` job and `windows-installers` resource removed from `ci/pipeline.yml`, header comment corrected; `ci/README.md` states Windows installers come only from the GitHub release workflow. `grep -rn "build-windows\|windows-installers" ci/ docs/ CLAUDE.md README.md .github/` returns nothing. `fly validate-pipeline -c ci/pipeline.yml` -> "looks good". **Operator follow-up, verbatim:** after merge, run `./ci/set-pipeline.sh` to drop the job from the running pipeline; archives already in MinIO are theirs to delete.
+- **AC8.** `npm run format:check`, `lint`, `typecheck`, `npm test` pass; `rm -r node_modules && npm ci` succeeded and `npm audit` is 0 afterwards.
+
+**Lockfile changed packages:** `@hono/node-server` 1.19.17 -> 2.1.9; `hono` 4.13.14 -> 4.13.19; `electron` 45.3.2 -> 45.3.3; `minimatch` 9.0.9 (under `@electron/universal`) and 10.2.6 (top-level, `app-builder-lib`, `eslint`, `@eslint/config-array`) -> 11.0.9 (nested copies under `@electron/universal`, `app-builder-lib`, `@eslint/config-array`, `eslint`); new transitive `@isaacs/nonrecursive-glob-match` 1.1.0 (a `minimatch` 11 dependency). Nothing else moved. `package.json` `overrides`: four added `minimatch@<range>` entries beside `brace-expansion`.
+
+**Squawk candidates (not fixed):** (1) `ci/README.md` opening paragraph and the README's "private repo" wording are out of scope but stale-looking; (2) `ci/README.md` still lists 1 manual job only now, but `ci/set-pipeline.sh` was not read for Windows references (grep found none).
+
+## Leg 02 — packaged-measurements
+
+**2026-11-17. Landed. Not committed.** Results and evidence: [`packaged-measurements.md`](packaged-measurements.md). No change to `src/`, `package.json`, `ci/` or tests; Electron 45.3.3 / Chromium 156.0.8078.100.
+
+- **Q1 (AC1): yes.** With `HOME` and `XDG_CONFIG_HOME` both in scratch, a packaged build (`--no-sandbox`) wrote its profile to `<XDG_CONFIG_HOME>/goldfinch` (a dev launch uses `goldfinch-dev`); `XDG_CONFIG_HOME` alone is honoured. Launch recipe is in the document.
+- **AC2: a packaged build IS drivable over MCP**, jar and admin tier, from a profile seeded by a dev-mode mint: copy `app.db` **with its `-wal`/`-shm`**, set `automationEnabled: true` and a free `automationPort` in the settings document, launch with `GOLDFINCH_AUTOMATION_ADMIN=1` for the admin tier (without it the admin key is refused). The flight's apparatus-table assumption ("every packaged observation is external") no longer holds; later legs can use `connectAutomation()` against a packaged build.
+- **Q4 (AC4): the three runtime fuses break nothing here** — start, argument URL, second-instance hand-off, and the Shields restart-to-apply relaunch (through MCP) all worked on a fused copy; each fuse's own effect shown before/after (`ELECTRON_RUN_AS_NODE` stops running scripts; `--inspect` stops answering; `NODE_OPTIONS` is no longer consulted — stock packaged Electron already refused the options probed). Not measured: `SIGUSR1`, macOS/Windows.
+- **Q3 (AC3):** all seven switches given were tested in baseline / removed / exit rows. Six take effect and **`removeSwitch` before ready stops them** (`--remote-debugging-port`, `--remote-debugging-pipe`, `--ignore-certificate-errors`, `--disable-web-security`, `--host-rules`, `--host-resolver-rules`). **`--js-flags` is only partly removable**: the renderer loses it but the main process keeps it (V8 flag already applied) — recommend **exit** for it. `--load-extension` has **no effect** in Electron (positive control with `session.loadExtension` worked), so needs no refusal. Exit (`app.exit(3)` at the top of the startup block) worked for every row: no window, no port. Per-switch table in the document.
+- **Q2 (AC5), for the operator's DD6 ruling.** (1) Protects: little on a host with no keyring — `basic_text` backend, `isEncryptionAvailable()` false, cookies become `v10` under Chromium's fixed fallback key; real protection needs an OS store (DPAPI, keychain, Linux keyring), which this host cannot show. (2) Costs: one-way and silent — existing cookies survive and are encrypted in place at the next launch, but a stock binary on a fused profile loses every cookie (measured: not sent, rows deleted); backend switching (basic ↔ forced libsecret with no keyring) was harmless both ways. (3) Not shown: Windows DPAPI, macOS keychain and its tie to an ad-hoc signature, a real keyring appearing/disappearing (`v11`), kwallet. A dev launch is unaffected (unmodified binary).
+- **Surprises:** Electron's `index.js` re-downloads `node_modules/electron/dist` on first `require('electron')` after an `npm ci`; `/proc/<pid>/environ` is not a reliable witness of a Chromium process's environment; a dev launch creates an empty `goldfinch` directory beside `goldfinch-dev`.
+- **Checkpoint:** the operator rules on DD6 from the three lines above; the exit-for-`--js-flags` mechanism is for DD5 to confirm at leg `launch-switches` design.
+
+## Leg 03 — runtime-fuses
+
+**2026-11-17. Landed. Not committed.** `package.json` `build.electronFuses` = `{ runAsNode: false, enableNodeOptionsEnvironmentVariable: false, enableNodeCliInspectArguments: false, resetAdHocDarwinSignature: true }`; `@electron/fuses` 1.8.0 added as an exact dev dependency (lockfile: only the root `devDependencies` entry changed). New `scripts/check-fuses.mjs` (pure exported `decideFuses`, `EXPECTED_FUSES`, `RUNTIME_FUSES`; CLI exits 2 for a missing/non-Electron path, 1 for a wrong fuse), `test/unit/check-fuses.test.js` (6 tests: setting exact, drift against the table, each runtime fuse on one at a time, every other fuse flipped/missing/unknown, CLI refusals). Call sites: `ci/tasks/package-linux.yml` and a *Check Electron fuses* step in `ci.yml`. Docs: `docs/RELEASING.md` *Runtime fuses*, `docs/dev-testing.md` *Packaged build on a dev host*, one CLAUDE.md gotcha line. `build.yml` untouched. Gates: `npm test` 7170 (7166 pass, 0 fail), typecheck, lint, format:check clean; `npm ci` from the lockfile succeeds.
+
+- **Finding (not in the leg):** Electron 45's fuse wire has a **ninth** fuse (index 8) that `@electron/fuses` 1.8.0 does not name (the binary exports `IsWasmTrapHandlersEnabled`); it reads Enabled on the stock binary. The expected table pins it as `WasmTrapHandlers: true` (named locally in the script, read by index), so the "any other fuse differs" rule has no false alarm on a stock build and still catches it changing.
+- **Fuse read-back, packed build** (`npm run pack`, then `node scripts/check-fuses.mjs dist/linux-unpacked/goldfinch`, exit 0): RunAsNode, EnableCookieEncryption, EnableNodeOptionsEnvironmentVariable, EnableNodeCliInspectArguments, EnableEmbeddedAsarIntegrityValidation, OnlyLoadAppFromAsar, LoadBrowserProcessSpecificV8Snapshot all Disabled; GrantFileProtocolExtraPrivileges Enabled; WasmTrapHandlers Enabled; `check-fuses: ok`. **Stock `node_modules/electron/dist/electron`**: RunAsNode, EnableNodeOptionsEnvironmentVariable, EnableNodeCliInspectArguments Enabled (others as above); three `RUNTIME FUSE ON` lines, exit 1.
+- **Packaged smoke** (scratch `HOME` and `XDG_CONFIG_HOME` enforced by the launcher, `--no-sandbox --ozone-platform=wayland --proxy-server=http://127.0.0.1:9`, seeded profile per leg 02's four steps, admin env for the admin half, loopback fixture whose log showed no outside request). All primitives answered: enumerateWindows (admin), enumerateTabs, openTab, navigate, readDom, evaluate, readAxTree, captureScreenshot, captureWindow (admin), click, typeText (value `hello` read back), pressKey (Backspace -> `hell`), scroll (`scrollY` 600), findInPage (3 matches) / stopFindInPage, setZoom/getZoom (1.5), goBack/goForward, reload, getHistory, downloadsList (admin), closeTab, getChromeTarget (chrome URL under `dist/linux-unpacked/resources/app/src/renderer/`). Differences from dev: none beyond the tier rules already true in dev (`captureWindow` and `downloadsList` are admin-only; the first run of `downloadsList` with the jar key was refused for that reason, then passed as admin and returned `[]`). Cold-launch URL reached the fixture; a second launch handed `/second` over and exited, one main process remained; restart-to-apply: pre-change call `not-pending`, after `shieldsSet({isolate:false})` the old pid was replaced, the same two keys attached, `isolateEffective` true -> false.
+- **Fuse effects on this build:** `ELECTRON_RUN_AS_NODE=1 goldfinch -e 'console.log("RUNASNODE_PROBE_"+(40+2))'` printed nothing, the app started instead (stock dev binary control printed the probe). `goldfinch --inspect=<port>`: nothing answered on the port, no `Debugger listening` line (stock dev binary control: HTTP 200 and the line). `NODE_OPTIONS=--inspect=<port>`: no answer, no line, no "not supported in packaged apps" message (variable not consulted).
+- **AC5 grep:** hits outside tests: `scripts/build-preload-hook.cjs:18` (`child_process` `execSync` of `npm run build:preload`, runs under electron-builder's plain Node: unaffected) and `scripts/dev-launch.mjs:30` (`spawn` of the unfused dev binary: unaffected). Nothing in `src/`, `build/`, `ci/`, `.github/`, `package.json`. Hits added by this leg's own docs (`CLAUDE.md`, `docs/RELEASING.md`) are descriptions.
+- **Not verified:** the worker run (`fly` not used: "not verified on the worker"); macOS re-sign (owned by leg `release-build-split`); Windows; `SIGUSR1`.
+
+## Leg 05 — update-check
+
+**2026-11-17. Landed. Not committed.** Flown ahead of legs 03 and 04. New: `src/shared/update-version.js`, `src/main/update-check.js`, `src/main/register-update-ipc.js`, `docs/updates.md`, four unit files. Changed: settings store (`updateCheckEnabled`), `register-settings-ipc.js` (optional `applyUpdateCheckEnabled`), channel table (206 -> 209), `main.js` (construction and wiring only; no startup-block edit), `app-lifecycle.js` (`startUpdateCheck` in the ready chain, `stopUpdateCheck` in `before-quit`), both preloads, `renderer-globals.d.ts`, CLAUDE.md (new *Update check* entry; row count 205 -> 209). `renderer.js` untouched; seam still 41. `npm test` 7160 pass / 0 fail, typecheck, lint, format:check clean.
+
+**Live smoke** (dev mode, DEV_MINT + admin, loopback fixture, `GOLDFINCH_UPDATE_TRACE=1`, launched with `--proxy-server=http://127.0.0.1:9` — a dead proxy, forwarded by `dev-launch.mjs`, so no request left the machine; the fixture was reached directly, proven by step 1; a tab at `http://example.invalid/` showed `chrome-error://chromewebdata/`). 48 of 49 checks pass; step 8 (no override) 3 of 3.
+
+- **Request headers received on a check (verbatim, raw order and case):** `GET /latest HTTP/1.1`; `Host: 127.0.0.1:<port>`, `Connection: keep-alive`, `accept: application/vnd.github+json`, `user-agent: Goldfinch-update-check`, `Sec-Fetch-Site: none`, `Sec-Fetch-Mode: no-cors`, `Sec-Fetch-Dest: empty`, `Accept-Encoding: gzip, deflate, br, zstd`, `Accept-Language: en-US`. No Cookie, Referer, Origin, Authorization; no `goldfinch/` or `Electron/` token. One request per check; the second (after off/on) had the same list.
+- **The four undocumented `net.fetch` questions (Electron 45.3.3):** custom `User-Agent`: **honoured** exactly (header names lower-case as given). `credentials: 'omit'`: **honoured** (the first answer set a cookie; the second request carried none — omit also means the response cookie is not stored, so this shows "none sent", not which half). `redirect: 'error'`: **honoured** (302 to a second loopback port: that port received nothing; trace `redirect`, classified from the thrown error text). `cache: 'no-store'`: **honoured** (the first answer was `max-age=3600`; the second check reached the fixture and reported the new tag). No `[BLOCKED:…]` needed.
+- **Trace codes observed (step 5):** equal and lower -> `current`; prerelease, malformed (`0.19.99`), wrong-type `tag_name` -> `bad-tag`; 2 MiB body -> `too-large`; 302 -> `redirect`; 401 -> `http-401`; 403 -> `http-403`; 500 -> `http-500`; connection reset -> `network`; never-completing body -> `timeout` (15 s); setting off -> `disabled`; a held request closed by off -> `aborted` (fixture saw the socket close). **Deviation: a 407 with `Proxy-Authenticate` from a direct origin traced `network`, not `http-407`** (Chromium treats an unexpected proxy-auth answer as a transport failure). Silent either way; state unchanged, no sign-in sheet (`enumerateWindows` showed no sheet). The leg's AC8 expectation of `http-407` is therefore not literally met; the docs record the observation.
+- Steps 1-4, 6, 7 as written: chrome and settings-page readers agree; both `onUpdateStateChanged` subscriptions saw the same three events; no request for 5 s while off; `updateOpenReleasePage()` from the settings page opened one tab at the app-built address in window 1 and from window 2's chrome in window 2; census, windows, `readDom`, `readAxTree`, `captureScreenshot`, `captureWindow`, `evaluate` all answered.
+- **Not verified:** the packaged branch (unit-tested only); the real endpoint (never contacted); the dev profile's restored tabs (claude.ai, news.google.com, …) were loaded under the dead proxy, so they failed locally.
+
+**Unit/other notes.** The checker has `start(enabled)` (first check after the initial delay) beside `setEnabled` (check at once on off -> on); the leg text says the start hook calls `setEnabled`, which would have fired immediately in a packaged build instead of after 60 s. Settings: a wrong-typed stored value repairs in memory only and is written at the next `set()` (existing store behaviour for every additive key), so AC4's "persist" clause is covered as "repairs, and the next write carries it". The leg's remark that no test calls `handleLogin` with no `webContents` was stale (a contents-less case existed); a named update-request test was added anyway.
+
+**Squawk candidates (not fixed):** none beyond the above deviations; the restored-tab behaviour of the dev profile (loads outside sites at launch) is worth knowing for any live run.
+
+## Leg 04 — launch-switches
+
+**2026-11-17. Landed. Not committed.** New: `src/main/launch-switches.js` (Electron-free CJS; frozen `STRIPPED` / `REFUSED` tables, pure `decideLaunchSwitches`, `applyLaunchSwitches`, `removedNames`, message builders, `REFUSAL_EXIT_CODE` 64), `test/unit/launch-switches.test.js` (16 tests), `test/unit/launch-switches-placement.test.js` (placement and neuter pins). Changed: `main.js` (one block between the dev redirect and `requestSingleInstanceLock()`, plus the require), `test/unit/insecure-tls-flag.test.js` (one exemption, below), `docs/RELEASING.md` (*Launch switches*), `docs/dev-testing.md` (one bullet), CLAUDE.md (one entry). `renderer.js` untouched. `npm test` 7182 pass / 0 fail, typecheck, lint, `format:check` clean.
+
+**Final tables as shipped.** *Stripped*: `remote-debugging-port`, `remote-debugging-pipe`, `remote-debugging-address`, `remote-allow-origins`, `remote-debugging-targets`, `ignore-certificate-errors`, `disable-web-security`, `host-rules`, `host-resolver-rules`, `load-extension`, `disable-extensions-except`. *Refused*: `js-flags`, `ignore-certificate-errors-spki-list`, `unsafely-treat-insecure-origin-as-secure`, `disable-site-isolation-trials`, `disable-site-isolation-for-policy`, `allow-running-insecure-content`, `ssl-key-log-file`, `log-net-log`, and `disable-features` naming `IsolateOrigins` / `SitePerProcess` / `site-per-process`. **No switch moved stripped -> refused.**
+
+**Deviations (report to the Flight Director).**
+1. **`allow-file-access-from-files` is on neither list** (the leg listed it as refused). Measured on the packaged build: `app.commandLine.hasSwitch('allow-file-access-from-files')` is **true on every launch with no such argument** (Electron adds it itself while the `GrantFileProtocolExtraPrivileges` fuse is on, the chrome being a `file://` page); `process.argv` distinguishes an operator-supplied copy, but the switch then adds nothing. The first packaged refusal run refused every launch (all 19 rows named it). Listing it would refuse every start; moved out of the refused table, documented in the module, RELEASING and CLAUDE.md, pinned by a unit test. This is a loosening of the leg's refused set, made because the entry cannot work; the Flight Director may overrule (an argv-only check for that one name would be the alternative).
+2. **`disable-features` tokens** also drop a `<study` or `:params` suffix before the exact comparison (`SitePerProcess<Foo` is refused); near-misses are still not refused. Stricter than the leg's wording, never looser.
+3. **`test/unit/insecure-tls-flag.test.js` edited** (not one of the four named pins): its source pin says no file under `src/` may contain the substring `ignore-certificate-errors`, which the new table must (to strip it). One exemption for exactly `src/main/launch-switches.js` (which has no `appendSwitch`; placement test pins that), with a comment saying why. Obfuscating the literal to dodge the pin was rejected.
+4. `applyLaunchSwitches` returns the final refusal list as specified; the names actually removed come from the extra pure helper `removedNames(decision, finalRefuse)`.
+
+**The four existing order pins passed UNMODIFIED** (`single-instance-lock-order`, `third-party-cookie-startup-order`, `crash-reporter-pins`, `dev-profile-redirect-order`: 34 tests green together with the two new files, run before any packaging).
+
+**Error box on this host (Linux, before `ready`):** `dialog.showErrorBox` did not throw, did not block and put up no window; it wrote two stderr lines after Goldfinch's own line (title in bold-on-white escape codes, then the body naming the switches). Total per refusal: refusal line, title line, body line. Exit 64 in 0.2 s. Not seen: the real box on Windows/macOS.
+
+**Smoke method.** Packed build `npm run pack` with this leg's code (fuse check ok), launched directly, never a patched copy except the baseline. Launcher helper refused to start unless `HOME` and `XDG_CONFIG_HOME` were distinct scratch dirs; every launch carried `--no-sandbox --ozone-platform=wayland --proxy-server=http://127.0.0.1:9` (the proxy row used a loopback proxy fixture); mapped `.test` hosts additionally used `--proxy-bypass-list=<that host>` (otherwise the dead proxy would hide the host-rule effect). Keys from a dev-mode mint, profile seeded as in leg 02, `connectAutomation()` only. Positive controls are **unpackaged dev launches** with the same switch. No registered MCP server used; no vault, clipboard, download or dialog touched. Every process stopped by recorded pid; none left, no port bound (the loopback listeners still shown on the host belong to other services).
+
+**AC4 — stripped switches (switch -> form -> observation).** Packaged, every row: stderr `goldfinch: ignored launch switches: --<names>` once, app started, and the full list of **21 primitives** answered `ok` (enumerateWindows, getChromeTarget, enumerateTabs, openTab, readDom, evaluate, readAxTree, captureScreenshot, captureWindow, click, typeText [`hello`], pressKey [`hell`], scroll, findInPage/stopFindInPage, setZoom/getZoom, navigate, goBack/goForward, reload, getHistory, downloadsList, closeTab).
+
+| Switch | Form | Dev control | Packaged |
+| --- | --- | --- | --- |
+| `remote-debugging-port` | `=<n>` | `/json/version` answered (Chrome/156.0.8078.100) | no answer |
+| `+ remote-debugging-address` | `=127.0.0.1` with the port switch | (port control above) | no answer |
+| `+ remote-allow-origins` | `=*` with the port switch | | no answer |
+| `+ remote-debugging-targets` | `=http://127.0.0.1:1` with the port switch | | no answer |
+| `remote-debugging-pipe` | bare, `Browser.getVersion` on fd 3 | reply on fd 4 | no reply (process alive, MCP up, line printed) |
+| `ignore-certificate-errors` | bare, self-signed HTTPS loopback fixture | request reached the fixture | none reached |
+| `disable-web-security` | bare, page on `127.0.0.1:A` fetches `localhost:B/secret` | `read:SECRETDATA` | `blocked` |
+| `host-rules` | `=MAP mapped.test 127.0.0.1` | request reached the fixture | none |
+| `host-resolver-rules` | same | request reached the fixture | none |
+| `load-extension`, `disable-extensions-except` | `=<dir>` | (Electron ignores; positive control is leg 02's) | listed in the stripped line, app started |
+
+Relaunch (Shields restart-to-apply) with `--remote-debugging-port=<n>` present: before, `isolateEffective true`, port not answering; `shieldsSet({isolate:false})` then `shieldsRestartToApply()`: old pid gone, new process listening on the same MCP port, same admin key accepted, `isolateEffective false`, debug port still not answering. (The relaunched process's own stderr was not captured, so its repeated "ignored" line was not seen; its effect was.)
+
+**AC5 — refused switches.** 18 packaged runs, each on a fresh scratch profile, all: exit **64**, one `goldfinch: refusing to start: --<name> (exit 64)` line plus the two error-box lines, no display-initialisation text on stderr, port not answering (one row paired `--js-flags` with `--remote-debugging-port`: the stripped line printed, then the refusal, port silent), and no `ssl-key-log-file` / `log-net-log` file created. Rows: `js-flags` (`=--expose-gc`, bare), `ignore-certificate-errors-spki-list` (`=`, bare), `unsafely-treat-insecure-origin-as-secure` (`=`, bare), `disable-site-isolation-trials`, `disable-site-isolation-for-policy`, `allow-running-insecure-content`, `ssl-key-log-file` (`=`, bare), `log-net-log` (`=`, bare), `disable-features` (`IsolateOrigins`, `SitePerProcess`, `site-per-process`, `Foo, SitePerProcess ,Bar`).
+**Baseline vs refused.** Baseline = a copy of the packed build whose `main.js` calls `app.exit(3)` as its first statement, same switches and scratch dirs: `XDG_CONFIG_HOME` empty (no `goldfinch/` directory at all) and `HOME` holding only `.cache/fontconfig/` (6 cache files + `CACHEDIR.TAG`). Every refused launch left exactly that: `XDG_CONFIG_HOME` empty, `HOME` the same 10 entries; so no `app.db`, `history.db`, `vaults/`, `SingletonLock` or crash log. **With a running instance** (URL `/cold` open, a second plain launch had already shown hand-off working): a refused launch `--js-flags=--expose-gc http://…/refused-handoff` exited 64, the fixture received no `/refused-handoff`, `enumerateTabs` unchanged, still one main process.
+
+**AC6 — keeps working** (packaged; `isolateEffective` read by admin `evaluate` in the chrome of `window.goldfinch.shieldsIsolationState()`):
+
+| Launch | Result |
+| --- | --- |
+| no feature switches | `{isolateEffective:true, operatorOverride:null}` |
+| `--disable-features=Foo` | `true`, `null` |
+| `--enable-features=Bar` | `true`, `null` |
+| both | `true`, `null` |
+| `--disable-features=ForceThirdPartyCookieBlockingEnabled` | started, not refused; `{isolateEffective:false, operatorOverride:"disabled"}` (the existing operator override) |
+| explicit `--allow-file-access-from-files`, extra `--no-sandbox` | started; `true`, `null` |
+| `--proxy-server=http://127.0.0.1:<loopback proxy>` + `http://plain.test/pg` | the proxy saw `GET http://plain.test/pg` |
+| URL argument | tab opened at the URL |
+| second instance with a URL | exit 0, fixture saw `/second`, census gained the tab, one main process |
+| unpackaged `dev-launch.mjs --automation-dev --remote-debugging-port=<n>` | `/json/version` answered (Chrome/156.0.8078.100): dev unchanged |
+
+**AC7:** the 21-primitive list answered `ok` on a launch with no listed switch (and on every row above). **AC3:** pins as above plus the source-scan neuter tests (block moved after the lock, an `appendSwitch` inside, a second `app.exit(64)`, a missing landmark throws). **AC8:** `docs/RELEASING.md` *Launch switches*, `docs/dev-testing.md`, CLAUDE.md entry. **AC9:** gates green.
+
+**Not verified:** Windows `/switch` forms and case; the real error box on Windows/macOS; the unmeasured refused switches' own effects (refused by default); `remote-debugging-address`/`-allow-origins`/`-targets` stripped alone (observed only with the port switch); the process-launcher family; `--load-extension` effect (Electron ignores it, per leg 02); stderr of the relaunched process.
+
+**Out of scope, not fixed:** (1) `process.argv` still carries a stripped switch (nothing in `src/` reads it); a relaunch re-passes it and strips it again. (2) The behavior spec `third-party-cookie-isolation` is for the Flight Director to run.
+
+## Leg 06 — update-notice
+
+**Status**: in-flight .
+
+**Built.** `src/shared/update-notice-model.js` (pure; `updateNoticeModel(state)` also returns `openAriaLabel` for the button's accessible name) and its table test; Settings -> About (`#about-version`, `#about-update-status`, `#about-update-open`, checkbox `#update-check-enabled` described by `#update-check-note`) with a controller IIFE in `settings.js` (patched in place, boot read dropped if a push already arrived, focus moved to the checkbox if the focused button is hidden); two routes on the settings host (`update-notice-model.js`, `update-version.js`; the existing route-closure test already pins "a routed module's imports are routed", and `internal-page-map.test.js`'s exact list gained both); kebab state in `overlay-menus.js` (`setKebabUpdateState` / `resetKebabUpdateState`, boot wiring inside `createChromePageActions`, `kebabActions.update`); fixture `tests/behavior/fixtures/update-check/server.cjs`; spec finalised; docs (`docs/updates.md`, `README.md`, CLAUDE.md); one precondition line added to `kebab-menu.md` and `multi-window-shell.md`. `src/renderer/renderer.js` byte-identical (md5 unchanged), seam at 41, sheet code untouched.
+
+**Smoke** (dev mode, fresh HOME/XDG in scratch, dead proxy, fixture on 8237/8238, MCP port 49871; real clicks via `click`).
+
+| Step | Observation |
+| --- | --- |
+| Launch + first request | one `GET /latest`, `User-Agent: Goldfinch-update-check`, no Cookie/Referer/Origin/Authorization; one `outcome=newer` line |
+| About, notice showing | `Goldfinch 0.19.15`; `Version 0.19.16 is available.`; button `View release notes`, `aria-label` `View release notes for version 0.19.16`; checkbox checked, `aria-describedby=update-check-note`; AX tree has the button name and the checkbox |
+| Computed display, notice showing | status `block`, button `inline-block` |
+| Chrome state read | `updateGetState()` -> `{current 0.19.15, available 0.19.16, releaseUrl …/tag/v0.19.16, checkEnabled true}` (the kebab model itself is not seam-reachable) |
+| Second window opened after the push | chrome state read the same; its Settings page showed the notice at once |
+| Chrome `location.reload()` | state read after reload identical (boot read, not a push) |
+| Real click on `#about-update-open` | new tab in the same window, jar `personal`, address `https://github.com/msieurthenardier/goldfinch/releases/tag/v0.19.16`; Settings tab still open |
+| Real click on the checkbox (off) | no reload: status text empty, status display `none`, button display `none`, checkbox unchecked; `outcome=disabled`; 0 requests in 5.5 s |
+| Checkbox on | one request, notice back |
+| Modes (each off then on) | outcome lines `current` (equal), `current` (lower), `bad-tag` (prerelease), `bad-tag` (malformed), `bad-json`, `http-500`, `too-large`, `redirect`, `newer` (higher); exactly 1 fixture request each; redirect target port 0 requests; no notice after any failure mode |
+| Other primitives on the Settings tab | readDom, readAxTree, captureScreenshot, captureWindow, click, scroll, pressKey, typeText, getHistory, downloadsList, enumerateTabs/Windows, evaluate, getChromeTarget all `ok`; findInPage/stopFindInPage/setZoom/getZoom refuse `internal-session excluded` (pre-existing) |
+| `npm run a11y -- --target=goldfinch://settings` (notice showing) | "No NEW violations" |
+
+Gates: `npm test` 7195 pass / 0 fail, typecheck, lint, format:check clean. All processes stopped by pid; ports 8237/8238/49871 free.
+
+**Spec changes** (`tests/behavior/update-notice.md`): the launch command is now a full one (fresh `HOME`/`XDG_CONFIG_HOME`, `GOLDFINCH_MCP_PORT`, `cd`, background, pid note); fixture ports/flags/modes/log shape stated; `click` recipe now requires scrollIntoView plus about 1.2 s (smooth scroll — measuring the rectangle at once gave an off-screen y of 1657); `evaluate` notes (single expression, no top-level await in the chrome); `enumerateTabs` field names; second-window recipe uses `enumerateWindows` `chromeWcId` (not `getChromeTarget({windowId})`); trace codes listed; step 4 notes the extra `disabled` line before each outcome line; step 9 relaunch keeps the same HOME/XDG. No assertion weakened.
+
+**Not verified:** the kebab item's appearance and click (by eye, `hat-and-alignment`); the kebab's boot read in the real chrome (unit only); the 24 h repeat; keyboard focus rescue when the focused button is hidden by a push (code only).
+
+**Observations, not fixed:** (1) in the dev launch, a chrome `location.reload()` left the window showing only a Welcome tab and `enumerateTabs` empty (the open Settings tab was no longer listed); not investigated, not caused by this leg's files as far as seen — worth a look when the spec's chrome-reload row is run. (2) The AX/`readDom` evaluate seam in the chrome rejects `a; b` expressions silently with a console SyntaxError and `ok:true`/stale results.
+
+## Leg 07 — release-build-split
+
+**Status**: in-flight (AC8, the manual dispatch run, is the operator's; not run).
+
+**Built.** `package.json`: per-target `artifactName` (`nsis`, `dmg`, `mac`, `appImage`, `deb`; none at the top level or under `linux`). `.github/workflows/build.yml` rewritten: `create-release` (no checkout) -> `build` (matrix; `contents: read`, no token/secret, `persist-credentials: false`, `--publish never`, locate unpacked app once, fuse check, macOS `codesign` verify + ad-hoc check, start check in a fresh `--user-data-dir`, stage the platform's installers by exact name + `VERSION` + `SHA256SUMS`, `upload-artifact` retention 1 / compression 0) -> `upload` (no checkout, no node; download, re-hash, exact-name check, `gh release upload` on a tag only) -> `publish-release` (needs `upload`, requires its success). One shell function `expected_names VERSION [PLATFORM]` is the name source in both the stage and verify steps. Tests: `test/unit/artifact-names.test.js` (templates == README links), `test/unit/release-workflow-invariants.test.js` (text scan). Docs: `docs/RELEASING.md` (new *The release workflow* section; dispatch paragraph; fuse/macOS notes), CLAUDE.md *Release / CI* permissions line.
+
+**Local Linux build** (`npx electron-builder --linux --publish never`, output redirected to a scratch directory with `-c.directories.output` because `dist/` holds older builds; nothing launched): `Goldfinch-0.19.15.AppImage`, `goldfinch_0.19.15_amd64.deb`, plus `latest-linux.yml`, `builder-debug.yml`, `linux-unpacked/` (the three that staging never copies). `node scripts/check-fuses.mjs` on that unpacked binary: ok.
+
+**Pins (AC7)**, resolved with `gh api repos/actions/<name>/git/ref/tags/<tag>` (lightweight tags, type commit): `actions/upload-artifact` v7.0.2 -> `cf430e030ddbb5b0abf93d22962f4752f3646cd9`; `actions/download-artifact` v8.0.2 -> `9000827ccba6bdab643e8b6fd33ac0654aef8333` (both the latest release on 2026-11-17).
+
+**Neuter runs** (workflow mutated in place, test run, file restored and diffed identical): unpinned `uses:` in build.yml and in ci.yml; top-level `contents: write`; build job `contents: write`; `GH_TOKEN` added to build; checkout without `persist-credentials`; checkout added to upload; `node -v` added to upload; `--publish always`; `retention-days: 5`; `compression-level` removed; `expected_names` differing between the two jobs; AppImage name given an arch; publish-release no longer needing upload. Each went red on the intended test.
+
+**Not provable locally:** that Windows and macOS write the five names; the no-token build; fuse and start checks on Windows/macOS; `codesign` verification; the Linux sandbox sysctl; `upload-artifact` / `download-artifact` behaviour and Q7 (artifact storage on a public repository); the `upload` job's checks and its skipped upload; bash-on-Windows details (`cygpath`, `/proc/<pid>/winpid`, `taskkill`).
+
+### Dispatch run 1 fix
+
+The first manual dispatch of `build.yml` went green on all three `build` jobs and red in `upload`, step "Verify names and digests": `artifacts/installers-win: the digest list does not match the files present`. Cause (from the run log): Git-for-Windows' `sha256sum` writes binary mode (`<hash> *<name>`), Linux and macOS write `<hash>  <name>`; `sha256sum -c` accepts both, but the upload job's `awk '{print $2}'` cross-check compared `*Goldfinch-Setup-0.19.15.exe` with the file name.
+
+Fix at both ends, `build.yml` only. Stage step: the list is written to `SHA256SUMS.raw`, then `sed -E 's/^([0-9a-fA-F]+) [ *]/\1  /'` rewrites either marker to two spaces (chosen over `--text`, which was not confirmed for every build; macOS keeps its `shasum -a 256` fallback, whose output is already the text form). Upload step: new `listed_names()` takes the name as everything after the hash and the first run of spaces, minus one leading `*`; the five-name comparison is unchanged. New test `listed_names` in `release-workflow-invariants.test.js` extracts the function and runs it on text form, binary form, a missing-file list and a double-marker list.
+
+Local outcomes (scratch trees, the real edited verify block run under bash): good tree with a `*`-form win list passes (rc 0); list naming a missing file fails (rc 1, at `sha256sum -c`); extra unlisted file fails (rc 1, "digest list does not match the files present"). Not provable locally: the Windows runner's actual output.
+
+### Review fixes (legs 01–07)
+
+Four non-blocking mid-flight review items, fixed before push.
+
+1. `build.yml` upload job, "Verify names and digests": right after the directory listing, the directory names must be exactly `installers-linux`, `installers-mac`, `installers-win` (fails before any file is read). The upload step now `cd`s into each of those three literal directories and gives `gh release upload` bare, already-verified file names (the list file holds `dir|file`, parsed per literal dir). New test in `release-workflow-invariants.test.js` pins the check (landmark-or-throw, ordered before the first `VERSION` read). Neuter: replaced the check's name literal, test went red, restored. Shell blocks `bash -n` clean; the verify fragment run on scratch trees: good names pass; `installers-win#x`, `installers win` and an extra directory all fail with the directory-name error; upload fragment run with a fake `gh` calls it once per directory with bare names.
+2. Build-job no-token test pattern now also matches `github\.token` (case-insensitive). Neuter: `${{ github.token }}` added to the build job, red, restored.
+3. `settings.js` About controller: the boot `settingsGet('updateCheckEnabled')` is ignored once a `settings-changed` push was seen; a rejected `settingsSet` reverts the checkbox to the last known value. Patched in place. Observation (not changed): older controllers in the file have the same boot-read/push race and no revert on rejection.
+4. `launch-switches-placement.test.js`: new assertion that `src/main/launch-switches.js` (comment-masked, throws if unreadable) contains no `appendSwitch(`; the TLS-flag exemption stays. Neuter: appended `app.appendSwitch('x');`, red, restored.
+
+## Leg 08 — release-integrity
+
+**Status**: landed on the workflow, tests, docs and runbook (AC7, the operator applying the settings and cutting candidates, is not part of this landing).
+
+**Built.** `.github/workflows/build.yml`: (1) `create-release` gains step *Require a stable tag to be on the default branch* (after *Validate semver tag and classify stability*, whose `semver=` line is untouched; `if: steps.ver.outputs.is_stable == 'true'`; `GH_TOKEN` and `DEFAULT_BRANCH` through `env:`; one small function `stable_tag_on_default sha default` over `gh api repos/$GITHUB_REPOSITORY/compare/<default>...<sha> --jq .status`: `identical`/`behind` allow, everything else refuses, one retry after 10 s except on an `HTTP 403`, prints the answer and commit on every path). (2) `upload`: *Verify names and digests* gained `id: verify` and, after every check passed, writes a multi-line step output `subjects` from its own verified `dir|file` list (`sed 's#|#/#'`: five `artifacts/<dir>/<name>` paths, never `VERSION`/`SHA256SUMS`, no glob); new step *Attest build provenance* after *Upload to the draft release*, tag-gated; the job's permissions are `contents: write`, `id-token: write`, `attestations: write`; the comment beside the token now says the attest step reads the job token by default. `artifact-metadata: write` is left out. Header comment extended.
+
+**Attest step as written**
+```yaml
+      - name: Attest build provenance
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ steps.verify.outputs.subjects }}
+```
+Tag -> SHA: `gh api repos/actions/attest/git/ref/tags/v4.2.2` -> `commit 1e69f48acb82d1966a394da916b4c1698aa569d6` (lightweight tag; `releases/latest` is `v4.2.2`), resolved 2026-11-17.
+
+**Tests.** `release-workflow-invariants.test.js`: the old `deepEqual(…, ['contents: write'])` line removed from the upload test and replaced by *exact permission set; the signing permissions live nowhere else* (exact three; `id-token`/`attestations:` absent from every other job and the top level; no `actions/attest` in `build`) and *one attest step, after the upload, tag-gated, subjects are the verified list only* (exactly one attest step; order; `if`; `subject-path` is exactly the step output; no glob, no `artifacts/`, no `VERSION`/`SHA256SUMS` in the step; the verify step has `id: verify` and writes the output from the upload list). New `stable-tag-check.test.js`: the function is extracted from the workflow and run under bash with a fake `gh` and a stubbed `sleep`: identical/behind allow with one call; ahead, diverged, empty, junk, `null` refuse after two calls and one `sleep 10`; 404 and 502 refuse after a retry; 403 refuses with one call and no sleep; ahead-then-identical and 404-then-identical allow on the retry; an error whose text is `identical` still refuses; the step is gated on `is_stable == 'true'`, takes the default branch through `env:`, has no `${{` in its run block, sits after the semver step and before the draft. The *Validate semver…* block is also run for `v1.2.3`, `v1.2.3+build.5` (stable), `v1.2.3-rc.1`, `v1.2.3-rc.1+x` (prerelease), `v1.2` (rc 1). `update-readme.test.js`: text after the generated block survives the script unchanged; the real README's verify section sits after `DOWNLOADS:END`, once, and the unsigned sentence is not repeated. Neuter runs are listed in the report of this leg (each mutation restored and diffed).
+
+**AC3 — the function against the live compare endpoint** (read-only GETs; `GITHUB_REPOSITORY=msieurthenardier/goldfinch`, default `main`):
+
+| Commit | Answer | Result |
+| --- | --- | --- |
+| `v0.19.15` commit `f401407e…` | `identical` | ALLOWED |
+| `v0.19.0` commit `20d3025e…` | `behind` | ALLOWED |
+| flight branch head on the remote, `09302d92…` | `ahead` (both attempts, one `sleep 10`) | REFUSED |
+| local HEAD `6cebcac2…` (not pushed) | `{"message":"Not Found",…,"status":"404"}` HTTP 404 (both attempts) | REFUSED |
+| made-up `01234567…` | HTTP 404 (both attempts) | REFUSED |
+
+Note the 404 body itself contains `"status":"404"`; the function reads only a success answer's `.status`, and the error text is not mistaken for an answer. **This is a substitute**: the tag-push path (`GITHUB_SHA` for an annotated tag, the job token's right to call compare, the default-branch value from the event payload) runs first at the acceptance walk, where a stable-looking tag on a commit that is not on `main` should be pushed to watch `create-release` refuse (no release is created; the operator deletes the tag), and the real release tag later passes. A prerelease candidate cannot exercise the check (prereleases skip it). Both go to `hat-and-alignment`.
+
+**Release sequence, re-proved in a scratch clone** (nothing pushed): `git switch -c release-prep/vX` then `npm version patch --no-git-tag-version` printed `> version` / `README download section updated to v0.19.16` and `v0.19.16`; afterwards `git status` showed `README.md` staged and `package.json` / `package-lock.json` unstaged, `git tag --points-at HEAD` empty, HEAD unchanged (no commit). Hence the doc's `git commit -a -m "release-prep: bump to X.Y.Z"`.
+
+**Docs.** `docs/RELEASING.md`: intro; job table (create-release's check, upload's permissions and attest); *what a release carries* incl. no updater metadata (AC5b) and "nothing about attestations has run yet"; new *The stable-tag rule*; *Cut a release* rewritten as branch -> `npm version --no-git-tag-version` -> commit -> PR -> squash-merge -> `pull --ff-only` -> tag the merged commit -> push the tag; new *Rollback*, *One-time repository settings*, *Verifying a release*; *Windows HAT build* replaced by *Release candidates and hands-on builds*; the *Notes* bullet about a direct push to `main` replaced. `CLAUDE.md` *Release / CI*: least-privilege bullet (upload's two extra permissions) and the *Cutting a release* paragraph (PR-then-tag sequence, stable-tag check, rollback = next patch, rc used once, dispatch artifacts for hands-on builds, attestation, one-time settings). `docs/updates.md`: the request's `Accept-Language` / `Sec-Fetch-*` stated as an accepted disclosure (AC5b). `README.md`: new *Verify your download* section after the generated block. `ci/README.md` describes no release flow beyond "build.yml owns releases": unchanged.
+
+**Not run (this host's `gh` is 2.45.0, no `gh attestation`, no `gh release verify`):** the attest step, every `gh attestation verify` / `gh release verify` / `verify-asset` command (their flags are from the published manual, not `--help`), the tag path of `create-release`, the ruleset and immutability calls. See *First real run at the acceptance walk* in the leg report.
+
+### Leg 08 operator runbook
+
+For the repository owner. Nothing here has been run; the two `POST`/`PUT` calls change repository settings. `R=msieurthenardier/goldfinch`.
+
+**Order, and why.** (1) the tag ruleset; (2) cut the **first candidate** `vX.Y.Z-rc.1` — proves the tag path, the attest step, and whether the ruleset lets the workflow create its draft release; (3) turn on immutable releases; (4) cut a **second candidate** `-rc.2` to see a prerelease is immutable too. A release published while immutability is on stays immutable and its tag name stays spent, even if the setting is later turned off.
+
+**1. Tag ruleset on `v*`** (restrict creation, update, deletion; the repository-administrator role may bypass, which is what lets the owner's own tag push through). Body from the REST reference and this repository's `main` ruleset (administrator role is `actor_id` 5):
+
+```bash
+gh api -X POST repos/msieurthenardier/goldfinch/rulesets --input - <<'JSON'
+{"name":"release-tags","target":"tag","enforcement":"active","conditions":{"ref_name":{"include":["refs/tags/v*"],"exclude":[]}},"rules":[{"type":"creation"},{"type":"update","parameters":{"update_allows_fetch_and_merge":false}},{"type":"deletion"}],"bypass_actors":[{"actor_id":5,"actor_type":"RepositoryRole","bypass_mode":"always"}]}
+JSON
+```
+- Settings path instead: repository Settings -> Rules -> Rulesets -> New ruleset -> New tag ruleset; name `release-tags`; Enforcement Active; Bypass list: Repository admin (Always allow); target tags matching `v*`; tick Restrict creations, Restrict updates, Restrict deletions.
+- Confirm: `gh api repos/msieurthenardier/goldfinch/rulesets -q '.[] | "\(.id) \(.name) \(.target) \(.enforcement)"'` lists `release-tags tag active` beside `main branch active`.
+- Undo: `gh api -X DELETE repos/msieurthenardier/goldfinch/rulesets/<id>` (the id from the listing), or set enforcement to Disabled in Settings.
+- The `update` rule's `parameters.update_allows_fetch_and_merge` is documented for the endpoint but not verified for a `target: "tag"` ruleset: if the `POST` is rejected naming that parameter, re-send with the `update` rule as `{"type":"update"}` alone, and record which form was accepted.
+
+**2. Immutable releases** (after the first candidate):
+
+```bash
+gh api -X PUT repos/msieurthenardier/goldfinch/immutable-releases
+```
+- Settings path instead: repository Settings -> Releases (General) -> Enable release immutability.
+- Confirm: `gh api repos/msieurthenardier/goldfinch/immutable-releases` answers `{"enabled":true,…}` (today `{"enabled":false,"enforced_by_owner":false}`).
+- Undo: `gh api -X DELETE repos/msieurthenardier/goldfinch/immutable-releases`. Releases already published while it was on stay immutable.
+
+If the first candidate fails at `create-release`'s first step because the ruleset blocks the workflow's token, stop: the fix (a bypass entry for the GitHub Actions integration) is a decision with the Flight Director.
+
+## Leg 10 — dispositions-and-docs
+
+**Status**: landed (2026-11-17). Documentation only; no file under `src/`, `test/`, `scripts/`, `.github/` or `ci/tasks/` was changed by this leg (the leg-08 changes already in the working tree were left as they were).
+
+**Built.** `mission.md` gained `## Dispositions` (findings 1–22 with sub-rows per part, and a second table for the Flight 1 audit's NF items). `release-notes-draft.md` (this directory). Corrections: `CLAUDE.md` (two planning rules; the attestation sentence); `README.md` (new *Known limits* section; the verify section no longer says every installer carries an attestation); `docs/RELEASING.md` (new *Accepted, not fixed (release side)* and *Release checklist: by-eye items*; the fuse paragraph names the cookie ruling); `docs/vault.md` (the fill-payload acceptance); `ci/README.md` (public repository; *Accepted advisories* rewritten; the stale "untouched" sentence).
+
+**Counts (finding level):** fixed 6 (4, 9, 10, 11, 20, 21); fixed in part 16 (1, 2, 3, 5, 6, 7, 8, 12, 13, 14, 15, 16, 17, 18, 19, 22) [recounted in the final review fixes: 1, 3 and 5 moved from fixed]; accepted 0 as a whole finding (every accepted item is a sub-row of a finding that also changed something); struck 0. Sub-rows marked accepted: 2c, 2d, 3c, 3d, 6c, 7d, 8b, 8c, 12c, 13d, 15d, 16c, 19c, 19d, 22b. Sub-rows built-not-exercised or awaiting the operator: 7a, 7c, 7b (read-back), 13a, 18a, 18b, 18d.
+
+**AC2 run list.** Every path in the section was checked with `ls` (the proof files, the ten run logs, the specs, the squawks, `ci/pipeline.yml`; `ci/tasks/build-windows.yml` is absent and a grep for `build-windows` in `ci docs CLAUDE.md README.md .github` is empty). The 67 unit files named were run together with `node --test`: 1,605 tests, 1,605 pass, 0 fail. Files: ipc-gate, ipc-gate-invariant, preload-channel-literals, register-settings-ipc, gesture-verifier, gesture-witness, picker-context, picker-dismissal, vault-human-context, vault-human-confirm, sheet-arming, vault-confirmed-origins, update-version, update-check, register-update-ipc, update-notice-model, media-proxy, media-proxy-tokens, media-list, media-proxy-handler, the five reveal-gate files, download-path, register-download-ipc, download-retry, release-workflow-invariants, stable-tag-check, artifact-names, update-readme, check-fuses, history-store, history-recorder, reserved-ids, automation-auth, settings-store, vault-kdf-rewrap, vault-store-kdf-read-validation, vault-binding, vault-format-v2, vault-upgrade, vault-v1-vector, vault-power-lock, secret-clipboard, auth-challenges, display-url, cert-picker-template, automation-mcp-server, automation-audit-log, automation-port-moved, injected-input, injected-input-invariant, automation-input, ci-image-pins, launch-switches, launch-switches-placement, file-modes, vault-store-file-modes, sheet-menu-type-guard, tab-create-validate, session-runtime, register-tab-ipc, register-browser-ipc, origin-match, vault-picker-controls-template, jar-registry-ipc, history-ipc. Not run: `npm audit` (reaches an outside host; finding 20's proof is the leg 01 record); the behavior specs (their latest run logs are named, with their status stated honestly: `guest-ipc-refusal` halted on Electron 45, `admin-reach-refusal` partial, `vault-gesture-trust` reduced).
+
+**AC3 — accepted or not-covered item -> where an operator would look.**
+
+| Item | Where stated |
+| --- | --- |
+| 3c no automatic download or install | `docs/updates.md` (opening paragraph) |
+| 3d address and `Accept-Language` seen by GitHub | `docs/updates.md` *What the request carries* |
+| 7d no code signing | `README.md` (Download note, Verify section); `docs/RELEASING.md` *Accepted, not fixed* |
+| 8b cookies at rest | `README.md` *Known limits* (new); `docs/RELEASING.md` *Runtime fuses* and *Accepted, not fixed* (new) |
+| 8c `asar: false`, no code-on-disk integrity | `docs/RELEASING.md` *Runtime fuses*, *Accepted, not fixed*; `README.md` *Known limits* |
+| 19c `--no-sandbox`, `--proxy-server`, admin variable | `docs/RELEASING.md` *Launch switches*; `README.md` *Known limits* |
+| 19d process-launcher family, local attacker | `docs/RELEASING.md` *Launch switches* ("Not covered") |
+| 2c fill payload through the page's world | `docs/vault.md` (new bullet beside the box residual) |
+| 2d page-supplied icon box | `docs/vault.md` ("Stated residual") |
+| 6c no download confirmation | `README.md` *Known limits* (new); `docs/RELEASING.md` checklist item 1 |
+| 12c rollback of one vault | `docs/vault.md` ("the existing rollback limit") |
+| 13d no re-key on revoke or master change | `docs/vault.md` ("What is NOT re-keyed"); `README.md` *Known limits* |
+| 15d prompt arming, `user:pass@`, long subdomains | `README.md` *Known limits* (new) |
+| 16c in-page navigation not rate-limited; 22b browser views not pinned | `README.md` *Known limits* (new) |
+| 17a port fallback kept, shown | `docs/mcp-automation.md` (production-port row) |
+| 17c read-back of a filled password; 5 residuals | `docs/mcp-automation.md` (the read-back paragraph; *What each tier can reach*) |
+| 7a/7c/18a/18b awaiting a tag push or the operator's settings | `docs/RELEASING.md` *The release workflow*, *Accepted, not fixed*, *One-time repository settings* |
+
+**AC4 — false-claim sweep.** CLAUDE.md, `README.md`, `docs/**`, `ci/README.md` searched.
+
+| Claim | Where it was | Result |
+| --- | --- | --- |
+| Finding 22: four guards on every state-changing sheet channel | CLAUDE.md *Menu-overlay sheet* | already true as written (the gate owns guards 1 and 3; `sheet-menu-type-guard.test.js`) |
+| `settings-get` carries non-secret data only (1i) | CLAUDE.md | already true as written (`automationKeyState`); no "non-secret only" wording remains |
+| Admin reach into internal pages "by design" (5) | `docs/mcp-automation.md` | already true as written: it now says reach is not unrestricted (reveal gate); the by-design clause is about `evaluate` reaching the page |
+| "The vault locks at quit" (a Flight 2 false premise) | a store comment, then CLAUDE.md | already true: the quit lock was built (`lockVaultForQuit`); `docs/vault.md` states it |
+| "205" channel count | CLAUDE.md | already true: 209 (counted from `CHANNEL_CLASS` in this leg); `flight.md` still says 205 in a historical sentence, left alone |
+| "private repo" | `ci/README.md` | corrected (the Concourse secrets table) |
+| `build.yml` is "untouched" | `ci/README.md` opening paragraph | corrected |
+| Attestation on every installer | `README.md`, CLAUDE.md | corrected to say releases up to v0.19.15 have none and the step has not yet run |
+| A manual dispatch yields no installer | `docs/RELEASING.md`, CLAUDE.md | already true: both say a dispatch stages real installers as one-day artifacts and publishes nothing |
+| A tag can be reused / re-tag as rollback | `docs/RELEASING.md`, CLAUDE.md | already true: "never re-tag; publish the next patch"; the one `--cleanup-tag` sentence is limited to releases published before immutability |
+| Fuse/launch-switch statements | `docs/RELEASING.md`, `docs/dev-testing.md` | already true as written; the Windows and macOS gaps are stated |
+| Cookies "the operator's separate decision" (fuse paragraph) | `docs/RELEASING.md` | corrected: now says accepted, 2026-11-17 |
+| Release checklist with seven unowned items | `docs/RELEASING.md` Notes | corrected: gathered under *Release checklist: by-eye items* with platform and walk owner |
+
+**AC5 — the two rules as written (CLAUDE.md, *Project-specific planning rules*).**
+1. "A refusal that compares an IPC-supplied value rejects a non-string BEFORE comparing, and its tests send an array and an object through the real store, not only a mock (Mission 23: a `===` guard on a key name was bypassed by a non-string the store then coerced, found at Flight 1's review and built again in Flight 2's `admin-key-name` leg)."
+2. "Every claim that existing code already does something — in a design decision, a platform check or a leg's context — cites the call site that does it (Mission 23 Flight 2: "the vault is locked at quit" rested on a comment about a hook that was never wired, and "an unknown session id gets the wrong status" was already handled; both fell to "show me the line")."
+
+**AC6.** The checklist has thirteen rows. Walk column: items 1–7 (Flight 1's mark and Flight 2's six) and the new 8 (kebab item), 9 (refused-switch box) and 12 (About spacing) are planned for leg `hat-and-alignment` per the plan (DD8, line 221, and the flight log's carried note); item 10 (Windows `/switch`) is not named in the plan; item 11 (macOS on hardware) is not walkable by the operator (ruling 2026-11-17); item 13 (Flight 1 groups 2–6, Flight 2 groups 3–7) is not in the plan's seven and has no owner. Nothing was struck.
+
+**AC7.** `release-notes-draft.md`: Before you upgrade (the vault note, verbatim from the checklist), What you will notice, What changed underneath, macOS users please tell us, Verify your download, Operator notes. **AC8.** `ci/README.md` *Accepted advisories*: the four `minimatch@…` overrides, why, the removal condition and the command; the `@hono/node-server` line. **AC9.** See below.
+
+**Not verified here.** Nothing in this leg ran the app, a packaged build, a port or an outside host. The Concourse digest form, the attestation step, the stable-tag check on a real tag, the tag ruleset, immutable releases and the documented `gh attestation verify` / `gh release verify` commands are described as unexercised or awaiting the operator.
+
+**Reported to the Flight Director (could not source):** finding 14b (no disposition anywhere in the three flights' artifacts); NF6 (open as squawk 0187, no acceptance recorded); no operator ruling is recorded for 13d (the flight plan accepted it under the mission's permission); no owner for checklist rows 10 and 13; the `admin-reach-refusal` spec has never passed in full.
+
+### Final review fixes (legs 08, 10)
+
+1. **No `${{ }}` in any `run:` body.** `test/unit/release-workflow-invariants.test.js` gained one test scanning only `run:` bodies (block and single-line) of `build.yml` and `ci.yml`; throws on zero blocks. `ci.yml` has no expression in a run body, so both are covered. Neuter: `${{ github.ref_name }}` put in the dispatch step's run body went red ("build.yml: run block 14 holds an expression"); restored from a copy, identical.
+2. **`stable_tag_on_default` stderr.** `gh` stderr now goes to a temp file (`${RUNNER_TEMP:-${TMPDIR:-/tmp}}`), printed as `stderr='…'` on the diagnostic line; allow still needs rc 0 and exactly `identical`/`behind`; the 403 check reads the status and the stderr text (live finding: `gh` writes the HTTP text to stderr and the JSON error body to stdout, so both are inspected). `stable-tag-check.test.js` fakes now take an optional stderr; error cases put their text on stderr; one new case: success plus a stderr notice is allowed. Live read-only compare calls through the edited function (rc/answer as printed): `v0.19.15` commit `f401407…` rc=0 `identical` -> ALLOWED; remote head `09302d9…` of this branch rc=0 `ahead` (both attempts) -> REFUSED; made-up SHA rc=1, stderr `gh: Not Found (HTTP 404)` (both attempts) -> REFUSED.
+3. **Runbook.** One sentence added under the ruleset step (above) on `update_allows_fetch_and_merge`; `docs/RELEASING.md` does not carry the body, so nothing to mirror.
+4. **README** *Verify your download*: attestation wording is now "meant to carry ... starting with the first release after v0.19.15 ... a release without one makes the command report none was found".
+5. **`docs/RELEASING.md` row 6** now points at the vault-upgrade release note under *Notes* below.
+6. **`release-notes-draft.md`** first operator-notes bullet corrected: the sentence lives in `README.md`, not the draft.
+7. **Dispositions.** Rows 1, 3a and 5 now read "fixed in part"; counts recounted from the table: finding level fixed 6 (4, 9, 10, 11, 20, 21), fixed in part 16, accepted 0, struck 0 (22 total); the Leg 10 entry matches. Row 13d now names the Flight 2 plan (Flight Director) under the mission's permission, no separate operator ruling; row 3d says a default put to the operator and not objected to, pending an explicit ruling. No criterion ticked; 14b and NF6 untouched.
+
+## Leg 11 — hat-and-alignment (acceptance walk)
+
+Steps 1–6 performed by the Flight Director on the operator's instruction of 2026-11-17 ("you can do all of that except Ill install the release candidate"). Step 7 onward is the operator's.
+
+### Step 1 — tag ruleset
+
+`POST repos/msieurthenardier/goldfinch/rulesets` with the runbook's body: accepted, ruleset `release-tags` (id 27504949), `target: tag`, `refs/tags/v*`, rules `creation`, `update`, `deletion`, bypass for the repository-administrator role (`current_user_can_bypass: always`). **Answered:** the `update` rule's `update_allows_fetch_and_merge` parameter is accepted and dropped for a tag ruleset — the stored rule is `{"type":"update"}`.
+
+### Step 2 — candidate 1, `v0.19.15-rc.1` (commit `29f9b67`, annotated tag)
+
+Run [44196914592](https://github.com/msieurthenardier/goldfinch/actions/runs/44196914592): every job green. **Answered:** the owner's tag push is accepted under the ruleset; the ruleset's creation restriction does **not** stop the workflow's token creating a release for an existing tag; `Validated 'v0.19.15-rc.1' as a PRERELEASE` and the stable check was skipped; `Verified five installers for 0.19.15-rc.1`; the attestation step's first run — `Attestation created for 5 subjects`, signed and logged, with `contents: write`, `id-token: write`, `attestations: write` only (**`artifact-metadata: write` is not needed**); published as a prerelease with exactly five assets; `releases/latest` still `v0.19.15`. This release was published before immutability was on: `immutable: false`.
+
+### Step 6 (first half) — verification on candidate 1, with GitHub CLI 2.104.0 fetched into the session scratch directory (checksum verified against the CLI's published list)
+
+- `Goldfinch-Setup-0.19.15-rc.1.exe`: local SHA-256 equals the asset's published digest.
+- The README's command, verbatim — `gh attestation verify <file> -R msieurthenardier/goldfinch --signer-workflow msieurthenardier/goldfinch/.github/workflows/build.yml` — exit 0.
+- Negative controls: the same with `--signer-workflow …/ci.yml` → exit 1; a copy of the file with one byte appended → exit 1 (no attestation for that digest).
+- With its output captured (not a terminal) a successful verify prints nothing; in a terminal it prints the policy it enforced and `✓ Verification succeeded!`.
+
+### Step 3 — refusal test
+
+Annotated tag `v0.0.0` on the flight branch head, pushed and watched with an automatic cancel armed. Run [44197557515](https://github.com/msieurthenardier/goldfinch/actions/runs/44197557515): `Validated 'v0.0.0' as a STABLE release`; `compare main...29f9b67…: attempt 1: rc=0 answer='ahead'`, again on attempt 2; `Stable tag v0.0.0 (commit 29f9b67…) is not on main; refusing to create a release.` `create-release` failed, every other job skipped, no draft and no release. **Answered:** `GITHUB_SHA` on an annotated tag is the tagged commit; the job's token may call the compare endpoint; the default-branch value arrives. The tag was deleted on the remote and locally (administrator bypass); `git ls-remote` shows none.
+
+### Step 4 — immutable releases
+
+`PUT repos/msieurthenardier/goldfinch/immutable-releases` → `{"enabled":true,"enforced_by_owner":false}`.
+
+### Step 5 — candidate 2, `v0.19.15-rc.2` (same commit)
+
+Run [44197680777](https://github.com/msieurthenardier/goldfinch/actions/runs/44197680777): every job green. The release: prerelease, five assets, **`immutable: true`** — **answered:** a prerelease is immutable too, and a draft stayed writable until it was published (the upload went in after the setting was on). `v0.19.15-rc.1` remains `immutable: false`. **`v0.19.15-rc.2` is the first immutable release**; its tag name is spent.
+
+### Step 6 (second half) — release verification on candidate 2
+
+- `gh release verify v0.19.15-rc.2` → `✓ Release v0.19.15-rc.2 verified!`, listing the five assets and digests.
+- `gh release verify-asset v0.19.15-rc.2 goldfinch_0.19.15-rc.2_amd64.deb` → `✓ Verification succeeded! … is present in release v0.19.15-rc.2`.
+- `gh attestation verify` on the same file, as documented → `✓ Verification succeeded!`; the policy printed includes the signer workflow match on `…/.github/workflows/build.yml`.
+
+### Not exercised by steps 1–6
+
+A **stable** tag on a `main` commit passing the check (the first real release after merge); the 403 branch of the compare function; the release sequence on a real pull request; `gh` verification on Windows or macOS; any behaviour of an installed candidate (step 7).
+
+### Step 7 — the operator's install of `v0.19.15-rc.2` over 0.19.15 (Windows), 2026-11-17
+
+The operator's report, verbatim: "Goldfinch 0.19.15-rc.2 is not displayed in the about section, seems like it should immediately. After about a minute the button and new version did show up and the item showed up in the kabob, the spacing and alignment needs fixing the in teh about section. Release notes button worked, but we need a better release notes page and process. Turning it off worked as expected, ccampe back as expected. skipping #6." A screenshot of the About section accompanied it.
+
+| Item | Result |
+| --- | --- |
+| Installs over 0.19.15 and starts | Walked; no problem reported |
+| About names the running version | **Fail** — showed `Goldfinch` alone |
+| Notice and button after about a minute | Pass (the first check is delayed 60 s by design) |
+| Button opens the release page | Pass |
+| Kebab "Update available" item | Pass, by eye |
+| Setting off clears both; on brings them back | Pass |
+| A refused launch switch | **Not walked** ("skipping #6") — stays on the release checklist |
+| About spacing and alignment | **Needs fixing** |
+
+Flight Director's classification, said to the operator:
+
+- **Version not shown — a defect, and the Flight Director's design error.** Leg 06's AC1 had the version line show only a version passing the *stable* pattern, which is right for the offered version (from the network) and wrong for the app's own (`0.19.15-rc.2` was filtered out). Fixed inline through a Developer.
+- **Spacing and alignment — a look-and-feel fix on one page.** Fixed in the same Developer pass.
+- **"A better release notes page and process" — a feature, not folded into the walk.** Recorded as a follow-up for the operator to scope (what the page holds; where notes are written and reviewed before a release). Not a squawk: it adds behaviour and needs a design call.
+
+### Walk fix 1 — About version and layout
+
+Operator's report: "Goldfinch 0.19.15-rc.2 is not displayed in the about section, seems like it should immediately … the spacing and alignment needs fixing in the about section." Follow-up screenshot: the "Check for new versions" row should look like the Spellcheck row above it.
+
+**Cause 1 (version).** `update-notice-model.js` gated the running version on `parseStableTag('v' + current)`, so a prerelease build showed `Goldfinch` alone. The stable-only rule is right for the offered version (network) and wrong for the app's own (`app.getVersion()`). The version line renders from the first `render(null)`/boot read in `settings.js`; nothing delays it (the minute the operator saw is the first check, by design).
+
+**Change 1.** New export `isWellFormedVersion` in `src/shared/update-version.js` (reuses `parseRunning`; adds an optional `+build` of dot-separated `[0-9A-Za-z-]+`; length cap 64). `versionText` uses it; notice/button/kebab rule unchanged (`available` stable and `releaseUrl` non-null). Tests: `update-notice-model.test.js` (`0.19.15`, `0.19.15-rc.2`, `1.0.0-beta.1+build.5`, rc with notice; hostile values `<b>x`, `0.19.15 <script>`, `01.2.3`, 200 characters, object, null, others all give `Goldfinch`), `update-version.test.js`. Docs: `docs/updates.md`, CLAUDE.md *Update check*.
+
+**Cause 2 (layout).** The row sat in a `shields-group` fieldset with `.shield-row`, whose rule `.shield-row:not(.shield-parent) { padding-left: 14px }` is the Shields sub-row indent; Spellcheck cancels it with `.shield-row.spellcheck-row` and carries its divider with `.spellcheck-group`. The About row had neither, and the notice, button and row had no spacing.
+
+**Change 2 (CSS only, markup and ids untouched).** In `settings.css`, beside the Spellcheck rules: `.update-check-group` (divider, 12px top padding, 16px top margin), `.shield-row.update-check-row { padding-left: 0 }`, `#about-update-status` margin-top 12px, `#about-update-open` margin-top 8px. Gaps ride the following elements, so a hidden notice leaves no gap.
+
+**Measurements** (px, dev build, Settings tab). Before, notice showing: version/status/button/note left 268, label left 282 (14 px indent), version to status 0, status to button 0, no divider. After, notice showing: every left edge 268 (version, status, button, label, note); Spellcheck label left 268, weight 400, size 14px, same as the About label; version to status 12, status to button 8, button to label row 34 (16 margin, 1 divider, 12 padding, 3 row), label to note about 18, the same as Spellcheck. Notice hidden (setting off): status and button computed `display: none`, version to label row 34, no empty gap. Note: the label weight is 400 on both rows (the Flight Director's "stronger weight" was the indent illusion; they now match).
+
+Screenshots: in the session scratch directory, `about-fix/` — `about-before.png`, `about-notice.png`, `about-no-notice.png`. The prerelease display is proven by unit tests, not live (the dev build is stable 0.19.15). a11y against the running app with the notice showing: no new violations.
+
+### Walk outcome — a feature request, and a follow-up
+
+- Walk fix 1 accepted by the Flight Director from the Developer's screenshots and measurements: every row of the About block now starts on one left edge and the "Check for new versions" row matches the Spellcheck row above it. The operator had sent a wider screenshot showing the row styled as a Shields sub-row; that was passed to the Developer as the target. The prerelease version line is proved by unit tests only (the dev build's version is stable).
+- Operator, on what the notice lets them do: "it occurs to me there is nothing actionable in the UI..there is no \"Update now\", what is the expectation from the user?" The Flight Director laid out three levels (wording only; a direct download button; a real in-app updater, which would need the updater metadata this flight stopped publishing and cannot work on unsigned macOS builds). **Operator ruling: "A download now button would be ideal in the settings page, the link in the kabab menu can continue to work as it does".**
+- **Classified a feature** → new leg 12 `update-download`, tier high, Developer design review before implementation. Flight DD1's "never downloads" is narrowed to "never automatically" and annotated by that leg. A third candidate (`-rc.3`) will be needed for the operator to see it installed.
+- **Follow-up for the operator to scope, not part of this flight**: release notes — "we need a better release notes page and process", clarified as "the content of the release notes, not an in app whats new". Suggested vehicle: a sortie (hand-written notes reviewed in the release-prep pull request; the workflow publishing that file instead of generated notes). Leg 10's `release-notes-draft.md` serves by hand until then; a published release's title and notes stay editable under immutability.
+
+## Leg 12 — update-download
+
+Status: **in-flight** (the Flight Director re-runs `tests/behavior/update-notice.md` and lands the leg). Built to the leg's "Design review amendments".
+
+### What was built
+
+- `src/shared/update-version.js`: `installerNameFor({ platform, arch, appImage, version })` and `installerUrlFor(name, version)` (constant slug + re-validated version + one of four fixed names; `null` otherwise). `src/main/update-check.js`: `downloadName` computed in `getState()` from `available` and injected `platform` / `arch` / `appImage` (defaults `process.platform`, `process.arch`, `APPIMAGE` read at construction).
+- `internal-update-download` (`internal` class; table 209 -> 210, `internal` 75 -> 76 in `ipc-gate-invariant.test.js`; CLAUDE.md's row count set to 210). No arguments, no reveal gate (comment in the registrar). The call lives in `main.js`'s injected `startUpdateDownload(url)` (try/catch around `session.defaultSession.downloadURL`), so `register-download-ipc.test.js`'s two-caller pin is untouched. Bridge `updateDownload()` on `window.goldfinchInternal` only; typing in `renderer-globals.d.ts`.
+- About block: `#about-update-download` (primary, "Download now"), `#about-update-open` now `.settings-btn--secondary`, `#about-update-hint` (`aria-describedby` from the download button). The pure model owns every string (`downloadResultHint`, `DOWNLOAD_HINT`, `NO_DIRECT_HINT`, ...). The controller's early return is unchanged; the new elements are fetched separately. The hint after a click survives state pushes while the button shows and is dropped when it goes away. Walk fix 1 kept and built on.
+- `renderer.js`, `overlay-menus.js`, `register-download-ipc.js`, the media path: untouched (`git diff` empty). Seam 41.
+
+### Measured (live, dev mode, scratch HOME / XDG_CONFIG_HOME, dead proxy, `-u XDG_DOWNLOAD_DIR`, no `user-dirs.dirs`)
+
+- **Downloads folder: under the scratch root, yes** - it resolved to the scratch `HOME` itself (no `~/Downloads` exists there; Electron falls back to `HOME`). Shown first by one page-initiated loopback download (record `savePath`), before the button was pressed. Real `~/Downloads` showed no new file.
+- **Proxy dead, yes**: a tab to `http://example.invalid/` ended `loadState: failed`, `ERR_TIMED_OUT`.
+- **A download that cannot connect DOES produce a record**, about 8 s after the click (the connection attempt must time out first): `state: progressing`, then about 10 s later **`interrupted`**, `received: 0`, `total: 0`, `mime: ''`, no `partition`, `savePath` in the scratch downloads folder, name `goldfinch_0.19.16_amd64.deb` (the built address's own, no redirect to show Chromium's choice). **No `endTime`** while the app runs (Electron emits `updated` with `interrupted`, never `done`, for a resumable failure); `flushInterrupted` stamps one at quit. Nothing is left in the downloads directory (listed before and after: only the control file).
+- **Finding that changed the code**: the amendment's "no end time = in progress" would have treated that `interrupted` record as in progress forever (the first live run had a repeat click answered `already`). The definition is now: exact address, no end time AND state `progressing` (paused is `progressing` + `paused: true`); `interrupted` never blocks. Unit-tested; re-verified live after a relaunch.
+- Indicator: `Downloading — 1 in progress` while the record was `progressing`, and it still read that with an `interrupted`-no-end record (pre-existing behaviour of the indicator; see out-of-scope). Downloads page: both rows `Failed`, with the existing "Cannot retry: this download does not record which identity it came from." note.
+- Hints: before click `Downloads the installer for this computer. Run it to update.`; after a successful start `Download started — find it in Downloads, then run it to update.` (shown within 1.5 s, before the record exists - the start is "started", the failure arrives later on the downloads surface). The `unavailable` / rejected-call hint is unit-tested only.
+
+### Smoke table (AC8)
+
+| Step | Result |
+|---|---|
+| Downloads folder under scratch | pass (loopback control download, `savePath` under scratch) |
+| Proxy dead | pass (`ERR_TIMED_OUT`) |
+| About block: both buttons, first hint, `aria-label`s, `aria-describedby`, ax tree | pass; `about-download.png` |
+| Real click on `#about-update-download` | pass; record at the app-built `.../releases/download/v0.19.16/goldfinch_0.19.16_amd64.deb` |
+| Final state | `interrupted` (shown Failed); never `completed`, `received` 0; nothing reached github.com |
+| Hint after click | pass; `about-after-click.png` |
+| Indicator / `goldfinch://downloads` | pass; `downloads-page.png` |
+| Second click after the first ended | pass, a second record (id 3); the in-progress repeat is unit-tested only |
+| AC7 control download (page-initiated, jar tab) | pass: record keeps `partition: persist:container:personal`, completed 19 B, shown on the page with Open / Show in folder / Remove (a completed row has no Retry; retry itself is the existing unit suite) |
+| Other primitives against the Settings tab | `enumerateWindows`, `enumerateTabs`, `getChromeTarget`, `readDom`, `readAxTree`, `captureScreenshot`, `captureWindow`, `evaluate`, `injectScript`, `scroll`, `click`, `pressKey`, `typeText`, `downloadsList`, `getHistory` answer; `getZoom`, `setZoom`, `findInPage`, `stopFindInPage`, `printToPDF`, `reload` refuse with `internal-session excluded` (existing design) |
+| No native dialog | nothing stalled across three downloads |
+| Cleanup | app stopped by recorded pid, fixture and loopback server stopped by pid; 8237 / 8238 / 50321 / 50400 free (`ss` exit 1); scratch `home` and `xdg` removed |
+
+### Copy sweep (AC6)
+
+Patterns `Nothing is downloaded`, `nothing is downloaded`, `never download(s)`, `notify-only`, `Notify-only`, `no in-app download`, plus `downloads or installs`:
+- `settings.html` `#update-check-note` - corrected ("Asks GitHub once a day whether a newer release exists. Nothing is downloaded unless you ask, and nothing is installed for you.").
+- `src/main/update-check.js` header comment - corrected.
+- `docs/updates.md` (intro; state; *Where it shows*; new *Download now* section) - corrected / added.
+- `README.md` "Updates are never automatic" - corrected (says what the button does; still true).
+- CLAUDE.md *Update check* ("Notify-only daily check") - corrected, plus the new Download-now paragraph.
+- `release-notes-draft.md` - corrected.
+- `docs/mcp-automation.md` tier section - one line added (automation reach).
+- Flight `flight.md` DD1 - dated annotation appended; original sentence and its "notify-only" rationale kept.
+- `mission.md` - dated annotation beneath the planning decision "no in-app download or install" (verbatim from the amendments); Dispositions 3a ("notify-only") and 3c reworded to "never automatically"; nothing ticked. The success criterion line ("nothing is downloaded or installed automatically") already holds as written - left.
+- Left as historical: legs 05, 06, 10; this flight-log's earlier entries (lines 17 and 482); other missions' unrelated "never auto-*" hits.
+
+### Gates
+
+`npm test` 7251 tests, 0 fail; `npm run typecheck`, `npm run lint`, `npm run format:check` clean.
+
+### Candidate squawk (not fixed)
+
+An app-started download's record has no partition, so the downloads page shows "Cannot retry: this download does not record which identity it came from." - true but oddly worded for it.
+
+[HANDOFF:review-needed] - leg left `in-flight`; the Flight Director re-runs the behavior spec.
+
+### Leg 12 review fixes
+
+1. **Repeat-click check.** `downloadInProgress` now matches a record as this download when its address equals the built one, or it has no partition and its saved file name is the expected installer name (exactly, or with the ` (n)` suffix `uniquePath` adds before the extension, matched precisely); it must also be `progressing` with no end time. The latch release uses the same match. The shared downloads files are untouched. The reason: a GitHub asset request redirects and Chromium reports the last address, so the stored address probably differs from the built one. A real redirecting download has not been observed; the operator's next candidate is the first. Tests added in `register-update-ipc.test.js`: redirect-shaped record (long signed query) with exact and ` (1)` names blocks; partitioned, other name, malformed suffix, `interrupted` and ended records do not; latch releases on such a record.
+2. **Stale hint.** The About controller remembers the `available` / `downloadName` pair the result hint was set under and drops the override when a push changes either. The controller is not unit-testable in this codebase (page controller reading `document`), so this was verified by reading.
+3. **Private path.** One absolute scratch-directory path in the "Walk fix 1" screenshot list replaced by a neutral description. Earlier-flight files carrying the same pattern were left for the operator.
+
+### Leg 12 — review, spec run and landing
+
+- Developer design review of leg 12: approve with changes, one cycle, incorporated as the leg's "Design review amendments". Settled by reading: the browser's own session is wired for downloads, a download with no page behind it is recorded and shown, and no native dialog is on that path.
+- The Developer changed one amended rule after a live finding, accepted by the Flight Director: "in progress" means state `progressing`, not merely "no end time" — an interrupted download gets no end time while the app runs, so the amended rule would have blocked every later click.
+- Reviewer (Sonnet, third pass, uncommitted work only): **`[HANDOFF:confirmed]`**, nothing blocking; gates green. It traced every input to the download address and found only the validated version, the constant repository name and the fixed installer names. Three non-blocking items fixed by a Developer: the repeat-click check now recognises an app-started download by its installer file name (a real download's recorded address is the redirect target, so the address match alone would never hit); the result hint is cleared when the offered version changes; an absolute scratch path was removed from this flight's log.
+- Spec `update-notice`, second run: **pass, 11/11** (run log `tests/behavior/update-notice/runs/2026-11-17-23-53-08.md`). Leg 12 marked `landed` by the Flight Director. Spec notes added from the Validator's findings; no row weakened.
+- **Not verified**: a download that succeeds (every run blocks the network on purpose), and anything on Windows or macOS — the operator's check on the next candidate is the first real download.
+- **Found, outside this flight**: the toolbar downloads indicator counts an `interrupted` download as in progress while the downloads page says "Failed" (candidate squawk); the Retry note for an app-started download reads oddly (candidate squawk).
+- **Public-repository hygiene, raised with the operator**: absolute scratch-directory paths that embed the operating-system user name are present in artifacts already merged to `main` — Flight 1's flight log, audit and probe notes, Flight 2's flight log, two sortie leg files and one squawk (fourteen lines in seven files). Not edited by this flight; whether to clean the current files, and whether to rewrite published history, is the operator's decision.
+4. **Button heights.** The About pair (Download now, View release notes) rendered 28 px and 30 px: the secondary variant carries a 1 px border and `.settings-btn` had none. `.settings-btn` now has `border: 1px solid transparent`, so every primary `.settings-btn` is 30 px (was 28) and matches the secondary; measured live both About buttons 30 px, same top and bottom.
+5. **Not changed.** `#home-page-save` is its own primary rule (not `.settings-btn`) and still sits at 28 px beside the 30 px Clear; the same one-line border would align it.
+
+### Operator rulings at the walk, 2026-11-17
+
+- On the four open dispositions, after the Flight Director explained each: **"ill take your recommendations"** — finding 14b accepted and documented (candidate sortie); NF6 / squawk 0187 accepted for this mission with the squawk standing; 13d (no re-key on revoke or master change) accepted, compromise rotation being the remedy; the update request's `Accept-Language` accepted and documented. `mission.md`'s Dispositions rows updated; no finding is left without a disposition.
+- On the user-name paths in earlier artifacts: **"clean the files"** — fourteen lines in seven files of Flights 1 and 2, two sortie legs and one squawk now carry neutral placeholders (`<session-scratch>`, `<repo>`). Git history is not rewritten.
+- **"go ahead and commit and public rc.3"** — the Flight Director commits, pushes the branch, and pushes `v0.19.15-rc.3`.
+
+### Docs brought up to date after the walk
+
+Written 2026-11-17 from this leg's record; no source, test, script or workflow file changed.
+
+- `docs/RELEASING.md`: the attestation paragraph, the stable-tag rule, *Rollback*, *One-time repository settings* and *Verifying a release* now state what ran (attestation on all three candidates; refusal of a stable-looking tag not on `main`; the ruleset and immutable releases applied; the verification commands run on Linux with GitHub CLI 2.104.0, not on Windows or macOS) and name `v0.19.15-rc.2` as the first immutable release. A stable tag passing the check is still marked not exercised. The checklist rows for the kebab item (8) and the About spacing (12) are marked walked (Windows, `v0.19.15-rc.3`, 2026-11-17); every other row is unchanged; a new row 14 covers "Download now" on macOS and Linux.
+- `README.md` *Verify your download*: says which commands were run and on what (Linux, CLI 2.104.0), that older CLIs lack them, what success looks like in a terminal and redirected, and that Windows and macOS were not run.
+- `CLAUDE.md` *Release / CI*: the same facts, briefly, and the first immutable release.
+- `docs/updates.md`: "Download now" was seen starting a real download on Windows; not seen on macOS or Linux; the walk does not say what address the finished record held.
+- `release-notes-draft.md`: what has and has not run, the Download now button's platform status, immutability, the operator notes; the macOS request is kept.
+- `mission.md` *Dispositions*: rows 3a, 7a, 7c, 18a, 18b and the verification paragraph. Outcomes: 7a to fixed, 7c to fixed, 18b to fixed, 18a to "fixed in part: refusal observed, a passing stable tag still to come". Finding-level counts are unchanged (findings 7 and 18 each still hold a part that is accepted or in part). No success criterion ticked.
+
+### Walk close — candidate 3 and the operator's verdict
+
+- `v0.19.15-rc.3` (commit `fcc5145`): run green, published as a prerelease with five installers, immutable, not latest.
+- The operator installed it over the previous candidate on Windows and reported, verbatim: **"pass - do realize we are missing an indicator in the app that shows an impending update, we can add that later"**. Covered by that pass, as asked of them: the version line on a prerelease build, the About layout, the notice, "Download now" (the first real download from that button), a repeat click during the download, the saved file name, the release-notes button and the kebab item. The report carried no per-item detail beyond "pass".
+- Disposition 3a moved to **fixed**: the installed candidates were offered v0.19.15 by the real endpoint. Counts: 7 fixed, 15 fixed in part.
+- Leg 11 acceptance: steps 1–6 recorded with their runs; the refusal test refused and left nothing; step 7 reported, its two defects fixed and re-walked, its feature request built, reviewed and re-walked; docs corrected to what was observed. **Not walked**: a refused launch switch on Windows; the macOS build on hardware; Windows `/switch` forms; "Download now" on macOS and Linux; the carried by-eye items of Flights 1 and 2 — all listed in `docs/RELEASING.md`'s checklist.
+
+### Follow-ups carried out of the flight (for the debrief to turn into squawks or sorties)
+
+- **Features, for the operator to scope**: an indicator in the app's main window that an update is waiting (operator, at the walk); hand-written, reviewed release notes published by the workflow (operator, at the walk); in-app verification of a downloaded installer; planning and sending a capture from the isolated world (finding 14b, accepted for now).
+- **Standing squawk**: 0187, uncapped script-opened popups and tabs (accepted for this mission).
+- **Candidate squawks**: the downloads indicator counts an `interrupted` download as in progress; the Retry note's wording for an app-started download; the home-page Save button is 2 px shorter than Clear; `location.reload()` on the chrome through admin `evaluate` leaves only a Welcome tab; the older Settings controllers share the boot-read race fixed for the new checkbox; no test pins the saved file name of an app-started download.
+- **First real runs still ahead**: a stable tag on a `main` commit passing the stable-tag check, and the documented release sequence on a real pull request — both at the next release.
+
+### Flight landed
+
+All legs `completed` (leg 09 not flown, by operator ruling). Reviewed three times (legs 01–07; 08 and 10; 12 and the walk fixes), each confirmed. Flight status `landed`; Flight 3 checked off in the mission. `[COMPLETE:flight]`

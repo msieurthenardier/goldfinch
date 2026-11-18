@@ -1,6 +1,6 @@
 {
   "name": "goldfinch",
-  "version": "0.19.15",
+  "version": "0.19.16",
   "description": "A Chromium-based browser with an expandable media panel for viewing, playing, and downloading site media.",
   "main": "src/main/main.js",
   "desktopName": "goldfinch.desktop",
@@ -31,6 +31,12 @@
     "appId": "com.goldfinch.browser",
     "productName": "Goldfinch",
     "asar": false,
+    "electronFuses": {
+      "runAsNode": false,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "resetAdHocDarwinSignature": true
+    },
     "publish": {
       "provider": "github",
       "owner": "msieurthenardier",
@@ -45,7 +51,17 @@
       "src/**/*",
       "package.json"
     ],
+    "dmg": {
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "appImage": {
+      "artifactName": "${productName}-${version}.${ext}"
+    },
+    "deb": {
+      "artifactName": "${name}_${version}_${arch}.${ext}"
+    },
     "mac": {
+      "artifactName": "${productName}-${version}-${arch}-mac.${ext}",
       "target": [
         "dmg",
         "zip"
@@ -59,6 +75,7 @@
       ]
     },
     "nsis": {
+      "artifactName": "${productName}-Setup-${version}.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "include": "build/installer.nsh"
@@ -86,13 +103,18 @@
     "@modelcontextprotocol/sdk": "1.32.2"
   },
   "overrides": {
-    "brace-expansion": "^5.0.8"
+    "brace-expansion": "^5.0.8",
+    "minimatch@^9.0.3": "^11.0.1",
+    "minimatch@^10.2.4": "^11.0.1",
+    "minimatch@^10.2.5": "^11.0.1",
+    "minimatch@^10.2.6": "^11.0.1"
   },
   "devDependencies": {
+    "@electron/fuses": "1.8.0",
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.6.6",
     "axe-core": "^4.14.0",
-    "electron": "45.3.2",
+    "electron": "45.3.3",
     "electron-builder": "^26.18.0",
     "esbuild": "^0.28.2",
     "eslint": "^10.14.0",

@@ -3,6 +3,8 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
+const fs = require('node:fs');
+const path = require('node:path');
 const { registerAppLifecycle } = require('../../src/main/app-lifecycle');
 const { extractLaunchUrls, filterLaunchUrls } = require('../../src/shared/launch-urls');
 const { eventFrom, makeTestGate } = require('../helpers/ipc-gate-fixture');
@@ -34,6 +36,9 @@ function makeHarness({
   // Leg `vault-lifecycle`: opt in to recording the power-lock registration and the quit lock.
   vaultLifecycle = false,
   vaultQuitLockThrows = false,
+  // Leg `update-check`: opt in to recording the checker's start and stop.
+  updateCheck = false,
+  updateStartThrows = false,
   restore = null,
   platform = 'linux',
   dev = false,
@@ -157,6 +162,15 @@ function makeHarness({
             events.push('vault-quit-lock');
             if (vaultQuitLockThrows) throw new Error('boom');
           }
+        }
+      : {}),
+    ...(updateCheck
+      ? {
+          startUpdateCheck: () => {
+            events.push('update-start');
+            if (updateStartThrows) throw new Error('boom');
+          },
+          stopUpdateCheck: () => events.push('update-stop')
         }
       : {}),
     initProfileAndStores: () => events.push('init-stores'),
@@ -902,6 +916,32 @@ test('leg vault-lifecycle: the power lock registers once, after ready (store ini
   await h.lifecycle.ready;
   assert.equal(h.events.filter((e) => e === 'power-lock-registered').length, 1);
   assert.ok(h.events.indexOf('init-stores') < h.events.indexOf('power-lock-registered'));
+});
+
+test('leg update-check: the checker starts once, after the stores are initialised', async () => {
+  const h = makeHarness({ updateCheck: true });
+  await h.lifecycle.ready;
+  assert.equal(h.events.filter((e) => e === 'update-start').length, 1);
+  assert.ok(h.events.indexOf('init-stores') < h.events.indexOf('update-start'));
+});
+
+test('leg update-check: a throwing start is logged and boot continues', async () => {
+  const h = makeHarness({ updateCheck: true, updateStartThrows: true });
+  await h.lifecycle.ready;
+  assert.ok(h.events.includes('update-start'));
+});
+
+test('leg update-check: before-quit stops the checker, after the clipboard flush step and in its own try', async () => {
+  const h = makeHarness({ updateCheck: true });
+  await h.lifecycle.ready;
+  h.events.length = 0;
+  h.appListeners.get('before-quit')();
+  assert.ok(h.events.includes('update-stop'));
+  assert.ok(h.events.indexOf('update-stop') < h.events.indexOf('quitting:true'));
+  const src = fs.readFileSync(path.join(__dirname, '../../src/main/app-lifecycle.js'), 'utf8');
+  const handler = src.slice(src.indexOf("app.on('before-quit'"), src.indexOf("app.on('window-all-closed'"));
+  assert.match(handler, /try\s*\{\s*stopUpdateCheck\(\);\s*\}\s*catch/);
+  assert.ok(handler.indexOf('flushSecretClipboard') < handler.indexOf('stopUpdateCheck'));
 });
 
 // ---------------------------------------------------------------------------

@@ -10,6 +10,8 @@ image_resource:
   source:
     repository: node
     tag: '22'
+  version:
+    digest: 'sha256:e13726ca604184d7a91fcacab1fc09eefd642dc28e79ac34e85540dd93b78cfb' # node:22 index digest, resolved 2026-11-17 (see ci/README.md)
 
 inputs:
   - name: repo

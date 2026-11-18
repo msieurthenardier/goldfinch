@@ -237,6 +237,25 @@ describe("case 'kebab' with the real createChromePageActions().kebabActions", ()
     h.overlay.dispatchActivation({ menuType: 'kebab', id: 'automation' });
     assert.deepEqual(created, [['goldfinch://automation', null, { trusted: true }]]);
   });
+
+  test("'update' calls updateOpenReleasePage on the bridge with no arguments", async () => {
+    const { createChromePageActions } = await import('../../src/renderer/chrome/overlay-menus.js');
+    const calls = [];
+    const pageActions = createChromePageActions({
+      window: { goldfinch: { updateOpenReleasePage: (...args) => calls.push(args) } },
+      tabs: new Map(),
+      createTab: () => {},
+      activateTab: () => {},
+      activeTab: () => null,
+      isInternalTab: () => false,
+      isInternalPageUrl: () => false,
+      deriveSiteInfo: () => ({}),
+      openNewTab: () => {}
+    });
+    const h = setup({ KEBAB_ACTIONS: pageActions.kebabActions });
+    h.overlay.dispatchActivation({ menuType: 'kebab', id: 'update' });
+    assert.deepEqual(calls, [[]]);
+  });
 });
 
 // ---------------------------------------------------------------------------

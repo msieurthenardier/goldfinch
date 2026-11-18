@@ -134,11 +134,22 @@ const { createCertObserver } = require('./cert-observer');
 const { summarizeCertificate } = require('./certificate-summary');
 const { createSessionRuntime } = require('./session-runtime');
 const { decideStartup } = require('./third-party-cookies');
+const {
+  REFUSAL_TITLE,
+  decideLaunchSwitches,
+  applyLaunchSwitches,
+  removedNames,
+  removalLine,
+  refusalLine,
+  refusalBody
+} = require('./launch-switches');
 const { readStartupShieldsConfig } = require('./shields-startup');
 const { registerTabIpc, applyGuestVisibility, createSendOrQueue, queueChromeSend } = require('./register-tab-ipc');
 const { registerOverlayIpc } = require('./register-overlay-ipc');
 const { registerDownloadIpc } = require('./register-download-ipc');
 const { registerSettingsIpc } = require('./register-settings-ipc');
+const { registerUpdateIpc } = require('./register-update-ipc');
+const { createUpdateChecker, decideUpdateCheck } = require('./update-check');
 const { createDefaultBrowser } = require('./default-browser');
 const { registerVaultIpc } = require('./register-vault-ipc');
 const { registerBrowserIpc } = require('./register-browser-ipc');
@@ -302,6 +313,40 @@ if (process.platform === 'win32') {
 // getPath('userData') it makes now already resolves the -dev path set here.
 if (!app.isPackaged) {
   app.setPath('userData', devUserDataPath(app.getPath('userData')));
+}
+
+// Launch switches (Mission 23 Flight 3, leg `launch-switches`, flight DD5): an installed build
+// does not obey the command-line switches that turn off its protections. Strip the measured-
+// removable ones, refuse to start for the rest (launch-switches.js holds both tables and the
+// reasons). Placed after the dev redirect and BEFORE the single-instance lock, so a refused
+// launch opens no store, takes no lock and hands nothing to a running instance, and before the
+// enable-features reader below. Packaged builds only; a dev launch is unchanged. process.argv is
+// not rewritten: nothing in src/ reads it for a listed switch. Pinned by
+// test/unit/launch-switches-placement.test.js.
+if (app.isPackaged) {
+  const launchDecision = decideLaunchSwitches({
+    isPackaged: app.isPackaged,
+    hasSwitch: (name) => app.commandLine.hasSwitch(name),
+    getSwitchValue: (name) => app.commandLine.getSwitchValue(name)
+  });
+  const refusedSwitches = applyLaunchSwitches(launchDecision, {
+    removeSwitch: (name) => app.commandLine.removeSwitch(name),
+    hasSwitch: (name) => app.commandLine.hasSwitch(name)
+  });
+  const removedSwitches = removedNames(launchDecision, refusedSwitches);
+  if (removedSwitches.length > 0) {
+    process.stderr.write(removalLine(removedSwitches) + '\n');
+  }
+  if (refusedSwitches.length > 0) {
+    process.stderr.write(refusalLine(refusedSwitches) + '\n');
+    try {
+      dialog.showErrorBox(REFUSAL_TITLE, refusalBody(refusedSwitches));
+    } catch {
+      // the error box is a courtesy; the exit is the control
+    }
+    app.exit(64);
+    process.exit(64);
+  }
 }
 
 // Single-instance lock (sortie 01 / DD1). Electron keys the lock on the userData dir, so
@@ -2966,6 +3011,22 @@ const sessionRuntime = createSessionRuntime({
 });
 const { applySpellcheck, applyShields, pruneAllJars } = sessionRuntime;
 
+// Update check (Mission 23 Flight 3, leg `update-check`). CONSTRUCTED here (it reads no setting), STARTED from
+// app-lifecycle's ready chain after the settings store loads (`startUpdateCheck`). Packaged: the fixed API
+// address; unpackaged: only a loopback `GOLDFINCH_UPDATE_CHECK_URL`, else inert (no request, ever).
+const updateDecision = decideUpdateCheck({ isPackaged: app.isPackaged, env: process.env });
+const updateChecker = createUpdateChecker({
+  fetch: (url, init) => net.fetch(url, init),
+  getVersion: () => app.getVersion(),
+  url: updateDecision.url,
+  initialDelayMs: updateDecision.initialDelayMs,
+  onChange: (state) => broadcastToChromeAndInternal('update-state-changed', state),
+  trace:
+    process.env.GOLDFINCH_UPDATE_TRACE === '1' && !app.isPackaged
+      ? (code) => console.log('[update-check] outcome=' + code)
+      : () => {}
+});
+
 registerSettingsIpc({
   ipcMain,
   gate,
@@ -2980,6 +3041,7 @@ registerSettingsIpc({
   broadcast: broadcastToChromeAndInternal,
   applyAutomationEnabledChange,
   applySpellcheck,
+  applyUpdateCheckEnabled: (enabled) => updateChecker.setEnabled(enabled),
   getDefaultSession: () => session.defaultSession,
   getAllWebContents: () => webContents.getAllWebContents(),
   currentAutomationStatus,
@@ -3053,12 +3115,36 @@ const vaultPowerLock = createPowerLock({
   logger: console
 });
 
+registerUpdateIpc({
+  ipcMain,
+  gate,
+  registerInternalHandler,
+  registry,
+  getState: () => updateChecker.getState(),
+  queueChromeSend,
+  // Leg `update-download`: the one place the update download starts. The browser's own default session
+  // carries the `will-download` handler (app-lifecycle wires it); it holds no site cookies, and the
+  // internal session deliberately has no download handler, so a Settings tab's own contents are never used.
+  startUpdateDownload: (url) => {
+    try {
+      session.defaultSession.downloadURL(url);
+      return true;
+    } catch (error) {
+      console.error('[update-download] could not start:', error);
+      return false;
+    }
+  },
+  getDownloadsManager: () => downloadsManager
+});
+
 registerAppLifecycle({
   app,
   gate,
   markScripted: (wc) => documentMarks.markScripted(wc.id),
   injectedInput,
   startVaultPowerLock: () => vaultPowerLock.register(),
+  startUpdateCheck: () => updateChecker.start(settings.get('updateCheckEnabled') === true),
+  stopUpdateCheck: () => updateChecker.stop(),
   flushSecretClipboard: () => secretClipboard.flush(),
   lockVaultForQuit: () => _vaultStore?.lockNow(),
   extractLaunchUrls,

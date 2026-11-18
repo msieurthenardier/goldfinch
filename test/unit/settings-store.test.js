@@ -2078,3 +2078,40 @@ test('the real store refuses a non-string key on set and get: nothing is written
     appDb.close();
   }
 });
+
+// Leg `update-check`: additive boolean, default true, no version bump; a non-boolean repairs to true and
+// the repaired config is persisted (the load-path rule).
+test('updateCheckEnabled: default true, round-trips, repairs a non-boolean and a missing key', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    const store = freshStore();
+    assert.equal(store.load(dir).updateCheckEnabled, true);
+    assert.equal(store.load(dir).version, 3, 'no version bump');
+    store.set('updateCheckEnabled', false);
+    assert.equal(store.load(dir).updateCheckEnabled, false, 'persisted across reload');
+    assert.throws(() => store.set('updateCheckEnabled', 'no'), TypeError);
+    assert.equal(store.get('updateCheckEnabled'), false, 'prior value kept');
+
+    // a corrupt value in the row repairs to true and the repair is written back
+    const row = JSON.parse(readRow(dir));
+    row.updateCheckEnabled = 'maybe';
+    const raw = new DatabaseSync(path.join(dir, 'app.db'));
+    raw.prepare('UPDATE documents SET payload = ?1 WHERE store = ?2').run(JSON.stringify(row), 'settings');
+    raw.close();
+    assert.equal(store.load(dir).updateCheckEnabled, true);
+    // (a per-key type repair is in-memory, like every other additive key: the next set() writes the row)
+    store.set('homePage', null);
+    assert.equal(JSON.parse(readRow(dir)).updateCheckEnabled, true, 'the next write carries the repaired value');
+
+    // a row written before the key existed gains it as true, persisted
+    delete row.updateCheckEnabled;
+    const raw2 = new DatabaseSync(path.join(dir, 'app.db'));
+    raw2.prepare('UPDATE documents SET payload = ?1 WHERE store = ?2').run(JSON.stringify(row), 'settings');
+    raw2.close();
+    assert.equal(store.load(dir).updateCheckEnabled, true);
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});

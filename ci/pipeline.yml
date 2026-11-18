@@ -6,9 +6,10 @@
 #
 # - `ci` runs the full PR-equivalent check suite automatically on every push to
 #   main (the GitHub Actions ci.yml equivalent; ci.yml's PR trigger is disabled).
-# - `build-linux` / `build-windows` are MANUAL (no auto-trigger) — on-demand
-#   fallback installers pushed to MinIO. They never publish to GitHub Releases;
-#   build.yml (GitHub Actions) remains the real release path.
+# - `build-linux` is MANUAL (no auto-trigger) — an on-demand fallback installer
+#   pushed to MinIO. It never publishes to GitHub Releases; build.yml (GitHub
+#   Actions) remains the real release path, and the only source of Windows and
+#   macOS installers.
 
 resources:
   - name: repo
@@ -31,18 +32,6 @@ resources:
       region_name: us-east-1
       disable_ssl: true
       regexp: goldfinch-linux-(.*).tar.gz
-
-  - name: windows-installers
-    type: s3
-    icon: package-variant-closed
-    source:
-      endpoint: ((minio.endpoint))
-      bucket: ((minio.bucket))
-      access_key_id: ((minio.access_key))
-      secret_access_key: ((minio.secret_key))
-      region_name: us-east-1
-      disable_ssl: true
-      regexp: goldfinch-windows-(.*).zip
 
 jobs:
   - name: ci
@@ -80,13 +69,3 @@ jobs:
       - put: linux-installers
         params:
           file: installers/goldfinch-linux-*.tar.gz
-
-  - name: build-windows
-    plan:
-      - get: repo
-        passed: [ci]
-      - task: build
-        file: repo/ci/tasks/build-windows.yml
-      - put: windows-installers
-        params:
-          file: installers/goldfinch-windows-*.zip
