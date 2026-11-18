@@ -1,6 +1,6 @@
 # Sortie: Release notes — hand-written notes on every release page
 
-**Status**: in-flight
+**Status**: landed
 
 > Architect design review 2026-11-17: **approve with changes**, incorporated — the file name and title prefix use `base` (MAJOR.MINOR.PATCH), not the validation step's `core`, which keeps a candidate's prerelease suffix; the release-prep sequence adds the notes file explicitly (`git commit -a` skips a new file); the enforcement is stated as "present in every passing commit"; draft detection fails closed; the splitter's byte limits, control-byte check and file outputs are specified; the extraction helper takes a name and asserts exactly one definition; a fallback is written to the run's step summary; the path check stays narrow and squawk 0204 stays open.
 
@@ -13,10 +13,10 @@ Every Goldfinch release page opens with hand-written notes that say, in plain te
 At Mission 23 Flight 3's acceptance walk (2026-11-17) the operator said "we need a better release notes page and process" (the content, not an in-app "what's new"). v0.19.16 and v0.19.17 shipped with GitHub's generated one-line notes, and the in-app "View release notes" button (Settings → About) lands on exactly those pages. The Flight 3 debrief listed "hand-written release notes published by the workflow" as a sortie candidate; the Sortie 09 debrief's recommendation 4 named it the next update-area sortie.
 
 ### Success Criteria
-- [ ] A release whose notes file exists publishes with that file's title and text; a release candidate (`-rc.N`) uses its target version's file. With no file, or a malformed one, the release publishes as today (tag title, generated notes) and never fails.
-- [ ] `npm test` fails when `package.json`'s version has no notes file, or a notes file's title doesn't start with its own version — so writing the notes is part of the release-prep pull request.
-- [ ] v0.19.16 and v0.19.17 on GitHub carry hand-written notes the operator approved word for word.
-- [ ] The publishing path is proven on a real release candidate (`v0.19.18-rc.1`) before the next stable release.
+- [x] A release whose notes file exists publishes with that file's title and text; a release candidate (`-rc.N`) uses its target version's file. With no file, or a malformed one, the release publishes as today (tag title, generated notes) and never fails.
+- [x] `npm test` fails when `package.json`'s version has no notes file, or a notes file's title doesn't start with its own version — so writing the notes is part of the release-prep pull request.
+- [x] v0.19.16 and v0.19.17 on GitHub carry hand-written notes the operator approved word for word.
+- [x] The publishing path is proven on a real release candidate (`v0.19.18-rc.1`) before the next stable release.
 
 ### Constraints
 - The release workflow's hardening holds: the build job holds no token; `create-release` runs no project code (it reads the notes file through the GitHub API at the tagged commit, no checkout); actions stay SHA-pinned, no new third-party action; a stable tag must still be on `main`.
@@ -95,7 +95,7 @@ Make hand-written, per-version release notes the source of every release page's 
 - [x] Contents API raw read at a commit, with 404 for a missing file — probed.
 - [x] Immutable releases allow title/notes edits — GitHub docs.
 - [x] Precedent for executing workflow shell in tests — `release-workflow-invariants.test.js` `functionTexts()` / `expected_names()`.
-- [ ] Operator authorises the walk's outward actions when reached: pushing the branch, the `v0.19.18-rc.1` tag, and the two `gh release edit` calls.
+- [x] Operator authorises the walk's outward actions when reached: pushing the branch, the `v0.19.18-rc.1` tag, and the two `gh release edit` calls.
 
 ### Pre-Flight Checklist
 
@@ -114,9 +114,9 @@ One implementation leg changes `build.yml`'s `create-release` job (step output f
 
 ### Checkpoints
 
-- [ ] Leg 01 landed: gates green (`npm test`, typecheck, lint, format:check), the splitter executed in tests against every notes file and the fixtures.
-- [ ] Code review confirmed.
-- [ ] Walk: operator approves both backfill files; `v0.19.18-rc.1` publishes with the candidate title and line; v0.19.16 and v0.19.17 edited.
+- [x] Leg 01 landed: gates green (`npm test`, typecheck, lint, format:check), the splitter executed in tests against every notes file and the fixtures.
+- [x] Code review confirmed.
+- [x] Walk: operator approves both backfill files; `v0.19.18-rc.1` publishes with the candidate title and line; v0.19.16 and v0.19.17 edited.
 
 ### Adaptation Criteria
 
@@ -126,8 +126,8 @@ One implementation leg changes `build.yml`'s `create-release` job (step output f
 
 ### Legs
 
-- [ ] `01-notes-in-the-workflow` — the workflow's notes step, both test files, the format guide, the two backfill files, the release-process docs
-- [ ] `02-hat-and-alignment` — operator approves the backfill text; `v0.19.18-rc.1` proves the path; v0.19.16 and v0.19.17 edited (interactive)
+- [x] `01-notes-in-the-workflow` — the workflow's notes step, both test files, the format guide, the two backfill files, the release-process docs
+- [x] `02-hat-and-alignment` — operator approves the backfill text; `v0.19.18-rc.1` proves the path; v0.19.16 and v0.19.17 edited (interactive)
 
 ---
 
@@ -135,10 +135,10 @@ One implementation leg changes `build.yml`'s `create-release` job (step output f
 
 ### Completion Checklist
 
-- [ ] All legs completed
-- [ ] Code review confirmed
-- [ ] Charter criteria checked
-- [ ] Docs current (`docs/RELEASING.md`, `docs/releases/README.md`, CLAUDE.md)
+- [x] All legs completed
+- [x] Code review confirmed
+- [x] Charter criteria checked
+- [x] Docs current (`docs/RELEASING.md`, `docs/releases/README.md`, CLAUDE.md)
 
 ### Verification
 
