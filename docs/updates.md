@@ -34,12 +34,28 @@ as for any web request.
 
 ## State and bridge
 
-`{ current, available, releaseUrl, checkEnabled, downloadName }` — held in main (`src/main/update-check.js`),
+`{ current, available, releaseUrl, checkEnabled, downloadName, lastCheck, canCheck }` — held in main (`src/main/update-check.js`),
 pushed to every chrome and internal page as `update-state-changed`, read with `update:get-state`.
 `checkEnabled` is the setting's value only. Opening the release page (`update:open-release-page`,
 `internal-update-open-release-page`) takes **no argument**: main sends the address it built to the
 chrome of the calling window, which opens it as an ordinary tab. `downloadName` is computed in `getState()`
 from `available` and this machine (null when nothing is available or no direct installer exists), never stored.
+`lastCheck` is `{ at, outcome: 'newer' | 'current' | 'failed' }` (completion time; in memory only; null until a
+check ends with any outcome but an abort; kept when the setting is turned off). Every completed check emits
+one push, so **a push no longer implies that `available` changed**. `canCheck` is false when the build has no
+check address (an unpackaged build without the override) or after quit.
+
+## Check now
+
+`internal-update-check-now` (internal pages only, no argument, every argument ignored) asks main for one check
+through the same request code as the daily one - the request is byte-for-byte the same. It works with automatic
+checks on or off and never arms, moves or clears the daily timer. One request at a time: a press while a check
+(scheduled or on demand) is in flight joins it and gets its outcome. A press within 30 seconds of the last
+completed check (any outcome but an abort; wall clock; exactly 30 s is allowed) is refused with
+`{ outcome: 'too-soon', retryAt }` and makes no request. Answers: `newer`, `current`, `failed` (any failure,
+including a timeout or an abort), `too-soon`, `unavailable` (no check address, or after quit). A result found
+while automatic checks are off stays in `available` until the next check or a restart. Turning the setting on
+still checks at once; the 30-second gap binds Check now only.
 
 ## Where it shows
 
@@ -48,8 +64,19 @@ from `available` and this machine (null when nothing is available or no direct i
   plus a **View release notes** button (which opens the release page through the no-argument channel above).
   With no direct installer for the machine the hint reads "Download the installer for your system from the
   release page, then run it to update." and there is no download button.
+- **Settings -> About, Check now**: below the notice, a **Check now** button, a result line for the answer
+  this page received to its own press (`Checking…`, `Found a newer version — see above.`, `You're up to date.`,
+  `Couldn't check — try again later.`, `Checked moments ago — try again in a few seconds.`, or
+  `Checking isn't available in this build.` with the button disabled), and a **Last checked** line
+  (`Last checked at <time>` today, `Last checked <date> at <time>` otherwise, `Not checked yet` before any
+  check; the clock time is not refreshed on a timer, only when state arrives). A failed check also sets it:
+  it is when Goldfinch last asked. The result line is not a live region.
 - **The kebab menu**: an `Update available — <x>` item at the top, present only while a newer release is
-  known. There is no toolbar element.
+  known.
+- **The kebab button**: while a newer release is known, a small accent dot sits on the corner of the ⋮ button
+  in every window, its tooltip reads `More — update available`, and it is described to assistive technology
+  as `Update available` (its name stays `More`). It clears whenever the notice clears, including when
+  automatic checks are turned off.
 - Both are drawn from one pure model (`src/shared/update-notice-model.js`) over main's state, never from
   anything the page or chrome fetched. The behavior spec is `tests/behavior/update-notice.md`; its release
   endpoint stand-in is `tests/behavior/fixtures/update-check/server.cjs`.

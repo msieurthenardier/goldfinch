@@ -5,6 +5,8 @@ const assert = require('node:assert/strict');
 const {
   updateNoticeModel: model,
   downloadResultHint,
+  checkNowView,
+  CHECK_NOW_COPY,
   DOWNLOAD_HINT,
   NO_DIRECT_HINT
 } = require('../../src/shared/update-notice-model.js');
@@ -48,7 +50,7 @@ test('notice + direct installer: the Download now button, its name, and the firs
   assert.equal(m.showNotice, true);
   assert.equal(m.showDownload, true);
   assert.equal(m.downloadLabel, 'Download now');
-  assert.equal(m.downloadAriaLabel, 'Download version 0.19.16');
+  assert.equal(m.downloadAriaLabel, 'Download now — version 0.19.16');
   assert.equal(m.hintText, DOWNLOAD_HINT);
   assert.equal(m.hintText, 'Downloads the installer for this computer. Run it to update.');
   assert.equal(m.openLabel, 'View release notes');
@@ -149,4 +151,79 @@ test('a throwing getter is swallowed', () => {
     }
   };
   assert.equal(model(state).showNotice, false);
+});
+
+// ── checkNowView (sortie 09 leg `about-controller-and-dot`) ─────────────────────────────────
+const NOW = new Date(2026, 10, 17, 15, 30).getTime();
+const EARLIER_TODAY = new Date(2026, 10, 17, 9, 5).getTime();
+const YESTERDAY = new Date(2026, 10, 16, 23, 50).getTime();
+const FMT = { time: (ms) => `T${ms}`, date: (ms) => `D${ms}` };
+const BASE = { current: '0.19.16', available: null, canCheck: true, lastCheck: null };
+const view = (state, pressing = false, answer = null, now = NOW) => checkNowView(state, pressing, answer, now, FMT);
+
+test('checkNowView: result text by the latest answer', () => {
+  const newer = { ...BASE, available: '0.20.0' };
+  assert.equal(view(newer, false, 'newer').resultText, 'Found a newer version — see above.');
+  assert.equal(view(BASE, false, 'current').resultText, "You're up to date.");
+  assert.equal(view(BASE, false, 'failed').resultText, "Couldn't check — try again later.");
+  assert.equal(view(BASE, false, 'too-soon').resultText, 'Checked moments ago — try again in a few seconds.');
+  assert.equal(view(BASE, false, 'unavailable').resultText, CHECK_NOW_COPY.unavailable);
+  assert.deepEqual(view(BASE), {
+    buttonDisabled: false,
+    resultText: '',
+    resultHidden: true,
+    lastCheckedText: 'Not checked yet'
+  });
+  assert.equal(view(BASE, false, 'current').resultHidden, false);
+});
+
+test('checkNowView: newer shows the offered version only when it validates', () => {
+  assert.equal(view({ ...BASE, available: '0.20.0-evil<b>' }, false, 'newer').resultText, '');
+  assert.equal(view(BASE, false, 'newer').resultText, '');
+  assert.equal(view({ ...BASE, available: 7 }, false, 'newer').resultHidden, true);
+});
+
+test('checkNowView: pressing disables the button and reads Checking…', () => {
+  const v = view(BASE, true, 'failed');
+  assert.equal(v.buttonDisabled, true);
+  assert.equal(v.resultText, 'Checking…');
+  assert.equal(v.resultHidden, false);
+});
+
+test('checkNowView: canCheck false disables the button and says why; a null state is disabled and silent', () => {
+  const v = view({ ...BASE, canCheck: false }, false, null);
+  assert.equal(v.buttonDisabled, true);
+  assert.equal(v.resultText, "Checking isn't available in this build.");
+  const n = view(null);
+  assert.equal(n.buttonDisabled, true);
+  assert.equal(n.resultText, '');
+  assert.equal(n.lastCheckedText, 'Not checked yet');
+});
+
+test('checkNowView: Last checked — today, another day, future, malformed', () => {
+  const at = (ms) => ({ ...BASE, lastCheck: { at: ms, outcome: 'current' } });
+  assert.equal(view(at(EARLIER_TODAY)).lastCheckedText, `Last checked at T${EARLIER_TODAY}`);
+  assert.equal(view(at(YESTERDAY)).lastCheckedText, `Last checked D${YESTERDAY} at T${YESTERDAY}`);
+  assert.equal(view(at(NOW + 3600_000)).lastCheckedText, `Last checked at T${NOW + 3600_000}`);
+  assert.equal(view(at(NOW)).lastCheckedText, `Last checked at T${NOW}`);
+  assert.equal(view(at(NaN)).lastCheckedText, 'Not checked yet');
+  assert.equal(view({ ...BASE, lastCheck: { at: '5' } }).lastCheckedText, 'Not checked yet');
+  assert.equal(view({ ...BASE, lastCheck: 'x' }).lastCheckedText, 'Not checked yet');
+});
+
+test("checkNowView: a failed check still shows Last checked beside Couldn't check", () => {
+  const v = view({ ...BASE, lastCheck: { at: EARLIER_TODAY, outcome: 'failed' } }, false, 'failed');
+  assert.equal(v.resultText, "Couldn't check — try again later.");
+  assert.equal(v.lastCheckedText, `Last checked at T${EARLIER_TODAY}`);
+});
+
+test('checkNowView never throws on hostile input', () => {
+  const hostile = {
+    get canCheck() {
+      throw new Error('x');
+    }
+  };
+  assert.doesNotThrow(() => view(hostile));
+  assert.equal(view(hostile).buttonDisabled, true);
+  assert.doesNotThrow(() => checkNowView(BASE, false, null, NOW, null));
 });

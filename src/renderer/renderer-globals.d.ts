@@ -49,6 +49,8 @@ interface UpdateState {
   releaseUrl: string | null;
   checkEnabled: boolean;
   downloadName: string | null;
+  lastCheck: { at: number; outcome: 'newer' | 'current' | 'failed' } | null;
+  canCheck: boolean;
 }
 
 interface GoldfinchBridge {
@@ -745,6 +747,10 @@ interface GoldfinchInternalBridge {
   updateDownload(): Promise<
     { ok: true; name: string; already?: true } | { ok: false; reason: 'unavailable' | 'failed' }
   >;
+  updateCheckNow(): Promise<{
+    outcome: 'newer' | 'current' | 'failed' | 'too-soon' | 'unavailable';
+    retryAt?: number;
+  }>;
   onAutomationActivity(cb: (snap: AutomationActivity) => void): number;
   offAutomationActivity(h: number): void;
   // --- downloads surface (Flight 5, Leg 2) ---

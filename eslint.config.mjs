@@ -234,6 +234,9 @@ export default [
       'src/renderer/pages/jars-tabs.js',
       'src/renderer/pages/jars-confirm-modal.js',
       'src/renderer/pages/settings.js',
+      // settings-about-controller.js (sortie 09) is the About controller extracted from settings.js —
+      // the same real-ES-module shape (`export function` needs sourceType: module).
+      'src/renderer/pages/settings-about-controller.js',
       // Sortie 05: goldfinch://automation's controller + the scroll-spy shared with settings.js.
       'src/renderer/pages/automation.js',
       'src/renderer/pages/automation-key-flow.js',

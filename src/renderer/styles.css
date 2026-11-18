@@ -421,6 +421,22 @@ a:focus-visible {
   cursor: pointer;
   font-size: 15px;
 }
+/* Update-waiting dot on the kebab (sortie 09): class-qualified, out of flow — the button stays 32x32.
+   No outline rule here (toolbar-focus-ring-pin.test.js). */
+#kebab.update-waiting {
+  position: relative;
+}
+#kebab.update-waiting::after {
+  content: '';
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  pointer-events: none;
+}
 .icon-btn:hover {
   background: rgba(255, 255, 255, 0.08);
 }

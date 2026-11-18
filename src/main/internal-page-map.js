@@ -28,6 +28,9 @@ function createInternalPageMap({ baseDir, path }) {
       // Mission 23 F3 leg `update-notice`: the About section's notice model, and the
       // `update-version.js` it imports (a shared module's own import needs its own route).
       '/update-notice-model.js': shared('update-notice-model.js'),
+      // Sortie 09 leg `about-controller-and-dot`: the About controller, extracted from settings.js
+      // (injected deps, no static import of its own, so it needs only this route).
+      '/settings-about-controller.js': rendererPage('settings-about-controller.js'),
       '/update-version.js': shared('update-version.js')
     },
     // Sortie 05: the MCP automation surface (moved out of Settings). Shares settings.css

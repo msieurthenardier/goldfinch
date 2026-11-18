@@ -285,6 +285,8 @@ if (INTERNAL_ORIGINS.has(location.origin)) {
     updateOpenReleasePage: () => ipcRenderer.invoke('internal-update-open-release-page'),
     // Takes NO argument: main builds the address and starts one ordinary download (leg `update-download`).
     updateDownload: () => ipcRenderer.invoke('internal-update-download'),
+    // Takes NO argument: one on-demand check through main's own request path (leg `check-now-main-side`).
+    updateCheckNow: () => ipcRenderer.invoke('internal-update-check-now'),
 
     // Downloads surface (Flight 5, Leg 2). The goldfinch://downloads page is the only
     // caller; these are inert on the settings page. The actionable savePath is NEVER

@@ -8,7 +8,8 @@ const {
   REQUEST_HEADERS,
   DAY_MS,
   FIRST_CHECK_DELAY_MS,
-  DEV_FIRST_CHECK_DELAY_MS
+  DEV_FIRST_CHECK_DELAY_MS,
+  MIN_CHECK_GAP_MS
 } = require('../../src/main/update-check.js');
 const { LATEST_RELEASE_API_URL, MAX_BODY_BYTES } = require('../../src/shared/update-version.js');
 
@@ -116,7 +117,7 @@ test('the request: one GET with the pinned options and exactly the two caller he
   assert.ok(init.signal instanceof AbortSignal);
 });
 
-test('newer: state, trace, one change; a second identical answer changes nothing', async () => {
+test('newer: state, trace, one change; a repeat answer emits once for lastCheck, available unchanged', async () => {
   const h = setup({ fetch: async () => respond(200, tagBody('v0.19.16')) });
   h.checker.setEnabled(true);
   await flush();
@@ -125,14 +126,18 @@ test('newer: state, trace, one change; a second identical answer changes nothing
     available: '0.19.16',
     releaseUrl: 'https://github.com/msieurthenardier/goldfinch/releases/tag/v0.19.16',
     checkEnabled: true,
-    downloadName: 'goldfinch_0.19.16_amd64.deb'
+    downloadName: 'goldfinch_0.19.16_amd64.deb',
+    lastCheck: { at: h.checker.getState().lastCheck.at, outcome: 'newer' },
+    canCheck: true
   });
   assert.deepEqual(h.traces, ['newer']);
   const n = h.changes.length;
   h.timers.fire(DAY_MS);
   await flush();
   assert.deepEqual(h.traces, ['newer', 'newer']);
-  assert.equal(h.changes.length, n, 'no change event when nothing changed');
+  assert.equal(h.changes.length, n + 1, 'one emit for the completion (lastCheck), none for available');
+  assert.equal(h.changes.at(-1).available, '0.19.16');
+  assert.equal(h.changes.at(-1).releaseUrl, 'https://github.com/msieurthenardier/goldfinch/releases/tag/v0.19.16');
 });
 
 test('current clears a previously available release; failures leave it untouched', async () => {
@@ -328,7 +333,9 @@ test('off after a release was found: available and releaseUrl go null', async ()
     available: null,
     releaseUrl: null,
     checkEnabled: false,
-    downloadName: null
+    downloadName: null,
+    lastCheck: { at: h.checker.getState().lastCheck.at, outcome: 'newer' },
+    canCheck: true
   });
   assert.equal(h.changes.at(-1).available, null);
 });
@@ -411,7 +418,9 @@ test('an inert checker (no address) never calls fetch on any path and keeps chec
     available: null,
     releaseUrl: null,
     checkEnabled: true,
-    downloadName: null
+    downloadName: null,
+    lastCheck: null,
+    canCheck: false
   });
   assert.ok(h.changes.length >= 2, 'the setting toggles still notify');
 });
@@ -478,4 +487,251 @@ test('downloadName is computed from available and the injected machine facts, ne
     h.checker.setEnabled(false);
     assert.equal(h.checker.getState().downloadName, null, 'cleared with available');
   }
+});
+
+// ---- leg `check-now-main-side`: checkNow, lastCheck, canCheck ----
+
+function clockSetup(opts = {}) {
+  const clock = { t: 1_000_000 };
+  const h = setup({ now: () => clock.t, ...opts });
+  return { ...h, clock };
+}
+const deferred = () => {
+  const d = {};
+  d.promise = new Promise((resolve, reject) => {
+    d.resolve = resolve;
+    d.reject = reject;
+  });
+  return d;
+};
+
+test('check-now with automatic checks off: one request, the outcome, lastCheck, no timer', async () => {
+  const h = clockSetup({ fetch: async () => respond(200, tagBody('v0.19.16')) });
+  const r = await h.checker.checkNow();
+  assert.deepEqual(r, { outcome: 'newer' });
+  assert.equal(h.calls.length, 1);
+  assert.deepEqual(h.timers.delays(), []);
+  assert.deepEqual(h.checker.getState().lastCheck, { at: 1_000_000, outcome: 'newer' });
+  assert.equal(h.checker.getState().available, '0.19.16');
+  assert.equal(h.checker.getState().checkEnabled, false);
+  assert.equal(h.changes.length, 1, 'one emit per completion, carrying available and lastCheck');
+  assert.equal(h.changes[0].available, '0.19.16');
+  assert.equal(h.changes[0].lastCheck.outcome, 'newer');
+});
+
+test('check-now with automatic checks on: one request, the daily timer untouched', async () => {
+  const h = clockSetup({ fetch: async () => respond(200, tagBody('v0.19.15')) });
+  h.checker.start(true);
+  const before = [...h.timers.pending.entries()].map(([id, t]) => [id, t.ms]);
+  assert.deepEqual(await h.checker.checkNow(), { outcome: 'current' });
+  assert.equal(h.calls.length, 1);
+  assert.deepEqual(
+    [...h.timers.pending.entries()].map(([id, t]) => [id, t.ms]),
+    before
+  );
+});
+
+test('the request options are identical on the scheduled and the on-demand path', async () => {
+  const h = clockSetup({ fetch: async () => respond(200, tagBody('v0.19.15')) });
+  h.checker.start(true);
+  await h.checker.checkNow();
+  h.clock.t += MIN_CHECK_GAP_MS;
+  h.timers.fire(FIRST_CHECK_DELAY_MS);
+  await flush();
+  assert.equal(h.calls.length, 2);
+  const [a, b] = h.calls;
+  assert.equal(a.url, b.url);
+  for (const k of ['method', 'credentials', 'redirect', 'referrerPolicy', 'cache'])
+    assert.equal(a.init[k], b.init[k], k);
+  assert.deepEqual(a.init.headers, b.init.headers);
+  assert.deepEqual(Object.keys(a.init).sort(), Object.keys(b.init).sort());
+  assert.deepEqual(a.init.headers, { 'User-Agent': 'Goldfinch-update-check', Accept: 'application/vnd.github+json' });
+  assert.equal(a.init.method, 'GET');
+  assert.equal(a.init.credentials, 'omit');
+  assert.equal(a.init.redirect, 'error');
+  assert.equal(a.init.referrerPolicy, 'no-referrer');
+  assert.equal(a.init.cache, 'no-store');
+});
+
+test('check-now on an inert checker or after stop(): unavailable, zero requests', async () => {
+  const inert = clockSetup({ url: null, fetch: async () => assert.fail('no fetch') });
+  assert.deepEqual(await inert.checker.checkNow(), { outcome: 'unavailable' });
+  assert.equal(inert.checker.getState().canCheck, false);
+  const h = clockSetup({ fetch: async () => respond(200, tagBody('v0.19.15')) });
+  assert.equal(h.checker.getState().canCheck, true);
+  h.checker.stop();
+  assert.equal(h.checker.getState().canCheck, false);
+  assert.deepEqual(await h.checker.checkNow(), { outcome: 'unavailable' });
+  assert.equal(h.calls.length, 0);
+});
+
+test('a press while a TIMER-started check is in flight joins it: no extra request, same outcome', async () => {
+  const d = deferred();
+  const h = clockSetup({ fetch: () => d.promise });
+  h.checker.start(true);
+  assert.ok(h.timers.fire(FIRST_CHECK_DELAY_MS));
+  await flush();
+  assert.equal(h.calls.length, 1);
+  const p = h.checker.checkNow();
+  await flush();
+  assert.equal(h.calls.length, 1);
+  d.resolve(respond(200, tagBody('v0.19.16')));
+  assert.deepEqual(await p, { outcome: 'newer' });
+  assert.equal(h.calls.length, 1);
+});
+
+test('two presses back to back without awaiting: one request, both get the outcome', async () => {
+  const h = clockSetup({ fetch: async () => respond(200, tagBody('v0.19.15')) });
+  const [a, b] = await Promise.all([h.checker.checkNow(), h.checker.checkNow()]);
+  assert.deepEqual(a, { outcome: 'current' });
+  assert.deepEqual(b, { outcome: 'current' });
+  assert.equal(h.calls.length, 1);
+});
+
+test('inside the gap: too-soon with retryAt, no request; the 30 000 ms boundary is allowed', async () => {
+  const h = clockSetup({ fetch: async () => respond(200, tagBody('v0.19.15')) });
+  await h.checker.checkNow();
+  h.clock.t += MIN_CHECK_GAP_MS - 1;
+  assert.deepEqual(await h.checker.checkNow(), { outcome: 'too-soon', retryAt: 1_000_000 + MIN_CHECK_GAP_MS });
+  assert.equal(h.calls.length, 1);
+  h.clock.t += 1;
+  assert.deepEqual(await h.checker.checkNow(), { outcome: 'current' });
+  assert.equal(h.calls.length, 2);
+});
+
+test('the gap applies after a scheduled check too, and an in-flight check is joined even inside it', async () => {
+  const h = clockSetup({ fetch: async () => respond(200, tagBody('v0.19.15')) });
+  h.checker.start(true);
+  h.timers.fire(FIRST_CHECK_DELAY_MS);
+  await flush();
+  assert.equal(h.calls.length, 1);
+  assert.equal((await h.checker.checkNow()).outcome, 'too-soon');
+  assert.equal(h.calls.length, 1);
+});
+
+test('the gap counts after a failed check but not after an aborted one', async () => {
+  const failed = clockSetup({ fetch: async () => respond(500, '') });
+  assert.deepEqual(await failed.checker.checkNow(), { outcome: 'failed' });
+  assert.equal((await failed.checker.checkNow()).outcome, 'too-soon');
+
+  const d = deferred();
+  const aborted = clockSetup({
+    fetch: (_u, init) => (init.signal.addEventListener('abort', () => d.reject(new Error('x'))), d.promise)
+  });
+  const p = aborted.checker.checkNow();
+  await flush();
+  aborted.checker.stop();
+  assert.deepEqual(await p, { outcome: 'failed' });
+  assert.equal(aborted.checker.getState().lastCheck, null, 'an abort sets no lastCheck');
+});
+
+test('a clock stepped backward counts the gap as elapsed', async () => {
+  const h = clockSetup({ fetch: async () => respond(200, tagBody('v0.19.15')) });
+  await h.checker.checkNow();
+  h.clock.t -= 5000;
+  assert.equal((await h.checker.checkNow()).outcome, 'current');
+  assert.equal(h.calls.length, 2);
+});
+
+test('every failure code maps to failed', async () => {
+  const cases = [
+    () => respond(404, ''),
+    () => respond(200, new Uint8Array(MAX_BODY_BYTES + 10)),
+    () => respond(200, 'not json'),
+    () => respond(200, tagBody('v0.19.16-rc.1')),
+    () => {
+      throw new Error('redirect mode is error');
+    },
+    () => {
+      throw new Error('net::ERR');
+    }
+  ];
+  for (const c of cases) {
+    const h = clockSetup({ fetch: async () => c() });
+    assert.deepEqual(await h.checker.checkNow(), { outcome: 'failed' });
+    assert.equal(h.checker.getState().lastCheck.outcome, 'failed');
+  }
+});
+
+test('a request that never completes ends as timeout: failed, and it counts toward the gap', async () => {
+  const h = clockSetup({
+    fetch: (_u, init) => new Promise((_r, rej) => init.signal.addEventListener('abort', () => rej(new Error('t'))))
+  });
+  const p = h.checker.checkNow();
+  await flush();
+  assert.ok(h.timers.fire(15 * 1000));
+  assert.deepEqual(await p, { outcome: 'failed' });
+  assert.deepEqual(h.traces, ['timeout']);
+  assert.equal((await h.checker.checkNow()).outcome, 'too-soon');
+});
+
+test('setEnabled(false) during a check-now: failed, notice cleared, lastCheck unchanged, even for a late 200', async () => {
+  const d = deferred();
+  const h = clockSetup({ fetch: () => d.promise });
+  h.checker.setEnabled(true);
+  await flush();
+  d.resolve(respond(200, tagBody('v0.19.16')));
+  await flush();
+  assert.equal(h.checker.getState().available, '0.19.16');
+  const kept = h.checker.getState().lastCheck;
+  h.checker.setEnabled(false);
+  assert.equal(h.checker.getState().available, null);
+  assert.deepEqual(h.checker.getState().lastCheck, kept, 'lastCheck is not cleared by turning the setting off');
+
+  // the aborted request's late 200 never counts
+  const d3 = deferred();
+  const h3 = clockSetup({ fetch: () => d3.promise });
+  const p = h3.checker.checkNow();
+  await flush();
+  h3.checker.setEnabled(true);
+  h3.checker.setEnabled(false);
+  d3.resolve(respond(200, tagBody('v0.19.16')));
+  assert.deepEqual(await p, { outcome: 'failed' });
+  assert.equal(h3.checker.getState().lastCheck, null);
+  assert.equal(h3.checker.getState().available, null);
+});
+
+test('stop() during a check-now: failed, nothing emitted after stop', async () => {
+  const d = deferred();
+  const h = clockSetup({ fetch: () => d.promise });
+  const p = h.checker.checkNow();
+  await flush();
+  h.checker.stop();
+  const n = h.changes.length;
+  d.resolve(respond(200, tagBody('v0.19.16')));
+  assert.deepEqual(await p, { outcome: 'failed' });
+  assert.equal(h.changes.length, n);
+});
+
+test('setEnabled(true) during a check-now: still one request in total', async () => {
+  const d = deferred();
+  const h = clockSetup({ fetch: () => d.promise });
+  const p = h.checker.checkNow();
+  await flush();
+  h.checker.setEnabled(true);
+  await flush();
+  d.resolve(respond(200, tagBody('v0.19.15')));
+  assert.deepEqual(await p, { outcome: 'current' });
+  assert.equal(h.calls.length, 1);
+});
+
+test('check-now with automatic checks off that finds a newer version sets and emits available', async () => {
+  const h = clockSetup({ fetch: async () => respond(200, tagBody('v0.19.16')) });
+  await h.checker.checkNow();
+  assert.equal(h.changes.at(-1).available, '0.19.16');
+  assert.equal(h.changes.length, 1);
+});
+
+test('lastCheck is emitted on current after current, and survives off then on', async () => {
+  const h = clockSetup({ fetch: async () => respond(200, tagBody('v0.19.15')) });
+  await h.checker.checkNow();
+  h.clock.t += MIN_CHECK_GAP_MS;
+  const n = h.changes.length;
+  await h.checker.checkNow();
+  assert.equal(h.changes.length, n + 1);
+  assert.equal(h.changes.at(-1).lastCheck.at, h.clock.t);
+  const kept = h.checker.getState().lastCheck;
+  h.checker.setEnabled(true);
+  h.checker.setEnabled(false);
+  assert.deepEqual(h.checker.getState().lastCheck.outcome, kept.outcome);
 });

@@ -60,12 +60,72 @@ export function updateNoticeModel(state) {
         openAriaLabel: `View release notes for version ${s.available}`,
         showDownload,
         downloadLabel: showDownload ? 'Download now' : '',
-        downloadAriaLabel: showDownload ? `Download version ${s.available}` : '',
+        downloadAriaLabel: showDownload ? `Download now — version ${s.available}` : '',
         hintText: showDownload ? DOWNLOAD_HINT : NO_DIRECT_HINT
       };
     }
     return { ...EMPTY, versionText };
   } catch {
     return { ...EMPTY, versionText: 'Goldfinch' };
+  }
+}
+
+export const CHECK_NOW_COPY = Object.freeze({
+  checking: 'Checking…',
+  newer: 'Found a newer version — see above.',
+  current: "You're up to date.",
+  failed: "Couldn't check — try again later.",
+  tooSoon: 'Checked moments ago — try again in a few seconds.',
+  unavailable: "Checking isn't available in this build.",
+  neverChecked: 'Not checked yet'
+});
+
+/**
+ * The "Check now" row: the button's disabled state, the result line and the "Last checked" line.
+ * `lastAnswer` is the latest answer THIS page received to its own press (`'newer' | 'current' |
+ * 'failed' | 'too-soon' | 'unavailable' | null`); `pressing` is true while that press is awaiting its
+ * answer. `now` (ms) and the formatter `{ time(ms), date(ms) }` are injected so the table is
+ * deterministic. "Today" is the local calendar day; a `lastCheck.at` in the future reads as its time.
+ * Never throws; `state` is main's validated state and is re-validated here (the offered version is
+ * shown only if it is a stable tag, as `updateNoticeModel` does).
+ * @param {any} state
+ * @param {boolean} pressing
+ * @param {string | null} lastAnswer
+ * @param {number} now
+ * @param {{ time: (ms: number) => string, date: (ms: number) => string }} fmt
+ * @returns {{ buttonDisabled: boolean, resultText: string, resultHidden: boolean, lastCheckedText: string }}
+ */
+export function checkNowView(state, pressing, lastAnswer, now, fmt) {
+  try {
+    const s = state && typeof state === 'object' ? state : {};
+    const unavailable = s.canCheck === false;
+    let resultText = '';
+    if (pressing) resultText = CHECK_NOW_COPY.checking;
+    else if (unavailable || lastAnswer === 'unavailable') resultText = CHECK_NOW_COPY.unavailable;
+    else if (lastAnswer === 'newer') {
+      // The notice above carries the version; this line only points at it. No claim without a validated
+      // offered version (the notice may have cleared since the answer).
+      resultText = isStableVersion(s.available) ? CHECK_NOW_COPY.newer : '';
+    } else if (lastAnswer === 'current') resultText = CHECK_NOW_COPY.current;
+    else if (lastAnswer === 'too-soon') resultText = CHECK_NOW_COPY.tooSoon;
+    else if (lastAnswer === 'failed') resultText = CHECK_NOW_COPY.failed;
+    /** @type {string} */
+    let lastCheckedText = CHECK_NOW_COPY.neverChecked;
+    const lc = s.lastCheck;
+    if (lc && typeof lc === 'object' && typeof lc.at === 'number' && Number.isFinite(lc.at)) {
+      const sameDay = lc.at >= now || new Date(lc.at).toDateString() === new Date(now).toDateString();
+      lastCheckedText = sameDay
+        ? `Last checked at ${fmt.time(lc.at)}`
+        : `Last checked ${fmt.date(lc.at)} at ${fmt.time(lc.at)}`;
+    }
+    return {
+      // A state not yet read (null) disables the button too: it cannot know a check is possible.
+      buttonDisabled: pressing || s.canCheck !== true,
+      resultText,
+      resultHidden: resultText === '',
+      lastCheckedText
+    };
+  } catch {
+    return { buttonDisabled: true, resultText: '', resultHidden: true, lastCheckedText: CHECK_NOW_COPY.neverChecked };
   }
 }

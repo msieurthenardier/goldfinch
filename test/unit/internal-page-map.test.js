@@ -15,6 +15,7 @@ test('createInternalPageMap returns the exact current host/path allowlist', () =
     '/default-browser-row-model.js',
     '/search-engines.js',
     '/section-scroll-spy.js',
+    '/settings-about-controller.js',
     '/settings.css',
     '/settings.js',
     '/shields-isolation-model.js',
