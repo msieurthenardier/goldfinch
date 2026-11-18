@@ -17,6 +17,11 @@ name: Build installers
 # then uploads into the draft Release. The digest comparison proves integrity BETWEEN jobs; it
 # does not prove the build job was honest (the build job is the party being contained).
 #
+# Release notes (sortie 10). The release page's title and text come from the committed
+# docs/releases/vX.Y.Z.md, read and split by `create-release` as workflow text (no project code);
+# a candidate reads its target version's file; a missing or malformed file falls back to
+# generated notes; a published release is never edited. See docs/releases/README.md.
+#
 # Provenance and where a stable release may come from (Mission 23 finding 7 and 19). After the
 # upload, the `upload` job attests exactly the verified installers (tag builds only) with
 # actions/attest, so a downloaded installer can be traced to this workflow run and commit. A stable
@@ -42,7 +47,8 @@ permissions:
   contents: read
 
 jobs:
-  # Create the draft Release once (tags only), with auto-generated notes, so the
+  # Create the draft Release once (tags only), with the hand-written notes from
+  # docs/releases/vX.Y.Z.md (generated notes when there is no usable file), so the
   # upload job puts the installers into ONE existing release. Also validates the tag
   # is strict semver and classifies stability. Uses only `gh` with --repo: no checkout.
   create-release:
@@ -118,19 +124,138 @@ jobs:
             exit 1
           fi
 
+      # The release title and text come from the committed docs/releases/vX.Y.Z.md (format guide:
+      # docs/releases/README.md), read through the contents API at the TAGGED commit, so this job
+      # needs no checkout and runs no project code: the splitter below is workflow text, like
+      # expected_names in the upload job. A release candidate reads its target version's file.
+      # Any problem (no file, unreadable, malformed) falls back to GitHub's generated notes and
+      # never fails the step. A release that is already published is never edited. GitHub runs
+      # this step as `bash -eo pipefail`, so every command that can fail is guarded.
       - name: Create the draft release (idempotent)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
-          # Pre-create the release as a DRAFT with generated notes so notes survive and
-          # the upload job has one release to add to. Idempotent: reuse if present.
-          if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-            echo "Release ${GITHUB_REF_NAME} already exists - reusing."
+          # split_release_notes FILE BASE TAG IS_CANDIDATE TITLE_OUT BODY_OUT
+          # Returns 0 and writes the title and body files, or returns 1 and prints one reason word
+          # on stderr. Reads no step variable; works in bytes (LC_ALL=C); title and body are
+          # only ever written to the two output files.
+          split_release_notes() {
+            local -x LC_ALL=C
+            local f="$1" base="$2" tag="$3" cand="$4" tout="$5" bout="$6"
+            local size nul line title rest
+            local n1="${tout}.t1" n2="${tout}.t2" l1="${tout}.t3" l1c="${tout}.t4" bd="${tout}.t5"
+            size="$(wc -c < "$f")" || { echo unreadable >&2; return 1; }
+            if [ "$size" -gt 65536 ]; then echo too-large >&2; return 1; fi
+            nul="$(tr -d '\0' < "$f" | wc -c)" || { echo unreadable >&2; return 1; }
+            if [ "$nul" -ne "$size" ]; then echo control-byte >&2; return 1; fi
+            sed '1s/^\xEF\xBB\xBF//' "$f" > "$n1" || { echo unreadable >&2; return 1; }
+            head -n 1 "$n1" > "$l1" || { echo unreadable >&2; return 1; }
+            sed 's/\r$//' "$l1" > "$l1c" || { echo unreadable >&2; return 1; }
+            if grep -q '[[:cntrl:]]' "$l1c"; then echo control-byte >&2; return 1; fi
+            tr -d '\r' < "$n1" > "$n2" || { echo unreadable >&2; return 1; }
+            line=''
+            IFS= read -r line < "$n2" || [ -n "$line" ] || true
+            case "$line" in
+              '# '*) title="${line#\# }" ;;
+              *) echo no-title-line >&2; return 1 ;;
+            esac
+            case "$title" in
+              *' ') echo trailing-space >&2; return 1 ;;
+            esac
+            if [ "$title" = "v${base}" ]; then echo no-title-text >&2; return 1; fi
+            case "$title" in
+              "v${base} "*) ;;
+              *) echo wrong-version >&2; return 1 ;;
+            esac
+            rest="${title#"v${base} "}"
+            if [ -z "${rest//[[:space:]]/}" ]; then echo no-title-text >&2; return 1; fi
+            if [ "${#title}" -gt 200 ]; then echo title-too-long >&2; return 1; fi
+            sed '1d' "$n2" | sed '/./,$!d' > "$bd" || { echo unreadable >&2; return 1; }
+            if ! grep -aq '[^[:space:]]' "$bd"; then echo empty-body >&2; return 1; fi
+            if [ "$cand" = 1 ]; then
+              title="${tag}${title#"v${base}"}"
+              { printf 'Release candidate for v%s — for testing, not general use.\n\n' "$base"; cat "$bd"; } > "$bout" || { echo unreadable >&2; return 1; }
+            else
+              cat "$bd" > "$bout" || { echo unreadable >&2; return 1; }
+            fi
+            printf '%s' "$title" > "$tout" || { echo unreadable >&2; return 1; }
+            return 0
+          }
+
+          tag="${GITHUB_REF_NAME}"
+          ver="${tag#v}"
+          base="${ver%%[-+]*}"
+          core="${ver%%+*}"
+          cand=0
+          case "$core" in *-*) cand=1 ;; esac
+          notes_ok=0
+          reason=''
+          title=''
+          work="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/release-notes.XXXXXX")" || work=''
+          if [ -z "$work" ]; then
+            reason=no-workdir
+          elif ! gh api -H "Accept: application/vnd.github.raw+json" "repos/${GITHUB_REPOSITORY}/contents/docs/releases/v${base}.md?ref=${GITHUB_SHA}" > "$work/notes.md" 2>/dev/null; then
+            rm -f "$work/notes.md"
+            reason=missing-or-unreadable
+          elif split_release_notes "$work/notes.md" "$base" "$tag" "$cand" "$work/title" "$work/body" 2> "$work/reason"; then
+            notes_ok=1
+            title="$(cat "$work/title")" || notes_ok=0
+            [ "$notes_ok" = 1 ] || reason=unreadable
           else
-            gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" \
-              --draft --generate-notes --title "${GITHUB_REF_NAME}"
+            reason="$(head -c 40 "$work/reason" | tr -dc 'a-z-')" || reason=''
+            [ -n "$reason" ] || reason=unreadable
           fi
+
+          summary() { printf '%s\n' "$1" >> "${GITHUB_STEP_SUMMARY:-/dev/null}" || true; }
+
+          # none / draft / published, from the bounded list (the by-tag view may not return drafts).
+          state="$(gh release list --repo "${GITHUB_REPOSITORY}" --limit 200 --json tagName,isDraft --jq '[.[] | select(.tagName == env.GITHUB_REF_NAME)] | if length == 0 then "none" elif .[0].isDraft then "draft" else "published" end' 2>/dev/null)" || state=''
+          case "$state" in
+            none | draft | published) ;;
+            *)
+              if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+                state=unknown
+              else
+                state=none
+              fi
+              ;;
+          esac
+
+          case "$state" in
+            none)
+              if [ "$notes_ok" = 1 ]; then
+                gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" \
+                  --draft --title "$title" --notes-file "$work/body"
+                summary "Release notes: docs/releases/v${base}.md"
+              else
+                echo "::warning::Release notes: ${reason}; using generated notes"
+                gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" \
+                  --draft --generate-notes --title "${GITHUB_REF_NAME}"
+                summary "Release notes: generated (reason: ${reason})"
+              fi
+              ;;
+            draft)
+              echo "Release ${GITHUB_REF_NAME} already exists as a draft - reusing."
+              if [ "$notes_ok" = 1 ]; then
+                gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" \
+                  --title "$title" --notes-file "$work/body"
+                summary "Release notes: docs/releases/v${base}.md"
+              else
+                echo "::warning::Release notes: ${reason}; existing draft left unchanged"
+                summary "Release notes: existing draft left unchanged (reason: ${reason})"
+              fi
+              ;;
+            published)
+              echo "Release ${GITHUB_REF_NAME} is already published - not editing it."
+              summary "Release notes: existing published release left unchanged"
+              ;;
+            *)
+              echo "Release ${GITHUB_REF_NAME} already exists - reusing."
+              summary "Release notes: existing release left unchanged"
+              ;;
+          esac
+          if [ -n "$work" ]; then rm -rf "$work" || true; fi
 
   # Runs project code (npm ci install scripts, the build). READ-ONLY, NO TOKEN: nothing in this
   # job may reference a secret or the GitHub token. It builds with `--publish never`, checks the

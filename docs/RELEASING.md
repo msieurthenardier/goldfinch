@@ -12,7 +12,7 @@ to the repository or the release; the one that writes runs none of it.
 
 | Job | Runs on | Permissions | May do |
 | --- | --- | --- | --- |
-| `create-release` (tags only) | Linux | `contents: write` | Validates the tag as strict semver, classifies stable vs prerelease, for a **stable** tag requires its commit to be reachable from the default branch (see *The stable-tag rule*), then creates the **draft** release. `gh` only; no checkout. |
+| `create-release` (tags only) | Linux | `contents: write` | Validates the tag as strict semver, classifies stable vs prerelease, for a **stable** tag requires its commit to be reachable from the default branch (see *The stable-tag rule*), then creates the **draft** release with the hand-written notes from `docs/releases/vX.Y.Z.md` (see *Release notes*). `gh` and inline shell only; no checkout, no project code. |
 | `build` (mac / linux / win) | one runner each | `contents: read`, no token or secret anywhere in the job | Checkout (credentials not persisted), `npm ci`, version from the tag, `electron-builder --publish never`, fuse check on the unpacked app, macOS ad-hoc signature verification, one start of the unpacked app, then stages that platform's installers **by exact name** with their SHA-256 list and the version, and uploads them as a one-day, uncompressed Actions artifact. |
 | `upload` | Linux | `contents: write`, `id-token: write`, `attestations: write` | No checkout, no `node` / `npm`. Downloads the three artifacts, recomputes every digest, asserts the file names are exactly the five expected for the tag's version, then `gh release upload` into the draft (the token is given to that one step), then `actions/attest` creates a provenance attestation for exactly those five verified files (tag builds only). The signing permissions exist in this job and no other. |
 | `publish-release` (tags only) | Linux | `contents: write` | Flips the draft to published: stable tag -> latest, prerelease tag -> prerelease. Only after `upload` succeeded. |
@@ -67,6 +67,29 @@ answered `ahead` and the run refused, creating no release. That showed `GITHUB_S
 the tagged commit and that the job's token may call the compare endpoint. **Still not exercised:** a stable
 tag on a `main` commit passing the check; the next real release is its first run.
 
+## Release notes
+
+Each release's title and text come from `docs/releases/vX.Y.Z.md`; the format is `docs/releases/README.md`.
+`create-release` reads the file through the contents API at the tagged commit and splits it with inline
+shell (no checkout, no project code in a job that holds the write token). A candidate reads its target
+version's file and gets the tag in its title and a candidate line in its text. A missing or malformed file
+falls back to generated notes with a warning and a line in the run summary, and never fails the run. A
+re-run on a still-draft release re-applies the file; a published release is never edited by the workflow
+(a re-run on one reaches only that no-edit branch, and that draft re-edit has been run against a stub
+`gh`, not live). `test/unit/release-workflow-invariants.test.js` executes the workflow's own shell against
+every notes file and the edge cases.
+
+**What `npm test` guarantees:** the file for `package.json`'s version is **present** in every commit the
+tests pass on (`test/unit/release-notes.test.js`), and every notes file has its own version in its title
+line. It goes red at the bump only if the file was not committed earlier; a file written ahead of the bump
+(as for a candidate, which reads its target version's file) keeps the bump green. Both are fine. It is a
+test-time rule: a hand-made tag on a commit without the file still publishes, with generated notes and the
+summary line saying why.
+
+**Editing a published release's notes** is by hand, after the exact text is approved, from the same file
+through the same splitter (`docs/releases/README.md`, *Hand edits*). Only the assets and the tag of an
+immutable release are locked.
+
 ## Cut a release
 
 Releases are cut the way the repository is protected: the version bump arrives by pull request, and the tag
@@ -77,9 +100,14 @@ From a clean, up-to-date `main` with green gates (`npm test`, `npm run typecheck
 ```bash
 git switch -c release-prep/vX.Y.Z
 npm version patch --no-git-tag-version      # or minor / major
+# write docs/releases/vX.Y.Z.md (format: docs/releases/README.md); the operator approves the text in the PR
+git add docs/releases/vX.Y.Z.md             # -a below takes tracked files only
 git commit -a -m "release-prep: bump to X.Y.Z"
 git push -u origin release-prep/vX.Y.Z
 ```
+
+The notes file goes in the same commit as the bump. Without the `git add`, `git commit -a` leaves a new
+file out, a pre-push test run on your working tree passes, and `main` goes red after the squash-merge.
 
 Open a pull request, let the checks run, squash-merge it. Then:
 
