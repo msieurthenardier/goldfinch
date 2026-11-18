@@ -6,7 +6,12 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { createInjectedInput, ALLOWANCE_MS, MENU_HOLD_MS } = require('../../src/main/automation/injected-input');
+const {
+  createInjectedInput,
+  isOperatorInput,
+  ALLOWANCE_MS,
+  MENU_HOLD_MS
+} = require('../../src/main/automation/injected-input');
 
 function make(over = {}) {
   let t = 1000;
@@ -255,4 +260,25 @@ test('menu ignore: an opener and its popup hold and restore independently, each 
   m.fire();
   assert.deepEqual(opener.calls, [true, false, true, false]);
   assert.deepEqual(popup.calls, [true, false, true], 'a forgotten tab is never sent a restore');
+});
+
+test('isOperatorInput: true only for no store or a store that answers exactly false; never throws', () => {
+  assert.equal(isOperatorInput(null, 1), true);
+  assert.equal(isOperatorInput(undefined, 1), true);
+  assert.equal(isOperatorInput({}, 1), false, 'no isInjecting function');
+  assert.equal(
+    isOperatorInput(
+      {
+        isInjecting: () => {
+          throw new Error('boom');
+        }
+      },
+      1
+    ),
+    false
+  );
+  assert.equal(isOperatorInput({ isInjecting: () => 1 }, 1), false, 'a truthy non-boolean');
+  assert.equal(isOperatorInput({ isInjecting: () => undefined }, 1), false, 'a non-boolean falsy');
+  assert.equal(isOperatorInput({ isInjecting: () => true }, 1), false);
+  assert.equal(isOperatorInput({ isInjecting: () => false }, 1), true);
 });

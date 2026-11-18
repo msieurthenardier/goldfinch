@@ -60,7 +60,7 @@ function normalizeTotpForSave(item, unchangedSecrets) {
 /**
  * @param {object} args
  * @param {{ handle: (channel: string, fn: (...a: any[]) => any) => void }} args.ipcMain
- * @param {{ confirm: (event: any, request: any, info?: { interrupted?: boolean }) => Promise<string>, applies?: (event: any) => boolean, epoch?: () => number }} args.revealGate
+ * @param {{ confirm: (event: any, request: any, info?: { interrupted?: boolean }) => Promise<string>, applies?: (event: any) => boolean, epoch?: () => number, itemWritten: (event: any, p: any) => void, itemCopied: (event: any, p: any) => void, itemDeleted: (vaultId: string, itemId: string) => void, dropAllGrants: () => void }} args.revealGate
  *        REQUIRED (leg `admin-reach`, DD2): the reveal gate (`reveal-gate.js`). Every handler here that
  *        returns a secret or lets the caller choose where an encrypted bundle is written asks it first;
  *        registration throws without it, so a registrar can never quietly skip the confirmation.
@@ -122,6 +122,11 @@ function registerVaultIpc({
   if (!revealGate || typeof revealGate.confirm !== 'function') {
     throw new Error('registerVaultIpc: revealGate is required (leg admin-reach, DD2)');
   }
+  for (const m of ['itemWritten', 'itemCopied', 'itemDeleted', 'dropAllGrants']) {
+    if (typeof (/** @type {any} */ (revealGate)[m]) !== 'function') {
+      throw new Error(`registerVaultIpc: revealGate.${m} is required (Mission 24 F2, item-write grants)`);
+    }
+  }
   /** @param {string} decision */
   const proceeds = (decision) => decision === 'not-applicable' || decision === 'confirmed';
   /** Marker: the metadata lookup could not be completed (not "no such item"). */
@@ -148,6 +153,39 @@ function registerVaultIpc({
       if (err instanceof VaultLockedError) throw err;
       return LOOKUP_FAILED;
     }
+  }
+  /**
+   * After a copy that wrote an item: resolve the destination id and tell the gate. Strings only, checked
+   * before any comparison; skips when the written id is not exactly determined.
+   * @param {any} event
+   * @param {any} result
+   * @param {{ sourceVaultId: unknown, itemId: unknown, destVaultId: unknown, matchId: unknown }} p
+   * @param {Set<string> | null} idsBefore
+   */
+  function noteCopy(event, result, { sourceVaultId, itemId, destVaultId, matchId }, idsBefore) {
+    const outcome = result && result.outcome;
+    if (outcome !== 'replaced' && outcome !== 'copied' && outcome !== 'kept-both') return;
+    if (typeof sourceVaultId !== 'string' || typeof itemId !== 'string' || typeof destVaultId !== 'string') return;
+    /** @type {string | null} */
+    let destItemId = null;
+    if (outcome === 'replaced') {
+      if (typeof matchId === 'string') destItemId = matchId;
+    } else if (idsBefore) {
+      const added = getVaultStore()
+        .listItemsMeta(destVaultId, { touch: false })
+        .map((/** @type {any} */ m) => m && m.id)
+        .filter((/** @type {any} */ id) => typeof id === 'string' && !idsBefore.has(id));
+      if (added.length === 1) destItemId = added[0];
+    }
+    if (destItemId === null) return;
+    const live = itemMeta(destVaultId, destItemId, false);
+    revealGate.itemCopied(event, {
+      srcVaultId: sourceVaultId,
+      srcItemId: itemId,
+      destVaultId,
+      destItemId,
+      titleAfter: live !== LOOKUP_FAILED && live ? live.title : null
+    });
   }
   /** The grant epoch, read before a confirmation opens (a lock bumps it). */
   const epochNow = () => (typeof revealGate.epoch === 'function' ? revealGate.epoch() : 0);
@@ -355,11 +393,33 @@ function registerVaultIpc({
   registerInternalHandler(
     ipcMain,
     'internal-vault-item-save',
-    catchLocked((_event, payload) => {
+    catchLocked((event, payload) => {
       const { vaultId, item, unchangedSecrets } = payload || {};
       const unchanged = unchangedSecrets || [];
       const toSave = normalizeTotpForSave(item, unchanged);
+      // Gate bookkeeping (Mission 24 F2): the stored title BEFORE the write; never changes the reply.
+      /** @type {string | null} */
+      let titleBefore = null;
+      try {
+        const before = itemMeta(vaultId, item && item.id, false);
+        if (before !== LOOKUP_FAILED && before) titleBefore = before.title;
+      } catch {
+        titleBefore = null;
+      }
       const saved = getVaultStore().saveItemPreservingSecrets(vaultId, toSave, unchanged);
+      try {
+        if (typeof vaultId === 'string' && saved && typeof saved.id === 'string') {
+          revealGate.itemWritten(event, {
+            vaultId,
+            itemId: saved.id,
+            kind:
+              titleBefore !== null && Array.isArray(unchanged) && unchanged.length > 0 ? 'kept-secrets' : 'new-secrets',
+            titleBefore
+          });
+        }
+      } catch {
+        // the gate's bookkeeping can never change the reply
+      }
       return { item: metadataOf(saved) };
     })
   );
@@ -392,7 +452,15 @@ function registerVaultIpc({
     'internal-vault-item-delete',
     catchLocked((_event, payload) => {
       const { vaultId, itemId } = payload || {};
-      return { deleted: getVaultStore().deleteItem(vaultId, itemId) };
+      const deleted = getVaultStore().deleteItem(vaultId, itemId);
+      try {
+        if (deleted === true && typeof vaultId === 'string' && typeof itemId === 'string') {
+          revealGate.itemDeleted(vaultId, itemId);
+        }
+      } catch {
+        // the gate's bookkeeping can never change the reply
+      }
+      return { deleted };
     })
   );
 
@@ -403,10 +471,30 @@ function registerVaultIpc({
   // hand-mapped to `{ locked: true }` (the internal-vault-export precedent); busy/state ride as
   // reasons via VAULT_ITEM_COPY_CONFIG; any other error rethrows unchanged. No broadcast (a second
   // window is stale until its next refresh, exactly as after save/delete). No MCP surface.
-  registerInternalHandler(ipcMain, 'internal-vault-item-copy', async (_event, payload) => {
+  registerInternalHandler(ipcMain, 'internal-vault-item-copy', async (event, payload) => {
     const { sourceVaultId, itemId, destVaultId, resolution, matchId } = payload || {};
     try {
+      // Gate bookkeeping (Mission 24 F2): the destination's item ids before the copy (copyItem is
+      // synchronous, so nothing interleaves); never changes the reply.
+      /** @type {Set<string> | null} */
+      let idsBefore = null;
+      try {
+        if (typeof destVaultId === 'string') {
+          idsBefore = new Set(
+            getVaultStore()
+              .listItemsMeta(destVaultId, { touch: false })
+              .map((/** @type {any} */ m) => m && m.id)
+          );
+        }
+      } catch {
+        idsBefore = null;
+      }
       const result = getVaultStore().copyItem(sourceVaultId, itemId, destVaultId, { resolution, matchId });
+      try {
+        noteCopy(event, result, { sourceVaultId, itemId, destVaultId, matchId }, idsBefore);
+      } catch {
+        // the gate's bookkeeping can never change the reply
+      }
       return { ok: true, ...result };
     } catch (err) {
       if (err instanceof VaultLockedError) return { locked: true };

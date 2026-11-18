@@ -758,7 +758,7 @@ interface GoldfinchInternalBridge {
   downloadsAction(
     id: number,
     action: string
-  ): Promise<{ ok: boolean; error?: string; reason?: string; message?: string }>;
+  ): Promise<{ ok: boolean; error?: string; reason?: string; message?: string; refused?: string; busy?: boolean }>;
   downloadsClear(): Promise<{ ok: boolean }>;
   onDownloadsChanged(cb: (payload: any) => void): number[];
   offDownloadsChanged(handles: number[]): void;

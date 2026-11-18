@@ -1,6 +1,6 @@
 # Mission: Maintenance
 
-**Status**: planning
+**Status**: active
 
 ## Outcome
 
@@ -53,10 +53,10 @@ Operator rulings at report review (2026-11-18):
 
 ## Open Questions
 
-- [ ] **Release blocking (Flight 1).** "Wait for upstream" plus "the release build runs audit" means no release can be built until `picomatch` is patched, once the gate leg merges. Confirm this is intended before that leg merges, or revisit the audit-gate ruling.
-- [ ] **Reveal-gate fix shape (Flight 2).** (A) Drop grants on any write and show the title as of grant time, or (B) drop grants on any write and confirm save/copy while the gate applies.
-- [ ] **Opening a downloaded program from admin script (Flight 2).** (A) Accept as admin power and document it, or (B) a native confirmation while the gate applies.
-- [ ] **F10g (Flight 2, optional):** should `vault-eligible` stop telling web pages whether the vault is unlocked?
+- [x] **Release blocking (Flight 1).** Ruled 2026-11-18: hold the audit leg until `picomatch` is patched; fly the rest. Original question: "Wait for upstream" plus "the release build runs audit" means no release can be built until `picomatch` is patched, once the gate leg merges. Confirm this is intended before that leg merges, or revisit the audit-gate ruling.
+- [x] **Reveal-gate fix shape (Flight 2).** Ruled 2026-11-18: (A). Original question: (A) Drop grants on any write and show the title as of grant time, or (B) drop grants on any write and confirm save/copy while the gate applies.
+- [x] **Opening a downloaded program from admin script (Flight 2).** Ruled 2026-11-18: (B). Original question: (A) Accept as admin power and document it, or (B) a native confirmation while the gate applies.
+- [x] **F10g (Flight 2, optional):** left out; carried as Advisory. Original question: should `vault-eligible` stop telling web pages whether the vault is unlocked?
 
 ## Known Issues
 

@@ -20,6 +20,7 @@ const PDF_VIEWER_EXTENSION_ID = 'mhjfbmdgcfjbbpaeojofohoefgiehjai';
 const { onWindowClosed } = require('./window-factory');
 const { isBurnerPartition } = require('../shared/burner');
 const { handleRevealInputEvent } = require('./reveal-gate');
+const { isOperatorInput } = require('./automation/injected-input');
 // Mission 20 Flight 1 (DD2/DD4): the shared classification predicates and the
 // entry-URL substitution helper — both Electron-free, both required at the
 // established main-side CJS-of-ESM pattern (`settings-store.js:24` et al.).
@@ -146,7 +147,7 @@ function createGuestWiring(deps) {
     gestureWitness,
     // Mission 23 Flight 2 (leg `automation-input`, DD4): the per-tab counts of input AUTOMATION is
     // injecting (`automation/injected-input.js`, built once in main.js, bracketed around every
-    // sendInputEvent). The witness listener below ignores input while `isInjecting`; the guest's
+    // sendInputEvent). The witness listener below ignores input while `isOperatorInput` is false; the guest's
     // `before-input-event` handler skips every shortcut branch for a key while `isJarInjecting`.
     // Optional: an offline harness that omits it is unaffected.
     injectedInput,
@@ -578,7 +579,7 @@ function createGuestWiring(deps) {
     // receives - an automation `click` is injected with `sendInputEvent` and reaches it exactly like a
     // physical one - ahead of the page, with no page code involved, and it cannot block delivery
     // (`before-mouse-event` can - never use that one here). So the listener does NOT feed the witness while
-    // automation is injecting into this tab (`injectedInput.isInjecting`, every tier, plus a short trailing
+    // automation is injecting into this tab (`isOperatorInput`, every tier, plus a short trailing
     // allowance): an injected click is never the operator's click. "Ignore", not "clear" - a real press and
     // release recorded before the injection began stay on record. A real release that lands during an
     // injection is dropped too, leaving a press with no release, which the verifier refuses (fail-safe).
@@ -589,7 +590,7 @@ function createGuestWiring(deps) {
     if (gestureWitness && !isInternalContents(wc)) {
       wc.on('input-event', (_event, input) => {
         if (input.type !== 'mouseDown' && input.type !== 'mouseUp') return;
-        if (injectedInput?.isInjecting(wcId)) return;
+        if (!isOperatorInput(injectedInput, wcId)) return;
         gestureWitness.onInput(wcId, input);
       });
       wc.once('destroyed', () => gestureWitness.forget(wcId));

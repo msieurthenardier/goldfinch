@@ -150,8 +150,8 @@ function failingPins({ mainSrc, lifecycleSrc, engineSrc, serverSrc, wiringSrc })
     fails.push('engine.js threads jarTier only when true');
   // 4. guest-wiring.js: the witness gate, the key gate, the destroy hook.
   const wm = maskComments(wiringSrc);
-  if (!/if \(injectedInput\?\.isInjecting\(wcId\)\) return;\s*gestureWitness\.onInput\(wcId, input\)/.test(wm))
-    fails.push('guest-wiring.js: the witness ignores input while isInjecting');
+  if (!/if \(!isOperatorInput\(injectedInput, wcId\)\) return;\s*gestureWitness\.onInput\(wcId, input\)/.test(wm))
+    fails.push('guest-wiring.js: the witness ignores input while !isOperatorInput');
   if (!/if \(injectedInput\?\.isJarInjecting\(contents\.id\)\) return;\s*if \(handleCrossView/.test(wm))
     fails.push('guest-wiring.js: the key handler returns for a jar injection before every branch');
   if (!/injectedInput\.forget\(contents\.id\)/.test(wm)) fails.push('guest-wiring.js forgets the counts at destroy');
@@ -222,12 +222,38 @@ test('engine.js and guest-wiring.js: dropping a spread, a gate or the destroy ho
   assertMutated(REAL.engineSrc, e2, 'engine.js injectedInput spread');
   assert.ok(failingPins({ ...REAL, engineSrc: e2 }).length > 0);
   for (const [what, re] of [
-    ['witness gate', /if \(injectedInput\?\.isInjecting\(wcId\)\) return;\s*/],
+    ['witness gate', /if \(!isOperatorInput\(injectedInput, wcId\)\) return;\s*/],
     ['key gate', /if \(injectedInput\?\.isJarInjecting\(contents\.id\)\) return;\s*/],
     ['destroy hook', /injectedInput\.forget\(contents\.id\)/]
   ]) {
     const w = REAL.wiringSrc.replace(re, 'void 0;');
     assertMutated(REAL.wiringSrc, w, what);
     assert.ok(failingPins({ ...REAL, wiringSrc: w }).length > 0, what);
+  }
+});
+
+test('reveal-gate.js handleRevealInputEvent uses isOperatorInput and contains no raw isInjecting call', () => {
+  const src = maskComments(fs.readFileSync(path.join(MAIN, 'reveal-gate.js'), 'utf8'));
+  const body = (s) => {
+    const i = s.indexOf('function handleRevealInputEvent(');
+    assert.ok(i >= 0, 'handleRevealInputEvent found');
+    const open = s.indexOf('{', s.indexOf(')', i));
+    return s.slice(open, findMatchingBracket(s, open, '{', '}'));
+  };
+  const pinned = (s) =>
+    /if \(!isOperatorInput\(injectedInput, wcId\)\) return;/.test(body(s)) && !/\.isInjecting\b/.test(body(s));
+  assert.ok(pinned(src));
+  const mut = src.replace(
+    /if \(!isOperatorInput\(injectedInput, wcId\)\) return;/,
+    'if (injectedInput?.isInjecting?.(wcId)) return;'
+  );
+  assertMutated(src, mut, 'reveal cancel predicate');
+  assert.ok(!pinned(mut), 'a raw isInjecting call flips the pin');
+});
+
+test('no isInjecting( call remains in src/main/** outside automation/injected-input.js', () => {
+  for (const [file, src] of Object.entries(FILES)) {
+    if (file === path.join('automation', 'injected-input.js')) continue;
+    assert.ok(!/\bisInjecting\(/.test(maskComments(src)), file);
   }
 });

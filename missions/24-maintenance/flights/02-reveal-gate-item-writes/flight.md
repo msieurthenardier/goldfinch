@@ -1,6 +1,6 @@
 # Flight: Reveal Gate Covers Vault Item Writes
 
-**Status**: planning
+**Status**: in-flight
 **Mission**: [Maintenance](../../mission.md)
 
 ## Contributing to Criteria
@@ -16,36 +16,47 @@
 
 Restore the reveal gate's stated rule: "a confirmed reveal or code read of `(vaultId, itemId)` covers that item's later reveals and code reads in the same document and nothing else". Today a script evaluated by an admin key in `goldfinch://vault` can get around it. Item save and copy are ungated (deliberately: they return no secret). But a Replace-copy keeps the destination item's id, and grants are keyed by id. So one confirmation of a harmless item lets the script swap in any other login's password and read it with no further dialog. A rename can also make the dialog name a different item. The flight proves the swap with a failing test, closes it, rules on the related "open a downloaded program" gap, and gets the gate's behavior spec passing in full.
 
-**Status is `planning`, not `ready`**: two operator decisions below must be taken before leg design.
+Operator rulings 2026-11-18 ("merged, begin"): fix shape (A), open-download (B), F10g left out; this flight flies first.
 
 ### Open Questions
 
-- [ ] **Fix shape (report decision 4):**
+- [x] **Fix shape (report decision 4):** → (A), see Design Decisions.
   - (A) Drop an item's grants on any save, Replace-copy or delete, AND show the item's title as it was when the grant was made (or the first reveal began), so a rename cannot mislead the dialog.
   - (B) Drop grants on any write, AND, while `revealGate.applies(event)`, run `confirm` on item-save and item-copy.
   - Delete drops grants under either option and is not gated (it returns no secret).
-- [ ] **Opening a downloaded program from admin script (report decision 3; finding #3):**
+- [x] **Opening a downloaded program from admin script (report decision 3; finding #3):** → (B), see Design Decisions.
   - (A) Accept it as admin-in-chrome power, like quitting, and document it in `docs/mcp-automation.md` *What each tier can reach*.
   - (B) Reuse the native confirmation before `openDownload` while `applies()` holds.
   - The Security Reviewer advises against stretching the gate's definition. Either way the ruling is recorded.
-- [ ] **F10g (optional; finding #5):** `vault-eligible` returns `{ eligible, unlocked }` to web main frames and popups. Decide whether to fix it (drop `unlocked`) in this flight, or accept it formally.
+- [x] **F10g (optional; finding #5):** → left out of this flight and carried as Advisory (not ruled on). `vault-eligible` returns `{ eligible, unlocked }` to web main frames and popups. Decide whether to fix it (drop `unlocked`) in this flight, or accept it formally.
 
 ### Design Decisions
 
-*(To be recorded once the operator answers the Open Questions.)*
+**Item writes drop grants; the dialog shows the title as of grant time** (operator, 2026-11-18, option A).
+- Every save, Replace-copy and delete of `(vaultId, itemId)` drops that item's grants in every document. Delete stays ungated (it returns no secret).
+- The confirmation dialog's subject is the item title captured when its grant was made (or when the first reveal began), so a rename cannot make it name a different item.
+- Save and copy stay ungated, as `docs/vault.md` already records.
+- Rationale: closes chain (3) (grant swap) and chain (2) (title spoof) without adding dialogs to automation's write paths.
+- Trade-off: a write while the gate applies still needs no confirmation. Its effect on secrets is bounded because the next reveal re-asks.
+
+**Opening a downloaded file asks first while the gate applies** (operator, 2026-11-18, option B).
+- `openDownload` runs the reveal gate's native confirmation before `shell.openPath` when `revealGate.applies(event)` holds: an admin session active in the window, or the sender's document marked scripted.
+- Otherwise (an ordinary operator click) the behavior is unchanged, and DD9 still holds: the operating system's confirmation is the only one for a plain open.
+- Rationale: an admin-scripted page must not be able to download and run a program unseen.
+- Trade-off: this widens the gate's stated definition (secret-returning, key-minting, bundle-destination) by one "runs a program" case. Record that in `docs/mcp-automation.md` *What each tier can reach* and in CLAUDE.md's reveal-gate paragraph.
 
 **`isOperatorInput` lands here, not as a squawk** (finding #28): the two inline `injectedInput.isInjecting` checks, in `guest-wiring.js` (the click witness) and `reveal-gate.js` (`handleRevealInputEvent`, optional-chained), become one predicate in `automation/injected-input.js`. It touches a security surface, which fails squawk criterion 3, and this flight already owns the reveal gate.
 
 ### Prerequisites
 
-- [ ] Operator answers the two open questions (and optionally F10g).
+- [x] Operator answers the two open questions (2026-11-18).
 - [ ] Squawk 0194 (`admin-reach-refusal` spec poller and tolerance) completed, or folded in as this flight's first leg.
 
 ### Pre-Flight Checklist
 
-- [ ] All open questions resolved
-- [ ] Design decisions documented
-- [ ] Prerequisites verified
+- [x] All open questions resolved
+- [x] Design decisions documented
+- [ ] Prerequisites verified (squawk 0194 folds in as leg `admin-reach-full-run`)
 - [x] Validation approach defined
 - [x] Legs defined
 

@@ -58,6 +58,7 @@ const { INTERNAL_PARTITION } = require('../shared/internal-page');
 const { createMediaProxyHandler } = require('./media-proxy-handler');
 const { createMediaProxyTokens } = require('./media-proxy-tokens');
 const { createRevealGate, createDocumentMarks } = require('./reveal-gate');
+const { createGateSenderResolvers } = require('./reveal-gate-senders');
 const { initProfileAndStores } = require('./init-profile');
 const { sanitizeFilename, isWithinDir } = require('./download-path');
 const { createResolver } = require('./internal-assets');
@@ -1529,6 +1530,7 @@ async function vaultImportCommit(chromeId, handle, mapping) {
       secretKind: pending.secretKind,
       mapping
     });
+    revealGate.dropAllGrants();
     broadcastVaultLockState();
     if (res.fresh) {
       const secretKind = pending.secretKind === 'recovery' ? 'recovery' : 'master';
@@ -1595,10 +1597,13 @@ const revealGate = createRevealGate({
   hasGrant: (wcId, key) => documentMarks.hasGrant(wcId, key),
   addGrant: (wcId, key, epoch) => documentMarks.grant(wcId, key, epoch),
   grantEpoch: () => documentMarks.epoch(),
-  windowFor: (sender) => registry.getWindowForGuest(sender.id)?.win ?? null,
-  // Fix 1 of leg `hat-and-alignment`: a background tab gets no dialog - the same predicate ipc-gate's
-  // `activeOnly` uses (internal tabs are in `tabViews` too).
-  isActive: (sender) => registry.getWindowForGuest(sender.id)?.activeTabWcId === sender.id,
+  dropGrant: (key) => documentMarks.dropGrant(key),
+  noteWrite: (key, title, opts) => documentMarks.noteWrite(key, title, opts),
+  writeNote: (key) => documentMarks.writeNote(key),
+  clearWriteNote: (key) => documentMarks.clearWriteNote(key),
+  clearAllGrants: () => documentMarks.clearGrants(),
+  // Guest AND chrome senders (leg `open-download-ruling`); a background tab still gets no dialog.
+  ...createGateSenderResolvers(registry),
   showConfirm: (win, options, signal) => dialog.showMessageBox(win, { ...options, signal }),
   // The abort follows the sender's document and its window: a new main-frame document, the contents
   // destroyed, or the window about to close. `close` (never `closed`) - the window is still readable.
@@ -2230,6 +2235,7 @@ const { wireDownloadHandler, noteSessionPartition } = registerDownloadIpc({
   getJars: () => jars.list(),
   partitionFromStoragePath,
   isPartitionLive: (partition) => isPartitionLive(partition),
+  revealGate,
   now: () => Date.now(),
   logger: console
 });

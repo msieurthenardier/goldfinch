@@ -2497,6 +2497,24 @@ test('automation-input AC5: the witness listener ignores input while ANY tier is
   }
 });
 
+test('witness: a throwing injected-input store does not throw out of the listener and nothing reaches the witness', () => {
+  const witness = witnessFake();
+  const h = setup({
+    gestureWitness: witness,
+    injectedInput: {
+      isInjecting: () => {
+        throw new Error('boom');
+      },
+      isJarInjecting: () => false,
+      forget: () => {}
+    }
+  });
+  const wc = new FakeContents(81);
+  h.wiring.wireTabViewEvents({ webContents: wc }, 81, 'persist:jar-a');
+  assert.doesNotThrow(() => wc.emit('input-event', {}, { type: 'mouseDown', button: 'left', x: 1, y: 2 }));
+  assert.deepEqual(witness.calls, []);
+});
+
 test('automation-input AC5: an injected click on the icon ends in no-real-input; an earlier real click is NOT erased by it', () => {
   const c = countsOnClock();
   let t = 5000;

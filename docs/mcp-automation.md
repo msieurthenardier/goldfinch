@@ -747,7 +747,7 @@ natively awaited.
 
 The admin tier reaches `goldfinch://` pages and can call the pages' bridge (`window.goldfinchInternal.*`)
 from `evaluate` / `injectScript`. Since Mission 23 Flight 2 (leg `admin-reach`, flight DD2) the bridge
-methods that **return a secret, mint a key or let the caller pick where an encrypted bundle is written**
+methods that **return a secret, mint a key, let the caller pick where an encrypted bundle is written or open a downloaded file**
 take a **native confirmation** while the threat exists. The dialog is a real OS message box parented on the
 page's window, **Cancel first and default**, naming the action and the item, and saying that an automation
 connection has been active recently and will be able to read what is shown. No automation tier can see it or answer it
@@ -756,7 +756,12 @@ connection has been active recently and will be able to read what is shown. No a
 - **Gated (and only these)**: `vaultReveal` (`internal-vault-reveal`), `vaultTotpCode`
   (`internal-vault-totp-code`), `jarsCookiesValue` (`internal-jars-cookies-value`), `vaultExport` /
   `vaultExportProfile` (`internal-vault-export`, `-export-profile`), `automationJarKeyMint` and
-  `automationAdminKeyMint` (`automation:jar-key-mint`, `automation:admin-key-mint`).
+  `automationAdminKeyMint` (`automation:jar-key-mint`, `automation:admin-key-mint`), and **opening a
+  downloaded file** (Mission 24 F2, operator ruling 2026-11-18: opening a program runs it) - the downloads
+  popup's `open-downloaded-file` and the downloads page's `open` action. The dialog reads `Open the
+  downloaded file "<name>"?` with an **Open** button; every open asks (no grant); a refusal is
+  `{ ok: false, refused: 'not-confirmed' }` and the downloads page shows `Not opened.`. With no automation
+  around, an open is unchanged (the operating system's own confirmation is the only one).
 - **When it applies** - either condition: (a) an **admin-identity session made a request within the last
   ten minutes** (`ADMIN_ACTIVE_WINDOW_MS`; the stamp is written when the request passes the identity check,
   before its body is read, so an admin call always finds the gate on for itself; a request refused 401
@@ -796,7 +801,7 @@ connection has been active recently and will be able to read what is shown. No a
 - **A confirmed value is readable by the attached automation.** The dialog says so; that is the operator's
   informed choice. A reveal returns the whole item, every secret field at once.
 - **Not gated, by design**: turning automation off and revoking a key (the operator's kill switch); the vault
-  list, item save and copy, access-key list, the chrome's cookie list and every chrome-class channel (none
+  list, item save and copy (these drop that item's grants and note its title for the next dialog), access-key list, the chrome's cookie list and every chrome-class channel (none
   returns a secret); the vault fill channels (refused by Flight 1's picker context). **`internal-settings-get`
   still returns the automation key hashes to internal pages** - hashes of 256-bit keys, documented, not
   gated. An admin script can also still change `vaultAutoLockMinutes` and `automationPort` (neither yields a

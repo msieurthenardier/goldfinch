@@ -38,6 +38,22 @@
 // dies with the document, exactly like the scripted mark (`createDocumentMarks`).
 
 const { cleanDisplayText } = require('./display-text');
+const { isOperatorInput } = require('./automation/injected-input');
+
+/** Dialog detail line when the item's secrets were kept across a write made while the gate applied. */
+const CHANGED_NOTE =
+  'This item was changed while automation was active; the name shown is the one its stored secrets had before that change.';
+/** Dialog detail line when the item was created or fully replaced while the gate applied. */
+const CREATED_NOTE = 'This item was created or replaced while automation was active.';
+
+/**
+ * The per-item grant / note key.
+ * @param {string} vaultId
+ * @param {string} itemId
+ */
+function grantKeyOf(vaultId, itemId) {
+  return `${vaultId}\u0000${itemId}`;
+}
 
 /** How long an unanswered confirmation stays up. */
 const CONFIRM_TIMEOUT_MS = 60000;
@@ -56,7 +72,8 @@ const AFFIRM_INDEX = 1;
 /**
  * What each request kind says. `question` is the dialog message (the cleaned subject is spliced in),
  * `affirm` the affirmative button.
- * @type {Record<string, { question: (subject: string) => string, affirm: string, what: string }>}
+ * An entry may carry its own `detail(reason)`, used instead of the "will be able to read <what>" text.
+ * @type {Record<string, { question: (subject: string) => string, affirm: string, what: string, detail?: (reason: string) => string }>}
  */
 const ACTIONS = {
   reveal: { question: (s) => `Show the secrets stored in "${s}"?`, affirm: 'Show', what: 'what is shown' },
@@ -72,6 +89,17 @@ const ACTIONS = {
     question: () => 'Create a new admin automation key?',
     affirm: 'Create key',
     what: 'the key that is shown'
+  },
+  // Operator ruling 2026-11-18 (Mission 24 F2 leg `open-download-ruling`): while the gate applies, opening a
+  // downloaded file asks first, because opening a program runs it. No grant: every open asks.
+  'open-download': {
+    question: (s) => `Open the downloaded file "${s}"?`,
+    affirm: 'Open',
+    what: 'what is opened',
+    detail: (reason) =>
+      reason === 'admin-attached'
+        ? 'An automation connection has been active in this browser recently and may have asked for this. Opening a downloaded program runs it on this computer. Choose Cancel unless you started this yourself.'
+        : 'Automation ran script in this page and may have asked for this. Opening a downloaded program runs it on this computer. Choose Cancel unless you started this yourself.'
   }
 };
 
@@ -86,6 +114,13 @@ function createDocumentMarks() {
   const scripted = new Set();
   /** @type {Map<number, Set<string>>} */
   const grants = new Map();
+  /**
+   * Per-item title notes (process lifetime, not per document): `{ title }` is the title that belongs to the
+   * item's CURRENT secrets (`null` = the secrets are the writer's own, show the live title with a warning).
+   * They survive `clearGrants`, `onCommit` and `forget`.
+   * @type {Map<string, { title: string | null }>}
+   */
+  const notes = new Map();
   /** Bumped by `clearGrants`; a grant carrying an older epoch (a dialog that straddled a lock) is not stored. */
   let epoch = 0;
 
@@ -128,6 +163,27 @@ function createDocumentMarks() {
       epoch++;
       grants.clear();
     },
+    /** Remove one item's grant from EVERY document (the item was written or deleted). @param {string} key */
+    dropGrant(key) {
+      for (const set of grants.values()) set.delete(key);
+    },
+    /**
+     * @param {string} key
+     * @param {string | null} title
+     * @param {{ overwrite?: boolean }} [opts]  `overwrite: false` records only when no note exists
+     */
+    noteWrite(key, title, { overwrite = true } = {}) {
+      if (!overwrite && notes.has(key)) return;
+      notes.set(key, { title: typeof title === 'string' ? title : null });
+    },
+    /** @param {string} key @returns {{ title: string | null } | null} */
+    writeNote(key) {
+      return notes.get(key) ?? null;
+    },
+    /** @param {string} key */
+    clearWriteNote(key) {
+      notes.delete(key);
+    },
     onCommit: drop,
     forget: drop,
     /** Test/diagnostic only: how many documents hold any state. */
@@ -138,7 +194,7 @@ function createDocumentMarks() {
 /**
  * @typedef {object} GateRequest
  * @property {string} channel   the channel literal (trace only)
- * @property {'reveal'|'code'|'cookie'|'export'|'jar-key-mint'|'admin-key-mint'} action
+ * @property {'reveal'|'code'|'cookie'|'export'|'jar-key-mint'|'admin-key-mint'|'open-download'} action
  * @property {string} [subject] MAIN's own text for the item / cookie / jar / vault(s); cleaned here
  * @property {string} [destination] export only: the destination folder's name; cleaned here
  * @property {{ vaultId: string, itemId: string }} [grant] reveal / code only: the per-item grant scope
@@ -155,6 +211,11 @@ function createDocumentMarks() {
  * @param {(wcId: number, key: string) => boolean} [deps.hasGrant]
  * @param {(wcId: number, key: string, epoch?: number) => void} [deps.addGrant]
  * @param {() => number} [deps.grantEpoch]   read before the dialog opens, handed back to `addGrant`
+ * @param {(key: string) => void} [deps.dropGrant]   remove one item's grant from every document
+ * @param {(key: string, title: string | null, opts?: { overwrite?: boolean }) => void} [deps.noteWrite]
+ * @param {(key: string) => ({ title: string | null } | null)} [deps.writeNote]
+ * @param {(key: string) => void} [deps.clearWriteNote]
+ * @param {() => void} [deps.clearAllGrants]
  * @param {(win: any, options: any, signal: AbortSignal) => Promise<{ response?: number, cancelId?: number }>} deps.showConfirm
  * @param {(sender: any) => any} deps.windowFor   the sender's window, resolved main-side; null = none
  * @param {(sender: any, win: any, onGone: () => void) => (() => void)} deps.watch
@@ -173,6 +234,11 @@ function createRevealGate({
   hasGrant = () => false,
   addGrant = () => {},
   grantEpoch = () => 0,
+  dropGrant = () => {},
+  noteWrite = () => {},
+  writeNote = () => null,
+  clearWriteNote = () => {},
+  clearAllGrants = () => {},
   showConfirm,
   windowFor,
   watch,
@@ -217,17 +283,25 @@ function createRevealGate({
     }
   }
 
-  /** @param {GateRequest} request @param {string} reason */
-  function buildOptions(request, reason) {
+  /**
+   * @param {GateRequest} request
+   * @param {string} reason
+   * @param {{ title: string | null } | null} [note]  the item's write note (reveal / code only)
+   */
+  function buildOptions(request, reason, note = null) {
     const spec = ACTIONS[request.action] || ACTIONS.reveal;
-    const subject = cleanDisplayText(request.subject, DISPLAY_MAX_CHARS) || 'this item';
+    const hasNote = !!request.grant && !!note;
+    const shown = hasNote && typeof note?.title === 'string' ? note.title : request.subject;
+    const subject = cleanDisplayText(shown, DISPLAY_MAX_CHARS) || 'this item';
     let message = spec.question(subject);
     const destination = cleanDisplayText(request.destination, DISPLAY_MAX_CHARS);
     if (request.action === 'export' && destination) message += ` Destination folder: "${destination}".`;
-    const detail =
-      reason === 'admin-attached'
+    let detail = spec.detail
+      ? spec.detail(reason)
+      : reason === 'admin-attached'
         ? `An automation connection has been active in this browser recently and will be able to read ${spec.what}. Choose Cancel unless you started this yourself.`
         : `Automation ran script in this page and may still be running it; it will be able to read ${spec.what}. Choose Cancel unless you started this yourself.`;
+    if (hasNote && note) detail += ` ${typeof note.title === 'string' ? CHANGED_NOTE : CREATED_NOTE}`;
     return {
       type: 'question',
       title: 'Goldfinch',
@@ -299,12 +373,21 @@ function createRevealGate({
       }
       if (!active) return interruptedGone(request, reason);
 
-      const grantKey = request.grant ? `${request.grant.vaultId}\u0000${request.grant.itemId}` : null;
+      const grantKey = request.grant ? grantKeyOf(request.grant.vaultId, request.grant.itemId) : null;
       if (grantKey !== null && hasGrant(wcId, grantKey)) return traced(request, 'confirmed', reason);
 
       if (open.has(win)) return traced(request, 'busy', reason);
 
-      const options = buildOptions(request, reason);
+      /** @type {{ title: string | null } | null} */
+      let note = null;
+      if (grantKey !== null) {
+        try {
+          note = writeNote(grantKey) ?? null;
+        } catch {
+          note = null; // an unreadable note changes nothing about the decision
+        }
+      }
+      const options = buildOptions(request, reason, note);
       let epochAtOpen = 0;
       try {
         epochAtOpen = grantEpoch();
@@ -460,7 +543,81 @@ function createRevealGate({
     entry.cancel();
   }
 
-  return { confirm, applies, epoch, tabInactive, windowInput, openCount: () => open.size };
+  /**
+   * A save of an item through an internal page succeeded: its grants die in every document, and (while
+   * the gate applies) the title note is updated per the note model. Never throws.
+   * @param {any} event
+   * @param {{ vaultId: string, itemId: string, kind: 'kept-secrets'|'new-secrets', titleBefore?: string | null }} p
+   */
+  function itemWritten(event, { vaultId, itemId, kind, titleBefore }) {
+    try {
+      const key = grantKeyOf(vaultId, itemId);
+      dropGrant(key);
+      if (!applies(event)) return;
+      if (kind === 'kept-secrets') {
+        if (typeof titleBefore === 'string') noteWrite(key, titleBefore, { overwrite: false });
+      } else {
+        noteWrite(key, null, { overwrite: true });
+      }
+    } catch {
+      // bookkeeping must never reach the reply
+    }
+  }
+
+  /**
+   * A copy wrote an item at the destination: its grants die, and the source's note travels with the
+   * secrets (any gate state); with no source note and the gate applying, the destination's live title
+   * right after the copy (the source's own) becomes the note. Never throws.
+   * @param {any} event
+   * @param {{ srcVaultId: string, srcItemId: string, destVaultId: string, destItemId: string, titleAfter?: string | null }} p
+   */
+  function itemCopied(event, { srcVaultId, srcItemId, destVaultId, destItemId, titleAfter }) {
+    try {
+      const destKey = grantKeyOf(destVaultId, destItemId);
+      dropGrant(destKey);
+      const srcNote = writeNote(grantKeyOf(srcVaultId, srcItemId));
+      if (srcNote) {
+        noteWrite(destKey, srcNote.title, { overwrite: true });
+      } else if (applies(event) && typeof titleAfter === 'string') {
+        noteWrite(destKey, titleAfter, { overwrite: true });
+      }
+    } catch {
+      // bookkeeping must never reach the reply
+    }
+  }
+
+  /** An item was deleted: its grants and note go. Never throws. @param {string} vaultId @param {string} itemId */
+  function itemDeleted(vaultId, itemId) {
+    try {
+      const key = grantKeyOf(vaultId, itemId);
+      dropGrant(key);
+      clearWriteNote(key);
+    } catch {
+      // bookkeeping must never reach the reply
+    }
+  }
+
+  /** Every per-item grant in every document dies (a profile restore). Never throws. */
+  function dropAllGrants() {
+    try {
+      clearAllGrants();
+    } catch {
+      // ignore
+    }
+  }
+
+  return {
+    confirm,
+    applies,
+    epoch,
+    tabInactive,
+    windowInput,
+    itemWritten,
+    itemCopied,
+    itemDeleted,
+    dropAllGrants,
+    openCount: () => open.size
+  };
 }
 
 /**
@@ -490,7 +647,7 @@ function isRevealCancelInput(input) {
 function handleRevealInputEvent({ input, wcId, injectedInput, win, windowInput }) {
   try {
     if (!isRevealCancelInput(input)) return;
-    if (injectedInput?.isInjecting?.(wcId)) return;
+    if (!isOperatorInput(injectedInput, wcId)) return;
     windowInput(win);
   } catch {
     /* a listener must never throw */
@@ -502,6 +659,8 @@ module.exports = {
   handleRevealInputEvent,
   createRevealGate,
   createDocumentMarks,
+  CHANGED_NOTE,
+  CREATED_NOTE,
   CONFIRM_TIMEOUT_MS,
   INPUT_GRACE_MS,
   DISPLAY_MAX_CHARS,

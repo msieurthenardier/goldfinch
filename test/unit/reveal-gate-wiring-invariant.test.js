@@ -152,7 +152,8 @@ const GATED = [
   ['register-vault-ipc.js', /channel:\s*'internal-vault-export-profile'/],
   ['jar-data-ipc.js', /channel:\s*'internal-jars-cookies-value'/],
   ['register-settings-ipc.js', /channel:\s*'automation:jar-key-mint'/],
-  ['register-settings-ipc.js', /channel:\s*'automation:admin-key-mint'/]
+  ['register-settings-ipc.js', /channel:\s*'automation:admin-key-mint'/],
+  ['register-download-ipc.js', /action:\s*'open-download'/]
 ];
 
 test('every gated channel asks the reveal gate, and each owning registrar throws without one', () => {
@@ -162,7 +163,8 @@ test('every gated channel asks the reveal gate, and each owning registrar throws
   for (const [file, name] of [
     ['register-vault-ipc.js', 'registerVaultIpc'],
     ['register-settings-ipc.js', 'registerSettingsIpc'],
-    ['jar-data-ipc.js', 'registerJarDataIpc']
+    ['jar-data-ipc.js', 'registerJarDataIpc'],
+    ['register-download-ipc.js', 'registerDownloadIpc']
   ]) {
     const m = maskComments(read(file));
     assert.ok(new RegExp(`${name}: revealGate is required`).test(read(file)), `${name} throws at registration`);
@@ -174,6 +176,10 @@ test('every gated channel asks the reveal gate, and each owning registrar throws
   for (const call of ['registerJarIpc', 'registerSettingsIpc', 'registerVaultIpc']) {
     assert.ok(new RegExp(`${call}\\(\\{[^}]{0,60}?revealGate,`).test(mm), `main.js passes revealGate to ${call}`);
   }
+  assert.ok(
+    /registerDownloadIpc\(\{[\s\S]*?\n\s+revealGate,[\s\S]*?\n\}\);/.test(mm),
+    'main.js passes revealGate to registerDownloadIpc'
+  );
   assert.equal((mm.match(/createRevealGate\(/g) || []).length, 1, 'one gate, built once');
 });
 

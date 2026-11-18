@@ -32,9 +32,14 @@ function registerDownloadIpc({
   getJars,
   partitionFromStoragePath,
   isPartitionLive,
+  // Mission 24 Flight 2 (leg `open-download-ruling`): opening a downloaded file asks the reveal gate first.
+  revealGate,
   now = Date.now,
   logger = console
 }) {
+  if (!revealGate || typeof revealGate.confirm !== 'function') {
+    throw new Error('registerDownloadIpc: revealGate is required (Mission 24 F2, open-download-ruling)');
+  }
   // Suggested name / folder for a media-panel download, keyed by the DOWNLOADING TAB and the URL (a
   // page-started download of the same URL in another tab must not inherit them) and consumed when the
   // download STARTS, so a request that never produced a download leaves nothing behind.
@@ -186,14 +191,41 @@ function registerDownloadIpc({
   // openable until complete": an in-flight record already carries a savePath, so opening by id must
   // confirm a known record, completed state and a recorded path, or it would launch a partially-written
   // file. The chrome's open channel and the downloads page's open action both go through here.
-  /** @param {unknown} id */
-  function openDownload(id) {
-    const record = resolveDownloadRecord(/** @type {any} */ (id));
-    if (!record || record.state !== 'completed' || !record.savePath) return Promise.resolve({ ok: false });
-    return Promise.resolve(shell.openPath(record.savePath)).then((error) => ({
-      ok: !error,
-      error: error || undefined
-    }));
+  //
+  // While the reveal gate applies (an admin session attached, or this sender's document scripted), the open
+  // asks first through the gate's native dialog: opening a program runs it (operator ruling 2026-11-18,
+  // narrowing DD9). The record is resolved and checked BEFORE the gate (no dialog for an open that would
+  // fail) and AGAIN after a confirmation (it may have gone while the dialog was up). No grant: each asks.
+  /**
+   * @param {any} event
+   * @param {unknown} id
+   * @param {'open-downloaded-file'|'internal-downloads-action'} channel
+   */
+  async function openDownload(event, id, channel) {
+    const openable = () => {
+      const r = resolveDownloadRecord(/** @type {any} */ (id));
+      return r && r.state === 'completed' && r.savePath ? r : null;
+    };
+    const first = openable();
+    if (!first) return { ok: false };
+    /** @type {{ interrupted?: boolean }} */
+    const info = {};
+    const decision = await revealGate.confirm(
+      event,
+      { channel, action: 'open-download', subject: first.filename },
+      info
+    );
+    if (decision === 'confirmed' || decision === 'not-applicable') {
+      // After a confirmation the record is resolved AGAIN: it may have gone while the dialog was up.
+      const record = decision === 'confirmed' ? openable() : first;
+      if (!record) return { ok: false };
+      return Promise.resolve(shell.openPath(record.savePath)).then((error) => ({
+        ok: !error,
+        error: error || undefined
+      }));
+    }
+    const busy = decision === 'busy' || (decision === 'gone' && info.interrupted === true);
+    return busy ? { ok: false, refused: 'not-confirmed', busy: true } : { ok: false, refused: 'not-confirmed' };
   }
 
   // One-shot chrome bootstrap for newly created windows. The live feed remains
@@ -227,8 +259,8 @@ function registerDownloadIpc({
 
   gate.chrome.handle(
     'open-downloaded-file',
-    (_event, id) => {
-      return openDownload(id);
+    (event, id) => {
+      return openDownload(event, id, 'open-downloaded-file');
     },
     'throw'
   );
@@ -294,7 +326,7 @@ function registerDownloadIpc({
     (getDownloadsManager()?.listAll() || []).map((entry) => projectRow(entry, retryEnv))
   );
 
-  registerInternalHandler(ipcMain, 'internal-downloads-action', (_event, payload) => {
+  registerInternalHandler(ipcMain, 'internal-downloads-action', (event, payload) => {
     const id = payload && payload.id;
     const action = payload && payload.action;
     const manager = getDownloadsManager();
@@ -340,7 +372,7 @@ function registerDownloadIpc({
         };
       }
     } else if (action === 'open') {
-      return openDownload(id);
+      return openDownload(event, id, 'internal-downloads-action');
     } else if (action === 'show') {
       const savePath = record ? record.savePath : null;
       if (savePath) shell.showItemInFolder(savePath);

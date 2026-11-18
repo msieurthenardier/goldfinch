@@ -192,4 +192,22 @@ function createInjectedInput({
   return { begin, isInjecting, isJarInjecting, forget };
 }
 
-module.exports = { createInjectedInput, ALLOWANCE_MS, MENU_HOLD_MS };
+/**
+ * The ONE "is this input the operator's" predicate, shared by the vault click witness and the reveal gate's
+ * cancel listener. `true` for no store (no automation wiring: all input is the operator's) or a store whose
+ * `isInjecting(wcId)` answers exactly `false`; `false` for a store without a function, one that throws, or
+ * any other answer (fail-safe: never count doubtful input as the operator's). Never throws.
+ * @param {{ isInjecting?: (id: number) => boolean } | null | undefined} store
+ * @param {number} wcId
+ */
+function isOperatorInput(store, wcId) {
+  if (store === null || store === undefined) return true;
+  try {
+    if (typeof store.isInjecting !== 'function') return false;
+    return store.isInjecting(wcId) === false;
+  } catch {
+    return false;
+  }
+}
+
+module.exports = { createInjectedInput, isOperatorInput, ALLOWANCE_MS, MENU_HOLD_MS };
