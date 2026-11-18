@@ -7,8 +7,8 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { execFileSync } = require('node:child_process');
-const { mkdtempSync, readFileSync, rmSync, writeFileSync } = require('node:fs');
+const { execFileSync, spawnSync } = require('node:child_process');
+const { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 
@@ -189,11 +189,12 @@ test('only create-release, upload and publish-release may hold contents: write',
 
 // ---- the expected-names function, extracted from the workflow text and run ----
 
-/** Every `expected_names() { ... }` definition in the workflow, as text. */
-function functionTexts() {
+/** Every `<name>() { ... }` definition in `text` (default: the whole workflow), dedented. */
+function functionTexts(name = 'expected_names', text = build) {
   const out = [];
-  const re = /^( +)expected_names\(\) \{\n[\s\S]*?^\1\}\n/gm;
-  for (const m of build.matchAll(re))
+  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`^( +)${esc}\\(\\) \\{\\n[\\s\\S]*?^\\1\\}\\n`, 'gm');
+  for (const m of text.matchAll(re))
     out.push(
       m[0]
         .split('\n')
@@ -322,4 +323,404 @@ test('no workflow expression inside any run: body (build.yml and ci.yml)', () =>
     bodies.forEach((b, i) => assert.doesNotMatch(b, /\$\{\{/, `${f}: run block ${i + 1} holds an expression`));
   }
   assert.ok(runBodiesOf(read('build.yml')).length >= 10, 'build.yml: fewer run blocks than expected');
+});
+
+// ---- release notes (sortie 10): the draft step's own shell is extracted and executed ----
+
+const DRAFT_STEP = 'Create the draft release (idempotent)';
+const createJob = jobs['create-release'];
+// The executing tests need GNU sed (`\xEF` escapes) and a Linux runner like the workflow's.
+const runOk = bashOk && process.platform === 'linux';
+const runSkip = !runOk && 'needs bash on linux (GNU sed)';
+
+/** The draft step's `run:` body, dedented to its minimum common indent. */
+function draftScript() {
+  const bodies = runBodiesOf(stepOf(createJob, DRAFT_STEP));
+  assert.equal(bodies.length, 1, 'expected one run body in the draft step');
+  const lines = bodies[0].split('\n');
+  const indents = lines.filter((l) => l.trim() !== '').map((l) => l.search(/\S/));
+  const min = Math.min(...indents);
+  return lines.map((l) => l.slice(min)).join('\n') + '\n';
+}
+
+/** Run the extracted splitter on `content` (string or Buffer). */
+function split(content, base, tag, cand, { noContent = false } = {}) {
+  const [fn] = functionTexts('split_release_notes', createJob);
+  assert.ok(fn, 'split_release_notes not found in create-release');
+  const dir = mkdtempSync(path.join(tmpdir(), 'goldfinch-split-'));
+  try {
+    const f = path.join(dir, 'in.md');
+    if (!noContent) writeFileSync(f, content);
+    const r = spawnSync(
+      'bash',
+      [
+        '--noprofile',
+        '--norc',
+        '-c',
+        `${fn}\nsplit_release_notes "$@"`,
+        'bash',
+        f,
+        base,
+        tag,
+        cand ? '1' : '0',
+        path.join(dir, 'title'),
+        path.join(dir, 'body')
+      ],
+      { encoding: 'utf8' }
+    );
+    const ok = r.status === 0;
+    return {
+      ok,
+      reason: r.stderr.trim(),
+      title: ok ? readFileSync(path.join(dir, 'title'), 'utf8') : null,
+      body: ok ? readFileSync(path.join(dir, 'body'), 'utf8') : null,
+      stdout: r.stdout,
+      dir: null
+    };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('split_release_notes: exactly one definition, in create-release', () => {
+  assert.equal(functionTexts('split_release_notes', createJob).length, 1);
+  assert.equal(functionTexts('split_release_notes').length, 1);
+});
+
+test('split_release_notes: every docs/releases/v*.md splits for its own version', { skip: runSkip }, () => {
+  const dir = path.join(ROOT, 'docs', 'releases');
+  const files = readdirSync(dir).filter((n) => /^v\d+\.\d+\.\d+\.md$/.test(n));
+  assert.ok(files.length > 0, 'no notes files found');
+  for (const n of files) {
+    const base = n.slice(1, -3);
+    const r = split(readFileSync(path.join(dir, n)), base, `v${base}`, false);
+    assert.ok(r.ok, `${n}: ${r.reason}`);
+    assert.ok(r.title.startsWith(`v${base} `), `${n}: title ${r.title}`);
+    assert.ok(r.body.trim().length > 0, n);
+  }
+});
+
+test('split_release_notes: rejects malformed files with a reason word', { skip: runSkip }, () => {
+  const B = '1.2.3';
+  const T = 'v1.2.3';
+  const body = '\nSummary line.\n';
+  const bad = (content, reason, label) => {
+    const r = split(content, B, T, false);
+    assert.equal(r.ok, false, `${label}: should fail`);
+    assert.equal(r.reason, reason, label);
+    assert.equal(r.stdout, '', `${label}: nothing on stdout`);
+  };
+  bad(`v1.2.3 — x${body}`, 'no-title-line', 'missing "# "');
+  bad(`#v1.2.3 — x${body}`, 'no-title-line', 'no space after #');
+  bad(`# v1.2.3${body}`, 'no-title-text', 'no title text');
+  bad(`# v1.2.3 ${body}`, 'trailing-space', 'trailing space after version');
+  bad(`# v1.2.3 — x ${body}`, 'trailing-space', 'trailing space');
+  bad(`# v1.2.4 — x${body}`, 'wrong-version', 'wrong version');
+  bad(`# v1.2.30 — x${body}`, 'wrong-version', 'version prefix only');
+  bad('# v1.2.3 — x\n', 'empty-body', 'no body');
+  bad('# v1.2.3 — x\n\n\n', 'empty-body', 'blank body');
+  bad('# v1.2.3 — x\n  \t \n', 'empty-body', 'whitespace-only body');
+  bad('', 'no-title-line', 'empty file');
+  bad(`# v1.2.3 — x\x01y${body}`, 'control-byte', 'control byte in title');
+  bad(`# v1.2.3 — x\ty${body}`, 'control-byte', 'tab in title');
+  bad(`# v1.2.3 — x\x7fy${body}`, 'control-byte', 'DEL in title');
+  bad(`# v1.2.3 — x\ry${body}`, 'control-byte', 'lone CR inside title');
+  bad(
+    Buffer.concat([Buffer.from('# v1.2.3 — x\n\nbody'), Buffer.from([0]), Buffer.from('more\n')]),
+    'control-byte',
+    'NUL in body'
+  );
+  bad(`# v1.2.3 ${'a'.repeat(194)}${body}`, 'title-too-long', '201-byte title');
+  const big = `# v1.2.3 — x\n\n${'a'.repeat(65536)}\n`;
+  bad(big, 'too-large', '65,537+ bytes');
+  const h = '# v1.2.3 — x\n\n';
+  const exact = (n) => h + 'a'.repeat(n - Buffer.byteLength(h) - 1) + '\n';
+  bad(exact(65537), 'too-large', 'exactly 65,537 bytes');
+  const r = split('', B, T, false, { noContent: true });
+  assert.equal(r.ok, false, 'missing file fails');
+});
+
+test('split_release_notes: accepted shapes and the candidate rewrite', { skip: runSkip }, () => {
+  const ok = (content, base, tag, cand) => {
+    const r = split(content, base, tag, cand);
+    assert.ok(r.ok, r.reason);
+    return r;
+  };
+  const text = '# v1.2.3 — Title here\n\nSummary.\n\n## Added\n\n- thing\n\n# v9.9.9 later heading\n';
+  let r = ok(text, '1.2.3', 'v1.2.3', false);
+  assert.equal(r.title, 'v1.2.3 — Title here');
+  assert.equal(r.body, 'Summary.\n\n## Added\n\n- thing\n\n# v9.9.9 later heading\n', 'only line 1 is the title');
+
+  r = ok(text.replace(/\n/g, '\r\n'), '1.2.3', 'v1.2.3', false);
+  assert.equal(r.title, 'v1.2.3 — Title here', 'CRLF');
+  assert.ok(!r.body.includes('\r'));
+  r = ok(Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(text)]), '1.2.3', 'v1.2.3', false);
+  assert.equal(r.title, 'v1.2.3 — Title here', 'BOM');
+
+  // 200-byte em-dash title passes; the exactly-65,536-byte file passes.
+  const dashTitle = `v1.2.3 ${'—'.repeat(64)}x`;
+  assert.equal(Buffer.byteLength(dashTitle), 200);
+  r = ok(`# ${dashTitle}\n\nbody\n`, '1.2.3', 'v1.2.3', false);
+  assert.equal(r.title, dashTitle);
+  const head = '# v1.2.3 — x\n\n';
+  r = ok(head + 'a'.repeat(65536 - Buffer.byteLength(head) - 1) + '\n', '1.2.3', 'v1.2.3', false);
+  assert.equal(r.body.length, 65536 - Buffer.byteLength(head));
+
+  // Shell metacharacters stay data.
+  const dir = mkdtempSync(path.join(tmpdir(), 'goldfinch-split-'));
+  try {
+    const marker = path.join(dir, 'pwned');
+    const nasty = `# v1.2.3 — $(touch ${marker}) \`touch ${marker}\` "q" 'q'\n\nbody $(touch ${marker})\n`;
+    r = ok(nasty, '1.2.3', 'v1.2.3', false);
+    assert.equal(r.title, `v1.2.3 — $(touch ${marker}) \`touch ${marker}\` "q" 'q'`);
+    assert.equal(existsSync(marker), false, 'no side effect');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+
+  for (const tag of ['v1.2.3-rc.1', 'v1.2.3-alpha-1', 'v1.2.3-rc.1+b2']) {
+    r = ok(text, '1.2.3', tag, true);
+    assert.equal(r.title, `${tag} — Title here`, tag);
+    assert.ok(r.body.startsWith('Release candidate for v1.2.3 — for testing, not general use.\n\nSummary.\n'), tag);
+  }
+  r = ok(text, '1.2.3', 'v1.2.3+build', false);
+  assert.equal(r.title, 'v1.2.3 — Title here');
+  assert.ok(r.body.startsWith('Summary.'));
+});
+
+/** A stub `gh` first on PATH; records argv (unit-separator joined, one call per line). */
+function runStep(scenario) {
+  const dir = mkdtempSync(path.join(tmpdir(), 'goldfinch-step-'));
+  try {
+    const stubDir = path.join(dir, 'bin');
+    mkdirSync(stubDir);
+    const log = path.join(dir, 'calls.log');
+    writeFileSync(log, '');
+    writeFileSync(
+      path.join(stubDir, 'gh'),
+      `#!/bin/bash
+(IFS=$'\\x1f'; echo "$*") >> "$STUB_LOG"
+notes_file() { while [ $# -gt 0 ]; do [ "$1" = --notes-file ] && { echo "$2"; return; }; shift; done; }
+case "$1 $2" in
+  "api -H")
+    path="\${@: -1}"
+    if [ -n "$STUB_API_FILE" ] && [ "$path" = "repos/$GITHUB_REPOSITORY/contents/$STUB_API_PATH?ref=$GITHUB_SHA" ]; then cat "$STUB_API_FILE"; exit 0; fi
+    echo '{"message":"Not Found"}'; echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
+  "release list") [ "$STUB_STATE" = fail ] && exit 1; echo "$STUB_STATE"; exit 0 ;;
+  "release view") [ "$STUB_VIEW" = exists ] && exit 0; exit 1 ;;
+  "release create") f="$(notes_file "$@")"; [ -n "$f" ] && cp "$f" "$STUB_DIR/created-body"; exit "\${STUB_CREATE_RC:-0}" ;;
+  "release edit") f="$(notes_file "$@")"; [ -n "$f" ] && cp "$f" "$STUB_DIR/edited-body"; exit "\${STUB_EDIT_RC:-0}" ;;
+esac
+echo "unexpected gh call: $*" >&2; exit 99
+`,
+      { mode: 0o755 }
+    );
+    const script = path.join(dir, 'step.sh');
+    writeFileSync(script, draftScript());
+    const summary = path.join(dir, 'summary.md');
+    const tmp = path.join(dir, 'tmp');
+    mkdirSync(tmp);
+    const base = scenario.tag.replace(/^v/, '').split(/[-+]/)[0];
+    const env = {
+      PATH: `${stubDir}:/usr/bin:/bin`,
+      HOME: dir,
+      GITHUB_REF_NAME: scenario.tag,
+      GITHUB_REPOSITORY: 'owner/repo',
+      GITHUB_SHA: 'abc123',
+      RUNNER_TEMP: tmp,
+      GITHUB_STEP_SUMMARY: summary,
+      STUB_LOG: log,
+      STUB_DIR: dir,
+      STUB_API_PATH: `docs/releases/v${scenario.serves ?? base}.md`,
+      STUB_STATE: scenario.state ?? 'none',
+      STUB_VIEW: scenario.view ?? '',
+      STUB_CREATE_RC: String(scenario.createRc ?? 0),
+      STUB_EDIT_RC: String(scenario.editRc ?? 0)
+    };
+    if (scenario.file !== undefined) {
+      writeFileSync(path.join(dir, 'served.md'), scenario.file);
+      env.STUB_API_FILE = path.join(dir, 'served.md');
+    }
+    const which = spawnSync('bash', ['-c', 'command -v gh'], { env, encoding: 'utf8' });
+    assert.equal(which.stdout.trim(), path.join(stubDir, 'gh'), 'the stub must be the gh the step can reach');
+    const r = spawnSync('bash', ['--noprofile', '--norc', '-eo', 'pipefail', script], { env, encoding: 'utf8' });
+    const calls = readFileSync(log, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => l.split('\x1f'));
+    const rd = (n) => (existsSync(path.join(dir, n)) ? readFileSync(path.join(dir, n), 'utf8') : null);
+    return {
+      status: r.status,
+      stdout: r.stdout,
+      stderr: r.stderr,
+      calls,
+      created: calls.find((c) => c[0] === 'release' && c[1] === 'create'),
+      edited: calls.find((c) => c[0] === 'release' && c[1] === 'edit'),
+      createdBody: rd('created-body'),
+      editedBody: rd('edited-body'),
+      summary: existsSync(summary) ? readFileSync(summary, 'utf8').trim() : '',
+      leftovers: readdirSync(tmp)
+    };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const NOTES = '# v1.2.3 — The title\n\nSummary line.\n\n## Added\n\n- a thing\n';
+const arg = (call, flag) => call[call.indexOf(flag) + 1];
+
+test('draft step: stable tag with a file creates the draft with the file title and text', { skip: runSkip }, () => {
+  const r = runStep({ tag: 'v1.2.3', file: NOTES });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(r.created && !r.edited);
+  assert.equal(arg(r.created, '--title'), 'v1.2.3 — The title');
+  assert.ok(r.created.includes('--draft') && !r.created.includes('--generate-notes'));
+  assert.equal(r.createdBody, 'Summary line.\n\n## Added\n\n- a thing\n');
+  assert.equal(r.summary, 'Release notes: docs/releases/v1.2.3.md');
+  assert.deepEqual(r.leftovers, [], 'the work directory is removed');
+  assert.ok(r.calls[0].join(' ').includes('contents/docs/releases/v1.2.3.md?ref=abc123'));
+});
+
+test('draft step: candidates read the target file; edge tags; +build is stable', { skip: runSkip }, () => {
+  for (const tag of ['v1.2.3-rc.1', 'v1.2.3-alpha-1', 'v1.2.3-rc.1+b2']) {
+    const r = runStep({ tag, file: NOTES });
+    assert.equal(r.status, 0, `${tag}: ${r.stderr}`);
+    assert.equal(arg(r.created, '--title'), `${tag} — The title`, tag);
+    assert.ok(
+      r.createdBody.startsWith('Release candidate for v1.2.3 — for testing, not general use.\n\nSummary line.'),
+      tag
+    );
+    assert.equal(r.summary, 'Release notes: docs/releases/v1.2.3.md');
+  }
+  const r = runStep({ tag: 'v1.2.3+build', file: NOTES });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(arg(r.created, '--title'), 'v1.2.3 — The title');
+  assert.ok(r.createdBody.startsWith('Summary line.'));
+});
+
+test('draft step: no file / malformed file / gh api failure falls back to generated notes', { skip: runSkip }, () => {
+  const fallback = (r, reason) => {
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(r.created && r.created.includes('--generate-notes') && !r.created.includes('--notes-file'));
+    assert.equal(arg(r.created, '--title'), r.created[2]);
+    assert.ok(r.stdout.includes(`::warning::Release notes: ${reason}; using generated notes`), r.stdout);
+    assert.equal(r.summary, `Release notes: generated (reason: ${reason})`);
+  };
+  fallback(runStep({ tag: 'v1.2.3' }), 'missing-or-unreadable');
+  fallback(runStep({ tag: 'v1.2.3', file: 'no title line\n\nbody\n' }), 'no-title-line');
+  fallback(runStep({ tag: 'v1.2.3', file: '# v1.2.4 — x\n\nbody\n' }), 'wrong-version');
+  fallback(runStep({ tag: 'v1.2.3', file: '# v1.2.3 — x\n' }), 'empty-body');
+  // Only the target's file is served: a candidate that looked up its own tag would 404.
+  fallback(runStep({ tag: 'v1.2.3-rc.1', serves: '1.2.3-rc.1', file: NOTES }), 'missing-or-unreadable');
+  const r = runStep({ tag: 'v1.2.3', file: NOTES, serves: '9.9.9' });
+  fallback(r, 'missing-or-unreadable');
+});
+
+test(
+  'draft step: existing draft is re-edited from the file; published and unknown are left alone',
+  { skip: runSkip },
+  () => {
+    let r = runStep({ tag: 'v1.2.3', file: NOTES, state: 'draft' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(r.edited && !r.created);
+    assert.equal(arg(r.edited, '--title'), 'v1.2.3 — The title');
+    assert.equal(r.editedBody, 'Summary line.\n\n## Added\n\n- a thing\n');
+    assert.equal(r.summary, 'Release notes: docs/releases/v1.2.3.md');
+
+    r = runStep({ tag: 'v1.2.3', state: 'draft' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(!r.edited && !r.created);
+    assert.equal(r.summary, 'Release notes: existing draft left unchanged (reason: missing-or-unreadable)');
+
+    r = runStep({ tag: 'v1.2.3', file: NOTES, state: 'published' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(!r.edited && !r.created, 'a published release is never edited');
+    assert.equal(r.summary, 'Release notes: existing published release left unchanged');
+
+    // The list read fails: today's existence check, no edit either way.
+    r = runStep({ tag: 'v1.2.3', file: NOTES, state: 'fail', view: 'exists' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(!r.edited && !r.created);
+    assert.equal(r.summary, 'Release notes: existing release left unchanged');
+    r = runStep({ tag: 'v1.2.3', file: NOTES, state: 'fail', view: '' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(r.created && !r.edited);
+    assert.equal(arg(r.created, '--title'), 'v1.2.3 — The title');
+  }
+);
+
+test(
+  'draft step: gh failures — a failing api read still creates; create/edit failures fail the step',
+  { skip: runSkip },
+  () => {
+    // The api stub exits non-zero on a missing file; the step still reaches create and the summary.
+    const r = runStep({ tag: 'v1.2.3' });
+    assert.equal(r.status, 0);
+    assert.ok(r.created.includes('--generate-notes'));
+    assert.ok(r.summary.startsWith('Release notes: generated'));
+    assert.notEqual(runStep({ tag: 'v1.2.3', file: NOTES, createRc: 1 }).status, 0, 'create failure fails the step');
+    assert.notEqual(
+      runStep({ tag: 'v1.2.3', file: NOTES, state: 'draft', editRc: 1 }).status,
+      0,
+      'edit failure fails the step'
+    );
+  }
+);
+
+test('draft step: parses under bash -n', { skip: !bashOk && 'no bash' }, () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'goldfinch-step-'));
+  try {
+    writeFileSync(path.join(dir, 's.sh'), draftScript());
+    execFileSync('bash', ['-n', path.join(dir, 's.sh')]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('release state jq expression gives none / draft / published (when jq is installed)', () => {
+  const m = draftScript().match(/--jq '([^']+)'/);
+  assert.ok(m, 'no --jq expression in the draft step');
+  let jq = true;
+  try {
+    execFileSync('jq', ['--version']);
+  } catch {
+    jq = false;
+  }
+  if (!jq) return;
+  const run = (tag, list) =>
+    execFileSync('jq', ['-r', m[1]], {
+      input: JSON.stringify(list),
+      env: { ...process.env, GITHUB_REF_NAME: tag },
+      encoding: 'utf8'
+    }).trim();
+  assert.equal(run('v1', []), 'none');
+  assert.equal(run('v1', [{ tagName: 'v2', isDraft: true }]), 'none');
+  assert.equal(run('v1', [{ tagName: 'v1', isDraft: true }]), 'draft');
+  assert.equal(run('v1', [{ tagName: 'v1', isDraft: false }]), 'published');
+});
+
+test('create-release: no checkout, no project code, one credential; the notes path and guards are pinned', () => {
+  assert.doesNotMatch(createJob, /actions\/checkout/);
+  assert.doesNotMatch(runLines(createJob), /(?:^|[\s;&|(`$])(?:npm|npx|node)(?=\s|$)/m);
+  assert.doesNotMatch(runLines(createJob), /scripts\//);
+  assert.deepEqual(jobPermissions(createJob), ['contents: write']);
+  const step = stepOf(createJob, DRAFT_STEP);
+  assert.deepEqual(
+    [...step.matchAll(/^\s+([A-Z_]+): \$\{\{.*\}\}\s*$/gm)].map((m) => m[1]),
+    ['GH_TOKEN']
+  );
+  const [body] = runBodiesOf(step);
+  assert.doesNotMatch(body, /\$\{\{/);
+  assert.ok(body.includes('?ref=${GITHUB_SHA}') && body.includes('v${base}.md'));
+  assert.ok(body.includes('base="${ver%%[-+]*}"'));
+  assert.ok(body.includes('--generate-notes'));
+  // The edit is reachable only from the draft branch.
+  const edit = body.indexOf('gh release edit');
+  assert.ok(edit > body.indexOf('draft)'), 'edit must sit under the draft branch');
+  assert.equal((body.match(/gh release edit/g) || []).length, 1);
+  assert.ok(body.slice(body.indexOf('draft)'), edit).indexOf('published)') < 0, 'edit is not under published');
+});
+
+test('publish-release never sets a title or notes', () => {
+  assert.doesNotMatch(jobs['publish-release'], /--notes|--notes-file|--title|--generate-notes/);
 });
