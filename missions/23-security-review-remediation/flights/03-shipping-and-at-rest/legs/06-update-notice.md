@@ -1,6 +1,6 @@
 # Leg: update-notice
 
-**Status**: landed
+**Status**: completed
 **Flight**: [Shipping and At-Rest](../flight.md)
 
 > Developer design review 2026-11-17 (against leg 05 as built): **approve with changes**, incorporated — the kebab state guards against a boot read overwriting a newer push and has a reset for tests; the model's own import needs its own route on the settings host; the version check reuses `parseStableTag('v' + …)` so no landed file changes; two existing behavior specs assume the kebab's default rows and must run with the override unset; keyboard-opening the kebab lands on the update row when it is present (accepted); the kebab's real-trigger proof is by eye and its dispatch link gets a unit case; the behavior spec was corrected in six places (coordinates for `click`, the Settings and second-window recipes, stdout capture, key re-capture after relaunch, which rows the hidden notice actually discriminates, the fixture's exact failure bodies).

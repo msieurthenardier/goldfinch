@@ -80,8 +80,9 @@ Windows on ARM gets the x64 installer.
   while this download is still in progress starts nothing. "This download" is a record at exactly that
   address, or one with no identity whose saved file name is the expected installer name (also with the
   ` (n)` suffix added before the extension), because GitHub redirects the request and the stored address
-  is probably the redirect target. A real redirecting download has not been observed yet; the first one
-  is the next thing to check.
+  is probably the redirect target. The operator saw a real download from this button on Windows on a release
+  candidate (`v0.19.15-rc.3`, 2026-11-17; Flight 3 flight log, leg 11). It has not been seen on macOS or Linux,
+  and the walk record does not say what address the finished record held.
 - **The app never opens, runs or verifies the file.** Opening it from Downloads goes through the existing
   single open function, and the operating system then asks before running it. To check the file, use the
   digest and attestation commands in the README.

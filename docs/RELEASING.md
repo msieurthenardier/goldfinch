@@ -31,9 +31,11 @@ What a release carries beyond the files: GitHub's SHA-256 digest for each asset 
 page; `gh api repos/msieurthenardier/goldfinch/releases/latest -q '.assets[] | "\(.name) \(.digest)"'`),
 one build provenance attestation per installer (made by the `upload` job), and, once the repository's
 immutable-releases setting is on, a release attestation made by GitHub when the release is published. No
-checksum file is published. **Nothing in this paragraph about attestations has run yet**: the first
-tag build is where the attest step first executes, and the first immutable release is where the release
-attestation first exists (the acceptance walk records both here).
+checksum file is published. The attest step ran on all three release candidates of the acceptance walk
+(2026-11-17): five subjects each, with `contents: write`, `id-token: write` and `attestations: write`
+only (`artifact-metadata: write` is not needed). `v0.19.15-rc.2` is the first immutable release, so the
+first with a release attestation; the walk verified one with `gh release verify` (Flight 3 flight log,
+leg 11).
 
 **A manual dispatch runs everything except the upload and the release steps**: it builds, checks and
 stages the installers and runs the `upload` job's name and digest checks, and publishes nothing. The
@@ -60,9 +62,10 @@ What this proves is that the tagged commit is **reachable from the default branc
 branch head, and not that it passed checks. It matters because the app's update notice believes
 `releases/latest`, so a stable release must come from history that is on `main`. A refused run is
 recoverable (merge, then tag the merged commit); a stable release from unreviewed history is not. The
-check runs for real for the first time at the acceptance walk (the local demonstration used the same
-function against real commits but not a tag push, so `GITHUB_SHA` for an annotated tag and the job
-token's right to call compare are unproven until then).
+check ran at the acceptance walk (2026-11-17) on an annotated stable-looking tag on a commit not on `main`: compare
+answered `ahead` and the run refused, creating no release. That showed `GITHUB_SHA` on an annotated tag is
+the tagged commit and that the job's token may call the compare endpoint. **Still not exercised:** a stable
+tag on a `main` commit passing the check; the next real release is its first run.
 
 ## Cut a release
 
@@ -121,22 +124,27 @@ tag name: the name is spent, and a git tag for a published release cannot be mov
 release exists. So never re-tag. To undo a bad release, publish the **next patch version** with the fix
 (the title, notes and prerelease / latest flags of the bad one stay editable, so it can be marked a
 prerelease or annotated). A release published before immutability was turned on is not covered and can
-still be deleted with its tag; the first immutable release will be named here once known.
+still be deleted with its tag; `v0.19.15-rc.2` is the first immutable release (`v0.19.15-rc.1` was
+published before the setting was on and is not immutable).
 
 ## One-time repository settings
 
 Two settings, applied once by the repository owner (the exact commands, confirmation reads and undo
 calls are in the Mission 23 flight 03 log, *Leg 08 operator runbook*). Neither is applied by the workflow.
+Both are applied and were observed at the acceptance walk (2026-11-17; Flight 3 flight log, leg 11).
 
 - **A tag ruleset on `v*`** restricting creation, updates and deletion, with the repository-administrator
-  role on the bypass list so the owner's own tag push still works. Reason: without it anyone with write
+  role on the bypass list so the owner's own tag push still works (ruleset `release-tags`; GitHub stores the `update` rule
+  without the `update_allows_fetch_and_merge` parameter for a tag ruleset; the owner's tag pushes are
+  accepted under it, and it does not stop the workflow's token creating a release for an existing tag). Reason: without it anyone with write
   access can create or move a `v*` tag, and a tag is what fires the release workflow.
 - **Immutable releases** (Settings -> Releases). Reason: after publishing, the assets and the tag are
   locked, so a published installer cannot be swapped and a name cannot be reused; GitHub also writes a
-  release attestation. Applies only to releases published after it is enabled.
+  release attestation. Applies only to releases published after it is enabled. A prerelease is immutable
+  like any other release; a draft stayed writable until it was published.
 
-Order: the tag ruleset, then the first release candidate (proves the tag path, the attestation, and that
-the ruleset lets the workflow create its release), then immutability, then a second candidate (to see a
+Order, as run: the tag ruleset, then the first release candidate (proved the tag path, the attestation, and
+that the ruleset lets the workflow create its release), then immutability, then a second candidate (showed a
 prerelease is immutable too).
 
 ## Verifying a release
@@ -144,9 +152,12 @@ prerelease is immutable too).
 For a downloader, `README.md` has the commands (digest comparison, `gh attestation verify <file> -R
 msieurthenardier/goldfinch --signer-workflow msieurthenardier/goldfinch/.github/workflows/build.yml`, and
 `gh release verify` / `gh release verify-asset` for an immutable release). They need a recent GitHub CLI
-with those commands. **None of them has been run yet**: the development host's `gh` (2.45.0) has neither
-`gh attestation` nor `gh release verify`; every one is first run, exactly as written, at the acceptance
-walk. What a pass shows: the file was built by this repository's release workflow from the named commit.
+with those commands. They were run at the acceptance walk (2026-11-17) on Linux with GitHub CLI 2.104.0:
+`gh attestation verify` as written in the README succeeded on a downloaded installer (and failed for a wrong
+workflow and for a modified file); `gh release verify <tag>` and `gh release verify-asset <tag> <file>`
+succeeded on an immutable candidate. In a terminal a successful `gh attestation verify` prints the policy it
+enforced and "Verification succeeded!"; with output redirected it prints nothing and exits 0. The CLI on the
+development host (2.45.0) has none of these commands. **Not run on Windows or macOS.** What a pass shows: the file was built by this repository's release workflow from the named commit.
 It does not show the code is safe and is not an operating-system signature (SmartScreen and Gatekeeper
 still warn).
 
@@ -216,9 +227,8 @@ Each is a recorded decision, with the reason and who decided it, in the *Disposi
 - **No integrity check of the code on disk** (finding 8): `asar: false` is load-bearing, and the two archive-integrity
   fuses need `asar`.
 - **Launch switches left honoured or not covered** (finding 19): see *Launch switches* below.
-- **Awaiting the operator's repository settings, not accepted:** the tag ruleset and immutable releases (*One-time
-  repository settings*). Until they are applied the release-side claims about protected tags and immutable releases
-  are not in force.
+- **Repository settings, applied and observed (not accepted risks):** the tag ruleset and immutable releases (*One-time
+  repository settings*), applied and observed at the acceptance walk, 2026-11-17.
 
 ## Launch switches
 
@@ -289,8 +299,7 @@ in doubt it goes in the refused table.
 
 Things the development host (Linux under WSL) cannot show, carried from Mission 23's flights. Each has one owner
 column: **walk** says whether Flight 3's leg `hat-and-alignment` (the acceptance walk on a release candidate; flight
-plan DD8) is planned to walk it. That leg strikes an item it has walked; this section does not strike anything
-until then. An item nobody has walked is not accepted by eye, it is unwalked.
+plan DD8) is planned to walk it. That leg strikes an item it has walked (the row stays, marked walked with the date and candidate). An item nobody has walked is not accepted by eye, it is unwalked.
 
 | # | What to look at | Platform | Walk |
 | --- | --- | --- | --- |
@@ -301,12 +310,13 @@ until then. An item nobody has walked is not accepted by eye, it is unwalked.
 | 5 | **Reveal confirmation dialog (Flight 2).** With an admin automation client attached, click the eye on a vault password; a native dialog appears parented to the window with Cancel as the default (press Enter: nothing is revealed), the window is usable the moment the dialog is answered, and switching tabs while it is open cancels it. | Windows, macOS | Planned (DD8) |
 | 6 | **Vault upgrade on a real profile (Flight 2).** Before the first unlock on this version, copy the `vaults` directory aside (paths are in the vault-upgrade release note under *Notes* below); unlock, and every vault and item is present; an earlier version then cannot open the profile. | Any | Planned (DD8) |
 | 7 | **Jar-key shortcuts (Flight 2).** With a jar-scoped automation key, send a quit chord (Ctrl+Q / Cmd+Q) with `pressKey` to a tab; the app does not quit. Press the same chord on the keyboard; it does. | Windows, macOS | Planned (DD8) |
-| 8 | **The kebab menu's "Update available" item (Flight 3).** With a newer release offered, the kebab shows the item, it opens the release page in a tab, and it is absent when there is no newer release. Seen only through the model and unit tests so far. | Any (a desktop with a display) | Planned (the plan lists "the kebab item" by eye at the walk) |
+| 8 | **The kebab menu's "Update available" item (Flight 3).** With a newer release offered, the kebab shows the item, it opens the release page in a tab, and it is absent when there is no newer release. Seen only through the model and unit tests so far. | Any (a desktop with a display) | **Walked** 2026-11-17, `v0.19.15-rc.3`, Windows (operator: pass). Linux and macOS not seen. |
 | 9 | **A refused launch switch on an installed build (Flight 3).** Launch the installed app with a refused switch (for example `--js-flags=--expose-gc`): it exits with code 64 and shows an error box naming the switch. On Linux the box printed two stderr lines and no window. | Windows, macOS | Planned (the plan lists "a refused switch on an installed build") |
 | 10 | **Windows `/switch` forms and case (Flight 3).** `goldfinch.exe /remote-debugging-port=9222` and a differently cased form are stripped or refused the same way as the `--` forms. Handled by Chromium's parser; never run on Windows. | Windows | Not named in the plan; the Flight Director assigns it |
 | 11 | **The macOS build on real hardware (Flight 3).** The app opens after the fuse change and the ad-hoc re-sign. Verified only on the build runner (`codesign` valid, one start check), never on a Mac. | macOS (Apple Silicon) | **Not walkable by the operator** (no Apple hardware, ruling 2026-11-17); the release notes ask macOS users to report a build that will not open |
-| 12 | **The Settings About section's spacing (Flight 3).** The version line, the update status, the button and the checkbox row sit with sensible spacing (the checkbox row sat directly under the button in the spec run). | Any | Planned (carried to the leg in the flight log, 2026-11-17) |
+| 12 | **The Settings About section's spacing (Flight 3).** The version line, the update status, the button and the checkbox row sit with sensible spacing (the checkbox row sat directly under the button in the spec run). | Any | **Walked** 2026-11-17, `v0.19.15-rc.3`, Windows (operator: pass, after the layout fix). |
 | 13 | **Flight 1's unwalked acceptance groups 2 to 6 and Flight 2's groups 3 to 7** (sheet cards behind the newly guarded channels, tabs and media, downloads and address bar, a second window, wording; the rest of Flight 2's walk). Each has unit or behavior-test coverage; nobody has looked. | Any | Not in the plan's seven; no owner assigned; the Flight Director decides |
+| 14 | **The About "Download now" button (Flight 3).** Press it on macOS and on Linux; the installer for that platform downloads. A real download was seen only on Windows (`v0.19.15-rc.3`, operator, 2026-11-17). | macOS, Linux | Not walkable by the operator on macOS; Linux not assigned; the Flight Director decides |
 
 ## Notes
 

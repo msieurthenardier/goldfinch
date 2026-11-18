@@ -1,6 +1,6 @@
 # Leg: runtime-fuses
 
-**Status**: landed
+**Status**: completed
 **Flight**: [Shipping and At-Rest](../flight.md)
 
 ## Objective

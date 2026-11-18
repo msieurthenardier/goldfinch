@@ -1,6 +1,6 @@
 # Leg: dependencies
 
-**Status**: landed
+**Status**: completed
 **Flight**: [Shipping and At-Rest](../flight.md)
 
 ## Objective

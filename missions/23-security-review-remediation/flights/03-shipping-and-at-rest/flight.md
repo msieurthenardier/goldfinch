@@ -1,6 +1,6 @@
 # Flight: Shipping and At-Rest
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Security Review Remediation](../../mission.md)
 
 > Architect design review: **approve with changes** (2026-11-16). Incorporated: the macOS ad-hoc signature is reset after the fuse flip (DD2); the build is three jobs so that neither write access nor the right to attest sits beside dependency install scripts, and asset names are fixed and asserted (DD3, DD4); the stable-tag check no longer depends on checkout depth (DD3); the update notice is one `net.fetch` on the default session, has a read channel as well as a push, reacts to its setting mid-run, opens its link through a no-argument channel, and is split into two legs (DD1); the switch list is widened and the admin environment flag recorded as accepted (DD5); the acceptance candidate is tagged below the current stable version so the real notice shows (DD8); `release-pipeline` split in two.
@@ -197,6 +197,7 @@ Drawn up before the leg list (Flight 2 debrief, recommendation 2): one leg per d
 9. ~~`cookie-encryption`~~ — **not flown.** Operator ruling 2026-11-17 on DD6, after leg `packaged-measurements`: "accept cookies as not fixed". Recorded in the disposition table with the measured reasons (nominal on a host with no keyring; one-way; unverifiable on macOS, where the keychain entry is tied to a per-build ad-hoc signature).
 10. `dispositions-and-docs` — the table of findings 1–22 (fixed-and-pinned with the pinning test, or accepted with the reason) written into `mission.md`; the sweep of CLAUDE.md and `docs/` for any claim a finding named as false; the two standing planning rules from the Flight 2 debrief added to CLAUDE.md's *Project-specific planning rules*; the release checklist in `docs/RELEASING.md` given an owner and the items this walk covers struck from it afterwards. *Tier: low.*
 11. `hat-and-alignment` *(interactive)* — DD8.
+12. `update-download` — added at the walk on the operator's request: a "Download now" button in Settings → About (DD1 narrowed to "never automatically").
 
 Out of this flight, by design: the confirmation dialog's primitive (Flight 2 debrief, recommendation 3 — its own sortie); splitting `vault-store.js` and `main.js` (maintenance work); squawks 0179–0194, none of which shares a file with this flight; popup and tab burst limits (0187, a sortie).
 

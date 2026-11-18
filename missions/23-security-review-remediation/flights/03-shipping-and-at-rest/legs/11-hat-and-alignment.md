@@ -1,6 +1,6 @@
 # Leg: hat-and-alignment
 
-**Status**: in-flight
+**Status**: completed
 **Flight**: [Shipping and At-Rest](../flight.md)
 **Kind**: interactive — acceptance on a real public release candidate. Operator instruction 2026-11-17: "you can do all of that except Ill install the release candidate" — the Flight Director applies the two repository settings, pushes the candidate tags, runs the refusal test and the verification commands; the operator installs the candidate and reports what they see. No crew agent runs this leg on its own.
 

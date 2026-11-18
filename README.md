@@ -45,8 +45,12 @@ gh attestation verify <file> -R msieurthenardier/goldfinch \
   --signer-workflow msieurthenardier/goldfinch/.github/workflows/build.yml
 ```
 
-Once a release is immutable, `gh release verify <tag>` and `gh release verify-asset <tag> <file>` check
-the release's own attestation and that an asset is the one that was published.
+Releases published since immutable releases were turned on (the first is v0.19.15-rc.2) are immutable:
+`gh release verify <tag>` and `gh release verify-asset <tag> <file>` check the release's own attestation and
+that an asset is the one that was published. These commands were run on Linux with GitHub CLI 2.104.0, which
+is recent enough; older versions (2.45.0 has none of them) lack them. In a terminal a successful
+`gh attestation verify` prints the policy it enforced and "Verification succeeded!"; with its output redirected
+it prints nothing and exits 0. They were not run on Windows or macOS.
 
 This shows that the file was built by this repository's release workflow from the commit the attestation
 names. It does not show that the code is safe, and it is not an operating-system signature: Windows

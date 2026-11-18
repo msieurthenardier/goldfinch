@@ -1,6 +1,6 @@
 # Leg: update-check
 
-**Status**: landed
+**Status**: completed
 **Flight**: [Shipping and At-Rest](../flight.md)
 
 > Developer design review 2026-11-17: **approve with changes**, incorporated — the start and stop are wired through `app-lifecycle.js` (the ready chain lives there, and the settings store is not loaded at `main.js`'s top level); the channel counts are 206 → 209 with the three tests named; a 401 raises nothing because credentials are omitted, not because of the `login` guard; the default session's request listeners do see this request and AC9 says why that is harmless; the header assertion is a list of what must be absent, not an exact set; `checkEnabled` is the setting only; an inert checker never reaches the real endpoint.

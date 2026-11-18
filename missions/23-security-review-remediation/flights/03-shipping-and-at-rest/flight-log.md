@@ -566,3 +566,32 @@ An app-started download's record has no partition, so the downloads page shows "
 - On the four open dispositions, after the Flight Director explained each: **"ill take your recommendations"** — finding 14b accepted and documented (candidate sortie); NF6 / squawk 0187 accepted for this mission with the squawk standing; 13d (no re-key on revoke or master change) accepted, compromise rotation being the remedy; the update request's `Accept-Language` accepted and documented. `mission.md`'s Dispositions rows updated; no finding is left without a disposition.
 - On the user-name paths in earlier artifacts: **"clean the files"** — fourteen lines in seven files of Flights 1 and 2, two sortie legs and one squawk now carry neutral placeholders (`<session-scratch>`, `<repo>`). Git history is not rewritten.
 - **"go ahead and commit and public rc.3"** — the Flight Director commits, pushes the branch, and pushes `v0.19.15-rc.3`.
+
+### Docs brought up to date after the walk
+
+Written 2026-11-17 from this leg's record; no source, test, script or workflow file changed.
+
+- `docs/RELEASING.md`: the attestation paragraph, the stable-tag rule, *Rollback*, *One-time repository settings* and *Verifying a release* now state what ran (attestation on all three candidates; refusal of a stable-looking tag not on `main`; the ruleset and immutable releases applied; the verification commands run on Linux with GitHub CLI 2.104.0, not on Windows or macOS) and name `v0.19.15-rc.2` as the first immutable release. A stable tag passing the check is still marked not exercised. The checklist rows for the kebab item (8) and the About spacing (12) are marked walked (Windows, `v0.19.15-rc.3`, 2026-11-17); every other row is unchanged; a new row 14 covers "Download now" on macOS and Linux.
+- `README.md` *Verify your download*: says which commands were run and on what (Linux, CLI 2.104.0), that older CLIs lack them, what success looks like in a terminal and redirected, and that Windows and macOS were not run.
+- `CLAUDE.md` *Release / CI*: the same facts, briefly, and the first immutable release.
+- `docs/updates.md`: "Download now" was seen starting a real download on Windows; not seen on macOS or Linux; the walk does not say what address the finished record held.
+- `release-notes-draft.md`: what has and has not run, the Download now button's platform status, immutability, the operator notes; the macOS request is kept.
+- `mission.md` *Dispositions*: rows 3a, 7a, 7c, 18a, 18b and the verification paragraph. Outcomes: 7a to fixed, 7c to fixed, 18b to fixed, 18a to "fixed in part: refusal observed, a passing stable tag still to come". Finding-level counts are unchanged (findings 7 and 18 each still hold a part that is accepted or in part). No success criterion ticked.
+
+### Walk close — candidate 3 and the operator's verdict
+
+- `v0.19.15-rc.3` (commit `fcc5145`): run green, published as a prerelease with five installers, immutable, not latest.
+- The operator installed it over the previous candidate on Windows and reported, verbatim: **"pass - do realize we are missing an indicator in the app that shows an impending update, we can add that later"**. Covered by that pass, as asked of them: the version line on a prerelease build, the About layout, the notice, "Download now" (the first real download from that button), a repeat click during the download, the saved file name, the release-notes button and the kebab item. The report carried no per-item detail beyond "pass".
+- Disposition 3a moved to **fixed**: the installed candidates were offered v0.19.15 by the real endpoint. Counts: 7 fixed, 15 fixed in part.
+- Leg 11 acceptance: steps 1–6 recorded with their runs; the refusal test refused and left nothing; step 7 reported, its two defects fixed and re-walked, its feature request built, reviewed and re-walked; docs corrected to what was observed. **Not walked**: a refused launch switch on Windows; the macOS build on hardware; Windows `/switch` forms; "Download now" on macOS and Linux; the carried by-eye items of Flights 1 and 2 — all listed in `docs/RELEASING.md`'s checklist.
+
+### Follow-ups carried out of the flight (for the debrief to turn into squawks or sorties)
+
+- **Features, for the operator to scope**: an indicator in the app's main window that an update is waiting (operator, at the walk); hand-written, reviewed release notes published by the workflow (operator, at the walk); in-app verification of a downloaded installer; planning and sending a capture from the isolated world (finding 14b, accepted for now).
+- **Standing squawk**: 0187, uncapped script-opened popups and tabs (accepted for this mission).
+- **Candidate squawks**: the downloads indicator counts an `interrupted` download as in progress; the Retry note's wording for an app-started download; the home-page Save button is 2 px shorter than Clear; `location.reload()` on the chrome through admin `evaluate` leaves only a Welcome tab; the older Settings controllers share the boot-read race fixed for the new checkbox; no test pins the saved file name of an app-started download.
+- **First real runs still ahead**: a stable tag on a `main` commit passing the stable-tag check, and the documented release sequence on a real pull request — both at the next release.
+
+### Flight landed
+
+All legs `completed` (leg 09 not flown, by operator ruling). Reviewed three times (legs 01–07; 08 and 10; 12 and the walk fixes), each confirmed. Flight status `landed`; Flight 3 checked off in the mission. `[COMPLETE:flight]`

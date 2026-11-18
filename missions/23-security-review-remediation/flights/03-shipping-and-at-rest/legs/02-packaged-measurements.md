@@ -1,6 +1,6 @@
 # Leg: packaged-measurements
 
-**Status**: landed
+**Status**: completed
 **Flight**: [Shipping and At-Rest](../flight.md)
 **Kind**: measurement — no change to `src/`, `package.json` or CI. The output is a results document the next four legs and one operator ruling are built on.
 

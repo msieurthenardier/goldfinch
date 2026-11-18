@@ -1,6 +1,6 @@
 # Leg: launch-switches
 
-**Status**: landed
+**Status**: completed
 **Flight**: [Shipping and At-Rest](../flight.md)
 
 > Developer design review 2026-11-17: **approve with changes**, incorporated — the site-isolation feature's registered name is `SitePerProcess` (added, tokens trimmed); six more switches of the same kind join the refused set and one the stripped set; a failed or ineffective removal is promoted to a refusal; "no profile directory" became "no store, no lock", compared against a baseline; on Linux the error box is a second stderr line; the four existing order pins were read and admit the block unmodified.

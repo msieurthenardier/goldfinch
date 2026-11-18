@@ -1,6 +1,6 @@
 # Leg: release-integrity
 
-**Status**: landed
+**Status**: completed
 **Flight**: [Shipping and At-Rest](../flight.md)
 
 > Developer design review 2026-11-17: **approve with changes**, incorporated — the existing invariant test pins `upload`'s permissions exactly and must be rewritten, not extended; this host's `gh` (2.45.0) has neither `gh attestation` nor `gh release verify`, so the flags come from the published manual and the documented commands are first run at the acceptance walk; immutable releases do have a REST endpoint; only the verified installers are attested, after the upload; the stable-tag check proves "reachable from `main`" and is exercised for real only by a tag push; the release sequence was run in a scratch clone and the exact commands recorded; the ruleset body and the admin role id come from the REST reference and this repository's own branch ruleset.

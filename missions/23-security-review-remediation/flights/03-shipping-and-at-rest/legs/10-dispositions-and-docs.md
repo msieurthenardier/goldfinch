@@ -1,6 +1,6 @@
 # Leg: dispositions-and-docs
 
-**Status**: landed
+**Status**: completed
 **Flight**: [Shipping and At-Rest](../flight.md)
 
 ## Objective

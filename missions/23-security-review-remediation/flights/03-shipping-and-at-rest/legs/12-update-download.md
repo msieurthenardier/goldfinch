@@ -1,6 +1,6 @@
 # Leg: update-download
 
-**Status**: landed
+**Status**: completed
 **Flight**: [Shipping and At-Rest](../flight.md)
 
 > Added during leg `hat-and-alignment`. The operator, on the installed candidate: "it occurs to me there is nothing actionable in the UI..there is no \"Update now\", what is the expectation from the user?" and then, choosing among three options the Flight Director laid out: "A download now button would be ideal in the settings page, the link in the kabab menu can continue to work as it does". Classified by the Flight Director as a **feature** (new behaviour), so it is a designed leg with a design review, not an inline walk fix.
