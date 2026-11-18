@@ -1,6 +1,6 @@
 # Sortie: Release notes — hand-written notes on every release page
 
-**Status**: landed
+**Status**: completed
 
 > Architect design review 2026-11-17: **approve with changes**, incorporated — the file name and title prefix use `base` (MAJOR.MINOR.PATCH), not the validation step's `core`, which keeps a candidate's prerelease suffix; the release-prep sequence adds the notes file explicitly (`git commit -a` skips a new file); the enforcement is stated as "present in every passing commit"; draft detection fails closed; the splitter's byte limits, control-byte check and file outputs are specified; the extraction helper takes a name and asserts exactly one definition; a fallback is written to the run's step summary; the path check stays narrow and squawk 0204 stays open.
 
