@@ -1,7 +1,9 @@
 # Update check
 
-Goldfinch tells you when a newer **stable** release exists. It never downloads, installs or runs
-anything: it only remembers a version number and offers to open the release page in a tab.
+Goldfinch tells you when a newer **stable** release exists. It never downloads anything on its own and
+never installs or runs anything: the check only remembers a version number, and you choose what happens
+next - open the release page in a tab, or press **Download now** to start an ordinary download of the
+installer for your computer (below).
 
 ## What is asked, and when
 
@@ -32,21 +34,60 @@ as for any web request.
 
 ## State and bridge
 
-`{ current, available, releaseUrl, checkEnabled }` — held in main (`src/main/update-check.js`),
+`{ current, available, releaseUrl, checkEnabled, downloadName }` — held in main (`src/main/update-check.js`),
 pushed to every chrome and internal page as `update-state-changed`, read with `update:get-state`.
 `checkEnabled` is the setting's value only. Opening the release page (`update:open-release-page`,
 `internal-update-open-release-page`) takes **no argument**: main sends the address it built to the
-chrome of the calling window, which opens it as an ordinary tab.
+chrome of the calling window, which opens it as an ordinary tab. `downloadName` is computed in `getState()`
+from `available` and this machine (null when nothing is available or no direct installer exists), never stored.
 
 ## Where it shows
 
-- **Settings -> About**: `Goldfinch <version>` always; when a newer release is known, `Version <x> is available.`
-  and a **View release notes** button (which opens the release page through the no-argument channel above).
+- **Settings -> About**: `Goldfinch <version>` always, showing the running version whenever it is well-formed (prerelease and build suffix included, e.g. `0.19.15-rc.2`; `Goldfinch` alone if it is missing or malformed); when a newer release is known, `Version <x> is available.`
+  and, when this machine has a direct installer, a **Download now** button with a hint line (see *Download now*),
+  plus a **View release notes** button (which opens the release page through the no-argument channel above).
+  With no direct installer for the machine the hint reads "Download the installer for your system from the
+  release page, then run it to update." and there is no download button.
 - **The kebab menu**: an `Update available — <x>` item at the top, present only while a newer release is
   known. There is no toolbar element.
 - Both are drawn from one pure model (`src/shared/update-notice-model.js`) over main's state, never from
   anything the page or chrome fetched. The behavior spec is `tests/behavior/update-notice.md`; its release
   endpoint stand-in is `tests/behavior/fixtures/update-check/server.cjs`.
+
+## Download now
+
+Settings -> About, when a newer release is known and this machine has a direct installer. One no-argument
+channel (`internal-update-download`, internal pages only) makes the main process start **one ordinary
+download** of an address it builds itself: `https://github.com/msieurthenardier/goldfinch/releases/download/v<version>/<installer>`,
+from the constant repository slug, the validated version and a fixed installer name - never from the check's
+response, the release address or the developer override.
+
+| This machine | Installer |
+|---|---|
+| Windows | `Goldfinch-Setup-<v>.exe` |
+| macOS, Apple silicon | `Goldfinch-<v>-arm64.dmg` |
+| Linux x64, running from an AppImage | `Goldfinch-<v>.AppImage` |
+| Linux x64, otherwise | `goldfinch_<v>_amd64.deb` |
+| anything else (an Intel Mac, Linux on another architecture) | none: only the release page is offered |
+
+Emulation is not seen through: an x64 build under Rosetta reports an Intel Mac and gets no button, and
+Windows on ARM gets the x64 installer.
+
+- **It is an ordinary download**: through the browser's own default session (which holds no site cookies), into
+  the downloads folder, under the name Chromium derives (normally the asset's own name), shown in the
+  toolbar indicator and on `goldfinch://downloads`. No native dialog is raised. Because the record has no
+  identity (jar), the downloads page offers no Retry for it - press **Download now** again. A second press
+  while this download is still in progress starts nothing. "This download" is a record at exactly that
+  address, or one with no identity whose saved file name is the expected installer name (also with the
+  ` (n)` suffix added before the extension), because GitHub redirects the request and the stored address
+  is probably the redirect target. A real redirecting download has not been observed yet; the first one
+  is the next thing to check.
+- **The app never opens, runs or verifies the file.** Opening it from Downloads goes through the existing
+  single open function, and the operating system then asks before running it. To check the file, use the
+  digest and attestation commands in the README.
+- **A developer build still builds the github.com address** (the override only moves the check). The
+  behavior spec runs with a dead proxy for exactly that reason.
+- A failure to connect leaves an `interrupted` record (shown as Failed) and no file in the downloads folder.
 
 ## Turning it off
 

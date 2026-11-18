@@ -10,6 +10,9 @@ const {
   isNewer,
   releaseUrlFor,
   readLatestTag,
+  isWellFormedVersion,
+  installerNameFor,
+  installerUrlFor,
   LATEST_RELEASE_API_URL,
   REPO_SLUG,
   MAX_BODY_BYTES
@@ -147,4 +150,100 @@ test('drift guard: every tag the app accepts also satisfies the release workflow
   // and the workflow's rule refuses what ours refuses at the core level (leading zeros)
   assert.equal(workflowRule.test('01.2.3'), false);
   assert.equal(parseStableTag('v01.2.3'), null);
+});
+
+test('isWellFormedVersion: stable, prerelease and build forms only, capped at 64', () => {
+  for (const v of ['0.19.15', '0.19.15-rc.2', '1.0.0-beta.1+build.5', '1.0.0+b']) {
+    assert.equal(isWellFormedVersion(v), true, v);
+  }
+  const bad = [
+    '',
+    'v1.0.0',
+    '01.2.3',
+    '1.0',
+    '1.0.0-',
+    '1.0.0+',
+    '1.0.0-01',
+    '1.0.0 x',
+    '<b>x',
+    '1.0.0-' + 'a'.repeat(64),
+    null,
+    7,
+    {}
+  ];
+  for (const v of bad) assert.equal(isWellFormedVersion(v), false, String(v));
+});
+
+const V = '0.19.16';
+test('installerNameFor: one row per platform, null for the rest and for a non-stable version', () => {
+  const f = (platform, arch, appImage = false, version = V) => installerNameFor({ platform, arch, appImage, version });
+  assert.equal(f('win32', 'x64'), `Goldfinch-Setup-${V}.exe`);
+  assert.equal(f('win32', 'arm64'), `Goldfinch-Setup-${V}.exe`);
+  assert.equal(f('darwin', 'arm64'), `Goldfinch-${V}-arm64.dmg`);
+  assert.equal(f('darwin', 'x64'), null);
+  assert.equal(f('linux', 'x64', true), `Goldfinch-${V}.AppImage`);
+  assert.equal(f('linux', 'x64', false), `goldfinch_${V}_amd64.deb`);
+  assert.equal(f('linux', 'arm64'), null);
+  assert.equal(f('freebsd', 'x64'), null);
+  for (const bad of ['0.19.16-rc.1', '01.2.3', '1.0', '', null, 7, '0.19.16/../x']) {
+    assert.equal(f('win32', 'x64', false, bad), null, String(bad));
+  }
+  assert.equal(installerNameFor(), null);
+  assert.equal(installerNameFor({}), null);
+});
+
+test('installerUrlFor: the release-download address from the slug, version and a known name only', () => {
+  assert.equal(
+    installerUrlFor(`goldfinch_${V}_amd64.deb`, V),
+    `https://github.com/${REPO_SLUG}/releases/download/v${V}/goldfinch_${V}_amd64.deb`
+  );
+  assert.equal(installerUrlFor(null, V), null);
+  assert.equal(installerUrlFor(`goldfinch_${V}_amd64.deb`, '0.19.16-rc.1'), null);
+  assert.equal(installerUrlFor('evil.exe', V), null);
+  assert.equal(installerUrlFor(`../goldfinch_${V}_amd64.deb`, V), null);
+  assert.equal(installerUrlFor(`goldfinch_0.19.17_amd64.deb`, V), null, 'the name must be for that version');
+});
+
+test('installerUrlFor is not influenced by the dev override variable', () => {
+  const saved = process.env.GOLDFINCH_UPDATE_CHECK_URL;
+  process.env.GOLDFINCH_UPDATE_CHECK_URL = 'http://127.0.0.1:9/override';
+  try {
+    assert.match(installerUrlFor(`goldfinch_${V}_amd64.deb`, V), /^https:\/\/github\.com\//);
+  } finally {
+    if (saved === undefined) delete process.env.GOLDFINCH_UPDATE_CHECK_URL;
+    else process.env.GOLDFINCH_UPDATE_CHECK_URL = saved;
+  }
+});
+
+test('drift guard: the names installerNameFor can return are among the five the release builds', () => {
+  const { execFileSync } = require('node:child_process');
+  const os = require('node:os');
+  const ROOT = path.join(__dirname, '..', '..');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'goldfinch-dl-names-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'README.md'), '<!-- DOWNLOADS:START -->\nold\n<!-- DOWNLOADS:END -->\n');
+    execFileSync(process.execPath, [path.join(ROOT, 'scripts', 'update-readme.mjs'), V], { cwd: dir });
+    const text = fs.readFileSync(path.join(dir, 'README.md'), 'utf8');
+    const linked = new Set([...text.matchAll(/\/releases\/download\/v[^/\s)]+\/([^\s)]+)\)/g)].map((m) => m[1]));
+    assert.equal(linked.size, 5, 'five download links in the generated README block');
+    const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+    assert.ok(pkg.build && pkg.build.nsis, 'package.json build config readable');
+    const returned = new Set();
+    for (const [platform, arch, appImage] of [
+      ['win32', 'x64', false],
+      ['darwin', 'arm64', false],
+      ['linux', 'x64', true],
+      ['linux', 'x64', false]
+    ]) {
+      const n = installerNameFor({ platform, arch, appImage, version: V });
+      assert.ok(linked.has(n), `${n} is not a name the README links`);
+      returned.add(n);
+    }
+    assert.equal(returned.size, 4);
+    assert.ok([...returned].some((n) => n.endsWith('.exe')));
+    assert.ok([...returned].some((n) => n.endsWith('.dmg')));
+    assert.ok([...returned].some((n) => n.endsWith('.AppImage') || n.endsWith('.deb')));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

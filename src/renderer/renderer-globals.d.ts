@@ -48,6 +48,7 @@ interface UpdateState {
   available: string | null;
   releaseUrl: string | null;
   checkEnabled: boolean;
+  downloadName: string | null;
 }
 
 interface GoldfinchBridge {
@@ -202,6 +203,9 @@ interface GoldfinchBridge {
   updateGetState(): Promise<UpdateState>;
   onUpdateStateChanged(cb: (state: UpdateState) => void): void;
   updateOpenReleasePage(): Promise<boolean>;
+  updateDownload(): Promise<
+    { ok: true; name: string; already?: true } | { ok: false; reason: 'unavailable' | 'failed' }
+  >;
   onAutomationActivity(cb: (snap: AutomationActivity) => void): void;
 
   // --- page zoom ---
@@ -738,6 +742,9 @@ interface GoldfinchInternalBridge {
   onUpdateStateChanged(cb: (state: UpdateState) => void): number;
   offUpdateStateChanged(h: number): void;
   updateOpenReleasePage(): Promise<boolean>;
+  updateDownload(): Promise<
+    { ok: true; name: string; already?: true } | { ok: false; reason: 'unavailable' | 'failed' }
+  >;
   onAutomationActivity(cb: (snap: AutomationActivity) => void): number;
   offAutomationActivity(h: number): void;
   // --- downloads surface (Flight 5, Leg 2) ---

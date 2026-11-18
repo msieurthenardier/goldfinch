@@ -51,6 +51,25 @@ function parseRunning(version) {
 }
 
 /**
+ * True when `version` is a well-formed running version: MAJOR.MINOR.PATCH with an optional
+ * prerelease and an optional build suffix (the release workflow's tag shape), at most 64
+ * characters. For DISPLAY of the app's own version only; it takes no part in comparison.
+ * @param {unknown} version
+ * @returns {boolean}
+ */
+export function isWellFormedVersion(version) {
+  if (typeof version !== 'string' || version.length > MAX_TAG_LENGTH) return false;
+  const plus = version.indexOf('+');
+  let core = version;
+  if (plus !== -1) {
+    const build = version.slice(plus + 1);
+    if (!/^[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*$/.test(build)) return false;
+    core = version.slice(0, plus);
+  }
+  return parseRunning(core) !== null;
+}
+
+/**
  * Semantic-version precedence. Returns -1, 0, 1, or null when either side is unparseable.
  * @param {unknown} a
  * @param {unknown} b
@@ -101,6 +120,44 @@ export function releaseUrlFor(version) {
   const m = STABLE_VERSION.exec(version);
   if (!m || !coreOk([m[1], m[2], m[3]])) return null;
   return 'https://github.com/' + REPO_SLUG + '/releases/tag/v' + version;
+}
+
+/**
+ * The installer file name for this machine and a stable version, or null when there is no direct
+ * download (an Intel Mac, Linux on another architecture, a prerelease or malformed version). The
+ * five names are the release workflow's own (`artifact-names.test.js` drift guard).
+ * @param {{ platform?: unknown, arch?: unknown, appImage?: unknown, version?: unknown }} input
+ * @returns {string | null}
+ */
+export function installerNameFor({ platform, arch, appImage, version } = {}) {
+  if (releaseUrlFor(version) === null) return null;
+  const v = /** @type {string} */ (version);
+  if (platform === 'win32') return `Goldfinch-Setup-${v}.exe`;
+  if (platform === 'darwin' && arch === 'arm64') return `Goldfinch-${v}-arm64.dmg`;
+  if (platform === 'linux' && arch === 'x64') {
+    return appImage ? `Goldfinch-${v}.AppImage` : `goldfinch_${v}_amd64.deb`;
+  }
+  return null;
+}
+
+/**
+ * The release-download address, built from the constant slug, the re-validated version and the
+ * installer name only (never from a response or an override). Null for a null name, a malformed
+ * version, or a name that is not one `installerNameFor` returns for that version.
+ * @param {unknown} name
+ * @param {unknown} version
+ * @returns {string | null}
+ */
+export function installerUrlFor(name, version) {
+  if (typeof name !== 'string' || releaseUrlFor(version) === null) return null;
+  const known = [
+    `Goldfinch-Setup-${version}.exe`,
+    `Goldfinch-${version}-arm64.dmg`,
+    `Goldfinch-${version}.AppImage`,
+    `goldfinch_${version}_amd64.deb`
+  ];
+  if (!known.includes(name)) return null;
+  return 'https://github.com/' + REPO_SLUG + '/releases/download/v' + version + '/' + name;
 }
 
 /**

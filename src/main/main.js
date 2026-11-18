@@ -3121,7 +3121,20 @@ registerUpdateIpc({
   registerInternalHandler,
   registry,
   getState: () => updateChecker.getState(),
-  queueChromeSend
+  queueChromeSend,
+  // Leg `update-download`: the one place the update download starts. The browser's own default session
+  // carries the `will-download` handler (app-lifecycle wires it); it holds no site cookies, and the
+  // internal session deliberately has no download handler, so a Settings tab's own contents are never used.
+  startUpdateDownload: (url) => {
+    try {
+      session.defaultSession.downloadURL(url);
+      return true;
+    } catch (error) {
+      console.error('[update-download] could not start:', error);
+      return false;
+    }
+  },
+  getDownloadsManager: () => downloadsManager
 });
 
 registerAppLifecycle({

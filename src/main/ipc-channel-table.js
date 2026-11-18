@@ -221,6 +221,7 @@ const CHANNEL_CLASS = Object.freeze({
   'update:get-state': 'chrome-or-internal',
   'update:open-release-page': 'chrome',
   'internal-update-open-release-page': 'internal',
+  'internal-update-download': 'internal',
   // register-tab-ipc.js
   'tab-create': 'chrome',
   'tab-close': 'owning-chrome',

@@ -253,7 +253,7 @@ one, is the *Dispositions* section of
   little without an operating-system keyring, it is one-way, and it could not be checked on macOS.
 - **Builds are not code-signed** (see *Download* above), and Goldfinch does not check the integrity of its own files on disk
   (`asar: false` is load-bearing).
-- **Updates are never automatic.** The app only tells you a newer release exists ([`docs/updates.md`](docs/updates.md)).
+- **Updates are never automatic.** The app tells you a newer release exists and, if you ask, starts an ordinary download of the installer for your computer; it never downloads anything on its own and never installs or runs the file ([`docs/updates.md`](docs/updates.md)).
 - **Downloads are not confirmed by Goldfinch before you open them.** Whether the operating system warns is the system's job;
   Goldfinch does not add an executable-type list or its own prompt.
 - **Some prompts accept input at once.** The sign-in card and the certificate-error Proceed button are not delayed;

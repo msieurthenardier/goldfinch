@@ -222,7 +222,19 @@
              update state through update-notice-model.js. Ids are stable (behavior spec). -->
         <p id="about-version"></p>
         <p id="about-update-status" role="status" hidden></p>
-        <button id="about-update-open" class="settings-btn" type="button" hidden>View release notes</button>
+        <button
+          id="about-update-download"
+          class="settings-btn"
+          type="button"
+          aria-describedby="about-update-hint"
+          hidden
+        >
+          Download now
+        </button>
+        <button id="about-update-open" class="settings-btn settings-btn--secondary" type="button" hidden>
+          View release notes
+        </button>
+        <p id="about-update-hint" class="muted" hidden></p>
         <fieldset class="shields-group update-check-group">
           <legend class="sr-only">Update check</legend>
           <label class="shield-row update-check-row"
@@ -231,7 +243,8 @@
           /></label>
         </fieldset>
         <p id="update-check-note" class="muted">
-          Asks GitHub once a day whether a newer release exists. Nothing is downloaded or installed.
+          Asks GitHub once a day whether a newer release exists. Nothing is downloaded unless you ask, and nothing is
+          installed for you.
         </p>
       </section>
     </main>

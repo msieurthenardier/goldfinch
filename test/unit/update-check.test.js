@@ -86,6 +86,9 @@ function setup({ version = '0.19.15', url = 'http://127.0.0.1:9/x', fetch, ...re
     },
     getVersion: () => version,
     url,
+    platform: 'linux',
+    arch: 'x64',
+    appImage: false,
     onChange: (s) => changes.push(s),
     trace: (c) => traces.push(c),
     setTimeout: timers.setTimeout,
@@ -121,7 +124,8 @@ test('newer: state, trace, one change; a second identical answer changes nothing
     current: '0.19.15',
     available: '0.19.16',
     releaseUrl: 'https://github.com/msieurthenardier/goldfinch/releases/tag/v0.19.16',
-    checkEnabled: true
+    checkEnabled: true,
+    downloadName: 'goldfinch_0.19.16_amd64.deb'
   });
   assert.deepEqual(h.traces, ['newer']);
   const n = h.changes.length;
@@ -323,7 +327,8 @@ test('off after a release was found: available and releaseUrl go null', async ()
     current: '0.19.15',
     available: null,
     releaseUrl: null,
-    checkEnabled: false
+    checkEnabled: false,
+    downloadName: null
   });
   assert.equal(h.changes.at(-1).available, null);
 });
@@ -401,7 +406,13 @@ test('an inert checker (no address) never calls fetch on any path and keeps chec
   await flush();
   assert.equal(h.calls.length, 0);
   assert.deepEqual(h.timers.delays(), []);
-  assert.deepEqual(h.checker.getState(), { current: '0.19.15', available: null, releaseUrl: null, checkEnabled: true });
+  assert.deepEqual(h.checker.getState(), {
+    current: '0.19.15',
+    available: null,
+    releaseUrl: null,
+    checkEnabled: true,
+    downloadName: null
+  });
   assert.ok(h.changes.length >= 2, 'the setting toggles still notify');
 });
 
@@ -447,4 +458,24 @@ test('decideUpdateCheck: packaged ignores the override; unpackaged runs only on 
     assert.deepEqual(decideUpdateCheck({ isPackaged: false, env: { GOLDFINCH_UPDATE_CHECK_URL: u } }), none, String(u));
   }
   assert.deepEqual(decideUpdateCheck({ isPackaged: false, env: {} }), none);
+});
+
+test('downloadName is computed from available and the injected machine facts, never stored', async () => {
+  const cases = [
+    [{ platform: 'win32', arch: 'x64', appImage: false }, 'Goldfinch-Setup-0.19.16.exe'],
+    [{ platform: 'darwin', arch: 'arm64', appImage: false }, 'Goldfinch-0.19.16-arm64.dmg'],
+    [{ platform: 'darwin', arch: 'x64', appImage: false }, null],
+    [{ platform: 'linux', arch: 'x64', appImage: true }, 'Goldfinch-0.19.16.AppImage'],
+    [{ platform: 'linux', arch: 'x64', appImage: false }, 'goldfinch_0.19.16_amd64.deb'],
+    [{ platform: 'linux', arch: 'arm64', appImage: false }, null]
+  ];
+  for (const [facts, name] of cases) {
+    const h = setup({ ...facts, fetch: async () => respond(200, tagBody('v0.19.16')) });
+    assert.equal(h.checker.getState().downloadName, null, 'nothing available yet');
+    h.checker.setEnabled(true);
+    await flush();
+    assert.equal(h.checker.getState().downloadName, name, JSON.stringify(facts));
+    h.checker.setEnabled(false);
+    assert.equal(h.checker.getState().downloadName, null, 'cleared with available');
+  }
 });

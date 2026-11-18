@@ -1061,6 +1061,8 @@ state via the same drop choke point Leg 1 hardened (vault lock, window close, ta
 Origin is derived and **frozen at gesture time** — never re-derived at settle, since the tab may
 already show a different origin by the time a navigation-commit settle fires.
 
+**Stated and accepted - the capture is planned and sent from the page's world.** The values are read in the isolated world, but the step that plans the capture and sends it to main (`onCaptureGesture`, `planCaptures` and the send loop in `webview-preload.js`) runs in the page's own world. A page that controls its own built-ins can therefore make main hold a capture of the page's choosing for that page's own tab, so the save prompt may offer a username and password the page picked. It cannot read anything from the vault, affect another site, or save without the operator's click on the prompt. Operator ruling 2026-11-17 (Mission 23 finding 14b). The remedy, if it is ever scheduled, is to plan and send the capture from the isolated world.
+
 ### The save prompt (Sortie 06): a non-blocking corner prompt, not a sheet
 
 The offer to save / update a captured login, card or identity is presented in a small **corner

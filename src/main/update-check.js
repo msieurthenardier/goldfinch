@@ -1,12 +1,15 @@
 'use strict';
 
-// Update check (Mission 23 Flight 3, leg `update-check`; flight DD1). Notify only: once a day the
-// main process asks GitHub whether a newer STABLE release exists and holds the answer as state.
-// Nothing is downloaded, installed or executed, and nothing from the response but a validated
-// version number is believed (src/shared/update-version.js). Electron-free: `fetch`, the version,
+// Update check (Mission 23 Flight 3, leg `update-check`; flight DD1). Once a day the main process
+// asks GitHub whether a newer STABLE release exists and holds the answer as state. Nothing is
+// downloaded automatically, and nothing is ever installed or executed by the app (a download the
+// operator asks for is a separate, explicit channel: register-update-ipc.js, leg `update-download`).
+// Nothing from the response but a validated version number is believed (src/shared/update-version.js). Electron-free: `fetch`, the version,
 // timers and the sinks are injected, so the whole thing runs under `node --test` with fakes.
 //
-// State: { current, available, releaseUrl, checkEnabled }. A `newer` answer sets available /
+// State: { current, available, releaseUrl, checkEnabled, downloadName }. `downloadName` is COMPUTED
+// in getState() from `available` and the injected platform / arch / appImage facts (null when nothing
+// is available or this machine has no direct installer), so it cannot drift from `available`. A `newer` answer sets available /
 // releaseUrl, a valid `current` answer clears them, every failure leaves them alone. `checkEnabled`
 // is the SETTING's value only (an inert checker — no address — keeps it in step and never fetches).
 
@@ -15,7 +18,8 @@ const {
   MAX_BODY_BYTES,
   readLatestTag,
   isNewer,
-  releaseUrlFor
+  releaseUrlFor,
+  installerNameFor
 } = require('../shared/update-version.js');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -56,6 +60,9 @@ function decideUpdateCheck({ isPackaged, env }) {
  *   fetch: (url: string, init: any) => Promise<any>,
  *   getVersion: () => string,
  *   url: string | null,
+ *   platform?: string,
+ *   arch?: string,
+ *   appImage?: boolean,
  *   onChange?: (state: any) => void,
  *   trace?: (code: string) => void,
  *   setTimeout?: typeof setTimeout,
@@ -70,6 +77,9 @@ function createUpdateChecker({
   fetch,
   getVersion,
   url,
+  platform = process.platform,
+  arch = process.arch,
+  appImage = typeof process.env.APPIMAGE === 'string' && process.env.APPIMAGE !== '',
   onChange = () => {},
   trace = () => {},
   setTimeout: setT = setTimeout,
@@ -88,7 +98,13 @@ function createUpdateChecker({
   /** @type {{ controller: AbortController, abortedBy: string | null } | null} */
   let run = null;
 
-  const getState = () => ({ current: getVersion(), available, releaseUrl, checkEnabled });
+  const getState = () => ({
+    current: getVersion(),
+    available,
+    releaseUrl,
+    checkEnabled,
+    downloadName: available === null ? null : installerNameFor({ platform, arch, appImage, version: available })
+  });
   const emit = () => {
     try {
       onChange(getState());

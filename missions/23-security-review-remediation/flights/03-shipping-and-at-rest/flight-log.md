@@ -396,3 +396,173 @@ If the first candidate fails at `create-release`'s first step because the rulese
 5. **`docs/RELEASING.md` row 6** now points at the vault-upgrade release note under *Notes* below.
 6. **`release-notes-draft.md`** first operator-notes bullet corrected: the sentence lives in `README.md`, not the draft.
 7. **Dispositions.** Rows 1, 3a and 5 now read "fixed in part"; counts recounted from the table: finding level fixed 6 (4, 9, 10, 11, 20, 21), fixed in part 16, accepted 0, struck 0 (22 total); the Leg 10 entry matches. Row 13d now names the Flight 2 plan (Flight Director) under the mission's permission, no separate operator ruling; row 3d says a default put to the operator and not objected to, pending an explicit ruling. No criterion ticked; 14b and NF6 untouched.
+
+## Leg 11 — hat-and-alignment (acceptance walk)
+
+Steps 1–6 performed by the Flight Director on the operator's instruction of 2026-11-17 ("you can do all of that except Ill install the release candidate"). Step 7 onward is the operator's.
+
+### Step 1 — tag ruleset
+
+`POST repos/msieurthenardier/goldfinch/rulesets` with the runbook's body: accepted, ruleset `release-tags` (id 27504949), `target: tag`, `refs/tags/v*`, rules `creation`, `update`, `deletion`, bypass for the repository-administrator role (`current_user_can_bypass: always`). **Answered:** the `update` rule's `update_allows_fetch_and_merge` parameter is accepted and dropped for a tag ruleset — the stored rule is `{"type":"update"}`.
+
+### Step 2 — candidate 1, `v0.19.15-rc.1` (commit `29f9b67`, annotated tag)
+
+Run [44196914592](https://github.com/msieurthenardier/goldfinch/actions/runs/44196914592): every job green. **Answered:** the owner's tag push is accepted under the ruleset; the ruleset's creation restriction does **not** stop the workflow's token creating a release for an existing tag; `Validated 'v0.19.15-rc.1' as a PRERELEASE` and the stable check was skipped; `Verified five installers for 0.19.15-rc.1`; the attestation step's first run — `Attestation created for 5 subjects`, signed and logged, with `contents: write`, `id-token: write`, `attestations: write` only (**`artifact-metadata: write` is not needed**); published as a prerelease with exactly five assets; `releases/latest` still `v0.19.15`. This release was published before immutability was on: `immutable: false`.
+
+### Step 6 (first half) — verification on candidate 1, with GitHub CLI 2.104.0 fetched into the session scratch directory (checksum verified against the CLI's published list)
+
+- `Goldfinch-Setup-0.19.15-rc.1.exe`: local SHA-256 equals the asset's published digest.
+- The README's command, verbatim — `gh attestation verify <file> -R msieurthenardier/goldfinch --signer-workflow msieurthenardier/goldfinch/.github/workflows/build.yml` — exit 0.
+- Negative controls: the same with `--signer-workflow …/ci.yml` → exit 1; a copy of the file with one byte appended → exit 1 (no attestation for that digest).
+- With its output captured (not a terminal) a successful verify prints nothing; in a terminal it prints the policy it enforced and `✓ Verification succeeded!`.
+
+### Step 3 — refusal test
+
+Annotated tag `v0.0.0` on the flight branch head, pushed and watched with an automatic cancel armed. Run [44197557515](https://github.com/msieurthenardier/goldfinch/actions/runs/44197557515): `Validated 'v0.0.0' as a STABLE release`; `compare main...29f9b67…: attempt 1: rc=0 answer='ahead'`, again on attempt 2; `Stable tag v0.0.0 (commit 29f9b67…) is not on main; refusing to create a release.` `create-release` failed, every other job skipped, no draft and no release. **Answered:** `GITHUB_SHA` on an annotated tag is the tagged commit; the job's token may call the compare endpoint; the default-branch value arrives. The tag was deleted on the remote and locally (administrator bypass); `git ls-remote` shows none.
+
+### Step 4 — immutable releases
+
+`PUT repos/msieurthenardier/goldfinch/immutable-releases` → `{"enabled":true,"enforced_by_owner":false}`.
+
+### Step 5 — candidate 2, `v0.19.15-rc.2` (same commit)
+
+Run [44197680777](https://github.com/msieurthenardier/goldfinch/actions/runs/44197680777): every job green. The release: prerelease, five assets, **`immutable: true`** — **answered:** a prerelease is immutable too, and a draft stayed writable until it was published (the upload went in after the setting was on). `v0.19.15-rc.1` remains `immutable: false`. **`v0.19.15-rc.2` is the first immutable release**; its tag name is spent.
+
+### Step 6 (second half) — release verification on candidate 2
+
+- `gh release verify v0.19.15-rc.2` → `✓ Release v0.19.15-rc.2 verified!`, listing the five assets and digests.
+- `gh release verify-asset v0.19.15-rc.2 goldfinch_0.19.15-rc.2_amd64.deb` → `✓ Verification succeeded! … is present in release v0.19.15-rc.2`.
+- `gh attestation verify` on the same file, as documented → `✓ Verification succeeded!`; the policy printed includes the signer workflow match on `…/.github/workflows/build.yml`.
+
+### Not exercised by steps 1–6
+
+A **stable** tag on a `main` commit passing the check (the first real release after merge); the 403 branch of the compare function; the release sequence on a real pull request; `gh` verification on Windows or macOS; any behaviour of an installed candidate (step 7).
+
+### Step 7 — the operator's install of `v0.19.15-rc.2` over 0.19.15 (Windows), 2026-11-17
+
+The operator's report, verbatim: "Goldfinch 0.19.15-rc.2 is not displayed in the about section, seems like it should immediately. After about a minute the button and new version did show up and the item showed up in the kabob, the spacing and alignment needs fixing the in teh about section. Release notes button worked, but we need a better release notes page and process. Turning it off worked as expected, ccampe back as expected. skipping #6." A screenshot of the About section accompanied it.
+
+| Item | Result |
+| --- | --- |
+| Installs over 0.19.15 and starts | Walked; no problem reported |
+| About names the running version | **Fail** — showed `Goldfinch` alone |
+| Notice and button after about a minute | Pass (the first check is delayed 60 s by design) |
+| Button opens the release page | Pass |
+| Kebab "Update available" item | Pass, by eye |
+| Setting off clears both; on brings them back | Pass |
+| A refused launch switch | **Not walked** ("skipping #6") — stays on the release checklist |
+| About spacing and alignment | **Needs fixing** |
+
+Flight Director's classification, said to the operator:
+
+- **Version not shown — a defect, and the Flight Director's design error.** Leg 06's AC1 had the version line show only a version passing the *stable* pattern, which is right for the offered version (from the network) and wrong for the app's own (`0.19.15-rc.2` was filtered out). Fixed inline through a Developer.
+- **Spacing and alignment — a look-and-feel fix on one page.** Fixed in the same Developer pass.
+- **"A better release notes page and process" — a feature, not folded into the walk.** Recorded as a follow-up for the operator to scope (what the page holds; where notes are written and reviewed before a release). Not a squawk: it adds behaviour and needs a design call.
+
+### Walk fix 1 — About version and layout
+
+Operator's report: "Goldfinch 0.19.15-rc.2 is not displayed in the about section, seems like it should immediately … the spacing and alignment needs fixing in the about section." Follow-up screenshot: the "Check for new versions" row should look like the Spellcheck row above it.
+
+**Cause 1 (version).** `update-notice-model.js` gated the running version on `parseStableTag('v' + current)`, so a prerelease build showed `Goldfinch` alone. The stable-only rule is right for the offered version (network) and wrong for the app's own (`app.getVersion()`). The version line renders from the first `render(null)`/boot read in `settings.js`; nothing delays it (the minute the operator saw is the first check, by design).
+
+**Change 1.** New export `isWellFormedVersion` in `src/shared/update-version.js` (reuses `parseRunning`; adds an optional `+build` of dot-separated `[0-9A-Za-z-]+`; length cap 64). `versionText` uses it; notice/button/kebab rule unchanged (`available` stable and `releaseUrl` non-null). Tests: `update-notice-model.test.js` (`0.19.15`, `0.19.15-rc.2`, `1.0.0-beta.1+build.5`, rc with notice; hostile values `<b>x`, `0.19.15 <script>`, `01.2.3`, 200 characters, object, null, others all give `Goldfinch`), `update-version.test.js`. Docs: `docs/updates.md`, CLAUDE.md *Update check*.
+
+**Cause 2 (layout).** The row sat in a `shields-group` fieldset with `.shield-row`, whose rule `.shield-row:not(.shield-parent) { padding-left: 14px }` is the Shields sub-row indent; Spellcheck cancels it with `.shield-row.spellcheck-row` and carries its divider with `.spellcheck-group`. The About row had neither, and the notice, button and row had no spacing.
+
+**Change 2 (CSS only, markup and ids untouched).** In `settings.css`, beside the Spellcheck rules: `.update-check-group` (divider, 12px top padding, 16px top margin), `.shield-row.update-check-row { padding-left: 0 }`, `#about-update-status` margin-top 12px, `#about-update-open` margin-top 8px. Gaps ride the following elements, so a hidden notice leaves no gap.
+
+**Measurements** (px, dev build, Settings tab). Before, notice showing: version/status/button/note left 268, label left 282 (14 px indent), version to status 0, status to button 0, no divider. After, notice showing: every left edge 268 (version, status, button, label, note); Spellcheck label left 268, weight 400, size 14px, same as the About label; version to status 12, status to button 8, button to label row 34 (16 margin, 1 divider, 12 padding, 3 row), label to note about 18, the same as Spellcheck. Notice hidden (setting off): status and button computed `display: none`, version to label row 34, no empty gap. Note: the label weight is 400 on both rows (the Flight Director's "stronger weight" was the indent illusion; they now match).
+
+Screenshots: in the session scratch directory, `about-fix/` — `about-before.png`, `about-notice.png`, `about-no-notice.png`. The prerelease display is proven by unit tests, not live (the dev build is stable 0.19.15). a11y against the running app with the notice showing: no new violations.
+
+### Walk outcome — a feature request, and a follow-up
+
+- Walk fix 1 accepted by the Flight Director from the Developer's screenshots and measurements: every row of the About block now starts on one left edge and the "Check for new versions" row matches the Spellcheck row above it. The operator had sent a wider screenshot showing the row styled as a Shields sub-row; that was passed to the Developer as the target. The prerelease version line is proved by unit tests only (the dev build's version is stable).
+- Operator, on what the notice lets them do: "it occurs to me there is nothing actionable in the UI..there is no \"Update now\", what is the expectation from the user?" The Flight Director laid out three levels (wording only; a direct download button; a real in-app updater, which would need the updater metadata this flight stopped publishing and cannot work on unsigned macOS builds). **Operator ruling: "A download now button would be ideal in the settings page, the link in the kabab menu can continue to work as it does".**
+- **Classified a feature** → new leg 12 `update-download`, tier high, Developer design review before implementation. Flight DD1's "never downloads" is narrowed to "never automatically" and annotated by that leg. A third candidate (`-rc.3`) will be needed for the operator to see it installed.
+- **Follow-up for the operator to scope, not part of this flight**: release notes — "we need a better release notes page and process", clarified as "the content of the release notes, not an in app whats new". Suggested vehicle: a sortie (hand-written notes reviewed in the release-prep pull request; the workflow publishing that file instead of generated notes). Leg 10's `release-notes-draft.md` serves by hand until then; a published release's title and notes stay editable under immutability.
+
+## Leg 12 — update-download
+
+Status: **in-flight** (the Flight Director re-runs `tests/behavior/update-notice.md` and lands the leg). Built to the leg's "Design review amendments".
+
+### What was built
+
+- `src/shared/update-version.js`: `installerNameFor({ platform, arch, appImage, version })` and `installerUrlFor(name, version)` (constant slug + re-validated version + one of four fixed names; `null` otherwise). `src/main/update-check.js`: `downloadName` computed in `getState()` from `available` and injected `platform` / `arch` / `appImage` (defaults `process.platform`, `process.arch`, `APPIMAGE` read at construction).
+- `internal-update-download` (`internal` class; table 209 -> 210, `internal` 75 -> 76 in `ipc-gate-invariant.test.js`; CLAUDE.md's row count set to 210). No arguments, no reveal gate (comment in the registrar). The call lives in `main.js`'s injected `startUpdateDownload(url)` (try/catch around `session.defaultSession.downloadURL`), so `register-download-ipc.test.js`'s two-caller pin is untouched. Bridge `updateDownload()` on `window.goldfinchInternal` only; typing in `renderer-globals.d.ts`.
+- About block: `#about-update-download` (primary, "Download now"), `#about-update-open` now `.settings-btn--secondary`, `#about-update-hint` (`aria-describedby` from the download button). The pure model owns every string (`downloadResultHint`, `DOWNLOAD_HINT`, `NO_DIRECT_HINT`, ...). The controller's early return is unchanged; the new elements are fetched separately. The hint after a click survives state pushes while the button shows and is dropped when it goes away. Walk fix 1 kept and built on.
+- `renderer.js`, `overlay-menus.js`, `register-download-ipc.js`, the media path: untouched (`git diff` empty). Seam 41.
+
+### Measured (live, dev mode, scratch HOME / XDG_CONFIG_HOME, dead proxy, `-u XDG_DOWNLOAD_DIR`, no `user-dirs.dirs`)
+
+- **Downloads folder: under the scratch root, yes** - it resolved to the scratch `HOME` itself (no `~/Downloads` exists there; Electron falls back to `HOME`). Shown first by one page-initiated loopback download (record `savePath`), before the button was pressed. Real `~/Downloads` showed no new file.
+- **Proxy dead, yes**: a tab to `http://example.invalid/` ended `loadState: failed`, `ERR_TIMED_OUT`.
+- **A download that cannot connect DOES produce a record**, about 8 s after the click (the connection attempt must time out first): `state: progressing`, then about 10 s later **`interrupted`**, `received: 0`, `total: 0`, `mime: ''`, no `partition`, `savePath` in the scratch downloads folder, name `goldfinch_0.19.16_amd64.deb` (the built address's own, no redirect to show Chromium's choice). **No `endTime`** while the app runs (Electron emits `updated` with `interrupted`, never `done`, for a resumable failure); `flushInterrupted` stamps one at quit. Nothing is left in the downloads directory (listed before and after: only the control file).
+- **Finding that changed the code**: the amendment's "no end time = in progress" would have treated that `interrupted` record as in progress forever (the first live run had a repeat click answered `already`). The definition is now: exact address, no end time AND state `progressing` (paused is `progressing` + `paused: true`); `interrupted` never blocks. Unit-tested; re-verified live after a relaunch.
+- Indicator: `Downloading — 1 in progress` while the record was `progressing`, and it still read that with an `interrupted`-no-end record (pre-existing behaviour of the indicator; see out-of-scope). Downloads page: both rows `Failed`, with the existing "Cannot retry: this download does not record which identity it came from." note.
+- Hints: before click `Downloads the installer for this computer. Run it to update.`; after a successful start `Download started — find it in Downloads, then run it to update.` (shown within 1.5 s, before the record exists - the start is "started", the failure arrives later on the downloads surface). The `unavailable` / rejected-call hint is unit-tested only.
+
+### Smoke table (AC8)
+
+| Step | Result |
+|---|---|
+| Downloads folder under scratch | pass (loopback control download, `savePath` under scratch) |
+| Proxy dead | pass (`ERR_TIMED_OUT`) |
+| About block: both buttons, first hint, `aria-label`s, `aria-describedby`, ax tree | pass; `about-download.png` |
+| Real click on `#about-update-download` | pass; record at the app-built `.../releases/download/v0.19.16/goldfinch_0.19.16_amd64.deb` |
+| Final state | `interrupted` (shown Failed); never `completed`, `received` 0; nothing reached github.com |
+| Hint after click | pass; `about-after-click.png` |
+| Indicator / `goldfinch://downloads` | pass; `downloads-page.png` |
+| Second click after the first ended | pass, a second record (id 3); the in-progress repeat is unit-tested only |
+| AC7 control download (page-initiated, jar tab) | pass: record keeps `partition: persist:container:personal`, completed 19 B, shown on the page with Open / Show in folder / Remove (a completed row has no Retry; retry itself is the existing unit suite) |
+| Other primitives against the Settings tab | `enumerateWindows`, `enumerateTabs`, `getChromeTarget`, `readDom`, `readAxTree`, `captureScreenshot`, `captureWindow`, `evaluate`, `injectScript`, `scroll`, `click`, `pressKey`, `typeText`, `downloadsList`, `getHistory` answer; `getZoom`, `setZoom`, `findInPage`, `stopFindInPage`, `printToPDF`, `reload` refuse with `internal-session excluded` (existing design) |
+| No native dialog | nothing stalled across three downloads |
+| Cleanup | app stopped by recorded pid, fixture and loopback server stopped by pid; 8237 / 8238 / 50321 / 50400 free (`ss` exit 1); scratch `home` and `xdg` removed |
+
+### Copy sweep (AC6)
+
+Patterns `Nothing is downloaded`, `nothing is downloaded`, `never download(s)`, `notify-only`, `Notify-only`, `no in-app download`, plus `downloads or installs`:
+- `settings.html` `#update-check-note` - corrected ("Asks GitHub once a day whether a newer release exists. Nothing is downloaded unless you ask, and nothing is installed for you.").
+- `src/main/update-check.js` header comment - corrected.
+- `docs/updates.md` (intro; state; *Where it shows*; new *Download now* section) - corrected / added.
+- `README.md` "Updates are never automatic" - corrected (says what the button does; still true).
+- CLAUDE.md *Update check* ("Notify-only daily check") - corrected, plus the new Download-now paragraph.
+- `release-notes-draft.md` - corrected.
+- `docs/mcp-automation.md` tier section - one line added (automation reach).
+- Flight `flight.md` DD1 - dated annotation appended; original sentence and its "notify-only" rationale kept.
+- `mission.md` - dated annotation beneath the planning decision "no in-app download or install" (verbatim from the amendments); Dispositions 3a ("notify-only") and 3c reworded to "never automatically"; nothing ticked. The success criterion line ("nothing is downloaded or installed automatically") already holds as written - left.
+- Left as historical: legs 05, 06, 10; this flight-log's earlier entries (lines 17 and 482); other missions' unrelated "never auto-*" hits.
+
+### Gates
+
+`npm test` 7251 tests, 0 fail; `npm run typecheck`, `npm run lint`, `npm run format:check` clean.
+
+### Candidate squawk (not fixed)
+
+An app-started download's record has no partition, so the downloads page shows "Cannot retry: this download does not record which identity it came from." - true but oddly worded for it.
+
+[HANDOFF:review-needed] - leg left `in-flight`; the Flight Director re-runs the behavior spec.
+
+### Leg 12 review fixes
+
+1. **Repeat-click check.** `downloadInProgress` now matches a record as this download when its address equals the built one, or it has no partition and its saved file name is the expected installer name (exactly, or with the ` (n)` suffix `uniquePath` adds before the extension, matched precisely); it must also be `progressing` with no end time. The latch release uses the same match. The shared downloads files are untouched. The reason: a GitHub asset request redirects and Chromium reports the last address, so the stored address probably differs from the built one. A real redirecting download has not been observed; the operator's next candidate is the first. Tests added in `register-update-ipc.test.js`: redirect-shaped record (long signed query) with exact and ` (1)` names blocks; partitioned, other name, malformed suffix, `interrupted` and ended records do not; latch releases on such a record.
+2. **Stale hint.** The About controller remembers the `available` / `downloadName` pair the result hint was set under and drops the override when a push changes either. The controller is not unit-testable in this codebase (page controller reading `document`), so this was verified by reading.
+3. **Private path.** One absolute scratch-directory path in the "Walk fix 1" screenshot list replaced by a neutral description. Earlier-flight files carrying the same pattern were left for the operator.
+
+### Leg 12 — review, spec run and landing
+
+- Developer design review of leg 12: approve with changes, one cycle, incorporated as the leg's "Design review amendments". Settled by reading: the browser's own session is wired for downloads, a download with no page behind it is recorded and shown, and no native dialog is on that path.
+- The Developer changed one amended rule after a live finding, accepted by the Flight Director: "in progress" means state `progressing`, not merely "no end time" — an interrupted download gets no end time while the app runs, so the amended rule would have blocked every later click.
+- Reviewer (Sonnet, third pass, uncommitted work only): **`[HANDOFF:confirmed]`**, nothing blocking; gates green. It traced every input to the download address and found only the validated version, the constant repository name and the fixed installer names. Three non-blocking items fixed by a Developer: the repeat-click check now recognises an app-started download by its installer file name (a real download's recorded address is the redirect target, so the address match alone would never hit); the result hint is cleared when the offered version changes; an absolute scratch path was removed from this flight's log.
+- Spec `update-notice`, second run: **pass, 11/11** (run log `tests/behavior/update-notice/runs/2026-11-17-23-53-08.md`). Leg 12 marked `landed` by the Flight Director. Spec notes added from the Validator's findings; no row weakened.
+- **Not verified**: a download that succeeds (every run blocks the network on purpose), and anything on Windows or macOS — the operator's check on the next candidate is the first real download.
+- **Found, outside this flight**: the toolbar downloads indicator counts an `interrupted` download as in progress while the downloads page says "Failed" (candidate squawk); the Retry note for an app-started download reads oddly (candidate squawk).
+- **Public-repository hygiene, raised with the operator**: absolute scratch-directory paths that embed the operating-system user name are present in artifacts already merged to `main` — Flight 1's flight log, audit and probe notes, Flight 2's flight log, two sortie leg files and one squawk (fourteen lines in seven files). Not edited by this flight; whether to clean the current files, and whether to rewrite published history, is the operator's decision.
+4. **Button heights.** The About pair (Download now, View release notes) rendered 28 px and 30 px: the secondary variant carries a 1 px border and `.settings-btn` had none. `.settings-btn` now has `border: 1px solid transparent`, so every primary `.settings-btn` is 30 px (was 28) and matches the secondary; measured live both About buttons 30 px, same top and bottom.
+5. **Not changed.** `#home-page-save` is its own primary rule (not `.settings-btn`) and still sits at 28 px beside the 30 px Clear; the same one-line border would align it.
+
+### Operator rulings at the walk, 2026-11-17
+
+- On the four open dispositions, after the Flight Director explained each: **"ill take your recommendations"** — finding 14b accepted and documented (candidate sortie); NF6 / squawk 0187 accepted for this mission with the squawk standing; 13d (no re-key on revoke or master change) accepted, compromise rotation being the remedy; the update request's `Accept-Language` accepted and documented. `mission.md`'s Dispositions rows updated; no finding is left without a disposition.
+- On the user-name paths in earlier artifacts: **"clean the files"** — fourteen lines in seven files of Flights 1 and 2, two sortie legs and one squawk now carry neutral placeholders (`<session-scratch>`, `<repo>`). Git history is not rewritten.
+- **"go ahead and commit and public rc.3"** — the Flight Director commits, pushes the branch, and pushes `v0.19.15-rc.3`.

@@ -154,7 +154,7 @@ Wrapper log (stack and `this` shape): the 6 `push` hits come from `IpcRendererIn
 
 The fixture server saw no `Authorization` header in any case. The chrome shows the userinfo exactly as main reports it; the page sees it stripped. Measured twice (two product launches), same result.
 
-**Chrome CSP `'self'` and `file://host/...`** (static; no run). The chrome CSP (`src/renderer/index.html:6-7`) is `default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: goldfinch-media:; media-src 'self' blob: goldfinch-media:;`. The chrome page is a `file:` URL (`getChromeTarget` reported `file:///home/cprch/projects/goldfinch/src/renderer/index.html`). How Chromium matches `'self'` for `file:` origins, in particular a `file://host/share/...` UNC path, is **cannot answer here**: this host is Linux and cannot exercise a UNC `file://host/` path, and I did not verify Chromium's host comparison for `file:`; the answer would be static and unverified, so none is given.
+**Chrome CSP `'self'` and `file://host/...`** (static; no run). The chrome CSP (`src/renderer/index.html:6-7`) is `default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: goldfinch-media:; media-src 'self' blob: goldfinch-media:;`. The chrome page is a `file:` URL (`getChromeTarget` reported `file://<repo>/src/renderer/index.html`). How Chromium matches `'self'` for `file:` origins, in particular a `file://host/share/...` UNC path, is **cannot answer here**: this host is Linux and cannot exercise a UNC `file://host/` path, and I did not verify Chromium's host comparison for `file:`; the answer would be static and unverified, so none is given.
 
 ## Apparatus smoke (product, admin key; "before" reading for the post-gate-migration sweep)
 

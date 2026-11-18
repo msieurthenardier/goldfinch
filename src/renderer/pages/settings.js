@@ -12,7 +12,7 @@ import { SEARCH_ENGINES, normalizeHomePageInput } from './search-engines.js';
 // @ts-ignore — serving-path vs disk-path mismatch (see above)
 import { defaultBrowserRowModel } from './default-browser-row-model.js';
 // @ts-ignore — serving-path vs disk-path mismatch (see above)
-import { updateNoticeModel } from './update-notice-model.js';
+import { updateNoticeModel, downloadResultHint } from './update-notice-model.js';
 import {
   isolationModel,
   restartControl,
@@ -645,21 +645,54 @@ initSectionScrollSpy({ document, IntersectionObserver, window });
   const btn = /** @type {HTMLButtonElement|null} */ (document.getElementById('about-update-open'));
   const check = /** @type {HTMLInputElement|null} */ (document.getElementById('update-check-enabled'));
   if (!versionEl || !statusEl || !btn || !check) return;
+  // Leg `update-download`: fetched separately and tolerated absent, so the early return above never
+  // depends on them (a page without them still shows the notice and the release-page button).
+  const dlBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('about-update-download'));
+  const hintEl = document.getElementById('about-update-hint');
 
   let pushed = false;
+  // The hint after a click (started / could not start). It survives state pushes while the button is
+  // shown, and is dropped when the button goes away (notice cleared or no direct installer) or when
+  // the available version / installer name changes.
+  /** @type {string | null} */
+  let hintOverride = null;
+  // What the state said (`available` + `downloadName`) when the override was set, and what it says now:
+  // a push that changes either drops the override (it describes the old version's download).
+  let overrideKey = '';
+  let stateKey = '';
 
   function render(state) {
     const m = updateNoticeModel(state);
+    stateKey = JSON.stringify([state && state.available, state && state.downloadName]);
+    if (hintOverride !== null && overrideKey !== stateKey) hintOverride = null;
     if (versionEl.textContent !== m.versionText) versionEl.textContent = m.versionText;
     if (statusEl.textContent !== m.noticeText) statusEl.textContent = m.noticeText;
     if (btn.textContent !== m.openLabel && m.showNotice) btn.textContent = m.openLabel;
     if (m.showNotice) btn.setAttribute('aria-label', m.openAriaLabel);
     else btn.removeAttribute('aria-label');
     const hadFocus = document.activeElement === btn;
+    const dlHadFocus = !!dlBtn && document.activeElement === dlBtn;
     statusEl.hidden = !m.showNotice;
     btn.hidden = !m.showNotice;
-    // A hidden focused control drops focus to the document: move it to the checkbox instead.
+    if (dlBtn) {
+      if (m.showDownload) {
+        if (dlBtn.textContent !== m.downloadLabel) dlBtn.textContent = m.downloadLabel;
+        dlBtn.setAttribute('aria-label', m.downloadAriaLabel);
+      } else {
+        dlBtn.removeAttribute('aria-label');
+      }
+      dlBtn.hidden = !m.showDownload;
+    }
+    if (hintEl) {
+      const text = m.showNotice && hintOverride !== null && m.showDownload ? hintOverride : m.hintText;
+      if (hintEl.textContent !== text) hintEl.textContent = text;
+      hintEl.hidden = !m.showNotice;
+    }
+    if (!m.showNotice || !m.showDownload) hintOverride = null;
+    // A hidden focused control drops focus to the document: move it to the checkbox instead
+    // (or, when only the download button goes away, to the release-page button).
     if (hadFocus && !m.showNotice) check.focus();
+    else if (dlHadFocus && !m.showDownload) (m.showNotice ? btn : check).focus();
   }
 
   render(null);
@@ -683,6 +716,21 @@ initSectionScrollSpy({ document, IntersectionObserver, window });
   btn.addEventListener('click', () => {
     bridge.updateOpenReleasePage().catch(() => {});
   });
+
+  // The call takes NO argument: main builds the address and starts one ordinary download. The hint
+  // shows main's answer (`name` is what main downloaded, which a push between render and click can
+  // change); the button stays enabled so a second click is simply answered by main.
+  if (dlBtn && hintEl) {
+    dlBtn.addEventListener('click', () => {
+      const show = (/** @type {any} */ result) => {
+        hintOverride = downloadResultHint(result);
+        overrideKey = stateKey;
+        hintEl.textContent = hintOverride;
+      };
+      if (typeof bridge.updateDownload !== 'function') return show(null);
+      bridge.updateDownload().then(show, () => show(null));
+    });
+  }
 
   // The checkbox follows the stored setting (never .click()/dispatchEvent — that would echo).
   // A push seen before the boot read resolves wins (the read is older); a rejected write reverts
