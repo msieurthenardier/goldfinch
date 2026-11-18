@@ -1,10 +1,10 @@
 # Squawk 0088: MCP `evaluate` is a silent no-op in some builds
 
-**Status**: deferred
+**Status**: completed
 **Type**: defect
 **Severity**: routine
 **Reported**: 2026-09-18
-**Completed**: —
+**Completed**: 2026-11-18 (closed without a fix — see Ledger Sweep)
 
 ## Report
 
@@ -232,3 +232,6 @@ both closed at the end of the session:
 ## Sign-Off
 
 *(written at completion)*
+
+## Ledger Sweep (routine maintenance, 2026-11-18)
+**Closed without a fix — no corrective action was taken.** The headline symptom was not reproducible on 2026-09-19 and has not recurred in the 61 days since, across Mission 23 and sorties 05–10, which drove `evaluate` heavily. `completed` here is the ledger's only terminal state; it does not mean a fix landed. If the symptom recurs, log a new squawk with the evidence listed under the 2026-09-19 revisit trigger. The separate `evaluate` / void-op wire-shape question (item 3 above) remains a design question, not a squawk. See `maintenance/2026-11-18.md`.
