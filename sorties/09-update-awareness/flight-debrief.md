@@ -94,8 +94,8 @@ Recorded against mission-control **1.2.3**.
 
 ## Action Items
 
-- [ ] Squawk candidate: collapse the duplicated outcome mapping in `checkNow` / `execute` (`src/main/update-check.js`) into one helper.
-- [ ] Squawk candidate: run `npm run a11y` against `goldfinch://settings` in CI-adjacent smoke or the release checklist, so a label-in-name regression is caught where the page is changed.
+- [x] Squawk 0205 — collapse the duplicated outcome mapping in `checkNow` / `execute` (`src/main/update-check.js`) into one helper.
+- [x] Squawk 0206 — run `npm run a11y` against `goldfinch://settings` in CI-adjacent smoke or the release checklist, so a label-in-name regression is caught where the page is changed.
 - [ ] Planning rule (Recommendations 1–2) — for the operator to adopt into CLAUDE.md.
 
 Maintenance check: a mission has completed since the last maintenance report (2026-08-27), so no routine-maintenance recommendation is due from this sortie.

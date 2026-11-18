@@ -1,6 +1,6 @@
 # Sortie: Update awareness — a "Check now" button and an update dot on the kebab
 
-**Status**: landed
+**Status**: completed
 
 > Architect design review 2026-11-17: **approve with changes**, incorporated — `checkNow` shares `runCheck` by making it return its outcome and moving the on/off test to its callers; `lastCheck` is emitted on every completion, not through `apply()`; the gap tolerates a clock that steps backward; the dot is applied in the closures that already hold `window`, not in the module-level setter; the kebab keeps its accessible name "More" and gains a description; "Last checked" shows a clock time, so it never goes stale; the state says whether checking is possible at all; the work is two legs plus the walk, with the controller moved verbatim before anything is added to it.
 
