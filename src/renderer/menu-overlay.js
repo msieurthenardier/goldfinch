@@ -51,6 +51,7 @@
 // isSafeColor is imported (the SAME color domain the product accepts —
 // jars.js re-exports it).
 import { isSafeColor } from '../shared/safe-color.js';
+import { splitDownloadName } from '../shared/download-name-split.js';
 import { BOOKMARK_DND_MIME, overflowDropIndexY, overflowIndicatorY } from '../shared/bookmark-drag.js';
 import { buildVaultUnlockCard } from '../shared/vault-unlock-template.js';
 import { buildAuthBasicCard } from '../shared/auth-basic-template.js';
@@ -2466,6 +2467,22 @@ import {
     }
   }
 
+  function fillDownloadName(/** @type {HTMLElement} */ el, /** @type {any} */ filename) {
+    // Stem may shrink with an ellipsis; extension never does (squawk 0179).
+    // textContent only; the element's text and accessible name stay the full name.
+    const { stem, ext } = splitDownloadName(String(filename != null ? filename : ''));
+    const stemEl = document.createElement('span');
+    stemEl.className = 'dl-name-stem';
+    stemEl.textContent = stem;
+    el.appendChild(stemEl);
+    if (ext) {
+      const extEl = document.createElement('span');
+      extEl.className = 'dl-name-ext';
+      extEl.textContent = ext;
+      el.appendChild(extEl);
+    }
+  }
+
   /** Render the downloads list from the current chrome model (a flat item array).
    * All filenames via textContent (DD8 — untrusted / RTL / long names; CSS
    * ellipsis handles length).
@@ -2489,7 +2506,7 @@ import {
         const name = document.createElement('button');
         name.className = 'dl-name';
         name.type = 'button';
-        name.textContent = String(item.filename != null ? item.filename : '');
+        fillDownloadName(name, item.filename);
         name.addEventListener('click', () => {
           if (sendActivatedOnce({ id: 'dl:open:' + item.id })) menuController.close(downloadsEntry);
         });
@@ -2509,7 +2526,7 @@ import {
         // state to AT (a live progressbar role in a dialog would be chatty).
         const name = document.createElement('span');
         name.className = 'dl-name';
-        name.textContent = String(item.filename != null ? item.filename : '');
+        fillDownloadName(name, item.filename);
         const progress = document.createElement('span');
         progress.className = 'dl-progress';
         progress.textContent = downloadProgressText(item);

@@ -20,7 +20,8 @@ const RETRY_REASONS = Object.freeze({
 
 const REASON_TEXT = Object.freeze({
   [RETRY_REASONS.NO_RECORD]: 'Cannot retry: this download is no longer in the list.',
-  [RETRY_REASONS.NO_PARTITION]: 'Cannot retry: this download does not record which identity it came from.',
+  [RETRY_REASONS.NO_PARTITION]:
+    'Cannot retry here. If Goldfinch started this download, use Download now in Settings to fetch it again.',
   [RETRY_REASONS.JAR_GONE]: 'Cannot retry: the identity this download came from no longer exists.',
   [RETRY_REASONS.BURNER_GONE]: 'Cannot retry: the Burner tab this download came from has been closed.',
   [RETRY_REASONS.UNSUPPORTED_URL]: 'Cannot retry: only web addresses can be downloaded again.',

@@ -81,8 +81,8 @@ function makeHarness(opts = {}) {
     // unknown id) resolves to null, never throws.
     getTabContents: (id) => (id === 9 ? downloader : null),
     path,
-    fs: { existsSync: () => false },
-    sanitizeFilename: (name) => name,
+    fs: opts.fs || { existsSync: () => false },
+    sanitizeFilename: opts.sanitizeFilename || ((name) => name),
     isWithinDir: () => true,
     dialog: { showOpenDialog: async () => ({ canceled: false, filePaths: ['/approved'] }) },
     shell: {
@@ -439,10 +439,11 @@ test('download-media refuses a bad url before resolving anything: even with an u
   assert.deepEqual(res, { ok: false, error: 'Unsupported download URL.' });
 });
 
-function startDownload(h, sess, url, contents) {
+function startDownload(h, sess, url, contents, chain) {
   const calls = [];
   const item = {
     getURL: () => url,
+    ...(chain ? { getURLChain: typeof chain === 'function' ? chain : () => chain } : {}),
     getFilename: () => 'chromium-name',
     setSavePath: (p) => calls.push(['savePath', p]),
     on() {},
@@ -476,6 +477,54 @@ test("the pending record is keyed by tab and url: another tab downloading the sa
   // ...and it did not consume the real record: the media panel's own download still gets its name and folder.
   const own = startDownload(h, sess, url, { id: 9 });
   assert.deepEqual(own, [['savePath', path.join('/approved', 'suggested.png')]]);
+});
+
+test('a redirected download (URL chain [requested, final]) keeps its suggested name and chosen folder; a chainless item matches by getURL', async () => {
+  const h = makeHarness();
+  const sess = fakeSession();
+  h.wireDownloadHandler(sess);
+  h.setActiveTab(9);
+  const ok = await h.handlers.get('choose-download-dir')(eventFrom(h.chromeSender));
+  const requested = 'https://example.com/pic.png';
+  const final = 'https://cdn.example.com/abc123.png';
+  await h.handlers.get('download-media')(eventFrom(h.chromeSender), {
+    webContentsId: 9,
+    url: requested,
+    suggestedName: 'suggested.png',
+    saveDir: ok
+  });
+  // Another tab downloading the FINAL url inherits nothing, nor does a chain that starts elsewhere.
+  assert.deepEqual(startDownload(h, sess, final, { id: 77 }, [requested, final]), [
+    ['savePath', path.join('/downloads', 'chromium-name')]
+  ]);
+  assert.deepEqual(startDownload(h, sess, final, { id: 9 }, [final]), [
+    ['savePath', path.join('/downloads', 'chromium-name')]
+  ]);
+  // A throwing or empty chain falls back to getURL (the final url: no match, no throw).
+  assert.deepEqual(
+    startDownload(h, sess, final, { id: 9 }, () => {
+      throw new Error('x');
+    }),
+    [['savePath', path.join('/downloads', 'chromium-name')]]
+  );
+  assert.deepEqual(startDownload(h, sess, final, { id: 9 }, []), [
+    ['savePath', path.join('/downloads', 'chromium-name')]
+  ]);
+  // The tab's own redirected download gets the name and folder.
+  assert.deepEqual(startDownload(h, sess, final, { id: 9 }, [requested, final]), [
+    ['savePath', path.join('/approved', 'suggested.png')]
+  ]);
+  // Consumed: a second one gets nothing.
+  assert.deepEqual(startDownload(h, sess, final, { id: 9 }, [requested, final]), [
+    ['savePath', path.join('/downloads', 'chromium-name')]
+  ]);
+  // A chainless item still matches by getURL.
+  await h.handlers.get('download-media')(eventFrom(h.chromeSender), {
+    webContentsId: 9,
+    url: requested,
+    suggestedName: 'plain.png'
+  });
+  assert.deepEqual(startDownload(h, sess, requested, { id: 9 }), [['savePath', path.join('/downloads', 'plain.png')]]);
 });
 
 test('a download that reports no webContents never matches a pending record', async () => {
@@ -878,4 +927,31 @@ test('main.js wires the owning-jar facts into the downloads registrar and the pa
   assert.ok(!/getChromeContents/.test(downloads[0]), 'no chrome accessor is handed to the downloads registrar');
   const tabs = /registerTabIpc\(\{[\s\S]*?\n\}\);/.exec(src);
   assert.ok(tabs && /\bnoteSessionPartition\b/.test(tabs[0]), 'registerTabIpc receives noteSessionPartition');
+});
+
+test('uniquePath de-duplicates through dedupedName: a 180-byte name that already exists stays within 180 bytes and keeps its extension', () => {
+  const { sanitizeFilename } = require('../../src/main/download-path');
+  const name = `${'a'.repeat(176)}.mp4`;
+  assert.equal(Buffer.byteLength(name), 180);
+  const taken = new Set([path.join('/downloads', name)]);
+  const h = makeHarness({
+    sanitizeFilename,
+    fs: { existsSync: (p) => taken.has(p) }
+  });
+  const sess = fakeSession();
+  h.wireDownloadHandler(sess);
+  const calls = [];
+  const item = {
+    getURL: () => 'https://example.com/x',
+    getFilename: () => name,
+    setSavePath: (p) => calls.push(p),
+    on() {},
+    once() {}
+  };
+  sess.listeners.get('will-download')({}, item, { id: 77 });
+  assert.equal(calls.length, 1);
+  const base = path.basename(calls[0]);
+  assert.notEqual(base, name, 'a different name was chosen');
+  assert.ok(Buffer.byteLength(base) <= 180, `basename is ${Buffer.byteLength(base)} bytes`);
+  assert.ok(base.endsWith(' (1).mp4'), base);
 });
