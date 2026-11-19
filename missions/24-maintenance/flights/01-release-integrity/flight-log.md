@@ -72,4 +72,9 @@ In flight (2026-11-19). Branch `flight/01-release-integrity` cut from `main` @ 2
     - the Dependabot note could spell out the annotated-tag dereference (`git/tags/<sha>`);
     - the fuse-check pin's `indexOf` could match a comment.
   - Legs 02 and 03 are completed. **Leg 01 stays `landed` until its live `workflow_dispatch` run passes the audit step.** That run is dispatched after this commit, with the operator's go-ahead.
+- **Leg 1 live verification (2026-11-19): manual `workflow_dispatch` [run 44456941596](https://github.com/msieurthenardier/goldfinch/actions/runs/44456941596) on `flight/01-release-integrity` @ 05e473b — `success`.**
+  - "Audit dependencies (high and above)" ran and **passed on Build (linux)**, and was **skipped on win / mac**, as designed. All three builds succeeded.
+  - Upload ran its "Dispatch publishes nothing" path; Create draft release and Publish release were skipped.
+  - This proves the step runs and passes on the DISPATCH path. **The tag path's first live confirmation is the next real release.**
+- **Leg 1 completed. All legs completed; flight landed. Mission 24's five success criteria are all met.**
 

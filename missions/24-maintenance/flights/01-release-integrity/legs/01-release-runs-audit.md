@@ -1,6 +1,6 @@
 # Leg: release-runs-audit
 
-**Status**: landed
+**Status**: completed
 **Flight**: [Release Integrity](../flight.md)
 
 > *Original hold (operator ruling 2026-11-18, superseded 2026-11-19 below):* this leg was not to be implemented or merged until a patched `picomatch` was published (GHSA-fc5q-39xc-vjpf, range `<= 4.0.7`). Rechecked 2026-11-19: no patched version yet, and 4.0.7 is still the latest. When a fix ships, this leg takes the normal dependency bump in the same change, so the release gate goes green rather than blocking every release.
@@ -26,7 +26,7 @@ The release build runs `npm audit --audit-level=high` itself, once, before any i
   Each pin is neuter-verified.
 - [x] ~~**Dependency.**~~ Dropped: the advisory was withdrawn, and `npm audit --audit-level=high` exits 0 with no bump (checked 2026-11-19).
 - [ ] **Docs.** `docs/RELEASING.md` says what the release build now checks. CLAUDE.md's *Release / CI* paragraph says `build` runs the audit gate.
-- [ ] **Verification run.** A manual `workflow_dispatch` run of `build.yml` passes the audit step. This needs the branch pushed; the Flight Director dispatches it after the commit, with the operator's go-ahead, since a dispatch runs the full installer build.
+- [x] **Verification run.** A manual `workflow_dispatch` run of `build.yml` passes the audit step. This needs the branch pushed; the Flight Director dispatches it after the commit, with the operator's go-ahead, since a dispatch runs the full installer build.
 
 ## Citation Audit
 
