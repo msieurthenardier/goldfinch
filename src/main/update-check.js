@@ -58,6 +58,16 @@ function decideUpdateCheck({ isPackaged, env }) {
 }
 
 /**
+ * The one mapping from a raw check outcome to the public answer: `newer`/`current` pass through,
+ * everything else (failure codes, `aborted`, `timeout`) is `failed`.
+ * @param {string} raw
+ * @returns {'newer' | 'current' | 'failed'}
+ */
+function publicOutcome(raw) {
+  return raw === 'newer' || raw === 'current' ? raw : 'failed';
+}
+
+/**
  * @param {{
  *   fetch: (url: string, init: any) => Promise<any>,
  *   getVersion: () => string,
@@ -251,7 +261,7 @@ function createUpdateChecker({
     }
     // lastCheck is set BEFORE apply(), so one emit per completion carries both; when apply() did not
     // emit (a repeat answer, a failure) the completion emits once for lastCheck alone.
-    lastCheck = { at: now(), outcome: outcome === 'newer' || outcome === 'current' ? outcome : 'failed' };
+    lastCheck = { at: now(), outcome: publicOutcome(outcome) };
     const emitted = toApply ? apply(toApply.a, toApply.u) : false;
     if (!emitted) emit();
     trace(outcome);
@@ -321,7 +331,7 @@ function createUpdateChecker({
         }
       }
       const raw = await runCheck();
-      return { outcome: raw === 'newer' || raw === 'current' ? raw : 'failed' };
+      return { outcome: publicOutcome(raw) };
     },
     /** Quit: clears the timer, aborts, fires nothing. Safe twice. */
     stop() {

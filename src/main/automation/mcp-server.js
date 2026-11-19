@@ -176,6 +176,17 @@ function deriveAuditDetail(op, args, result) {
       const len = String(args.text ?? '').length;
       return 'text(' + len + ' chars)';
     }
+    case 'getHistory': {
+      // REDACTED: query length only — never the search text. Each part appears only
+      // when its argument is present (a non-string query records no q= part); no
+      // usable part at all → null.
+      const parts = [];
+      if (args.jarId != null) parts.push('jar=' + String(args.jarId));
+      if (typeof args.query === 'string') parts.push('q=' + args.query.length);
+      if (args.limit != null) parts.push('limit=' + String(args.limit));
+      if (args.before != null) parts.push('before=' + String(args.before));
+      return parts.length ? parts.join(' ') : null;
+    }
     case 'dragPointer': {
       const from = args.from;
       const to = args.to;

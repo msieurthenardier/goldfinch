@@ -89,6 +89,15 @@ of the six files (and the date in its comment).
 docker buildx imagetools inspect node:22 --format '{{.Manifest.Digest}}'
 ```
 
+### `jq` in the test task
+
+`ci/tasks/test.yml` installs `jq` from the image's own Debian repositories
+(`apt-get install jq`, then `jq --version` so the log shows it) before
+`npm test`. The release-state test in
+`test/unit/release-workflow-invariants.test.js` needs `jq` and otherwise
+reports as skipped (squawk 0227). The image and digest are unchanged; the
+package is not version-pinned, so it follows the image's Debian release.
+
 ### Accepted advisories
 
 None currently.

@@ -228,7 +228,14 @@ export function createMediaController(deps) {
     thumb.style.cursor = 'default';
     thumb.style.backgroundImage = 'none';
     thumb.classList.add(item.type === 'audio' ? 'audio-live' : 'video-live');
-    thumb.innerHTML = `<label class="media-pick"><span class="badge">${item.type}</span></label>`;
+    thumb.innerHTML = '';
+    const pick = document.createElement('label');
+    pick.className = 'media-pick';
+    const badge = document.createElement('span');
+    badge.className = 'badge';
+    badge.textContent = item.type;
+    pick.appendChild(badge);
+    thumb.appendChild(pick);
     const player = document.createElement(item.type === 'video' ? 'video' : 'audio');
     // Resolved at call time (fine — the item belongs to the active tab: playInline
     // only ever runs from a click on a card rendered for the current tab).
