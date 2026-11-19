@@ -252,8 +252,8 @@ test("control: with the gate not applying, save + copy + reveal are today's repl
   assert.equal(h.rg.dialogs.length, 0);
 });
 
-test('wiring pin: a successful profile restore drops every grant (main.js import commit)', () => {
-  const src = fs.readFileSync(path.join(__dirname, '../../src/main/main.js'), 'utf8');
+test('wiring pin: a successful profile restore drops every grant (vault-wiring.js import commit)', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../../src/main/vault/vault-wiring.js'), 'utf8');
   assert.match(
     src,
     /getVaultStore\(\)\.restoreProfile\([\s\S]{0,300}?\}\);\s*revealGate\.dropAllGrants\(\);/,

@@ -465,15 +465,30 @@ test('AC3c: documentMarks.clearGrants leaves the scripted mark alone', () => {
   assert.equal(m.isScripted(3), true);
 });
 
-// ---- source pins (wiring is in main.js / app-lifecycle.js) ---------------------------------------------
+// ---- source pins (wiring is in main.js / vault/vault-wiring.js / app-lifecycle.js) ---------------------------------------------
 
-test('pins: main.js clears grants in onLock, builds the power lock from the late store, registers after ready', () => {
-  const src = maskComments(fs.readFileSync(path.join(__dirname, '../../src/main/main.js'), 'utf8'));
-  assert.match(src, /onLock:\s*\(\)\s*=>\s*\{\s*documentMarks\.clearGrants\(\);/);
+test('pins: vault-wiring.js clears grants in onLock; main.js builds the power lock from the late store, registers after ready', () => {
+  const read = (rel) => maskComments(fs.readFileSync(path.join(__dirname, '../../src', rel), 'utf8'));
+  // onLock moved with the vault wiring (Mission 24 F3 leg 2).
+  const wiring = read('main/vault/vault-wiring.js');
+  assert.match(wiring, /onLock:\s*\(\)\s*=>\s*\{\s*documentMarks\.clearGrants\(\);/);
+  const src = read('main/main.js');
   assert.match(src, /createPowerLock\(\{\s*powerMonitor,/);
   assert.match(src, /startVaultPowerLock:\s*\(\)\s*=>\s*vaultPowerLock\.register\(\)/);
-  assert.match(src, /lockVaultForQuit:\s*\(\)\s*=>\s*_vaultStore\?\.lockNow\(\)/);
+  assert.match(src, /lockVaultForQuit:\s*\(\)\s*=>\s*peekVaultStore\(\)\?\.lockNow\(\)/);
   assert.equal((src.match(/powerMonitor\.on\(/g) || []).length, 0, 'no direct powerMonitor subscription in main.js');
+  // "Never constructs": the quit lock and every power-lock dep read the PEEK accessor only.
+  const powerStart = src.indexOf('createPowerLock({');
+  assert.ok(powerStart !== -1, 'createPowerLock( call found');
+  const powerBlock = src.slice(powerStart, src.indexOf('\n});', powerStart));
+  assert.ok(/peekVaultStore\(\)/.test(powerBlock), 'the power-lock deps use peekVaultStore()');
+  assert.equal(/getVaultStore\(/.test(powerBlock), false, 'no power-lock dep may construct the store');
+  const quitDep = /lockVaultForQuit:[^\n]*/.exec(src);
+  assert.ok(quitDep && !/getVaultStore/.test(quitDep[0]), 'lockVaultForQuit does not construct the store');
+  // assertMutated: a constructing dep must trip the power-lock scan.
+  const neutered = powerBlock.replace(/peekVaultStore\(\)\?\.lockNow\(\)/, 'getVaultStore().lockNow()');
+  assert.notEqual(neutered, powerBlock, 'the mutation actually changed the source');
+  assert.equal(/getVaultStore\(/.test(neutered), true, 'the scan catches a constructing dep');
 });
 
 test('pins: app-lifecycle before-quit locks in its own try, before getMcpServer().stop(), and registration is in the ready chain', () => {

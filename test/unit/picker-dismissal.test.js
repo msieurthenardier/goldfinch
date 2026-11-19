@@ -103,7 +103,7 @@ test('source pins: a successful unlock closes `activated`; every lock fans a `va
     /const ok = await vaultUnlock\(buf\);\s*if \(ok\) rec\.sheet\.closeMenuOverlay\('activated', current\.token\);/,
     'unlock success closes its sheet with `activated`'
   );
-  const main = read('src/main/main.js');
+  const main = read('src/main/vault/vault-wiring.js');
   assert.match(main, /rec\.sheet\?\.closeMenuOverlay\('vault-lock'\)/, 'every vault lock fans a vault-lock close');
   const manager = read('src/main/menu-overlay-manager.js');
   assert.match(

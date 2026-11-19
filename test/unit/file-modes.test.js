@@ -167,9 +167,9 @@ test('a missing vaults directory or file is silent (ENOENT)', () => {
   assert.deepEqual(warns, []);
 });
 
-// The bundle export writer lives in main.js (Electron-bound): source-scan pin of its mode handling.
+// The bundle export writer lives in vault/vault-wiring.js (moved out of main.js, Mission 24 F3 leg 2): source-scan pin of its mode handling.
 test('the bundle export writes mode 0600 on creation and tightens an overwritten file', () => {
-  const src = fs.readFileSync(path.join(__dirname, '../../src/main/main.js'), 'utf8');
+  const src = fs.readFileSync(path.join(__dirname, '../../src/main/vault/vault-wiring.js'), 'utf8');
   const m =
     /fs\.writeFileSync\(\s*filePath,\s*JSON\.stringify\(bundle\),[\s\S]*?return \{ ok: true, path: filePath \};/.exec(
       src

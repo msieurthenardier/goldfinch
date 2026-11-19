@@ -1,8 +1,8 @@
 'use strict';
 
 // Unit tests for src/main/capture-failure.js (squawk 0155) — the named capture-failed
-// refusal and the one bounded active-guest retry used by main.js grabWindow's Wayland
-// composite fallback. main.js itself is never loaded by a test; its wiring is pinned by
+// refusal and the one bounded active-guest retry used by window-capture.js grabWindow's Wayland
+// composite fallback. window-capture.js is never loaded by a test; its wiring is pinned by
 // capture-window-failure-pins.test.js.
 //
 // Electron-free: the module requires nothing. setTimeout is intercepted per test with

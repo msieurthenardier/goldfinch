@@ -2,7 +2,7 @@
 // @ts-check
 
 // Sortie 06 Leg 1 (AC15): the capture/prompt half of the vault-lock teardown, extracted from
-// main.js's store `onLock` so the ORDER is unit-testable with spies. Order is load-bearing:
+// vault/vault-wiring.js's store `onLock` so the ORDER is unit-testable with spies. Order is load-bearing:
 //   1. every window's corner save prompt closes `vault-lock` FIRST - the manager sets
 //      `settling` so the drop in step 2 cannot flash "This save request expired";
 //   2. `dropAllCaptures()` zeroizes and drops every held capture;

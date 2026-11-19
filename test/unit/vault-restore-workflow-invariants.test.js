@@ -56,11 +56,19 @@ test('vault-adminkey-show: every live send/registration is the rotate-admin PROV
   assert.equal(sendSites.length, 1, 'exactly one live vault-adminkey-show send (rotate-admin-key provision)');
   // The deleted admin-key map/functions may still be named in a HISTORICAL comment explaining
   // what was removed — assert no LIVE reference (a declaration, or a call on the map) remains.
-  assert.equal(
-    /_pendingAdoptAdminKeys\s*=\s*new Map|_pendingAdoptAdminKeys\.(set|get|delete|has)\(/.test(MAIN_JS),
-    false,
-    'the deleted admin-key map has no live declaration or call'
-  );
+  // The vault wiring moved to vault/vault-wiring.js (Mission 24 F3 leg 2): scan BOTH files.
+  const WIRING_JS = fs.readFileSync(path.join(REPO_ROOT, 'src/main/vault/vault-wiring.js'), 'utf8');
+  assert.ok(WIRING_JS.includes('createCompromiseRevealStore('), 'the scan target is the real wiring module');
+  for (const [name, src] of [
+    ['main.js', MAIN_JS],
+    ['vault-wiring.js', WIRING_JS]
+  ]) {
+    assert.equal(
+      /_pendingAdoptAdminKeys\s*=\s*new Map|_pendingAdoptAdminKeys\.(set|get|delete|has)\(/.test(src),
+      false,
+      `the deleted admin-key map has no live declaration or call in ${name}`
+    );
+  }
   assert.equal(/\btakeAdoptAdminKey\s*[:(]/.test(OVERLAY_IPC_JS), false, 'no live takeAdoptAdminKey reference remains');
   assert.equal(
     /\bstashAdoptAdminKey\s*[:(]/.test(OVERLAY_IPC_JS),

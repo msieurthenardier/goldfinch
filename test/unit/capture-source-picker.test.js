@@ -2,7 +2,7 @@
 
 // F7 DD4 — the extracted pure picker's unit net.
 //
-// THIS IS DD4'S ONLY RIG-PROVABLE HALF (recon S2, load-bearing). main.js skips the
+// THIS IS DD4'S ONLY RIG-PROVABLE HALF (recon S2, load-bearing). window-capture.js skips the
 // whole desktopCapturer branch under Wayland and `dev:automation` selects Wayland,
 // so the code that CALLS this module is dead on the dev rig: no live step in this
 // flight can prove the mis-pick fix, and any that claimed to would pass vacuously.
@@ -33,7 +33,7 @@ test('capture-source-picker: NO MATCH returns null — never a "closest" fallbac
   // Named for the CONTRACT, not the mechanism: a future "be helpful" refactor that
   // returns the nearest/largest/first source must fail HERE, loudly. "Capture *a*
   // window that happens to be the same size" is not a contract — a miss falls
-  // through to main.js's composite path, which is already bound to the right record.
+  // through to window-capture.js's composite path, which is already bound to the right record.
   const sources = [src('window:1:0'), src('window:2:0')];
   assert.equal(pickSourceByMediaSourceId(sources, 'window:404:0'), null);
 });

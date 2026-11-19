@@ -75,8 +75,10 @@ test('AC15 (real manager): with the prompt SHOWN, the lock closes it `vault-lock
   assert.deepEqual(h.dismisses, []);
 });
 
-test('AC15 source pin: main.js onLock calls runVaultLockTeardown (regex-target, wrap-insensitive, mutation-guarded)', () => {
-  const src = maskComments(fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'main', 'main.js'), 'utf8'));
+test('AC15 source pin: vault-wiring.js onLock calls runVaultLockTeardown (regex-target, wrap-insensitive, mutation-guarded)', () => {
+  const src = maskComments(
+    fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'main', 'vault', 'vault-wiring.js'), 'utf8')
+  );
   const re = /onLock:\s*\(\)\s*=>\s*\{[\s\S]*?runVaultLockTeardown\(\{[\s\S]*?\}\);\s*\},\s*onUnlock/;
   assert.ok(re.test(src), 'onLock must delegate to runVaultLockTeardown');
   // assertMutated: removing the call must make the pin fail (a no-op replace would pass vacuously).
@@ -116,18 +118,28 @@ test('AC8: zeroizeAutomationVaults runs between the capture drop and the sheets;
   );
 });
 
-test('AC9 source pin: main.js onLock passes zeroizeAutomationVaults bound to the LIVE mcpServer?.zeroizeAllVaultSessions()', () => {
-  const src = maskComments(fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'main', 'main.js'), 'utf8'));
+test('AC9 source pin: vault-wiring.js onLock passes zeroizeAutomationVaults bound to the LIVE getMcpServer()?.zeroizeAllVaultSessions()', () => {
+  const src = maskComments(
+    fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'main', 'vault', 'vault-wiring.js'), 'utf8')
+  );
   const callRe = /onLock:\s*\(\)\s*=>\s*\{[\s\S]*?runVaultLockTeardown\(\{[\s\S]*?\}\);\s*\},\s*onUnlock/;
   const m = callRe.exec(src);
   assert.ok(m, 'the onLock -> runVaultLockTeardown call is locatable');
-  const prop = /zeroizeAutomationVaults:\s*\(\)\s*=>\s*mcpServer\?\.zeroizeAllVaultSessions\(\)/;
-  assert.ok(prop.test(m[0]), 'the call must bind zeroizeAutomationVaults to mcpServer?.zeroizeAllVaultSessions()');
+  const prop = /zeroizeAutomationVaults:\s*\(\)\s*=>\s*getMcpServer\(\)\?\.zeroizeAllVaultSessions\(\)/;
+  assert.ok(prop.test(m[0]), 'the call must bind zeroizeAutomationVaults to getMcpServer()?.zeroizeAllVaultSessions()');
   // assertMutated: neuter the property inside the call; the pin must then fail.
   const mutatedCall = m[0].replace(
-    /zeroizeAutomationVaults:\s*\(\)\s*=>\s*mcpServer\?\.zeroizeAllVaultSessions\(\),?/,
+    /zeroizeAutomationVaults:\s*\(\)\s*=>\s*getMcpServer\(\)\?\.zeroizeAllVaultSessions\(\),?/,
     ''
   );
   assert.notEqual(mutatedCall, m[0], 'the mutation actually changed the source');
   assert.equal(prop.test(mutatedCall), false, 'the pin fails on the neutered source');
+  // The LIVE server: main.js hands the wiring a GETTER over the late-bound `let mcpServer`, never the value
+  // (a by-value capture would snapshot null at construction and the operator's lock would never zeroize).
+  const mainSrc = maskComments(fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'main', 'main.js'), 'utf8'));
+  const getterRe = /createVaultWiring\(\{(?:(?!\n\}\);)[\s\S])*?getMcpServer:\s*\(\)\s*=>\s*mcpServer\s*,/;
+  assert.ok(getterRe.test(mainSrc), 'main.js passes getMcpServer as a getter over the live mcpServer');
+  const byValue = mainSrc.replace(/getMcpServer:\s*\(\)\s*=>\s*mcpServer\s*,/, 'getMcpServer: mcpServer,');
+  assert.notEqual(byValue, mainSrc, 'the mutation actually changed the source');
+  assert.equal(getterRe.test(byValue), false, 'the pin fails when the server is captured by value');
 });

@@ -98,7 +98,7 @@ function sheetMenuSnapshot(wc, deps) {
 
 /**
  * M15 F3 L1 (DD1b) — the POST-AWAIT re-check every admitted sheet op runs, on the
- * main.js grabWindow TOCTOU idiom. `resolveContents` proved the gate at resolve time; the
+ * window-capture.js grabWindow TOCTOU idiom. `resolveContents` proved the gate at resolve time; the
  * menu can be closed or model-replaced during the op's async work, so the RESULT is
  * discarded unless the sheet's menu is byte-for-byte the same menu it was.
  *
@@ -322,7 +322,7 @@ async function readDom(wcId, deps) {
  *
  * A nullish or null-returning grabWindow throws the EXISTING 'automation: chrome window unavailable'
  * message verbatim (the same string engine.js:34 throws for the same null-window condition —
- * reused, not a new variant). grabWindow is injected from main.js (Flight 3, Leg 1) and keeps
+ * reused, not a new variant). grabWindow is injected from main.js (built in window-capture.js; Flight 3, Leg 1) and keeps
  * observe.js Electron-free.
  *
  * F7 DD3: threads an OPTIONAL windowId through to grabWindow (omitted → last-focused,

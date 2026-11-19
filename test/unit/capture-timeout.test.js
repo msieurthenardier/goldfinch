@@ -95,7 +95,7 @@ test('capture-timeout: a capture that NEVER settles REJECTS at the bound with th
 test('capture-timeout: the LABEL names the target in the refusal (Promise.all hides which capture hung)', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
 
-  // main.js races the chrome and guest captures in one Promise.all; without labels the
+  // window-capture.js races the chrome and guest captures in one Promise.all; without labels the
   // refusal would name the symptom but not the target. Both labels must survive verbatim.
   const mk = (label) => {
     const p = withCaptureTimeout(new Promise(() => {}), label);

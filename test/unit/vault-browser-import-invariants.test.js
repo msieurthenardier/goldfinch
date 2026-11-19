@@ -23,6 +23,9 @@ const VAULT_RESTORE_JS = fs.readFileSync(
   'utf8'
 );
 const MAIN_JS = fs.readFileSync(path.join(REPO_ROOT, 'src/main/main.js'), 'utf8');
+// The vault wiring moved out of main.js (Mission 24 F3 leg 2): the onLock hook, releaseVaultHoldsForWindow
+// and the held-store construction are read from vault-wiring.js; registrar threading stays on main.js.
+const WIRING_JS = fs.readFileSync(path.join(REPO_ROOT, 'src/main/vault/vault-wiring.js'), 'utf8');
 const INTERNAL_PAGE_MAP_JS = fs.readFileSync(path.join(REPO_ROOT, 'src/main/internal-page-map.js'), 'utf8');
 const AUTOMATION_DIR = path.join(REPO_ROOT, 'src/main/automation');
 
@@ -31,26 +34,26 @@ const AUTOMATION_DIR = path.join(REPO_ROOT, 'src/main/automation');
 // ---------------------------------------------------------------------------
 
 test('AC8: _pendingBrowserImports.dropAll() lives inside the onLock hook body', () => {
-  const onLockStart = MAIN_JS.indexOf('onLock: () => {');
+  const onLockStart = WIRING_JS.indexOf('onLock: () => {');
   assert.ok(onLockStart !== -1, 'onLock hook found');
-  const onLockEnd = MAIN_JS.indexOf('},', onLockStart);
-  const body = MAIN_JS.slice(onLockStart, onLockEnd);
+  const onLockEnd = WIRING_JS.indexOf('},', onLockStart);
+  const body = WIRING_JS.slice(onLockStart, onLockEnd);
   assert.ok(body.includes('_pendingBrowserImports.dropAll()'), 'onLock drops the held browser-import records');
   assert.ok(body.includes('_pendingVaultImports.dropAll()'), 'sanity: the restore drop stays alongside it');
 });
 
 test('AC8: _pendingBrowserImports.clear(chromeId) lives inside releaseVaultHoldsForWindow', () => {
-  const start = MAIN_JS.indexOf('function releaseVaultHoldsForWindow(chromeId) {');
+  const start = WIRING_JS.indexOf('function releaseVaultHoldsForWindow(chromeId) {');
   assert.ok(start !== -1, 'releaseVaultHoldsForWindow found');
-  const afterStart = MAIN_JS.slice(start);
-  const endMatch = afterStart.match(/\n\}\n/);
+  const afterStart = WIRING_JS.slice(start);
+  const endMatch = afterStart.match(/\n {2}\}\n/);
   assert.ok(endMatch, 'closing brace found');
   const body = afterStart.slice(0, /** @type {number} */ (endMatch.index));
   assert.ok(body.includes('_pendingBrowserImports.clear(chromeId)'));
 });
 
 test('AC8: exactly one createPendingBrowserImportStore( call', () => {
-  const hits = [...MAIN_JS.matchAll(/createPendingBrowserImportStore\(/g)];
+  const hits = [...WIRING_JS.matchAll(/createPendingBrowserImportStore\(/g)];
   assert.equal(hits.length, 1, 'exactly one browser-import held-store construction');
 });
 
