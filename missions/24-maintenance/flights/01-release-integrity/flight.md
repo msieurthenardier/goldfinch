@@ -1,6 +1,6 @@
 # Flight: Release Integrity
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Maintenance](../../mission.md)
 
 ## Contributing to Criteria
@@ -104,3 +104,13 @@ Make a release see its own gate. Today `build.yml` assumes the local Concourse `
 - A manual `workflow_dispatch` run of `build.yml` fails at the audit step while GHSA-fc5q-39xc-vjpf is unpatched, and passes it once fixed.
 - `release-workflow-invariants.test.js` fails if the audit step is removed, or is made non-fatal (neuter-verified).
 - `electron --version` in a dev launch reads 45.3.4, and the isolation spec passes.
+
+---
+
+*Debrief notes (2026-11-19). These correct the plan above where events overtook it; the original text is kept as written.*
+
+- **The audit-leg hold was lifted.** The hold in Pre-Flight was lifted mid-flight: GitHub WITHDREW GHSA-fc5q-39xc-vjpf rather than patching it, and the operator un-held the leg (flight log).
+- **Verification, corrected.** The Verification text "fails at the audit step while GHSA-fc5q-39xc-vjpf is unpatched" no longer applies. Dispatch run 44456941596 PASSED the audit step on Linux; the tag path is first confirmed at the next release.
+- **Electron version.** The Technical Approach's "45.3.4" became **45.4.1**, the current 45 release when the leg was designed, within the mission criterion's "or later".
+- **Concourse checkpoint.** The `fly` prerequisite was never met, so the Concourse-history checkpoint was superseded, not done.
+

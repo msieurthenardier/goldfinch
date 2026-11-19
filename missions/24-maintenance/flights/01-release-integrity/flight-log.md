@@ -77,4 +77,10 @@ In flight (2026-11-19). Branch `flight/01-release-integrity` cut from `main` @ 2
   - Upload ran its "Dispatch publishes nothing" path; Create draft release and Publish release were skipped.
   - This proves the step runs and passes on the DISPATCH path. **The tag path's first live confirmation is the next real release.**
 - **Leg 1 completed. All legs completed; flight landed. Mission 24's five success criteria are all met.**
+- **Debrief (2026-11-19).**
+  - [flight-debrief.md](flight-debrief.md) written.
+  - The suite ran in 8.9 s on a quiet host (load 0.2).
+  - Squawks 0225 and 0226 were logged.
+  - Debrief notes were appended to `flight.md`, correcting the stale hold, verification and version text.
+  - Flight marked `completed`.
 
