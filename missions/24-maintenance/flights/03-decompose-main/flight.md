@@ -1,6 +1,6 @@
 # Flight: Decompose main.js and Restore renderer.js Headroom
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Maintenance](../../mission.md)
 
 ## Contributing to Criteria

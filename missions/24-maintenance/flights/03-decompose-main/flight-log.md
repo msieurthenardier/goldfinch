@@ -89,4 +89,10 @@ In flight (2026-11-19). Branch `flight/03-decompose-main` cut from `main` @ 25e3
   - `main.js`: 3,269 → **2,409** (−860; window capture −270, vault wiring −590). That is slightly above the flight's "about 2,300" verification target, which was a rough figure; the leg-level criteria (≥240 and ≥450) were both exceeded.
   - `renderer.js`: 1,504 → **1,447** lines (1,448 by the budget's `split` count). `RENDERER_LINE_BUDGET` is 1,448.
 - **Committed. All legs completed; flight landed.**
+- **Debrief (2026-11-19).**
+  - [flight-debrief.md](flight-debrief.md) written.
+  - The operator confirmed that the narrowed "human wiring" scope meets the mission criterion.
+  - The suite ran at 10.5 s at load 2.7–5.5, back at baseline.
+  - Squawk 0224 logged.
+  - Flight marked `completed`.
 
