@@ -1,7 +1,7 @@
 // @ts-check
 'use strict';
 
-// Named capture refusals + the ONE bounded guest-capture retry for main.js's Wayland
+// Named capture refusals + the ONE bounded guest-capture retry for window-capture.js's Wayland
 // composite fallback in grabWindow (squawk 0155).
 //
 // Before this module, every composite failure that was not a capture-timeout collapsed
@@ -10,7 +10,7 @@
 // diagnosis (squawk 0155 Evidence) found the swallowed error was the ACTIVE GUEST's
 // capturePage() rejecting with `UnknownVizError` (no compositor frame to copy) in two
 // shapes: a freshly created guest that has not painted its first frame yet (~100-200ms
-// after openTab), and a guest hidden behind a chrome takeover panel (main.js now skips
+// after openTab), and a guest hidden behind a chrome takeover panel (window-capture.js now skips
 // that one — it is not on screen). This module names whatever is left, the way F7 DD7
 // already names a capture-timeout, so the tool returns the cause as isError.
 //

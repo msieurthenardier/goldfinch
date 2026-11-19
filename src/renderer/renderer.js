@@ -31,6 +31,7 @@ import { SEARCH_ENGINES, buildSearchUrl, capPendingQuery, normalizeHomePageInput
 import { createChromeContext, escapeHtml } from './chrome/context.js';
 import { createDownloadsController } from './chrome/downloads-controller.js';
 import { createAuditHooks } from './chrome/audit-hooks.js';
+import { createTabContextController } from './chrome/tab-context-controller.js';
 import { createAuditStates } from './chrome/audit-states.js'; // sortie 01: extracted crash/hang audit hooks
 import { createExternalUrlsController } from './chrome/external-urls-controller.js'; // sortie 01
 import { createSiteSecurityController } from './chrome/site-security-controller.js';
@@ -1064,78 +1065,20 @@ function openToolbarContextMenu(item, anchorEl) {
 }
 
 /* ------------------------------------------------ tab context menu (M09 F5 Leg 1) */
-// Tab-scoped context menu, rendered from the sheet (menuType 'tab-context',
-// element-anchored like the toolbar Unpin menu — DD2). ONE trigger listener
-// covers BOTH invocation paths: a real right-click AND the Context-Menu-key /
-// Shift+F10 on a focused tab both fire the native DOM `contextmenu` event at the
-// focused/targeted element (the same fact the toolbar pin buttons already rely
-// on — see their own `contextmenu` listeners + the keydown catch-all's exclusion
-// gate below, extended here for `.tab`). No parallel keydown listener is added
-// (DD2 integration-point ruling).
-
-/** @type {{ tabId: string | null, returnFocus: HTMLElement | null }} */
-const tabCtx = { tabId: null, returnFocus: null };
-
-// DD6 push-cache (M09 F6 Leg 3): the closed-tab stack's size, cached from main's
-// closed-tab-stack-changed pushes so openTabContextMenu builds its model
-// SYNCHRONOUSLY like every other sheet-menu opener — the F5 async opener, its
-// cross-type stale-resolve edge, and the tabCtx.tabId re-check guard are all
-// deleted with the await. Seed/push race: a received push always wins; the
-// boot-seed invoke applies only if no push arrived first (createPushCache owns
-// the rule — the push is the fresher fact even when the numbers disagree).
-const closedTabStackSizeCache = createPushCache(0);
-window.goldfinch.onClosedTabStackChanged((d) => {
-  closedTabStackSizeCache.push(d && typeof d.size === 'number' ? d.size : 0);
+// Mission 24 F3 Leg 3: the `tabCtx` state, the two push caches and
+// `openTabContextMenu` live in chrome/tab-context-controller.js (verbatim move);
+// bound here to the SAME names. `tabCtx` stays ONE object shared by identity.
+const { tabCtx, openTabContextMenu } = createTabContextController({
+  goldfinch: window.goldfinch,
+  document,
+  createPushCache,
+  tabContextModel,
+  tabs,
+  orderedTabIds,
+  isInternalTab,
+  openOverlayMenu,
+  chromePointToSheet
 });
-window.goldfinch.closedTabStackSize().then((size) => {
-  closedTabStackSizeCache.seed(typeof size === 'number' ? size : 0);
-});
-
-// DD8 push-cache (M09 F8 Leg 4): the OTHER open windows, each captioned main-side
-// from its active tab's title. Same seed/push race as the stack size above, and
-// cached for the same reason — openTabContextMenu is SYNCHRONOUS and F6 DD6
-// deleted the async opener (and its stale-resolve guard) it would otherwise need.
-// Only the LABEL is cached. The windowId rides the item id and main re-resolves it
-// through the registry at dispatch, so a stale caption degrades to a wrong menu
-// word, never a move into the wrong window — DD8's windowId-over-ordinal reversal.
-const moveTargetsCache = createPushCache(/** @type {{ windowId: number, label: string }[]} */ ([]));
-window.goldfinch.onMoveTargetsChanged((d) => {
-  moveTargetsCache.push(Array.isArray(d?.targets) ? d.targets : []);
-});
-window.goldfinch.moveTargets().then((targets) => {
-  moveTargetsCache.seed(Array.isArray(targets) ? targets : []);
-});
-
-/**
- * Open the tab context menu for `id`, anchored at `anchorEl` (chrome→sheet
- * translated element rect — the toolbar-Unpin anchor pattern). Synchronous
- * (M09 F6 Leg 3, DD6): the model reads the push-cached closed-tab stack size,
- * so a superseding open simply runs after this one — no in-flight resolve to
- * guard against.
- * @param {string} id @param {HTMLElement} anchorEl
- */
-function openTabContextMenu(id, anchorEl) {
-  const ids = orderedTabIds();
-  const idx = ids.indexOf(id);
-  if (idx === -1) return; // vanished between event dispatch and open — no-op
-  tabCtx.tabId = id;
-  tabCtx.returnFocus = /** @type {HTMLElement|null} */ (document.activeElement);
-  const r = anchorEl.getBoundingClientRect();
-  const model = tabContextModel({
-    tabId: id,
-    isLastTab: ids.length <= 1,
-    tabsToRight: ids.length - 1 - idx,
-    stackSize: closedTabStackSizeCache.get(),
-    // M09 F6 (review M4): tab:move-new-window is omitted for internal tabs —
-    // app-UI pages never move between windows.
-    isInternal: isInternalTab(tabs.get(id) || null),
-    hasView: (tabs.get(id) || {}).wcId != null, // M16 F2 Leg 1 (DD7/DD8): no view → no dead move/duplicate controls
-    // M09 F8 DD8: one flat "Move to window …" item per OTHER window. Push-cached
-    // above, so this read stays synchronous.
-    moveTargets: moveTargetsCache.get()
-  });
-  openOverlayMenu('tab-context', model, chromePointToSheet(r.left, r.bottom), 0);
-}
 
 // Mission 20 Flight 2 Leg 1 (DD11): the `open*ForAudit` hook family, extracted
 // verbatim into audit-hooks.js (zero-headroom relief for this composition

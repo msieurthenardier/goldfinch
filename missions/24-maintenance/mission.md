@@ -29,7 +29,7 @@ Operator rulings at report review (2026-11-18):
 - [ ] **Dependabot cannot quietly regress SHA pinning**: `.github/dependabot.yml` records the re-pin rule, and the runtime is on the current Electron 45 patch (45.3.4 or later). *(Findings #14, #9.)*
 - [x] **A reveal-gate grant covers one item's content, not one item id**: a test shows that a save, Replace-copy or delete drops that item's grants, and that the dialog cannot be misled by a rename. `admin-reach-refusal` passes in full. *(Finding #2, #38 part.)*
 - [x] **Opening a downloaded program from admin-scripted code has an operator ruling, implemented and documented** in `docs/mcp-automation.md` *What each tier can reach*. *(Finding #3.)*
-- [ ] **`main.js` no longer owns the window-capture, vault-wiring and human-wiring blocks**, and `renderer.js` has at least 40 lines of budget headroom. All gates are green and both `createEngine` grep pins are intact. *(Finding #10.)*
+- [x] **`main.js` no longer owns the window-capture, vault-wiring and human-wiring blocks**, and `renderer.js` has at least 40 lines of budget headroom. All gates are green and both `createEngine` grep pins are intact. *(Finding #10.)*
 
 ## Stakeholders
 
@@ -68,4 +68,4 @@ Operator rulings at report review (2026-11-18):
 
 - [ ] Flight 1: [Release integrity](flights/01-release-integrity/flight.md): the release build runs the audit and fuse gates; Dependabot re-pin note; Electron 45.3.4.
 - [x] Flight 2: [Reveal gate covers vault item writes](flights/02-reveal-gate-item-writes/flight.md): grant-swap test first, then the fix; the open-download ruling; `isOperatorInput`; squawk 0194 and a full `admin-reach-refusal` pass.
-- [ ] Flight 3: [Decompose main.js and restore renderer.js headroom](flights/03-decompose-main/flight.md): window-capture, vault-wiring and human-wiring out of `main.js`; the context-menu cluster out of `renderer.js`.
+- [x] Flight 3: [Decompose main.js and restore renderer.js headroom](flights/03-decompose-main/flight.md): window-capture, vault-wiring and human-wiring out of `main.js`; the context-menu cluster out of `renderer.js`.

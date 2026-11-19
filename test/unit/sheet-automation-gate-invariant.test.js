@@ -4,9 +4,9 @@
 //
 // Three things this leg depends on that no runtime unit test in this repo can reach:
 //
-//   AC7 — captureWindow's SHEET LAYER (src/main/main.js) is gated on the same menuType
+//   AC7 — captureWindow's SHEET LAYER (src/main/window-capture.js) is gated on the same menuType
 //         allowlist the resolver uses, and its post-await TOCTOU re-check re-evaluates the
-//         menuType and not only isVisible(). NO TEST IN THIS REPO LOADS main.js
+//         menuType and not only isVisible(). NO TEST IN THIS REPO LOADS window-capture.js
 //         (test/helpers/source-scan.js says so outright), so this is a scan, not a unit test.
 //   AC8 — the CO-RESIDENCY PREMISE that makes admitting readDom on the sheet sound: the three
 //         one-time-secret cards scrub their secret display in their onClose bodies, and
@@ -47,24 +47,24 @@ function readMasked(...parts) {
 // ---------------------------------------------------------------------------
 
 test('AC7: captureWindow gates its sheet layer on the SAME menuType allowlist the resolver uses', () => {
-  const masked = readMasked('main', 'main.js');
+  const masked = readMasked('main', 'window-capture.js');
 
   // Vacuity guard: the subject must exist. A rename/refactor fails loudly here rather than
   // letting the pin pass on a missing subject.
   assert.ok(
     /grabRec\.sheet\s*&&\s*grabRec\.sheet\.isVisible\(\)/.test(masked),
-    'main.js must still compute sheetView from the visible sheet of the grabbed record'
+    'window-capture.js must still compute sheetView from the visible sheet of the grabbed record'
   );
 
   // The allowlist is IMPORTED from the resolver, never re-typed as string literals — the two
   // predicates must be the same object, or a pixel read stays open on a surface a DOM read
   // is refused (which is exactly the pre-existing gap DD1c closes).
-  assert.ok(/require\(['"]\.\/automation\/resolve['"]\)/.test(masked), 'main.js requires the resolver');
-  assert.ok(/AUTOMATABLE_MENU_TYPES/.test(masked), 'main.js references the imported allowlist');
+  assert.ok(/require\(['"]\.\/automation\/resolve['"]\)/.test(masked), 'window-capture.js requires the resolver');
+  assert.ok(/AUTOMATABLE_MENU_TYPES/.test(masked), 'window-capture.js references the imported allowlist');
   for (const menuType of AUTOMATABLE_MENU_TYPES) {
     assert.ok(
       !masked.includes("'" + menuType + "'"),
-      'main.js must not re-type the allowlisted menuType ' + menuType + ' as a literal'
+      'window-capture.js must not re-type the allowlisted menuType ' + menuType + ' as a literal'
     );
   }
 
@@ -74,11 +74,11 @@ test('AC7: captureWindow gates its sheet layer on the SAME menuType allowlist th
 
   // Both call sites: the pre-capture gate AND the post-await re-check.
   const admittedCalls = (masked.match(/AUTOMATABLE_MENU_TYPES\.has\(/g) || []).length;
-  assert.ok(admittedCalls >= 1, 'the allowlist is consulted in main.js');
+  assert.ok(admittedCalls >= 1, 'the allowlist is consulted in window-capture.js');
 });
 
 test("AC7: the sheet layer's post-await TOCTOU re-check re-evaluates the menuType, not only isVisible()", () => {
-  const masked = readMasked('main', 'main.js');
+  const masked = readMasked('main', 'window-capture.js');
 
   // Locate the post-await re-check by its subject and extract the whole condition. The old
   // condition tested only detachment; a capture that starts under an allowlisted menu and is

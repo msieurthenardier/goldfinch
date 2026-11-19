@@ -226,11 +226,15 @@ test('AC25 grep pin: main.js injects isSavePromptContents at BOTH the createEngi
   assert.ok(pairs.length >= 1);
 });
 
+const CAPTURE = maskComments(
+  fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'main', 'window-capture.js'), 'utf8')
+);
+
 test('AC25 grep pin: captureWindow composites ONLY the find and sheet layers - the prompt is never a layer', () => {
-  const start = MAIN.indexOf('const layers = []');
+  const start = CAPTURE.indexOf('const layers = []');
   assert.notEqual(start, -1, 'vacuity guard: the layer list must exist');
   // the layer-building region: from the layer list to the sheet layer block's end
-  const region = MAIN.slice(start, MAIN.indexOf('sheet overlay layer', start) + 4000);
+  const region = CAPTURE.slice(start, CAPTURE.indexOf('sheet overlay layer', start) + 4000);
   assert.ok(/findOverlay/.test(region) && /grabRec\.sheet/.test(region), 'find + sheet layers present');
   assert.equal(/savePrompt/.test(region), false, 'no save-prompt layer in the captureWindow composite');
 });

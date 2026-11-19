@@ -1,11 +1,11 @@
 # Flight: Decompose main.js and Restore renderer.js Headroom
 
-**Status**: ready
+**Status**: landed
 **Mission**: [Maintenance](../../mission.md)
 
 ## Contributing to Criteria
 
-- [ ] `main.js` no longer owns the window-capture, vault-wiring and human-wiring blocks, and `renderer.js` has at least 40 lines of budget headroom, with every gate green and both `createEngine` grep pins intact.
+- [x] `main.js` no longer owns the window-capture, vault-wiring and human-wiring blocks, and `renderer.js` has at least 40 lines of budget headroom, with every gate green and both `createEngine` grep pins intact.
 
 ---
 
@@ -27,7 +27,7 @@ N/A: maintenance flight. The extraction map is in the maintenance report.
 
 ### Prerequisites
 
-- [ ] Squawks 0210–0221 that touch `main.js` or `renderer.js` are completed or explicitly sequenced after this flight, so the two do not collide (none of them is planned to touch either file).
+- [x] Squawks 0210–0221 that touch `main.js` or `renderer.js` are completed or explicitly sequenced after this flight, so the two do not collide (none of them is planned to touch either file).
 
 ### Pre-Flight Checklist
 
@@ -64,9 +64,9 @@ All three legs are verbatim moves under the CLAUDE.md **TDZ checklist**: anythin
 
 ### Checkpoints
 
-- [ ] `window-capture.js` extracted, unit-tested, and `captureWindow` live-smoked.
-- [ ] Vault and human wiring extracted; `ipc-gate-invariant`, `reveal-gate-wiring-invariant` and both `createEngine` grep pins green.
-- [ ] `renderer.js` at most 1,465 lines, budget retargeted, seam contract green.
+- [x] `window-capture.js` extracted, unit-tested, and `captureWindow` live-smoked.
+- [x] Vault and human wiring extracted; `ipc-gate-invariant`, `reveal-gate-wiring-invariant` and both `createEngine` grep pins green.
+- [x] `renderer.js` at most 1,465 lines, budget retargeted, seam contract green.
 
 ### Adaptation Criteria
 
@@ -82,9 +82,9 @@ All three legs are verbatim moves under the CLAUDE.md **TDZ checklist**: anythin
 
 > **Note:** These are tentative suggestions, not commitments. Legs are planned and created one at a time as the flight progresses. This list will evolve based on discoveries during implementation.
 
-- [ ] `window-capture` - Extract the `grabWindow` / `captureWindow` composite into `window-capture.js`.
-- [ ] `vault-wiring` - Hoist the late requires; extract the vault and human wiring into `vault/`; `peekVaultStore()`; fix the stale comments.
-- [ ] `renderer-headroom` - Move the context-menu / overlay-dispatch cluster out of `renderer.js`; retarget the budget.
+- [x] `window-capture` - Extract the `grabWindow` / `captureWindow` composite into `window-capture.js`.
+- [x] `vault-wiring` - Hoist the late requires; extract the vault and human wiring into `vault/`; `peekVaultStore()`; fix the stale comments.
+- [x] `renderer-headroom` - Move the context-menu / overlay-dispatch cluster out of `renderer.js`; retarget the budget.
 
 Every leg's live smoke exercises every existing apparatus primitive against the new state (census, windows, capture, evaluate, …) per the CLAUDE.md planning rule. `window-capture` in particular must live-smoke `captureWindow`.
 
@@ -94,10 +94,10 @@ Every leg's live smoke exercises every existing apparatus primitive against the 
 
 ### Completion Checklist
 
-- [ ] All legs completed
+- [x] All legs completed
 - [ ] Code merged
-- [ ] Tests passing
-- [ ] Documentation updated
+- [x] Tests passing
+- [x] Documentation updated
 
 ### Verification
 

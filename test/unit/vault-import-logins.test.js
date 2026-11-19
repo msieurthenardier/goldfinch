@@ -656,7 +656,13 @@ test('AC15: importLogins refuses more than MAX_IMPORT_ITEMS candidates with Vaul
 
 test('AC15b: exactly one `= 10000` and one `16 * 1024 * 1024` definition across src/main/vault/, both in browser-import.js', () => {
   const vaultDir = path.join(__dirname, '..', '..', 'src', 'main', 'vault');
-  const files = fs.readdirSync(vaultDir).filter((f) => f.endsWith('.js'));
+  // vault-wiring.js (moved out of main.js, Mission 24 F3 leg 2) carries the bundle-FILE cap
+  // `MAX_BUNDLE_BYTES = 16 * 1024 * 1024`, a different constant from the payload cap: it is excluded
+  // from the scan, and its one literal is pinned to that name below so it cannot go unaccounted.
+  const files = fs.readdirSync(vaultDir).filter((f) => f.endsWith('.js') && f !== 'vault-wiring.js');
+  const wiring = fs.readFileSync(path.join(vaultDir, 'vault-wiring.js'), 'utf8');
+  assert.equal((wiring.match(/16\s*\*\s*1024\s*\*\s*1024/g) || []).length, 1, 'wiring has exactly one 16 MiB literal');
+  assert.match(wiring, /MAX_BUNDLE_BYTES = 16 \* 1024 \* 1024/, 'and it is the bundle-file cap');
 
   let tenThousandHits = [];
   let sixteenMebiHits = [];

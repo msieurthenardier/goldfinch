@@ -1,6 +1,6 @@
 'use strict';
 
-// Squawk 0155 — source-scan pins over main.js grabWindow's Wayland composite fallback.
+// Squawk 0155 — source-scan pins over window-capture.js grabWindow's Wayland composite fallback.
 //
 // No test in this repo loads main.js (test/helpers/source-scan.js says so), so the wiring
 // that makes a captureWindow failure NAME its cause is pinned here as a scan. The helper's
@@ -29,7 +29,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { maskComments, findMatchingBracket } = require('../helpers/source-scan');
 
-const MAIN = path.join(__dirname, '..', '..', 'src', 'main', 'main.js');
+const MAIN = path.join(__dirname, '..', '..', 'src', 'main', 'window-capture.js');
 const REAL = fs.readFileSync(MAIN, 'utf8');
 
 /** @param {string} source @returns {string} grabWindow's comment-masked body ('' when absent) */
@@ -119,9 +119,12 @@ test('squawk 0155: the helpers are imported from the Electron-free module, not r
 // --- neuter verification: each pin goes red on the defect it exists to catch -------------
 
 test('neuter P1: restoring the old swallow-to-null catch-all fails the pin', () => {
-  const mutated = REAL.replace(/throw\s+captureFailure\(\s*'composite'\s*,\s*err\s*\)\s*;(\s*)\}\n\}/, (_m, ws) => {
-    return `/* fallback failed */${ws}}\n  return null;\n}`;
-  });
+  const mutated = REAL.replace(
+    /throw\s+captureFailure\(\s*'composite'\s*,\s*err\s*\)\s*;(\s*)\}(\n\s*)\}/,
+    (_m, ws, nl) => {
+      return `/* fallback failed */${ws}}${nl}  return null;${nl}}`;
+    }
+  );
   assertMutated(REAL, mutated, 'catch-all swallow');
   const failed = failingPins(mutated);
   assert.ok(failed.includes('P1-catch-all'), String(failed));

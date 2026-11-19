@@ -13,13 +13,21 @@ const path = require('node:path');
 const root = path.join(__dirname, '..', '..');
 const read = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
 const main = read('src/main/main.js');
+// The human vault-human deps block moved to vault-wiring.js (Mission 24 F3 leg 2); the automation
+// fill delegate stays in main.js.
+const wiring = read('src/main/vault/vault-wiring.js');
 const preload = read('src/preload/webview-preload.js');
 
 /** The text of the human vault-human deps block, and of the automation fill delegate. */
-const humanBlock = main.slice(
-  main.indexOf('_vaultHuman = createVaultHuman({'),
-  main.indexOf('// M19 F1 Leg 2 (DD5/DD13): the browser-CSV-import flow')
+const humanStart = wiring.indexOf('_vaultHuman = createVaultHuman({');
+const humanEnd = wiring.indexOf('// M19 F1 Leg 2 (DD5/DD13): the browser-CSV-import flow');
+assert.ok(humanStart !== -1 && humanEnd > humanStart, 'the human block markers are present in vault-wiring.js');
+assert.equal(
+  (wiring.match(/createVaultHuman\(\{/g) || []).length,
+  1,
+  'exactly one createVaultHuman( in the wiring (the human one)'
 );
+const humanBlock = wiring.slice(humanStart, humanEnd);
 
 test('main marks the three human fill messages { human: true } and the automation fill delegate is UNMARKED', () => {
   for (const [channel, arg] of [
@@ -35,7 +43,11 @@ test('main marks the three human fill messages { human: true } and the automatio
   // The automation delegate sends the credential unmarked (its own deps block, a different site).
   const unmarked = [...main.matchAll(/\?\.send\('vault-fill', credential\);/g)];
   assert.equal(unmarked.length, 1, 'exactly one unmarked vault-fill send: the automation fill');
-  assert.ok(main.indexOf(unmarked[0][0]) > main.indexOf('// M19 F1 Leg 2 (DD5/DD13)'), 'it is outside the human block');
+  assert.equal(
+    [...wiring.matchAll(/\?\.send\('vault-fill', credential\);/g)].length,
+    0,
+    'no unmarked vault-fill send inside the human wiring'
+  );
 });
 
 test('the guest consumes the pending target and fills strictly ONLY for a marked fill; an unmarked fill never touches it', () => {
