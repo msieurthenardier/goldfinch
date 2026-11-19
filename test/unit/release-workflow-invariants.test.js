@@ -724,3 +724,50 @@ test('create-release: no checkout, no project code, one credential; the notes pa
 test('publish-release never sets a title or notes', () => {
   assert.doesNotMatch(jobs['publish-release'], /--notes|--notes-file|--title|--generate-notes/);
 });
+
+test('dependabot.yml tells the reviewer to re-pin github-actions bumps to a commit SHA', () => {
+  const text = readFileSync(path.join(ROOT, '.github', 'dependabot.yml'), 'utf8');
+  const at = text.search(/^ {2}- package-ecosystem: github-actions\s*$/m);
+  assert.ok(at >= 0, 'no github-actions entry in dependabot.yml');
+  // The contiguous comment block directly above the entry.
+  const above = text.slice(0, at).replace(/\n$/, '').split('\n');
+  const block = [];
+  for (let i = above.length - 1; i >= 0 && /^\s*#/.test(above[i]); i--) block.unshift(above[i]);
+  const note = block.map((l) => l.replace(/^\s*#\s?/, '')).join(' ');
+  assert.ok(note.length > 0, 'no comment block above the github-actions entry');
+  assert.match(note, /re-pin\s+to\s+`owner\/repo@<40-hex>\s+#\s+vX\.Y\.Z`/i);
+  assert.match(note, /commit\s+SHA/i);
+  assert.match(note, /before\s+merging/i);
+});
+
+test('build job: the audit step runs on linux only, before npm ci, exactly `npm audit --audit-level=high`, unsoftened', () => {
+  const step = stepOf(jobs.build, 'Audit dependencies');
+  assert.match(step, /^\s+if: matrix\.platform == 'linux'\s*$/m);
+  const runs = runBodiesOf(step).join('\n');
+  assert.match(runs, /^\s*npm audit --audit-level=high\s*$/m);
+  assert.doesNotMatch(step, /continue-on-error|\|\|\s*true|--omit|--production|--only/);
+  assert.doesNotMatch(step.replace('--audit-level=high', ''), /--audit-level/);
+  const names = [...jobs.build.matchAll(/^ {6}- name: (.*)$/gm)].map((m) => m[1]);
+  const at = names.findIndex((n) => n.includes('Audit dependencies'));
+  const npmCi = names.findIndex((n) => n.includes('Install dependencies'));
+  const builder = names.findIndex((n) => /^Build .*installers/.test(n));
+  assert.ok(at >= 0 && npmCi >= 0 && builder >= 0, 'landmark steps missing');
+  assert.ok(at < npmCi, 'audit must run before npm ci');
+  assert.ok(npmCi < builder);
+});
+
+test('build job: the fuse check runs on every platform, after the build step', () => {
+  const step = stepOf(jobs.build, 'Check Electron fuses');
+  assert.doesNotMatch(step, /^\s+if:/m);
+  assert.match(step, /node scripts\/check-fuses\.mjs "\$APP_BIN"/);
+  assert.ok(jobs.build.indexOf('Check Electron fuses') > jobs.build.indexOf('npx electron-builder'));
+});
+
+test('upload job: runs only when every build succeeded, so a failed audit stops upload, attest and publish', () => {
+  const m = jobs.upload.match(/^ {4}if: (.*)$/m);
+  assert.ok(m, 'upload has no job-level if');
+  assert.match(m[1], /needs\.build\.result == 'success'/);
+  assert.doesNotMatch(m[1], /needs\.build\.result\s*!=/);
+  assert.match(jobs.upload, /^ {4}needs:.*\bbuild\b/m);
+  assert.match(jobs['publish-release'], /needs\.upload\.result == 'success'/);
+});

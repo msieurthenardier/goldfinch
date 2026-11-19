@@ -22,6 +22,11 @@ updates:
           - minor
           - patch
 
+  # RE-PIN BEFORE MERGING. Dependabot proposes a mutable tag (`@vX.Y.Z`).
+  # Resolve that version's commit SHA (`gh api repos/<owner>/<repo>/git/ref/tags/<tag>`,
+  # then the commit it points at) and re-pin to `owner/repo@<40-hex> # vX.Y.Z`.
+  # CI's SHA-pin invariant (test/unit/release-workflow-invariants.test.js) only
+  # catches an unpinned action after the merge. See CLAUDE.md "Release / CI".
   - package-ecosystem: github-actions
     directory: '/'
     schedule:

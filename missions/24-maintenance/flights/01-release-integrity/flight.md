@@ -1,6 +1,6 @@
 # Flight: Release Integrity
 
-**Status**: ready
+**Status**: in-flight
 **Mission**: [Maintenance](../../mission.md)
 
 ## Contributing to Criteria

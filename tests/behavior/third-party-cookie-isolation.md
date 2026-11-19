@@ -3,7 +3,7 @@
 **Slug**: `third-party-cookie-isolation`
 **Status**: active
 **Created**: 2026-10-05
-**Last Run**: 2026-11-17 — pass on Electron 45.3.3 / Chrome 156 (14/14 judged, step 9 struck; teardown ran in full), [run log](third-party-cookie-isolation/runs/2026-11-17-14-48-23.md)
+**Last Run**: 2026-11-19: pass on **Electron 45.4.1** / Chrome 156.0.8078.100 (14/14 judged, step 9 struck; two restarts attested; teardown ran in full). This is the gate run for the 45.3.3 → 45.4.1 bump (Mission 24 Flight 1). [run log](third-party-cookie-isolation/runs/2026-11-19-04-01-53.md)
 
 ## Intent
 
