@@ -1,10 +1,10 @@
 # Squawk 0224: CLAUDE.md does not document the "lazy with peek" pattern or the line-budget counting rule
 
-**Status**: open
+**Status**: completed
 **Type**: servicing
 **Severity**: routine
 **Reported**: 2026-11-19
-**Completed**: —
+**Completed**: 2026-11-19
 
 ## Report
 Two documentation gaps, found by the Mission 24 Flight 3 debrief:
@@ -18,7 +18,14 @@ Two documentation gaps, found by the Mission 24 Flight 3 debrief:
 - `missions/24-maintenance/flights/03-decompose-main/flight-debrief.md`, *Documentation*.
 
 ## Corrective Action
-*(written at completion)*
+CLAUDE.md: added a "Lazy with peek" bullet to *Recurring module shapes* (cites `vault-wiring.js` `getVaultStore`/`peekVaultStore`/`peekVaultHuman`, `main.js` `lockVaultForQuit` and `createPowerLock` deps, `vault-power-lock.test.js`); *Formatting is Prettier's* now states the `split(/\r?\n/).length` count is one more than `wc -l` for a newline-terminated file.
 
 ## Verification
 CLAUDE.md *Recurring module shapes* has a "Lazy with peek" bullet naming `vault-wiring.js` as the exemplar. The budget sentence names the `split(/\r?\n/)` rule. `npm run format:check` passes.
+
+Ran `npm run format` then `npm run format:check`: passed.
+
+## Sign-Off
+**Reviewer**: Reviewer agent (independent, diff-scoped batch review of the third 2026-11-19 turnaround)
+**Verdict**: confirmed, no issues. Every claim in the "Lazy with peek" bullet holds at a call site (`vault-wiring.js` `getVaultStore` / `peekVaultStore` / `peekVaultHuman`, `main.js` `lockVaultForQuit` and the `createPowerLock` deps, the `vault-power-lock.test.js` scan); the budget sentence states the `split(/\r?\n/)` rule and the `wc -l` difference. Gates at review: `npm test` 7,390 tests (7,385 pass, 0 fail, 1 skipped — the `jq` test, no `jq` on the dev host — and 4 todo); lint, typecheck and format:check clean.
+**Commit**: the `squawk: turnaround 2026-11-19` commit on `squawk/turnaround-2026-11-19-c`

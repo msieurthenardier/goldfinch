@@ -2286,6 +2286,31 @@ test('AC4 source-scan: wireTabViewEvents contains zero chromeForTab(wcId)?.send 
   assert.ok(body.includes('sendOrQueue(wcId, channel, payload)'), 'sendToChrome must be sendOrQueue-backed');
 });
 
+// Squawk 0210: whole-file pin. Every `chromeForTab(<expr>)?.send('<channel>'` in
+// guest-wiring.js is a deliberately UNQUEUED send (keystroke / right-click /
+// page-initiated; replay after a chrome boot would act on stale input). The
+// set is listed by channel; a seventh bare send fails this test.
+test('squawk 0210 source-scan: guest-wiring.js bare chromeForTab(...)?.send sites are exactly the six deliberate ones', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'main', 'guest-wiring.js'), 'utf8');
+  const re = /chromeForTab\s*\([^)]*\)\s*\?\.\s*send\s*\(\s*(['"`])([^'"`]+)\1/g;
+  const found = [...src.matchAll(re)].map((m) => m[2]).sort();
+  assert.deepEqual(
+    found,
+    [
+      'chrome-shortcut-action',
+      'devtools-state-changed',
+      'open-downloads',
+      'open-find',
+      'open-tab',
+      'page-context-menu'
+    ],
+    'a new bare chromeForTab(...)?.send must go through sendOrQueue or be added here as a deliberate, justified exception'
+  );
+  // Any bare send at all (channel not a plain literal) is also a failure.
+  const all = (src.match(/chromeForTab\s*\([^)]*\)\s*\?\.\s*send\b/g) || []).length;
+  assert.equal(all, found.length, 'every bare send must name a literal channel');
+});
+
 // --- Mission 23 Flight 1 (leg `vault-fill-trust`, revised DD4): the witness of real pointer input -----
 
 function witnessFake() {
