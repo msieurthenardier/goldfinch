@@ -677,27 +677,27 @@ test('draft step: parses under bash -n', { skip: !bashOk && 'no bash' }, () => {
   }
 });
 
-test('release state jq expression gives none / draft / published (when jq is installed)', () => {
-  const m = draftScript().match(/--jq '([^']+)'/);
-  assert.ok(m, 'no --jq expression in the draft step');
-  let jq = true;
-  try {
-    execFileSync('jq', ['--version']);
-  } catch {
-    jq = false;
+// Detected once; a host without jq reports this test as skipped, never as a silent pass.
+const HAS_JQ = spawnSync('jq', ['--version'], { stdio: 'ignore' }).status === 0;
+
+test(
+  'release state jq expression gives none / draft / published (when jq is installed)',
+  { skip: HAS_JQ ? false : 'jq not installed' },
+  () => {
+    const m = draftScript().match(/--jq '([^']+)'/);
+    assert.ok(m, 'no --jq expression in the draft step');
+    const run = (tag, list) =>
+      execFileSync('jq', ['-r', m[1]], {
+        input: JSON.stringify(list),
+        env: { ...process.env, GITHUB_REF_NAME: tag },
+        encoding: 'utf8'
+      }).trim();
+    assert.equal(run('v1', []), 'none');
+    assert.equal(run('v1', [{ tagName: 'v2', isDraft: true }]), 'none');
+    assert.equal(run('v1', [{ tagName: 'v1', isDraft: true }]), 'draft');
+    assert.equal(run('v1', [{ tagName: 'v1', isDraft: false }]), 'published');
   }
-  if (!jq) return;
-  const run = (tag, list) =>
-    execFileSync('jq', ['-r', m[1]], {
-      input: JSON.stringify(list),
-      env: { ...process.env, GITHUB_REF_NAME: tag },
-      encoding: 'utf8'
-    }).trim();
-  assert.equal(run('v1', []), 'none');
-  assert.equal(run('v1', [{ tagName: 'v2', isDraft: true }]), 'none');
-  assert.equal(run('v1', [{ tagName: 'v1', isDraft: true }]), 'draft');
-  assert.equal(run('v1', [{ tagName: 'v1', isDraft: false }]), 'published');
-});
+);
 
 test('create-release: no checkout, no project code, one credential; the notes path and guards are pinned', () => {
   assert.doesNotMatch(createJob, /actions\/checkout/);
@@ -738,6 +738,13 @@ test('dependabot.yml tells the reviewer to re-pin github-actions bumps to a comm
   assert.match(note, /re-pin\s+to\s+`owner\/repo@<40-hex>\s+#\s+vX\.Y\.Z`/i);
   assert.match(note, /commit\s+SHA/i);
   assert.match(note, /before\s+merging/i);
+  // The resolving command must dereference to a commit; `git/ref/tags/<tag>`
+  // returns a tag object's SHA for an annotated tag.
+  assert.match(note, /gh\s+api\s+repos\/<owner>\/<repo>\/commits\/<tag>\s+--jq\s+\.sha/);
+  assert.doesNotMatch(
+    note.replace(/`git\/ref\/tags\/<tag>`\s+would/, ''),
+    /gh\s+api\s+repos\/<owner>\/<repo>\/git\/ref\/tags/
+  );
 });
 
 test('build job: the audit step runs on linux only, before npm ci, exactly `npm audit --audit-level=high`, unsoftened', () => {
@@ -760,14 +767,76 @@ test('build job: the fuse check runs on every platform, after the build step', (
   const step = stepOf(jobs.build, 'Check Electron fuses');
   assert.doesNotMatch(step, /^\s+if:/m);
   assert.match(step, /node scripts\/check-fuses\.mjs "\$APP_BIN"/);
-  assert.ok(jobs.build.indexOf('Check Electron fuses') > jobs.build.indexOf('npx electron-builder'));
+  assert.ok(
+    buildStepNames().findIndex((n) => n.includes('Check Electron fuses')) >
+      buildStepNames().findIndex((n) => /^Build .*installers/.test(n))
+  );
 });
+
+/** Step names of the build job, from real `- name:` step headers only (a comment cannot match). */
+function buildStepNames(job = jobs.build) {
+  return [...job.matchAll(/^ {6}- name: (.*)$/gm)].map((m) => m[1]);
+}
+
+/** Split an `if:` expression on `&&` / `||` at parenthesis depth 0. */
+function topLevelParts(cond, op) {
+  const parts = [];
+  let depth = 0;
+  let quote = false;
+  let from = 0;
+  for (let i = 0; i < cond.length; i++) {
+    const c = cond[i];
+    if (c === "'") quote = !quote;
+    else if (quote) continue;
+    else if (c === '(') depth++;
+    else if (c === ')') depth--;
+    else if (depth === 0 && cond.startsWith(op, i)) {
+      parts.push(cond.slice(from, i).trim());
+      from = i + op.length;
+      i += op.length - 1;
+    }
+  }
+  parts.push(cond.slice(from).trim());
+  return parts;
+}
+
+/** Why `cond` does not guarantee a successful build, or null. `always() && <success> && ...` is allowed; a top-level `||` is not. */
+function uploadIfFault(cond) {
+  if (topLevelParts(cond, '||').length > 1) return 'top-level || can bypass the build-success test';
+  if (!topLevelParts(cond, '&&').includes("needs.build.result == 'success'"))
+    return 'no top-level build-success conjunct';
+  return null;
+}
 
 test('upload job: runs only when every build succeeded, so a failed audit stops upload, attest and publish', () => {
   const m = jobs.upload.match(/^ {4}if: (.*)$/m);
   assert.ok(m, 'upload has no job-level if');
   assert.match(m[1], /needs\.build\.result == 'success'/);
   assert.doesNotMatch(m[1], /needs\.build\.result\s*!=/);
+  assert.equal(uploadIfFault(m[1]), null);
   assert.match(jobs.upload, /^ {4}needs:.*\bbuild\b/m);
   assert.match(jobs['publish-release'], /needs\.upload\.result == 'success'/);
+});
+
+test('mutation: the fuse pin and the upload-condition pin go red on their bypasses', () => {
+  // A comment carrying the step name, with the step removed, must not satisfy the fuse pin.
+  const fuse = stepOf(jobs.build, 'Check Electron fuses');
+  const mutated = jobs.build.replace(fuse, '      # Check Electron fuses (removed)');
+  assert.notEqual(mutated, jobs.build, 'mutation did not apply');
+  assert.ok(mutated.includes('Check Electron fuses'));
+  assert.throws(() => stepOf(mutated, 'Check Electron fuses'));
+  assert.equal(
+    buildStepNames(mutated).findIndex((n) => n.includes('Check Electron fuses')),
+    -1
+  );
+
+  const cond = jobs.upload.match(/^ {4}if: (.*)$/m)[1];
+  assert.equal(uploadIfFault(cond), null);
+  const bad = cond.replace(
+    "always() && needs.build.result == 'success'",
+    "always() || needs.build.result == 'success'"
+  );
+  assert.notEqual(bad, cond, 'mutation did not apply');
+  assert.ok(uploadIfFault(bad));
+  assert.ok(uploadIfFault("always() && (needs.build.result == 'success' || true)"));
 });

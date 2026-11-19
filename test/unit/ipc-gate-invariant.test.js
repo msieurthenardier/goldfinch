@@ -27,9 +27,8 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('fs');
 const path = require('path');
-const { maskComments, findMatchingBracket, collectSources } = require('../helpers/source-scan');
+const { maskComments, findMatchingBracket, collectSourcesCached, readSourceCached } = require('../helpers/source-scan');
 const ChannelTable = require('../../src/main/ipc-channel-table');
 const { CHANNEL_CLASS, SHEET_MENU_TYPES } = ChannelTable;
 
@@ -421,8 +420,14 @@ function scanSource(source, { label, exceptions }) {
   return { registrations, violations };
 }
 
+/** @type {ReturnType<typeof scanSource> | null} */
+let scanTreeMemo = null;
+
+// The whole-tree scan is the expensive part and is identical for every test, so it runs once per
+// process (squawk 0219). The result is deep-frozen: no test can alter what another sees.
 function scanTree() {
-  const files = collectSources(MAIN_DIR);
+  if (scanTreeMemo) return scanTreeMemo;
+  const files = collectSourcesCached(MAIN_DIR);
   assert.ok(files.length > 20, `expected the src/main tree, found ${files.length} files`);
   /** @type {ReturnType<typeof scanSource>['registrations']} */
   const registrations = [];
@@ -430,11 +435,13 @@ function scanTree() {
   const violations = [];
   for (const file of files) {
     const label = path.relative(ROOT, file);
-    const res = scanSource(fs.readFileSync(file, 'utf8'), { label, exceptions: RAW_EXCEPTIONS });
+    const res = scanSource(readSourceCached(file), { label, exceptions: RAW_EXCEPTIONS });
     registrations.push(...res.registrations);
     violations.push(...res.violations);
   }
-  return { registrations, violations };
+  for (const r of registrations) Object.freeze(r);
+  scanTreeMemo = Object.freeze({ registrations: Object.freeze(registrations), violations: Object.freeze(violations) });
+  return scanTreeMemo;
 }
 
 /** @param {Iterable<string>} a @param {Iterable<string>} b */
@@ -486,7 +493,7 @@ test('LEGACY is gone: no export, an explicit empty exception list pinned at size
     registrations.filter((r) => r.form === 'raw'),
     []
   );
-  const src = fs.readFileSync(path.join(MAIN_DIR, 'ipc-channel-table.js'), 'utf8');
+  const src = readSourceCached(path.join(MAIN_DIR, 'ipc-channel-table.js'));
   assert.doesNotMatch(maskComments(src), /\bLEGACY\b/, 'no LEGACY identifier left in the table module');
 });
 
