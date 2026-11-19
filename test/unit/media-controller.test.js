@@ -200,6 +200,34 @@ test('filter rendering and selection operate on the active tab only', async () =
   assert.equal(h.els.mediaDownloadSelected.disabled, false);
 });
 
+test('inline play builds the badge with textContent: a hostile item type creates no element', async () => {
+  const h = harness();
+  await create(h);
+  const item = { type: 'video', url: 'https://x/v.mp4', name: 'v.mp4' };
+  h.tab.media = [item];
+  h.els.filters[0].listeners.get('click')();
+  const card = h.els.mediaList.children[0];
+  const thumb = card.children[0];
+  const actions = card.children[card.children.length - 1];
+  const playBtn = actions.children.find((c) => c.attributes.get('aria-label') === 'Play here');
+  assert.ok(playBtn, 'Play here button rendered');
+  const hostile = '<img src=x onerror=alert(1)>';
+  item.type = hostile;
+  playBtn.listeners.get('click')({ stopPropagation() {} });
+  const pick = thumb.children[0];
+  assert.equal(pick.name, 'label');
+  assert.ok(pick.classList.contains('media-pick'));
+  assert.equal(pick.children.length, 1);
+  assert.equal(pick.children[0].name, 'span');
+  assert.ok(pick.children[0].classList.contains('badge'));
+  assert.equal(pick.children[0].textContent, hostile);
+  const all = [thumb, ...thumb.children, ...pick.children];
+  assert.equal(
+    all.some((e) => e.name === 'img'),
+    false
+  );
+});
+
 test('lightbox centers within stage bounds and restores focus on close', async () => {
   const h = harness();
   const controller = await create(h);

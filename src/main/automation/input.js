@@ -30,6 +30,8 @@ const KEY_MAP = {
   ArrowUp: 'Up',
   Home: 'Home',
   End: 'End',
+  PageDown: 'PageDown',
+  PageUp: 'PageUp',
   Delete: 'Delete',
   Backspace: 'Backspace',
   // M17 F1 L1 (DD1/6b): the chrome↔content focus-cycle key. The fallback

@@ -11,6 +11,7 @@ const assert = require('node:assert/strict');
 
 const {
   keyEvents,
+  KEY_NAMES,
   mouseClickEvents,
   charEvents,
   dragEvents,
@@ -128,6 +129,20 @@ test('keyEvents: Home → "Home"', () => {
 
 test('keyEvents: End → "End"', () => {
   assert.equal(keyEvents('End')[0].keyCode, 'End');
+});
+
+test('keyEvents: PageDown / PageUp → keyDown + keyUp with the same keyCode, both in KEY_NAMES', () => {
+  for (const name of ['PageDown', 'PageUp']) {
+    const evs = keyEvents(name);
+    assert.deepEqual(
+      evs.map((e) => [e.type, e.keyCode]),
+      [
+        ['keyDown', name],
+        ['keyUp', name]
+      ]
+    );
+    assert.ok(KEY_NAMES.includes(name));
+  }
 });
 
 test('keyEvents: Delete → "Delete"', () => {

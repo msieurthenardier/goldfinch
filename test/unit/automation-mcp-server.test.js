@@ -1394,6 +1394,22 @@ test('deriveAuditDetail — typeText returns text(N chars) — NEVER the raw con
   assert.ok(!detail.includes(secret), 'typeText detail must not contain the typed content');
 });
 
+test('deriveAuditDetail — getHistory records jar/q length/limit, never the query text', () => {
+  const marker = 'SECRET-QUERY-MARKER-9f3';
+  const detail = deriveAuditDetail('getHistory', { jarId: 'work', query: marker, limit: 5 });
+  assert.equal(detail, 'jar=work q=' + marker.length + ' limit=5');
+  assert.ok(!detail.includes(marker), 'getHistory detail must not contain the query text');
+});
+
+test('deriveAuditDetail — getHistory listRecent records before; non-string query and empty args', () => {
+  assert.equal(
+    deriveAuditDetail('getHistory', { jarId: 'work', limit: 10, before: 1234 }),
+    'jar=work limit=10 before=1234'
+  );
+  assert.equal(deriveAuditDetail('getHistory', { jarId: 'work', query: { x: 1 } }), 'jar=work');
+  assert.equal(deriveAuditDetail('getHistory', {}), null);
+});
+
 test('deriveAuditDetail — typeText with empty text returns text(0 chars)', () => {
   assert.equal(deriveAuditDetail('typeText', { wcId: 1, text: '' }), 'text(0 chars)');
 });

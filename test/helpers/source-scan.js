@@ -192,8 +192,6 @@ function collectSources(dir) {
 const collectMemo = new Map();
 /** @type {Map<string, string>} */
 const readMemo = new Map();
-/** @type {Map<string, string>} */
-const maskMemo = new Map();
 
 /**
  * Memoized {@link collectSources}: same walk, same `.js` filter, returned frozen.
@@ -223,25 +221,10 @@ function readSourceCached(file) {
   return hit;
 }
 
-/**
- * Memoized {@link maskComments} over a file's text (keyed on the path).
- * @param {string} file
- * @returns {string}
- */
-function maskedSourceCached(file) {
-  let hit = maskMemo.get(file);
-  if (hit === undefined) {
-    hit = maskComments(readSourceCached(file));
-    maskMemo.set(file, hit);
-  }
-  return hit;
-}
-
 module.exports = {
   maskComments,
   findMatchingBracket,
   collectSources,
   collectSourcesCached,
-  readSourceCached,
-  maskedSourceCached
+  readSourceCached
 };
