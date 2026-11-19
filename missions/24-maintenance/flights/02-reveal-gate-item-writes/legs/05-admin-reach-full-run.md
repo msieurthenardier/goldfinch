@@ -1,6 +1,6 @@
 # Leg: admin-reach-full-run
 
-**Status**: in-flight
+**Status**: completed
 **Flight**: [Reveal Gate Covers Vault Item Writes](../flight.md)
 
 ## Objective

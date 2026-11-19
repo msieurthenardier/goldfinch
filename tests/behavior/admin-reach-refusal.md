@@ -3,7 +3,7 @@
 **Slug**: `admin-reach-refusal`
 **Status**: active
 **Created**: 2026-11-14
-**Last Run**: 2026-11-16 — partial on Electron 45.3.2, on the build with the three "a confirmation cannot strand its window" rules: steps 1, 1b, 2–4, 6, 6b (a pending confirmation is cancelled as `gone` 12 ms after its tab leaves the front) and 7–9 pass; step 5 export gate not exercised (no vault); steps 10–11 not run (need an operator-unlocked vault). [run log](admin-reach-refusal/runs/2026-11-16-03-02-52.md)
+**Last Run**: 2026-11-19: **full pass, every step**, on Electron 45.3.3 (Mission 24 Flight 2 @ `b95da29`), against an operator-unlocked vault. All 15 checkpoints pass, including 5, 10–13, and the new steps 12 (the rename-spoof note, by-eye) and 13 (the open-download gate). Steps 6b and 12 were rerun once for the operator's by-eye read. Spec cadence fixes are logged as squawk 0222. [run log](admin-reach-refusal/runs/2026-11-19-00-25-54.md)
 
 > Finalised at Mission 23 Flight 2 leg `admin-reach` (2026-11-14): bridge method names, refusal shapes, the trace line, the 60 s wait, the one-dialog-per-window rule and the scripted-document mark are the leg's own contracts (flight DD2 / DD9; `docs/mcp-automation.md` *What each tier can reach in an internal page*). The key-hash settings-write step of the draft landed at leg `admin-key-name` as step **1b** (inserted without renumbering; it raises no dialog and needs no wait).
 

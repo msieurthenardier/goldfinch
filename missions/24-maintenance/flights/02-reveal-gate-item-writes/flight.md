@@ -1,12 +1,12 @@
 # Flight: Reveal Gate Covers Vault Item Writes
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Maintenance](../../mission.md)
 
 ## Contributing to Criteria
 
-- [ ] A reveal-gate grant covers one item's content, not one item id, and `admin-reach-refusal` passes in full.
-- [ ] Opening a downloaded program from admin-scripted code has an operator ruling, implemented and documented.
+- [x] A reveal-gate grant covers one item's content, not one item id, and `admin-reach-refusal` passes in full.
+- [x] Opening a downloaded program from admin-scripted code has an operator ruling, implemented and documented.
 
 ---
 
@@ -50,13 +50,13 @@ Operator rulings 2026-11-18 ("merged, begin"): fix shape (A), open-download (B),
 ### Prerequisites
 
 - [x] Operator answers the two open questions (2026-11-18).
-- [ ] Squawk 0194 (`admin-reach-refusal` spec poller and tolerance) completed, or folded in as this flight's first leg.
+- [x] Squawk 0194 (`admin-reach-refusal` spec poller and tolerance) completed, or folded in as this flight's first leg.
 
 ### Pre-Flight Checklist
 
 - [x] All open questions resolved
 - [x] Design decisions documented
-- [ ] Prerequisites verified (squawk 0194 folds in as leg `admin-reach-full-run`)
+- [x] Prerequisites verified (squawk 0194 folds in as leg `admin-reach-full-run`)
 - [x] Validation approach defined
 - [x] Legs defined
 
@@ -88,10 +88,10 @@ Operator rulings 2026-11-18 ("merged, begin"): fix shape (A), open-download (B),
 
 ### Checkpoints
 
-- [ ] Grant-swap test written and failing on `main`.
-- [ ] Fix landed; swap test and title test green; `GATED` updated.
-- [ ] Open-download ruling implemented and documented.
-- [ ] `admin-reach-refusal` passes in full (run log committed).
+- [x] Grant-swap test written and failing on `main`.
+- [x] Fix landed; swap test and title test green; `GATED` updated.
+- [x] Open-download ruling implemented and documented.
+- [x] `admin-reach-refusal` passes in full (run log committed).
 
 ### Adaptation Criteria
 
@@ -107,11 +107,11 @@ Operator rulings 2026-11-18 ("merged, begin"): fix shape (A), open-download (B),
 
 > **Note:** These are tentative suggestions, not commitments. Legs are planned and created one at a time as the flight progresses. This list will evolve based on discoveries during implementation.
 
-- [ ] `grant-swap-proof` - Failing unit test for the Replace-copy grant swap and the rename-spoofed dialog.
-- [ ] `item-write-grants` - Grant invalidation on every item write plus the chosen dialog/confirm shape; `GATED`, `docs/vault.md` and `docs/mcp-automation.md` updated.
-- [ ] `open-download-ruling` - Implement and document the operator's ruling on admin-scripted `openDownload`.
-- [ ] `operator-input-predicate` - One `isOperatorInput` in `injected-input.js` for the click witness and the reveal gate.
-- [ ] `admin-reach-full-run` - Squawk 0194, then a witnessed full `admin-reach-refusal` pass.
+- [x] `grant-swap-proof` - Failing unit test for the Replace-copy grant swap and the rename-spoofed dialog.
+- [x] `item-write-grants` - Grant invalidation on every item write plus the chosen dialog/confirm shape; `GATED`, `docs/vault.md` and `docs/mcp-automation.md` updated.
+- [x] `open-download-ruling` - Implement and document the operator's ruling on admin-scripted `openDownload`.
+- [x] `operator-input-predicate` - One `isOperatorInput` in `injected-input.js` for the click witness and the reveal gate.
+- [x] `admin-reach-full-run` - Squawk 0194, then a witnessed full `admin-reach-refusal` pass.
 
 ---
 
@@ -119,10 +119,10 @@ Operator rulings 2026-11-18 ("merged, begin"): fix shape (A), open-download (B),
 
 ### Completion Checklist
 
-- [ ] All legs completed
+- [x] All legs completed
 - [ ] Code merged
-- [ ] Tests passing
-- [ ] Documentation updated
+- [x] Tests passing
+- [x] Documentation updated
 
 ### Verification
 

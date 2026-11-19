@@ -101,3 +101,10 @@ Deviation to flag: the leg's AC says chain 3's new dialog after the Replace-copy
 - **Leg 5 `admin-reach-full-run`, tier: low for part A** (it edits only a spec and a squawk, no source). Design review skipped; the flight-end Reviewer covers the spec diff. **Part B is an interactive live run**, guided with the operator after the flight commit, as for HAT legs.
 
 - **Flight review (Reviewer, Sonnet): [HANDOFF:confirmed]** on legs 01–04 + leg 05 Part A — npm test 7350 pass / 0 fail, lint/typecheck/format clean; no spoof sequence found. Two non-blocking mislabel residuals (operator copy over a noted item; restore keeps notes) recorded in docs/vault.md. Committed; leg 05 Part B (live run with the operator) outstanding.
+- **Leg 5 part B, the live run (2026-11-19).** `/mission-control:behavior-test admin-reach-refusal` ran in live mode (Executor and Validator, both Sonnet) with the operator present and a vault the operator unlocked. Result: **full pass, 15 of 15 checkpoints.** This is the spec's first. The run log is [2026-11-19-00-25-54](../../../../tests/behavior/admin-reach-refusal/runs/2026-11-19-00-25-54.md).
+  - **Leg 2's note observed live.** The step-12 dialog named `Bank` while the item's live title was `Renamed-…-r2`, and it carried the changed-while-automation note.
+  - **Leg 3's gate observed live.** Step 13's open was refused after 60 s, and nothing opened.
+  - **Reruns.** Steps 6b and 12 were each rerun once for the operator's by-eye read. The operator answered the step-12 rerun dialog, so its secrets were released (`decision=confirmed`) and then redacted from evidence. That is outside the step's scope, and it is the first live proof that a confirmed reveal releases the item.
+  - **Follow-up.** The spec cadence fixes are logged as squawk 0222.
+- **Leg 5 completed. All legs complete; flight landed.**
+
