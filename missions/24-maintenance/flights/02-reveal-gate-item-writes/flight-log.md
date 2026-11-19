@@ -107,4 +107,10 @@ Deviation to flag: the leg's AC says chain 3's new dialog after the Replace-copy
   - **Reruns.** Steps 6b and 12 were each rerun once for the operator's by-eye read. The operator answered the step-12 rerun dialog, so its secrets were released (`decision=confirmed`) and then redacted from evidence. That is outside the step's scope, and it is the first live proof that a confirmed reveal releases the item.
   - **Follow-up.** The spec cadence fixes are logged as squawk 0222.
 - **Leg 5 completed. All legs complete; flight landed.**
+- **Debrief (2026-11-19).**
+  - [flight-debrief.md](flight-debrief.md) written.
+  - The operator confirmed the ruling-(A) reading, and a note was added to the flight spec.
+  - The timing jump to about 23 s was shown to be host load: under the same load, `main` measured 26.6 s.
+  - Squawk 0223 was logged.
+  - Flight marked `completed`.
 

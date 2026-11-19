@@ -1,6 +1,6 @@
 # Flight: Reveal Gate Covers Vault Item Writes
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Maintenance](../../mission.md)
 
 ## Contributing to Criteria
@@ -33,6 +33,7 @@ Operator rulings 2026-11-18 ("merged, begin"): fix shape (A), open-download (B),
 ### Design Decisions
 
 **Item writes drop grants; the dialog shows the title as of grant time** (operator, 2026-11-18, option A).
+- *Debrief note (2026-11-19), operator-confirmed:* the ruling's working meaning is "the dialog names the title the item's **current secrets** had before automation touched them". "As of grant time" alone cannot stop a rename made before any grant exists. See the flight log's Flight Director Notes and leg 02's note model.
 - Every save, Replace-copy and delete of `(vaultId, itemId)` drops that item's grants in every document. Delete stays ungated (it returns no secret).
 - The confirmation dialog's subject is the item title captured when its grant was made (or when the first reveal began), so a rename cannot make it name a different item.
 - Save and copy stay ungated, as `docs/vault.md` already records.
