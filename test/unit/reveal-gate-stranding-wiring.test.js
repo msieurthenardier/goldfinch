@@ -36,7 +36,7 @@ function dropCalls(src) {
   return out;
 }
 
-function failingPins({ tabSrc, fsSrc, mainSrc, wiringSrc, factorySrc }) {
+function failingPins({ tabSrc, fsSrc, mainSrc, wiringSrc, factorySrc, sendersSrc }) {
   const fails = [];
   const tabCalls = dropCalls(tabSrc);
   const fsCalls = dropCalls(fsSrc);
@@ -61,10 +61,14 @@ function failingPins({ tabSrc, fsSrc, mainSrc, wiringSrc, factorySrc }) {
     )
   )
     fails.push('main.js hands createHtmlFullscreen the gate tabInactive');
+  if (!/createRevealGate\(\{(?:(?!\n\}\);)[\s\S])*?\.\.\.createGateSenderResolvers\(registry\)/.test(mm))
+    fails.push('main.js gives the gate the shared sender resolvers (which carry the active-tab predicate)');
   if (
-    !/isActive:\s*\(sender\)\s*=>\s*registry\.getWindowForGuest\(sender\.id\)\?\.activeTabWcId === sender\.id/.test(mm)
+    !/isActive\(sender\)\s*\{[\s\S]*?getWindowForGuest\(sender\.id\);\s*if \(g\) return g\.activeTabWcId === sender\.id;/.test(
+      maskComments(sendersSrc)
+    )
   )
-    fails.push('main.js gives the gate the active-tab predicate');
+    fails.push('the sender resolvers keep the guest active-tab predicate');
   if (
     !/createGuestWiring\(\{(?:(?!\n\}\);)[\s\S])*?revealWindowInput:\s*\(win\)\s*=>\s*revealGate\.windowInput\(win\)/.test(
       mm
@@ -110,7 +114,8 @@ const REAL = {
   fsSrc: read('html-fullscreen.js'),
   mainSrc: read('main.js'),
   wiringSrc: read('guest-wiring.js'),
-  factorySrc: read('window-factory.js')
+  factorySrc: read('window-factory.js'),
+  sendersSrc: read('reveal-gate-senders.js')
 };
 
 test('every stranding-fix wiring pin holds on the real source', () => {
@@ -127,7 +132,13 @@ test('each pin flips when its wiring is removed (neuter-verified)', () => {
     ],
     ['tabSrc', /tabInactive\?\.\(wcId\);/, 'void 0;', 'fan-out call'],
     ['fsSrc', /vaultHuman\(\),\s*revealTabInactive\)/, 'vaultHuman())', 'html-fullscreen site'],
-    ['mainSrc', /isActive:\s*\(sender\)\s*=>[^\n]*\n/, '', 'isActive'],
+    ['mainSrc', /\.\.\.createGateSenderResolvers\(registry\),?/, '', 'sender resolvers spread'],
+    [
+      'sendersSrc',
+      /if \(g\) return g\.activeTabWcId === sender\.id;/,
+      'if (g) return true;',
+      'guest active-tab predicate'
+    ],
     [
       'mainSrc',
       /revealTabInactive:\s*\(wcId\)\s*=>\s*revealGate\.tabInactive\(wcId\),\n\s*\/\/ Squawk|revealTabInactive:\s*\(wcId\)\s*=>\s*revealGate\.tabInactive\(wcId\),/,

@@ -102,6 +102,9 @@
           // A refused Retry shows its reason (main-worded), not the open-failure text.
           noticeEl.textContent =
             typeof res.message === 'string' && res.message ? res.message : 'Cannot retry this download.';
+        } else if (res && res.refused && noticeEl) {
+          // The reveal gate's confirmation was declined or could not be shown: not an open failure.
+          noticeEl.textContent = 'Not opened.';
         } else if (res && res.error && noticeEl) {
           noticeEl.textContent = 'Could not open file (it may have been moved or deleted).';
         }

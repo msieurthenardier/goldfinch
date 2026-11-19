@@ -7,6 +7,7 @@ const { registerDownloadIpc } = require('../../src/main/register-download-ipc');
 const fsReal = require('node:fs');
 const { eventFrom, makeTestGate } = require('../helpers/ipc-gate-fixture');
 const { partitionFromStoragePath } = require('../../src/main/jar-data-helpers');
+const { makeTestRevealGate } = require('../helpers/reveal-gate-fixture');
 
 function makeHarness(opts = {}) {
   const handlers = new Map();
@@ -45,6 +46,8 @@ function makeHarness(opts = {}) {
   const liveBurners = new Set(opts.liveBurners || []);
   const registerArgs = [];
   const sessionRequests = [];
+  // A REAL reveal gate (never a stub): by default nothing makes it apply, so opens behave as before.
+  const rg = opts.rg || makeTestRevealGate();
   const manager = {
     listAll: () => [record, partialRecord, cancelledRecord, ...extraRecords],
     register: () => 1,
@@ -112,6 +115,7 @@ function makeHarness(opts = {}) {
     getJars: () => jarList,
     partitionFromStoragePath,
     isPartitionLive: (partition) => liveBurners.has(partition),
+    revealGate: rg.gate,
     now: opts.now || (() => 10),
     logger: { warn: (...args) => events.push(['warn', ...args]) }
   });
@@ -127,6 +131,7 @@ function makeHarness(opts = {}) {
     sessionRequests,
     liveBurners,
     manager,
+    rg,
     setActiveTab: (id) => {
       activeTabWcId = id;
     }
@@ -741,8 +746,126 @@ test('shell.openPath is called from exactly one function in src/main (source-sca
   const src = fsReal.readFileSync(path.join(dir, 'register-download-ipc.js'), 'utf8');
   const fn = /function openDownload\([\s\S]*?\n {2}\}\n/.exec(src);
   assert.ok(fn && /shell\.openPath\(/.test(fn[0]), 'openPath lives in openDownload');
-  const callers = src.match(/return openDownload\(id\);/g) || [];
-  assert.equal(callers.length, 2, 'the chrome channel and the page action both call it');
+  // Wrap-insensitive: each call site passes its own event, the id and ITS OWN channel literal.
+  const callRe = (ch) => new RegExp(`return\\s+openDownload\\(\\s*event\\s*,\\s*id\\s*,\\s*'${ch}'\\s*\\)`, 'g');
+  assert.equal((src.match(callRe('open-downloaded-file')) || []).length, 1, 'the chrome channel calls it');
+  assert.equal((src.match(callRe('internal-downloads-action')) || []).length, 1, 'the page action calls it');
+  assert.equal((src.match(/\bopenDownload\(/g) || []).length, 3, 'definition + exactly the two callers');
+  // neuter: a caller naming the wrong channel flips the pin
+  const mut = src.replace(callRe('internal-downloads-action'), "return openDownload(event, id, 'x')");
+  assert.notEqual(mut, src);
+  assert.equal((mut.match(callRe('internal-downloads-action')) || []).length, 0);
+});
+
+test('registerDownloadIpc throws at registration without a revealGate', () => {
+  for (const bad of [undefined, {}, { confirm: 1 }]) {
+    assert.throws(() => {
+      const h = makeHarness();
+      // re-register with the bad dependency through the same harness plumbing
+      registerDownloadIpc({
+        ipcMain: { handle() {}, on() {} },
+        gate: makeTestGate({ ipcMain: { handle() {}, on() {} }, registry: h }),
+        revealGate: bad
+      });
+    }, /registerDownloadIpc: revealGate is required/);
+  }
+});
+
+// ---- Mission 24 F2 leg `open-download-ruling`: the REAL handlers, a REAL gate -----------------------------
+
+const ADMIN_PAGE = { id: 31 };
+function gatedHarness(extra = {}) {
+  // sender 31 is the internal downloads page's guest tab (in front); the chrome sender is h.chromeSender.
+  const rg = makeTestRevealGate({ admin: true, ...extra });
+  const h = makeHarness({ rg });
+  h.setActiveTab(null);
+  return { h, rg };
+}
+const chromeEvent = (h) => ({
+  sender: Object.assign(h.chromeSender, { id: 42, mainFrame: { frameTreeNodeId: 1 } }),
+  senderFrame: { frameTreeNodeId: 1, origin: 'file://' }
+});
+
+test('open-downloaded-file from the chrome: one dialog; Cancel never opens, Open opens once', async () => {
+  const { h, rg } = gatedHarness();
+  const p = h.handlers.get('open-downloaded-file')(chromeEvent(h), 1);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(rg.dialogs.length, 1);
+  assert.match(rg.dialogs[0].options.message, /Open the downloaded file "file"\?/);
+  rg.dialogs[0].answer(0);
+  assert.deepEqual(await p, { ok: false, refused: 'not-confirmed' });
+  assert.deepEqual(h.events, []);
+  const p2 = h.handlers.get('open-downloaded-file')(chromeEvent(h), 1);
+  await new Promise((r) => setImmediate(r));
+  rg.dialogs[1].answer(1);
+  assert.deepEqual(await p2, { ok: true, error: undefined });
+  assert.deepEqual(h.events, [['open', '/trusted/file']]);
+});
+
+test('internal-downloads-action open: one dialog; Cancel never opens, Open opens once', async () => {
+  const { h, rg } = gatedHarness();
+  const ev = rg.event(ADMIN_PAGE.id);
+  const run = () => h.internal.get('internal-downloads-action')(ev, { id: 1, action: 'open' });
+  const p = run();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(rg.dialogs.length, 1);
+  rg.dialogs[0].answer(0);
+  assert.deepEqual(await p, { ok: false, refused: 'not-confirmed' });
+  assert.deepEqual(h.events, []);
+  const p2 = run();
+  await new Promise((r) => setImmediate(r));
+  rg.dialogs[1].answer(1);
+  assert.deepEqual(await p2, { ok: true, error: undefined });
+  assert.deepEqual(h.events, [['open', '/trusted/file']]);
+});
+
+test("with the gate not applying both channels raise no dialog and return today's reply", async () => {
+  const rg = makeTestRevealGate();
+  const h = makeHarness({ rg });
+  assert.deepEqual(await h.handlers.get('open-downloaded-file')(chromeEvent(h), 1), { ok: true, error: undefined });
+  assert.deepEqual(await h.internal.get('internal-downloads-action')(rg.event(31), { id: 1, action: 'open' }), {
+    ok: true,
+    error: undefined
+  });
+  assert.equal(rg.dialogs.length, 0);
+  assert.equal(h.events.filter((e) => e[0] === 'open').length, 2);
+});
+
+test("no dialog and today's { ok: false } for an unknown, incomplete or path-less record, even with the gate applying", async () => {
+  const { h, rg } = gatedHarness();
+  for (const id of [999, 2, 3]) {
+    assert.deepEqual(await h.handlers.get('open-downloaded-file')(chromeEvent(h), id), { ok: false });
+  }
+  assert.equal(rg.dialogs.length, 0);
+  assert.deepEqual(h.events, []);
+});
+
+test('a record removed while the dialog is up is not opened after Open', async () => {
+  const { h, rg } = gatedHarness();
+  const p = h.handlers.get('open-downloaded-file')(chromeEvent(h), 1);
+  await new Promise((r) => setImmediate(r));
+  const i = h.manager.listAll().findIndex((r) => r.id === 1);
+  assert.ok(i >= 0);
+  h.manager.listAll = () => [];
+  rg.dialogs[0].answer(1);
+  assert.deepEqual(await p, { ok: false });
+  assert.deepEqual(h.events, []);
+});
+
+test('a busy gate answers refused with busy: true and opens nothing; the request carries no grant', async () => {
+  const { h, rg } = gatedHarness({ sameWindow: true });
+  const first = h.handlers.get('open-downloaded-file')(chromeEvent(h), 1);
+  await new Promise((r) => setImmediate(r));
+  const second = await h.handlers.get('open-downloaded-file')(chromeEvent(h), 1);
+  assert.deepEqual(second, { ok: false, refused: 'not-confirmed', busy: true });
+  rg.dialogs[0].answer(1);
+  await first;
+  // confirmed once, asks again: no grant was stored
+  const third = h.handlers.get('open-downloaded-file')(chromeEvent(h), 1);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(rg.dialogs.length, 2);
+  rg.dialogs[1].answer(0);
+  await third;
 });
 
 test('main.js wires the owning-jar facts into the downloads registrar and the partition write into tab creation', () => {

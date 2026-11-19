@@ -10,6 +10,8 @@ const {
   createRevealGate,
   createDocumentMarks,
   CONFIRM_TIMEOUT_MS,
+  CHANGED_NOTE,
+  CREATED_NOTE,
   isRevealCancelInput,
   handleRevealInputEvent
 } = require('../../src/main/reveal-gate');
@@ -650,4 +652,187 @@ test('handleRevealInputEvent: the shared order - type, then injecting, then the 
       }
     )
   );
+});
+
+// ----------------------------------------------------------------------------- Mission 24 F2: item-write grants
+
+const KEY = 'v\u0000i1';
+
+test('marks: dropGrant clears the key in EVERY document; notes survive clearGrants, commit and forget', () => {
+  const m = createDocumentMarks();
+  m.grant(1, KEY);
+  m.grant(2, KEY);
+  m.grant(2, 'v\u0000other');
+  m.dropGrant(KEY);
+  assert.equal(m.hasGrant(1, KEY), false);
+  assert.equal(m.hasGrant(2, KEY), false);
+  assert.equal(m.hasGrant(2, 'v\u0000other'), true);
+  m.noteWrite(KEY, 'Bank');
+  m.noteWrite(KEY, 'Other', { overwrite: false });
+  assert.deepEqual(m.writeNote(KEY), { title: 'Bank' });
+  m.noteWrite(KEY, null);
+  assert.deepEqual(m.writeNote(KEY), { title: null });
+  m.noteWrite(KEY, 'Bank');
+  m.clearGrants();
+  m.onCommit(1);
+  m.forget(2);
+  assert.deepEqual(m.writeNote(KEY), { title: 'Bank' });
+  m.clearWriteNote(KEY);
+  assert.equal(m.writeNote(KEY), null);
+});
+
+test('itemWritten: save rows - kept secrets (earliest title wins), new secrets, gate not applying', () => {
+  const rg = makeTestRevealGate({ admin: true });
+  const ev = rg.event(7);
+  rg.marks.grant(7, KEY);
+  rg.gate.itemWritten(ev, { vaultId: 'v', itemId: 'i1', kind: 'kept-secrets', titleBefore: 'Bank' });
+  assert.equal(rg.marks.hasGrant(7, KEY), false);
+  rg.gate.itemWritten(ev, { vaultId: 'v', itemId: 'i1', kind: 'kept-secrets', titleBefore: 'Harmless' });
+  assert.deepEqual(rg.marks.writeNote(KEY), { title: 'Bank' }, 'earliest kept-secrets title wins across renames');
+  rg.gate.itemWritten(ev, { vaultId: 'v', itemId: 'i1', kind: 'new-secrets', titleBefore: 'x' });
+  assert.deepEqual(rg.marks.writeNote(KEY), { title: null });
+  const quiet = makeTestRevealGate();
+  quiet.marks.grant(7, KEY);
+  quiet.gate.itemWritten(quiet.event(7), { vaultId: 'v', itemId: 'i1', kind: 'kept-secrets', titleBefore: 'Bank' });
+  assert.equal(quiet.marks.hasGrant(7, KEY), false, 'the grant still drops');
+  assert.equal(quiet.marks.writeNote(KEY), null, 'no note while the gate does not apply');
+});
+
+test('itemCopied: source note travels; else live title when applying; else unchanged; delete removes', () => {
+  const rg = makeTestRevealGate({ admin: true });
+  const ev = rg.event(7);
+  const copy = { srcVaultId: 's', srcItemId: 'S', destVaultId: 'v', destItemId: 'i1', titleAfter: 'Bank' };
+  rg.marks.grant(7, KEY);
+  rg.gate.itemCopied(ev, copy);
+  assert.equal(rg.marks.hasGrant(7, KEY), false);
+  assert.deepEqual(rg.marks.writeNote(KEY), { title: 'Bank' });
+  rg.marks.noteWrite('s\u0000S', 'Original');
+  rg.gate.itemCopied(ev, copy);
+  assert.deepEqual(rg.marks.writeNote(KEY), { title: 'Original' }, 'the source note overwrites');
+  const quiet = makeTestRevealGate();
+  quiet.gate.itemCopied(quiet.event(7), copy);
+  assert.equal(quiet.marks.writeNote(KEY), null);
+  quiet.marks.noteWrite('s\u0000S', null);
+  quiet.gate.itemCopied(quiet.event(7), copy);
+  assert.deepEqual(quiet.marks.writeNote(KEY), { title: null }, 'a source note travels even when not applying');
+  rg.gate.itemDeleted('v', 'i1');
+  assert.equal(rg.marks.writeNote(KEY), null);
+});
+
+test('item-write methods never throw, and dropAllGrants delegates', () => {
+  const boom = () => {
+    throw new Error('x');
+  };
+  const gate = createRevealGate({
+    hasAdminSession: () => true,
+    isTouched: () => false,
+    dropGrant: boom,
+    noteWrite: boom,
+    writeNote: boom,
+    clearWriteNote: boom,
+    clearAllGrants: boom,
+    showConfirm: async () => ({ response: 0 }),
+    windowFor: () => ({}),
+    watch: () => () => {}
+  });
+  const ev = { sender: { id: 1 } };
+  assert.doesNotThrow(() => {
+    gate.itemWritten(ev, { vaultId: 'v', itemId: 'i', kind: 'kept-secrets', titleBefore: 'a' });
+    gate.itemCopied(ev, { srcVaultId: 'a', srcItemId: 'b', destVaultId: 'v', destItemId: 'i', titleAfter: 'a' });
+    gate.itemDeleted('v', 'i');
+    gate.dropAllGrants();
+  });
+  let cleared = 0;
+  const g2 = createRevealGate({
+    hasAdminSession: () => true,
+    isTouched: () => false,
+    clearAllGrants: () => cleared++,
+    showConfirm: async () => ({ response: 0 }),
+    windowFor: () => ({}),
+    watch: () => () => {}
+  });
+  g2.dropAllGrants();
+  assert.equal(cleared, 1);
+});
+
+test('dialog: a string note names the stored title + CHANGED_NOTE; a null note keeps the live title + CREATED_NOTE', async () => {
+  const rg = makeTestRevealGate({ admin: true });
+  rg.marks.noteWrite(KEY, 'Original');
+  let p = rg.gate.confirm(rg.event(7), { ...REQ, subject: 'Harmless' });
+  await flush();
+  let o = rg.dialogs[0].options;
+  assert.match(o.message, /Original/);
+  assert.doesNotMatch(o.message, /Harmless/);
+  assert.ok(o.detail.endsWith(CHANGED_NOTE));
+  rg.dialogs[0].answer(0);
+  await p;
+  rg.marks.noteWrite(KEY, null);
+  p = rg.gate.confirm(rg.event(7), { ...REQ, subject: 'Live' });
+  await flush();
+  o = rg.dialogs[1].options;
+  assert.match(o.message, /Live/);
+  assert.ok(o.detail.endsWith(CREATED_NOTE));
+  rg.dialogs[1].answer(0);
+  await p;
+  rg.marks.clearWriteNote(KEY);
+  p = rg.gate.confirm(rg.event(7), { ...REQ, subject: 'Live' });
+  await flush();
+  assert.ok(!rg.dialogs[2].options.detail.includes('while automation was active'));
+  rg.dialogs[2].answer(0);
+  await p;
+});
+
+test('dialog: a throwing writeNote does not change the decision', async () => {
+  const gate = createRevealGate({
+    hasAdminSession: () => true,
+    isTouched: () => false,
+    writeNote: () => {
+      throw new Error('x');
+    },
+    showConfirm: async () => ({ response: 1 }),
+    windowFor: () => ({}),
+    watch: () => () => {}
+  });
+  const ev = { sender: { id: 1, mainFrame: { frameTreeNodeId: 1 } }, senderFrame: { frameTreeNodeId: 1 } };
+  assert.equal(await gate.confirm(ev, REQ), 'confirmed');
+});
+
+test('open-download: its own question, button and detail per reason; the other actions keep their detail', async () => {
+  const admin = makeTestRevealGate({ admin: true });
+  const p = admin.gate.confirm(admin.event(7), {
+    channel: 'open-downloaded-file',
+    action: 'open-download',
+    subject: 'setup.exe'
+  });
+  await new Promise((r) => setImmediate(r));
+  const o = admin.dialogs[0].options;
+  assert.equal(o.message, 'Open the downloaded file "setup.exe"?');
+  assert.deepEqual(o.buttons, ['Cancel', 'Open']);
+  assert.equal(
+    o.detail,
+    'An automation connection has been active in this browser recently and may have asked for this. Opening a downloaded program runs it on this computer. Choose Cancel unless you started this yourself.'
+  );
+  admin.dialogs[0].answer(1);
+  assert.equal(await p, 'confirmed');
+
+  const touched = makeTestRevealGate({ scripted: [7] });
+  const q = touched.gate.confirm(touched.event(7), { channel: 'x', action: 'open-download', subject: 'a' });
+  await new Promise((r) => setImmediate(r));
+  assert.equal(
+    touched.dialogs[0].options.detail,
+    'Automation ran script in this page and may have asked for this. Opening a downloaded program runs it on this computer. Choose Cancel unless you started this yourself.'
+  );
+  touched.dialogs[0].answer(0);
+  await q;
+
+  // another action's detail is byte-for-byte what it was
+  const r = makeTestRevealGate({ admin: true });
+  const z = r.gate.confirm(r.event(7), { channel: 'x', action: 'cookie', subject: 'sid' });
+  await new Promise((s) => setImmediate(s));
+  assert.equal(
+    r.dialogs[0].options.detail,
+    'An automation connection has been active in this browser recently and will be able to read what is shown. Choose Cancel unless you started this yourself.'
+  );
+  r.dialogs[0].answer(0);
+  await z;
 });

@@ -18,7 +18,7 @@ Make a release see its own gate. Today `build.yml` assumes the local Concourse `
 
 ### Open Questions
 
-- [ ] **Merging the audit step blocks releases until `picomatch` is patched** (operator rulings 2026-11-18: "wait for upstream" + "build.yml runs it"). Confirm with the operator before leg `release-runs-audit` merges, or land the leg and accept that no release ships until GHSA-fc5q-39xc-vjpf has a fix. N/A otherwise: no design decision is open.
+- [x] **Merging the audit step blocks releases until `picomatch` is patched.** Operator ruling 2026-11-18: **hold the leg**. Fly `dependabot-repin-note` and `electron-45-3-4`; build `release-runs-audit` to ready but do not merge it until a patched `picomatch` is released (then take the normal bump in the same leg).
 
 ### Design Decisions
 
@@ -30,7 +30,7 @@ Make a release see its own gate. Today `build.yml` assumes the local Concourse `
 
 ### Prerequisites
 
-- [ ] Operator confirms the release-blocking consequence (Open Questions) before `release-runs-audit` merges.
+- [x] Release-blocking consequence ruled on: hold `release-runs-audit` until `picomatch` is patched.
 - [ ] `fly -t local-goldfinch` authorized, so the leg can record what Concourse `ci` has shown since 2026-10-19.
 
 ### Pre-Flight Checklist

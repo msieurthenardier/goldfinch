@@ -294,6 +294,10 @@ test('AC17: a registrar without the gate throws at registration (vault, even wit
   assert.throws(() => registerVaultIpc(base), /revealGate is required/);
   assert.throws(() => registerVaultIpc({ ...base, revealGate: {} }), /revealGate is required/);
   assert.doesNotThrow(() => registerVaultIpc({ ...base, revealGate: makeTestRevealGate().gate }));
+  const full = makeTestRevealGate().gate;
+  for (const m of ['itemWritten', 'itemCopied', 'itemDeleted', 'dropAllGrants']) {
+    assert.throws(() => registerVaultIpc({ ...base, revealGate: { ...full, [m]: undefined } }), new RegExp(m));
+  }
 });
 
 // ----------------------------------------------------------------------------- cookie value

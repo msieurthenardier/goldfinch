@@ -760,7 +760,33 @@ condition holds there is no dialog and nothing changes.
   beside the usual `refused: 'not-confirmed'`; the page shows "try again" and does NOT latch
   (the code widget re-asks after 5 s or on the next focus). Mint, export and cookie-value
   refusals are unchanged (no `busy` flag).
-- **Not gated**: the vault list, item save and copy, the access-key list (none returns a secret),
+- **Item writes drop grants and note the title** (Mission 24 Flight 2). Save, copy and delete are not
+  confirmed, but after each succeeds `registerVaultIpc` tells the gate (`itemWritten`, `itemCopied`,
+  `itemDeleted`), and a profile restore drops every grant (`dropAllGrants`). Each write drops the item's
+  grants in EVERY document, then updates a per-item note `{ title }` (the title that belongs to the item's
+  current secrets; process lifetime, survives lock):
+
+  | Write | Gate applies? | Note afterwards |
+  | --- | --- | --- |
+  | Save of an existing item that kept at least one secret field | yes | the existing note, else the title before this save |
+  | Save that kept no secret, or created an item | yes | `{ title: null }` (live title shown, "created or replaced" line) |
+  | Copy that writes an item (replace / copy / keep-both) | yes | the source's note if any, else the destination's live title after the copy |
+  | Copy that writes an item | no | the source's note if any, else unchanged |
+  | Save | no | unchanged |
+  | Delete | either | removed |
+
+  A later reveal or code dialog names the note's title and adds "This item was changed while automation
+  was active; ..." (string note) or "This item was created or replaced while automation was active."
+  (`null` note). Residuals: an operator write never clears a note, so the warning persists for the
+  process; the notes map is unbounded (each entry is tiny and a script can only grow it by writing items);
+  a reloaded vault page still shows the note; an operator's own copy (gate not applying) over an item
+  that already carries a note leaves that note, so a later dialog may name the destination's earlier
+  title for the copied secrets (a mislabel no script can cause); a profile restore drops every grant but
+  keeps notes, so a restored item may keep a stale note (not reachable by script: native picker and
+  chrome-owned secret entry). Writers not routed through these channels (browser CSV
+  import, capture saves, jar delete) are accepted: not script-reachable, or they only strand grants for
+  deleted ids.
+- **Not gated**: the vault list, item save and copy (they drop grants and note the title, above), the access-key list (none returns a secret),
   and the fill channels (refused by the picker context). A key holder that fills a login form can
   still read that page's own password field back (`readDom` / `evaluate` on the page it filled) —
   fill is the feature (finding 17c). `internal-settings-get` still returns the automation key
