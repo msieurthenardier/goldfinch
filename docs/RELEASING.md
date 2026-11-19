@@ -13,7 +13,7 @@ to the repository or the release; the one that writes runs none of it.
 | Job | Runs on | Permissions | May do |
 | --- | --- | --- | --- |
 | `create-release` (tags only) | Linux | `contents: write` | Validates the tag as strict semver, classifies stable vs prerelease, for a **stable** tag requires its commit to be reachable from the default branch (see *The stable-tag rule*), then creates the **draft** release with the hand-written notes from `docs/releases/vX.Y.Z.md` (see *Release notes*). `gh` and inline shell only; no checkout, no project code. |
-| `build` (mac / linux / win) | one runner each | `contents: read`, no token or secret anywhere in the job | Checkout (credentials not persisted), `npm ci`, version from the tag, `electron-builder --publish never`, fuse check on the unpacked app, macOS ad-hoc signature verification, one start of the unpacked app, then stages that platform's installers **by exact name** with their SHA-256 list and the version, and uploads them as a one-day, uncompressed Actions artifact. |
+| `build` (mac / linux / win) | one runner each | `contents: read`, no token or secret anywhere in the job | Checkout (credentials not persisted), on the Linux entry only `npm audit --audit-level=high` (before anything is installed), `npm ci`, version from the tag, `electron-builder --publish never`, fuse check on the unpacked app, macOS ad-hoc signature verification, one start of the unpacked app, then stages that platform's installers **by exact name** with their SHA-256 list and the version, and uploads them as a one-day, uncompressed Actions artifact. |
 | `upload` | Linux | `contents: write`, `id-token: write`, `attestations: write` | No checkout, no `node` / `npm`. Downloads the three artifacts, recomputes every digest, asserts the file names are exactly the five expected for the tag's version, then `gh release upload` into the draft (the token is given to that one step), then `actions/attest` creates a provenance attestation for exactly those five verified files (tag builds only). The signing permissions exist in this job and no other. |
 | `publish-release` (tags only) | Linux | `contents: write` | Flips the draft to published: stable tag -> latest, prerelease tag -> prerelease. Only after `upload` succeeded. |
 
@@ -48,6 +48,20 @@ permission set and one tag-gated attest step after the upload, whose subjects ar
 are pinned by `test/unit/release-workflow-invariants.test.js`, a text scan of the workflow files. The
 stable-tag decision function is extracted from the workflow and run against canned answers by
 `test/unit/stable-tag-check.test.js`.
+
+## The audit gate
+
+The `build` job's Linux entry runs `npm audit --audit-level=high` right after Node is set up and
+**before `npm ci`** (it reads `package-lock.json` and needs no install, so no project install
+script runs ahead of the gate; the lockfile is platform-independent, so one entry is enough). It runs on
+a tag and on a manual dispatch. `upload` needs every `build` entry to succeed, so a failed audit stops
+the upload, the attestation and the publish even though the other platforms finish (`fail-fast: false`).
+
+- A failed audit leaves the draft release behind; the next run reuses it. Harmless.
+- An advisory published after a commit merged can fail a later tag. That is intended: fix it with a dependency bump, never by lowering the gate.
+- A transient registry or advisory-API failure fails the release closed. The remedy is a re-run. Never add retry-then-pass logic.
+- `ci.yml` and `ci/tasks/audit.yml` remain the PR-time gates; this step is the release's own, so a release cannot be cut from a commit that never passed.
+- The step's first live confirmation on the tag path is the next real release (candidate or stable); a manual dispatch shows it runs and passes on the dispatch path only.
 
 ## The stable-tag rule
 

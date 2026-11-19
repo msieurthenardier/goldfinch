@@ -295,6 +295,17 @@ jobs:
           # The npm cache is used on a manual dispatch only, never on a tag build.
           cache: ${{ github.event_name == 'workflow_dispatch' && 'npm' || '' }}
 
+      # The release's own audit gate (Mission 24 flight 01). `npm audit` reads package-lock.json
+      # and needs no install, so it runs BEFORE `npm ci` and no project install script runs
+      # ahead of it. Linux only: the lockfile is platform-independent. It runs on a tag AND on a
+      # manual dispatch. No continue-on-error, no `|| true`: a failure here (an advisory, or a
+      # registry/advisory-API outage) fails this entry, so the `upload` job (which needs every
+      # build to succeed) never runs. Remedy: a dependency bump or a re-run, never a softer gate.
+      - name: Audit dependencies (high and above)
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: npm audit --audit-level=high
+
       - name: Install dependencies
         run: npm ci
 

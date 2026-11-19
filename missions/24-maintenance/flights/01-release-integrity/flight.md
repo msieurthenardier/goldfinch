@@ -1,12 +1,12 @@
 # Flight: Release Integrity
 
-**Status**: ready
+**Status**: completed
 **Mission**: [Maintenance](../../mission.md)
 
 ## Contributing to Criteria
 
-- [ ] A release cannot be built from a commit that fails the audit or fuse gate.
-- [ ] Dependabot cannot quietly regress SHA pinning, and the runtime is on the current Electron 45 patch.
+- [x] A release cannot be built from a commit that fails the audit or fuse gate.
+- [x] Dependabot cannot quietly regress SHA pinning, and the runtime is on the current Electron 45 patch.
 
 ---
 
@@ -66,9 +66,9 @@ Make a release see its own gate. Today `build.yml` assumes the local Concourse `
 
 ### Checkpoints
 
-- [ ] Concourse `ci` history since 2026-10-19 recorded in the flight log.
-- [ ] `build.yml` audit step pinned by the invariants test; a manual `workflow_dispatch` run shows it failing on today's advisory (expected while upstream is unpatched).
-- [ ] Electron 45.3.4 with the store suite and `third-party-cookie-isolation` re-run.
+- [~] Concourse `ci` history since 2026-10-19 recorded in the flight log. *Not done: `fly` is still not authorized (operator action). Superseded in practice, because the advisory was withdrawn and the release build now runs its own audit.*
+- [x] `build.yml` audit step pinned by the invariants test; a manual `workflow_dispatch` run shows it failing on today's advisory (expected while upstream is unpatched).
+- [x] Electron 45.3.4 with the store suite and `third-party-cookie-isolation` re-run.
 
 ### Adaptation Criteria
 
@@ -84,9 +84,9 @@ Make a release see its own gate. Today `build.yml` assumes the local Concourse `
 
 > **Note:** These are tentative suggestions, not commitments. Legs are planned and created one at a time as the flight progresses. This list will evolve based on discoveries during implementation.
 
-- [ ] `release-runs-audit` - `build.yml` runs `npm audit --audit-level=high` once before staging; invariants test extended; RELEASING.md and CLAUDE.md updated; Concourse history recorded.
-- [ ] `dependabot-repin-note` - Re-pin rule recorded in `.github/dependabot.yml`.
-- [ ] `electron-45-3-4` - Electron patch bump with the store suite and the isolation behavior spec re-run.
+- [x] `release-runs-audit` - `build.yml` runs `npm audit --audit-level=high` once before staging; invariants test extended; RELEASING.md and CLAUDE.md updated; Concourse history recorded.
+- [x] `dependabot-repin-note` - Re-pin rule recorded in `.github/dependabot.yml`.
+- [x] `electron-45-3-4` - Electron patch bump with the store suite and the isolation behavior spec re-run.
 
 ---
 
@@ -94,13 +94,23 @@ Make a release see its own gate. Today `build.yml` assumes the local Concourse `
 
 ### Completion Checklist
 
-- [ ] All legs completed
+- [x] All legs completed
 - [ ] Code merged
-- [ ] Tests passing
-- [ ] Documentation updated
+- [x] Tests passing
+- [x] Documentation updated
 
 ### Verification
 
 - A manual `workflow_dispatch` run of `build.yml` fails at the audit step while GHSA-fc5q-39xc-vjpf is unpatched, and passes it once fixed.
 - `release-workflow-invariants.test.js` fails if the audit step is removed, or is made non-fatal (neuter-verified).
 - `electron --version` in a dev launch reads 45.3.4, and the isolation spec passes.
+
+---
+
+*Debrief notes (2026-11-19). These correct the plan above where events overtook it; the original text is kept as written.*
+
+- **The audit-leg hold was lifted.** The hold in Pre-Flight was lifted mid-flight: GitHub WITHDREW GHSA-fc5q-39xc-vjpf rather than patching it, and the operator un-held the leg (flight log).
+- **Verification, corrected.** The Verification text "fails at the audit step while GHSA-fc5q-39xc-vjpf is unpatched" no longer applies. Dispatch run 44456941596 PASSED the audit step on Linux; the tag path is first confirmed at the next release.
+- **Electron version.** The Technical Approach's "45.3.4" became **45.4.1**, the current 45 release when the leg was designed, within the mission criterion's "or later".
+- **Concourse checkpoint.** The `fly` prerequisite was never met, so the Concourse-history checkpoint was superseded, not done.
+
