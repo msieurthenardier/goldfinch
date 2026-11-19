@@ -236,3 +236,72 @@ test('isGuestActionAllowed: guest actions allowed over a web active tab', () => 
 test('isGuestActionAllowed: downloads (Ctrl+J) is tab-independent and EXEMPT from the internal guard', () => {
   assert.equal(isGuestActionAllowed('downloads', true), true);
 });
+
+// ---------------------------------------------------------------------------
+// Drift guard (squawk 0216): sheet-accelerator.js hand-mirrors keydownToAction.
+// Both functions are run over a key x modifier matrix and must agree on every
+// mirrored chord. Action NAMES are identical on both sides (the sheet adds
+// `scope`/`autoRepeatGuard`, which are sheet-only routing and not compared).
+// Deliberate non-mirrors, excluded explicitly:
+//   - sheet-only `print` (Ctrl+P): keydownToAction has no print action (the
+//     chrome never handled it; it is a guest-captured chord), so it must map
+//     to null there.
+//   - keydownToAction-only F6 / Shift+F6 (`focus-content` / `focus-chrome`):
+//     chrome<->content focus cycling is meaningless while the sheet holds focus.
+//   - lightboxOpen: the sheet has no lightbox concept; compared with false.
+// ---------------------------------------------------------------------------
+
+const { keydownToAction } = require('../../src/shared/keydown-action');
+
+const SHEET_ONLY_ACTIONS = new Set(['print']);
+const CHROME_ONLY_ACTIONS = new Set(['focus-content', 'focus-chrome']);
+// Pinned size of the mirrored subset over the matrix below. Adding a chord to
+// either side changes this number: look at both files, then update it.
+const EXPECTED_MIRRORED_INPUTS = 342;
+
+test('drift guard: sheetAcceleratorAction agrees with keydownToAction on every mirrored chord', () => {
+  const keys = [
+    ...'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789=+-',
+    'F5',
+    'F6',
+    'F12',
+    'Tab',
+    'PageDown',
+    'PageUp',
+    'Escape',
+    'Enter',
+    ' ',
+    'ArrowLeft',
+    'ArrowDown',
+    'Home',
+    'End'
+  ];
+  let mirrored = 0;
+  for (const key of keys) {
+    for (let bits = 0; bits < 16; bits++) {
+      const ctl = !!(bits & 1);
+      const meta = !!(bits & 2);
+      const shift = !!(bits & 4);
+      const alt = !!(bits & 8);
+      const chord = `${[ctl && 'Ctrl', meta && 'Meta', shift && 'Shift', alt && 'Alt'].filter(Boolean).join('+') || '(none)'}+${JSON.stringify(key)}`;
+      const sheet = sheetAcceleratorAction({ key, control: ctl, meta, shift, alt })?.action ?? null;
+      const chrome = keydownToAction({ key, ctrl: ctl, meta, shift, alt, lightboxOpen: false });
+
+      if (SHEET_ONLY_ACTIONS.has(/** @type {string} */ (sheet))) {
+        assert.equal(chrome, null, `${chord}: sheet-only ${sheet} must not exist in keydownToAction (got ${chrome})`);
+        continue;
+      }
+      if (CHROME_ONLY_ACTIONS.has(/** @type {string} */ (chrome))) {
+        assert.equal(sheet, null, `${chord}: chrome-only ${chrome} must not be forwarded by the sheet (got ${sheet})`);
+        continue;
+      }
+      assert.equal(sheet, chrome, `${chord}: sheet-accelerator says ${sheet}, keydownToAction says ${chrome}`);
+      if (sheet !== null) mirrored++;
+    }
+  }
+  assert.equal(
+    mirrored,
+    EXPECTED_MIRRORED_INPUTS,
+    'mirrored-subset size changed: review both files, then update the pin'
+  );
+});

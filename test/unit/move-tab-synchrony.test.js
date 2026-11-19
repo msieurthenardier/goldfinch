@@ -111,7 +111,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
-const { maskComments, findMatchingBracket, collectSources } = require('../helpers/source-scan');
+const { maskComments, findMatchingBracket, collectSourcesCached, readSourceCached } = require('../helpers/source-scan');
 
 const REPO_ROOT = path.join(__dirname, '../..');
 const MAIN_DIR = path.join(REPO_ROOT, 'src/main');
@@ -228,7 +228,7 @@ function scanSource(source, label) {
  *   cores: any[], violations: string[] }}
  */
 function scanTree() {
-  const files = collectSources(MAIN_DIR);
+  const files = collectSourcesCached(MAIN_DIR);
   // Sanity: fail loudly if the file walk itself breaks rather than scanning nothing.
   assert.ok(files.length > 5, `expected the src/main tree, found ${files.length} files`);
 
@@ -244,7 +244,7 @@ function scanTree() {
     // The IPC classification table (Mission 23 Flight 1) names every channel as DATA, not as a
     // registration site; this net counts registration anchors only.
     if (path.basename(file) === 'ipc-channel-table.js') continue;
-    const res = scanSource(fs.readFileSync(file, 'utf8'), path.relative(REPO_ROOT, file));
+    const res = scanSource(readSourceCached(file), path.relative(REPO_ROOT, file));
     anchors += res.anchors;
     channels += res.channels;
     registrations += res.registrations;

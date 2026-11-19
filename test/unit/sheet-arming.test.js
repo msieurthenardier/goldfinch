@@ -183,10 +183,9 @@ test('the inert style hook is the one class the sheet toggles and the stylesheet
   assert.match(SHEET_SRC, /pickerNode\.classList\.add\('vault-picker-arming'\)/);
   assert.match(SHEET_SRC, /pickerNode\.classList\.remove\('vault-picker-arming'\)/);
   // cosmetic only: the gate is the timestamp, so no listener reads the class
-  assert.doesNotMatch(
-    SHEET_SRC.replace(/pickerNode\.classList\.(add|remove)\('vault-picker-arming'\)/g, ''),
-    /vault-picker-arming'\)\s*\)/
-  );
+  const stripped = SHEET_SRC.replace(/pickerNode\.classList\.(add|remove)\('vault-picker-arming'\)/g, '');
+  assert.notEqual(stripped, SHEET_SRC, 'the class-toggle strip did not apply — the .replace() target is stale');
+  assert.doesNotMatch(stripped, /vault-picker-arming'\)\s*\)/);
 });
 
 test("the certificate picker's own open handler ignores the start index and focuses the list container (source scan)", () => {

@@ -182,4 +182,66 @@ function collectSources(dir) {
   return out;
 }
 
-module.exports = { maskComments, findMatchingBracket, collectSources };
+// ---------------------------------------------------------------------------
+// Per-process memo (squawk 0219). `node --test` runs each test file in its own process, so a
+// module-level cache cannot go stale across files. Everything returned is a string or a FROZEN
+// array, so no test can alter what another test sees; a mutation-style pin (`.replace()` on the
+// text) builds a new string and never touches the cache.
+// ---------------------------------------------------------------------------
+/** @type {Map<string, readonly string[]>} */
+const collectMemo = new Map();
+/** @type {Map<string, string>} */
+const readMemo = new Map();
+/** @type {Map<string, string>} */
+const maskMemo = new Map();
+
+/**
+ * Memoized {@link collectSources}: same walk, same `.js` filter, returned frozen.
+ * @param {string} dir
+ * @returns {readonly string[]}
+ */
+function collectSourcesCached(dir) {
+  let hit = collectMemo.get(dir);
+  if (!hit) {
+    hit = Object.freeze(collectSources(dir));
+    collectMemo.set(dir, hit);
+  }
+  return hit;
+}
+
+/**
+ * Memoized UTF-8 read of one file.
+ * @param {string} file
+ * @returns {string}
+ */
+function readSourceCached(file) {
+  let hit = readMemo.get(file);
+  if (hit === undefined) {
+    hit = fs.readFileSync(file, 'utf8');
+    readMemo.set(file, hit);
+  }
+  return hit;
+}
+
+/**
+ * Memoized {@link maskComments} over a file's text (keyed on the path).
+ * @param {string} file
+ * @returns {string}
+ */
+function maskedSourceCached(file) {
+  let hit = maskMemo.get(file);
+  if (hit === undefined) {
+    hit = maskComments(readSourceCached(file));
+    maskMemo.set(file, hit);
+  }
+  return hit;
+}
+
+module.exports = {
+  maskComments,
+  findMatchingBracket,
+  collectSources,
+  collectSourcesCached,
+  readSourceCached,
+  maskedSourceCached
+};

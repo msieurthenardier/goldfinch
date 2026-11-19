@@ -40,9 +40,8 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('fs');
 const path = require('path');
-const { maskComments, findMatchingBracket, collectSources } = require('../helpers/source-scan');
+const { maskComments, findMatchingBracket, collectSourcesCached, readSourceCached } = require('../helpers/source-scan');
 
 const MAIN_DIR = path.join(__dirname, '../../src/main');
 
@@ -105,7 +104,7 @@ function scanSource(source, label) {
 // --- the net --------------------------------------------------------------------
 
 test("src/main/** has ZERO raw `closed` registrations outside onWindowClosed's definition", () => {
-  const files = collectSources(MAIN_DIR);
+  const files = collectSourcesCached(MAIN_DIR);
   // Sanity: fail loudly if the file walk itself breaks rather than scanning nothing.
   assert.ok(files.length > 5, `expected the src/main tree, found ${files.length} files`);
 
@@ -114,7 +113,7 @@ test("src/main/** has ZERO raw `closed` registrations outside onWindowClosed's d
   let wrapperDefinitions = 0;
   for (const file of files) {
     const label = path.relative(path.join(__dirname, '../..'), file);
-    const res = scanSource(fs.readFileSync(file, 'utf8'), label);
+    const res = scanSource(readSourceCached(file), label);
     if (res.wrapperFound) wrapperDefinitions++;
     violations.push(...res.violations);
   }

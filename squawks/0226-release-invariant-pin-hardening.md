@@ -1,10 +1,10 @@
 # Squawk 0226: Two release-workflow invariant pins can be satisfied by the wrong text
 
-**Status**: open
+**Status**: completed
 **Type**: servicing
 **Severity**: routine
 **Reported**: 2026-11-19
-**Completed**: —
+**Completed**: 2026-11-19
 
 ## Report
 Two pins added in Mission 24 Flight 1 can pass when they should fail:
@@ -19,7 +19,12 @@ Test-only hardening; there is no workflow change.
 - `missions/24-maintenance/flights/01-release-integrity/flight-debrief.md`, *Technical*; flight review non-blocking note 3.
 
 ## Corrective Action
-*(written at completion)*
+Test-only, in `test/unit/release-workflow-invariants.test.js`. The fuse pin now orders steps by real `- name:` headers (`buildStepNames`), so a comment cannot satisfy it. The upload pin uses `uploadIfFault`, a parenthesis-aware check: a top-level `||` is refused and a top-level build-success conjunct is required. `always()` itself is not forbidden, because the real condition is `always() && needs.build.result == 'success' && (...)`, which is safe; the hole was `||`. A permanent mutation test covers both bypasses with applied-checks.
 
 ## Verification
-Each pin goes red under its new mutation: a comment carrying the fuse step's name with the step removed, and `always() || needs.build.result == 'success'` in `upload`'s `if:`. Each is neuter-verified, and `npm test` is green.
+The permanent mutation test (applied-check guarded) shows each pin red: the fuse step replaced by a comment carrying its name (`stepOf` throws, step index -1), and `always() || needs.build.result == 'success'` plus `always() && (… || true)` (`uploadIfFault` non-null). The real file passes both pins. `.github/` has no diff. `npm test` (7380 pass, 0 fail), lint, typecheck and format:check are green.
+
+## Sign-Off
+**Reviewer**: Reviewer agent (independent, diff-scoped batch review of the 2026-11-19 turnaround)
+**Verdict**: confirmed, no issues. The fuse-step order is read from real `- name:` headers only. The deviation from "forbid `always()`" (the real `upload` condition begins `always() &&`) closes the hole the squawk describes: a top-level `||` is refused and a top-level `needs.build.result == 'success'` conjunct is required; an `||` inside a nested group is allowed; odd spacing fails closed. Gates at review: `npm test` 7,384 tests (7,379 pass, 0 fail, 1 skipped — the `jq` test — and 4 todo); lint, typecheck and format:check clean; `git diff main -- src .github/workflows` empty.
+**Commit**: the `squawk: turnaround 2026-11-19` commit on `squawk/turnaround-2026-11-19`

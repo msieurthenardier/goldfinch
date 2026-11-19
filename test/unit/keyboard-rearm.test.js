@@ -160,10 +160,22 @@ test('the scan PASSES the real fix shape (read into guard + guarded incoming foc
   assert.ok(r.readsIsFocused && r.guardVar === 'wasPageFocused' && r.focusesGuarded);
 });
 
+/** Apply one mutation link and assert it hit — a no-op .replace() would pass the scan vacuously. */
+function mutateStep(before, pattern, replacement, what) {
+  const after = before.replace(pattern, replacement);
+  assert.notEqual(after, before, `the ${what} mutation did not apply — the .replace() target is stale`);
+  return after;
+}
+
 test('direction 1 — removing the conditional focus (never .focus() the incoming) FAILS', () => {
-  const mutated = GOOD.replace('    if (wasPageFocused && !entry.view.webContents.isDestroyed()) {\n', '')
-    .replace('      entry.view.webContents.focus();\n', '')
-    .replace('    }\n  }', '  }');
+  let mutated = mutateStep(
+    GOOD,
+    /^([ \t]*)if \(wasPageFocused && !entry\.view\.webContents\.isDestroyed\(\)\) \{\s*\n/m,
+    '',
+    'guard-open removal'
+  );
+  mutated = mutateStep(mutated, /^[ \t]*entry\.view\.webContents\.focus\(\);\s*\n/m, '', 'focus-call removal');
+  mutated = mutateStep(mutated, /\n[ \t]*\}(\s*\n[ \t]*\}\s*\n\}\);)/, '$1', 'guard-close removal');
   const body = extractHandlerBody(maskComments(mutated), HANDLER);
   assert.notEqual(body, null);
   const r = analyzeHandler(/** @type {string} */ (body));
@@ -172,12 +184,17 @@ test('direction 1 — removing the conditional focus (never .focus() the incomin
 });
 
 test('direction 2 — focusing unconditionally (no isFocused guard) FAILS', () => {
-  const mutated = GOOD.replace(
-    '  const wasPageFocused = owner.activeTabWcId != null && !!getTabContents(owner.activeTabWcId)?.isFocused();\n',
-    ''
-  ).replace(
-    '    if (wasPageFocused && !entry.view.webContents.isDestroyed()) {',
-    '    if (!entry.view.webContents.isDestroyed()) {'
+  let mutated = mutateStep(
+    GOOD,
+    /^[ \t]*const wasPageFocused = [^\n]*isFocused\(\)[^\n]*\n/m,
+    '',
+    'isFocused-read removal'
+  );
+  mutated = mutateStep(
+    mutated,
+    /if \(wasPageFocused && (!entry\.view\.webContents\.isDestroyed\(\))/,
+    'if ($1',
+    'guard-variable removal'
   );
   const body = extractHandlerBody(maskComments(mutated), HANDLER);
   assert.notEqual(body, null);
