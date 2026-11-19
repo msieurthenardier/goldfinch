@@ -1281,6 +1281,20 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  display: flex;
+}
+/* Squawk 0179: the stem shrinks with its own ellipsis; the extension never does,
+   so a long name keeps `.exe` visible. */
+.dl-name-stem {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dl-name-ext {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 button.dl-name {
   background: none;

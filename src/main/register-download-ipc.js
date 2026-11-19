@@ -2,6 +2,7 @@
 
 const { isDownloadableMediaUrl } = require('./media-list');
 const { RETRY_REASONS, planRetry, projectRow, retryReasonText } = require('./download-retry');
+const { dedupedName } = require('./download-path');
 
 const DOWNLOADS_ACTIONS = new Set(['pause', 'resume', 'cancel', 'remove', 'retry', 'open', 'show']);
 const INDICATOR_RECENT_CAP = 25;
@@ -81,12 +82,10 @@ function registerDownloadIpc({
 
   function uniquePath(dir, filename) {
     const safe = sanitizeFilename(filename);
-    const ext = path.extname(safe);
-    const base = path.basename(safe, ext);
     let candidate = path.join(dir, safe);
     let n = 1;
     while (fs.existsSync(candidate)) {
-      candidate = path.join(dir, `${base} (${n})${ext}`);
+      candidate = path.join(dir, dedupedName(safe, n));
       n++;
     }
     if (!isWithinDir(dir, candidate)) {
@@ -281,11 +280,20 @@ function registerDownloadIpc({
     sess.__goldfinchDownloads = true;
     sess.on('will-download', (_event, item, downloadingContents) => {
       const url = item.getURL();
+      // A redirected download reports the FINAL address from getURL(); the pending record is keyed by the
+      // address that was requested, which is the first entry of the URL chain. Any problem falls back.
+      let pendingUrl = url;
+      try {
+        const chain = typeof item.getURLChain === 'function' ? item.getURLChain() : null;
+        if (Array.isArray(chain) && chain.length > 0 && typeof chain[0] === 'string') pendingUrl = chain[0];
+      } catch {
+        pendingUrl = url;
+      }
       // Matched against the webContents the event reports; a download that reports none never matches.
       // Consumed here, at start (not at done).
       const key =
         downloadingContents && typeof downloadingContents.id === 'number'
-          ? pendingKey(downloadingContents.id, url)
+          ? pendingKey(downloadingContents.id, pendingUrl)
           : null;
       const meta = key ? pendingDownloads.get(key) : undefined;
       if (key) pendingDownloads.delete(key);

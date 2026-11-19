@@ -123,4 +123,22 @@ function isWithinDir(dir, candidate) {
   return r === path.resolve(dir) ? false : r.startsWith(path.resolve(dir) + path.sep);
 }
 
-module.exports = { sanitizeFilename, isWithinDir, MAX_NAME_BYTES };
+/**
+ * The de-duplicated form of an already-sanitised name: `stem (n).ext`, kept within MAX_NAME_BYTES by
+ * cutting the stem (never the extension, never mid-character). The extension is the same final 1-16
+ * letter/digit one `sanitizeFilename` keeps.
+ * @param {string} safe
+ * @param {number} n
+ * @returns {string}
+ */
+function dedupedName(safe, n) {
+  const match = EXTENSION_PATTERN.exec(safe);
+  const ext = match ? match[0] : '';
+  const stem = safe.slice(0, safe.length - ext.length);
+  const suffix = ` (${n})`;
+  const room = MAX_NAME_BYTES - byteLength(ext) - byteLength(suffix);
+  const cut = byteLength(stem) > room ? cutToBytes(stem, room).replace(/[.\s]+$/, '') : stem;
+  return `${cut || 'download'}${suffix}${ext}`;
+}
+
+module.exports = { sanitizeFilename, isWithinDir, dedupedName, MAX_NAME_BYTES };

@@ -17,7 +17,8 @@ const {
   reduce,
   deriveModel,
   RECENT_CAP,
-  IDLE_TIMEOUT_MS
+  IDLE_TIMEOUT_MS,
+  IN_PROGRESS_STATES
 } = require('../../src/renderer/chrome/downloads-indicator-model');
 
 const T0 = 1_000_000; // arbitrary base timestamp
@@ -47,6 +48,44 @@ test('progress makes the indicator visible + active with count 1', () => {
   assert.equal(m.active, true);
   assert.equal(m.activeCount, 1);
   assert.equal(m.recentCount, 0);
+});
+
+test('an interrupted record with no end time is not in progress', () => {
+  const s = reduce(initialState(), progress(1, { state: 'interrupted' }));
+  const m = deriveModel(s);
+  assert.equal(m.active, false);
+  assert.equal(m.activeCount, 0);
+  assert.equal(m.visible, false);
+  assert.equal(m.recentCount, 0);
+  assert.equal(m.ariaLabel, 'Downloads');
+});
+
+test('progressing then interrupted drops the entry; a resume re-adds it', () => {
+  let s = reduce(initialState(), progress(1));
+  s = reduce(s, progress(1, { state: 'interrupted' }));
+  assert.equal(deriveModel(s).activeCount, 0);
+  s = reduce(s, progress(1));
+  assert.equal(deriveModel(s).activeCount, 1);
+});
+
+test('one progressing and one interrupted count 1', () => {
+  let s = reduce(initialState(), progress(1));
+  s = reduce(s, progress(2, { state: 'interrupted' }));
+  assert.equal(deriveModel(s).activeCount, 1);
+  assert.equal(deriveModel(s).ariaLabel, 'Downloading — 1 in progress');
+});
+
+test('hydrate skips an interrupted row with no end time', () => {
+  const s = reduce(initialState(), {
+    type: 'hydrate',
+    now: T0,
+    d: [
+      { id: 1, filename: 'a', state: 'progressing', active: true },
+      { id: 2, filename: 'b', state: 'interrupted', active: true, endTime: null }
+    ]
+  });
+  assert.deepEqual([...s.inFlight.keys()], [1]);
+  assert.equal(deriveModel(s).activeCount, 1);
 });
 
 test('two progress events for the same id keep a single in-flight entry', () => {
@@ -300,4 +339,15 @@ test('unknown event type is a pure no-op', () => {
   const s0 = initialState();
   assert.equal(reduce(s0, { type: 'nope' }), s0);
   assert.equal(reduce(s0, undefined), s0);
+});
+
+test("drift guard: the model's in-progress state set equals goldfinch://downloads IN_PROGRESS_STATES (source scan)", () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '../../src/renderer/pages/downloads.js'), 'utf8');
+  const m = /IN_PROGRESS_STATES\s*=\s*new\s+Set\(\s*\[([^\]]*)\]\s*\)/.exec(src);
+  if (!m) throw new Error('IN_PROGRESS_STATES literal not found in downloads.js');
+  const pageSet = [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]).sort();
+  assert.ok(pageSet.length > 0, 'literal has members');
+  assert.deepEqual([...IN_PROGRESS_STATES].sort(), pageSet);
 });

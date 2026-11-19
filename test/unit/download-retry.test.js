@@ -70,5 +70,6 @@ test('projectRow keeps the record and adds the verdict', () => {
   assert.equal(no.retryable, false);
   assert.equal(no.retryReason, 'no-partition');
   assert.equal(no.retryNote, retryReasonText('no-partition'));
+  assert.match(no.retryNote, /Download now in Settings/);
   assert.equal(no.url, 'https://e.test/f.bin');
 });

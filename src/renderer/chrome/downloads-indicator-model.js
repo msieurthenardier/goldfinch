@@ -26,6 +26,16 @@
 
 const RECENT_CAP = 25;
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes after the last completion
+// States that count as "in progress". Same set as goldfinch://downloads
+// (src/renderer/pages/downloads.js IN_PROGRESS_STATES; that file is a classic script, so
+// the set is restated here). An `interrupted` record with no end time (a resumable failure
+// Electron never sends `done` for) is NOT in progress — the page shows it as "Failed".
+const IN_PROGRESS_STATES = new Set(['progressing', 'paused']);
+
+/** @param {unknown} state */
+function isInProgressState(state) {
+  return typeof state === 'string' && IN_PROGRESS_STATES.has(state);
+}
 
 /**
  * @typedef {{ id: number, filename: string, received?: number, total?: number, paused?: boolean, state?: string }} InFlightEntry
@@ -49,6 +59,11 @@ export function reduce(state, event) {
     case 'progress': {
       const d = event.d || {};
       const inFlight = new Map(state.inFlight);
+      if (!isInProgressState(d.state)) {
+        // e.g. `interrupted`: no longer in flight (a later `progressing` re-adds it on resume).
+        inFlight.delete(d.id);
+        return { ...state, inFlight };
+      }
       inFlight.set(d.id, {
         id: d.id,
         filename: d.filename,
@@ -101,6 +116,7 @@ export function reduce(state, event) {
       for (const row of rows) {
         if (!row || typeof row.id !== 'number' || seen.has(row.id)) continue;
         if (row.active === true) {
+          if (!isInProgressState(row.state)) continue;
           inFlight.set(row.id, {
             id: row.id,
             filename: row.filename,
@@ -189,4 +205,4 @@ export function deriveModel(state) {
   return { visible, active, activeCount, recentCount, attention, ariaLabel };
 }
 
-export { RECENT_CAP, IDLE_TIMEOUT_MS };
+export { RECENT_CAP, IDLE_TIMEOUT_MS, IN_PROGRESS_STATES };

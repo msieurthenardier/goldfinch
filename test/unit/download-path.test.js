@@ -3,7 +3,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
-const { sanitizeFilename, isWithinDir, MAX_NAME_BYTES } = require('../../src/main/download-path');
+const { sanitizeFilename, isWithinDir, dedupedName, MAX_NAME_BYTES } = require('../../src/main/download-path');
 
 // ---------------------------------------------------------------------------
 // sanitizeFilename
@@ -271,4 +271,31 @@ test('dedup-suffix scenario: filenames with dedup suffix stay within dir', () =>
   const dir = '/tmp/downloads';
   const dedupFile = '/tmp/downloads/video (1).mp4';
   assert.equal(isWithinDir(dir, dedupFile), true);
+});
+
+test('dedupedName: a name at the cap needing " (12)" stays within the cap and keeps its extension', () => {
+  const safe = sanitizeFilename('a'.repeat(300) + '.mp4');
+  assert.equal(Buffer.byteLength(safe), MAX_NAME_BYTES);
+  const out = dedupedName(safe, 12);
+  assert.ok(Buffer.byteLength(out) <= MAX_NAME_BYTES);
+  assert.ok(out.endsWith(' (12).mp4'));
+});
+
+test('dedupedName: short names get the plain suffix; extensionless names are capped too', () => {
+  assert.equal(dedupedName('Goldfinch-Setup-1.0.0.exe', 3), 'Goldfinch-Setup-1.0.0 (3).exe');
+  const out = dedupedName('b'.repeat(MAX_NAME_BYTES), 7);
+  assert.equal(Buffer.byteLength(out), MAX_NAME_BYTES);
+  assert.ok(out.endsWith(' (7)'));
+});
+
+test('dedupedName: a multi-byte stem near the cap is not split mid-character', () => {
+  for (const ch of ['é', '日', '😀']) {
+    const safe = sanitizeFilename(ch.repeat(200) + '.txt');
+    const out = dedupedName(safe, 10);
+    assert.ok(Buffer.byteLength(out) <= MAX_NAME_BYTES);
+    assert.ok(out.endsWith(' (10).txt'));
+    const stem = out.slice(0, -' (10).txt'.length);
+    assert.equal(stem, ch.repeat([...stem].length), 'only whole characters remain');
+    assert.ok(!out.includes('�'));
+  }
 });
