@@ -21,7 +21,7 @@ or download **v0.19.18** directly:
 
 | Platform | Installer |
 |----------|-----------|
-| **Windows** | [Goldfinch Setup 0.19.18.exe](https://github.com/msieurthenardier/goldfinch/releases/download/v0.19.18/Goldfinch-Setup-0.19.18.exe) |
+| **Windows** | [Goldfinch-Setup-0.19.18.exe](https://github.com/msieurthenardier/goldfinch/releases/download/v0.19.18/Goldfinch-Setup-0.19.18.exe) |
 | **macOS** (Apple Silicon) | [Goldfinch-0.19.18-arm64.dmg](https://github.com/msieurthenardier/goldfinch/releases/download/v0.19.18/Goldfinch-0.19.18-arm64.dmg) · [.zip](https://github.com/msieurthenardier/goldfinch/releases/download/v0.19.18/Goldfinch-0.19.18-arm64-mac.zip) |
 | **Linux** | [Goldfinch-0.19.18.AppImage](https://github.com/msieurthenardier/goldfinch/releases/download/v0.19.18/Goldfinch-0.19.18.AppImage) · [.deb](https://github.com/msieurthenardier/goldfinch/releases/download/v0.19.18/goldfinch_0.19.18_amd64.deb) |
 

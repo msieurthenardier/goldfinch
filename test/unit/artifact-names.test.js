@@ -63,3 +63,17 @@ test('artifactName is set per target only, never at the top level or under linux
   assert.equal(pkg.build.linux.artifactName, undefined, 'a linux artifactName would apply to both Linux targets');
   assert.equal(pkg.build.win.artifactName, undefined);
 });
+
+test('the README download links show the file name they point at (the .zip/.deb extras show their extension)', () => {
+  const readme = readFileSync(path.join(ROOT, 'README.md'), 'utf8');
+  const block = readme.match(/<!-- DOWNLOADS:START[\s\S]*?<!-- DOWNLOADS:END -->/);
+  assert.ok(block, 'README is missing the downloads block');
+  const links = [
+    ...block[0].matchAll(/\[([^\]]+)\]\(https:\/\/github\.com\/[^)\s]*\/releases\/download\/v[^/\s)]+\/([^\s)]+)\)/g)
+  ];
+  assert.equal(links.length, 5, 'expected five download links');
+  for (const [, text, file] of links) {
+    if (text.startsWith('.')) assert.ok(file.endsWith(text), `short label ${text} must be the extension of ${file}`);
+    else assert.equal(text, file, `link text "${text}" must equal the file name "${file}"`);
+  }
+});

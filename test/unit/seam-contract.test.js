@@ -327,11 +327,11 @@ const SEAM_COUNT = 41;
 // overflow rendering, measurement, and dispatch business logic lives in
 // bookmarks-bar.js per the M15 F1 Leg 3 line-budget ruling above — this pin
 // gives that file the same drift protection RENDERER_LINE_BUDGET gives
-// renderer.js. bookmarks-bar.js measures 1047 by this test's own
-// split-array metric (one above `wc -l` for a newline-terminated file, same
-// counting convention as RENDERER_LINE_BUDGET); the budget is set to
-// measured + 53 headroom, rounded to a clean number (1100), a small buffer
-// for incidental drift rather than planned feature growth — no bar/overflow
+// renderer.js. The budget was set to 1100 when bookmarks-bar.js measured 1047 by this
+// test's own split-array metric (one above `wc -l` for a newline-terminated
+// file, same counting convention as RENDERER_LINE_BUDGET): 53 headroom,
+// rounded to a clean number. It measures 1077 as of squawk 0217 (23
+// headroom). The buffer is for incidental drift rather than planned feature growth — no bar/overflow
 // work is scheduled. This pin protects the drag-session/render extraction
 // seam (bookmarks-bar.js owns both concerns today) until that split
 // happens; if it fails legitimately because the split is landing, raise
