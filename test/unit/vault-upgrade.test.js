@@ -532,8 +532,9 @@ test('AC4: a file that does not unwrap under this master key is skipped (its own
     assert.ok(bytesOf(p.dir, 'play').equals(bytes));
     assert.throws(() => store.listItems('play'), vc.VaultAuthError);
     assert.ok(lines.some((l) => /"play": wrong-key/.test(l)));
-    fs.rmSync(vaultFile(p.dir, 'play'));
+    // Squawk 0191: rotation no longer needs the foreign file removed - it rotates the rest and reports it.
     await assertRotationWorks(store, p.dir);
+    assert.ok(bytesOf(p.dir, 'play').equals(bytes), 'rotation left the foreign file untouched');
   } finally {
     rm(p.dir);
   }
@@ -634,7 +635,7 @@ test('AC4: beginTransaction throwing is survived (no journal, unlock fine, rotat
   }
 });
 
-test('AC4: a journal already present is recovered and skipped this time; the next unlock upgrades', async () => {
+test('AC4: a journal already present is recovered and the upgrade proceeds in the SAME unlock', async () => {
   const lines = [];
   const p = await v1Profile({ log: (l) => lines.push(l) });
   try {
@@ -642,16 +643,36 @@ test('AC4: a journal already present is recovered and skipped this time; the nex
     // residue appearing AFTER construction (the constructor's recovery already ran)
     const h = vtxn.beginTransaction(vdir(p.dir), [{ finalName: 'play.gfvault', content: Buffer.from('junk') }]);
     assert.equal(h.committed, false);
-    const snap = snapshot(p.dir);
-    for (const n of Object.keys(snap)) if (/txn-|\.stage-/.test(n)) delete snap[n];
     await store.unlock(MASTER);
-    assertUnchanged(p.dir, snap, 'journal present');
     assert.ok(lines.some((l) => /journal-present/.test(l)));
+    assert.deepEqual(versions(p.dir), { global: 2, work: 2, play: 2 }, 'all version 2 after ONE unlock');
+    assert.equal(vtxn.journalsIn(fs.readdirSync(vdir(p.dir))).length, 0, 'no journal remains');
+    await assertRotationWorks(store, p.dir);
+  } finally {
+    rm(p.dir);
+  }
+});
+
+test('AC4: a journal that recovery cannot clear keeps the skip; the next unlock upgrades', async () => {
+  const lines = [];
+  const p = await v1Profile({ log: (l) => lines.push(l) });
+  const realRecover = vtxn.recover;
+  try {
+    const store = makeStore(p.dir, { log: (l) => lines.push(l) });
+    vtxn.beginTransaction(vdir(p.dir), [{ finalName: 'play.gfvault', content: Buffer.from('junk') }]);
+    const snap = snapshot(p.dir);
+    vtxn.recover = () => {
+      throw new Error('recovery down');
+    };
+    await store.unlock(MASTER);
+    vtxn.recover = realRecover;
+    assertUnchanged(p.dir, snap, 'journal stuck');
+    assert.ok(lines.some((l) => /recover-failed/.test(l)));
     store.lockNow();
     await store.unlock(MASTER);
     assert.deepEqual(versions(p.dir), { global: 2, work: 2, play: 2 });
-    await assertRotationWorks(store, p.dir);
   } finally {
+    vtxn.recover = realRecover;
     rm(p.dir);
   }
 });

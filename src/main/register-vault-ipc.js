@@ -155,6 +155,14 @@ function registerVaultIpc({
     }
   }
   /**
+   * One log line when the gate's copy note is skipped (squawk 0223): the reason code and channel only,
+   * never an id or title. console.warn is the precedent (register-overlay-ipc.js `[cert-override-proceed]`).
+   * @param {string} reason
+   */
+  function noteSkipped(reason) {
+    console.warn(`[internal-vault-item-copy] ${reason}`);
+  }
+  /**
    * After a copy that wrote an item: resolve the destination id and tell the gate. Strings only, checked
    * before any comparison; skips when the written id is not exactly determined.
    * @param {any} event
@@ -170,12 +178,15 @@ function registerVaultIpc({
     let destItemId = null;
     if (outcome === 'replaced') {
       if (typeof matchId === 'string') destItemId = matchId;
-    } else if (idsBefore) {
+    } else if (!idsBefore) {
+      noteSkipped('copy-note-no-baseline');
+    } else {
       const added = getVaultStore()
         .listItemsMeta(destVaultId, { touch: false })
         .map((/** @type {any} */ m) => m && m.id)
         .filter((/** @type {any} */ id) => typeof id === 'string' && !idsBefore.has(id));
       if (added.length === 1) destItemId = added[0];
+      else noteSkipped(added.length === 0 ? 'copy-note-no-new-id' : 'copy-note-ambiguous-new-id');
     }
     if (destItemId === null) return;
     const live = itemMeta(destVaultId, destItemId, false);
@@ -626,7 +637,7 @@ function registerVaultIpc({
       }
       const res = await vaultSaveBundle(built.bundle, typeof savePath === 'string' ? savePath : undefined);
       if (res && res.ok) {
-        return { ...res, carried: built.carried };
+        return { ...res, carried: built.carried, skipped: built.skipped };
       }
       return res;
     });

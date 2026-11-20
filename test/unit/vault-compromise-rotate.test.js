@@ -395,31 +395,30 @@ test('out-of-sever-scope: a bundle exported BEFORE the rotation still adopts ont
 // The registry∪disk union (design review Q3): corrupt / foreign / unregistered
 // ---------------------------------------------------------------------------
 
-test('a content-corrupt .gfvault fails the rotation cleanly PRE-COMMIT: disk byte-identical, gate/lock released, store usable, retry succeeds', async () => {
+test('a content-corrupt .gfvault is SKIPPED (squawk 0191): left byte-identical, named in the result, the rest rotate', async () => {
   const dir = tmpDir();
+  const lines = [];
   try {
     const fx = await severFixture(dir);
-    fs.writeFileSync(path.join(fx.vdir, 'rogue.gfvault'), 'not a vault document', 'utf8');
-    const before = snapshot(fx.vdir);
+    fx.store._log = (l) => lines.push(l);
+    const rogue = path.join(fx.vdir, 'rogue.gfvault');
+    fs.writeFileSync(rogue, 'not a vault document', 'utf8');
+    const rogueBefore = fs.readFileSync(rogue);
+    const workBefore = fs.readFileSync(path.join(fx.vdir, 'work.gfvault'));
 
-    await assert.rejects(
-      rotateMaster(fx.store),
-      (e) => e instanceof vs.VaultFormatError,
-      'an unparseable vault file is an integrity anomaly — surfaced, never skipped'
-    );
-
-    assertSnapshotUnchanged(fx.vdir, before, 'corrupt-vault failure');
-    assert.equal(fx.store._rekeyInProgress, false, 'the gate is released');
-    assert.equal(fx.store.saveItem('work', loginItem({ id: 'w1', title: 'Still writable' })).title, 'Still writable');
-    fs.unlinkSync(path.join(fx.vdir, 'rogue.gfvault'));
     const out = await rotateMaster(fx.store);
-    assert.equal(typeof out.recoveryKey, 'string', 'the rotation succeeds once the anomaly is removed');
+    assert.deepEqual(out.skipped, [{ id: 'rogue', reason: 'unreadable-format' }]);
+    assert.ok(fs.readFileSync(rogue).equals(rogueBefore), 'the unreadable file is untouched');
+    assert.ok(!fs.readFileSync(path.join(fx.vdir, 'work.gfvault')).equals(workBefore), 'a readable vault was rotated');
+    assert.equal(lines.filter((l) => /skipped "rogue": unreadable-format/.test(l)).length, 1);
+    assert.equal(fx.store._rekeyInProgress, false, 'the gate is released');
+    assert.equal(fx.store.saveItem('work', loginItem({ id: 'w1', title: 'Writable' })).title, 'Writable');
   } finally {
     rm(dir);
   }
 });
 
-test('a foreign .gfvault (mrk envelope NOT under the old MRK) fails the rotation cleanly PRE-COMMIT', async () => {
+test('a foreign .gfvault (mrk envelope NOT under the old MRK) is skipped and reported (squawk 0191)', async () => {
   const dir = tmpDir();
   try {
     const fx = await severFixture(dir);
@@ -449,15 +448,54 @@ test('a foreign .gfvault (mrk envelope NOT under the old MRK) fails the rotation
     foreignKey.fill(0);
     const before = snapshot(fx.vdir);
 
-    await assert.rejects(
-      rotateMaster(fx.store),
-      (e) => e instanceof vs.VaultAuthError,
-      'an un-unwrappable vault during a security operation fails the rotation loudly'
+    const out = await rotateMaster(fx.store);
+    assert.deepEqual(out.skipped, [{ id: 'foreign', reason: 'no-unwrap' }]);
+    assert.ok(
+      fs.readFileSync(path.join(fx.vdir, 'foreign.gfvault')).equals(before.get('foreign.gfvault')),
+      'the foreign file is untouched'
     );
 
-    assertSnapshotUnchanged(fx.vdir, before, 'foreign-vault failure');
     assert.equal(fx.store._rekeyInProgress, false, 'the gate is released');
     assert.equal(fx.store.saveItem('work', loginItem({ id: 'w1', title: 'Usable' })).title, 'Usable');
+  } finally {
+    rm(dir);
+  }
+});
+
+test('squawk 0191: one corrupt file beside good vaults - the good ones open with the NEW key only, the corrupt bytes are identical, the result names it', async () => {
+  const dir = tmpDir();
+  try {
+    const fx = await severFixture(dir);
+    const rogue = path.join(fx.vdir, 'rogue.gfvault');
+    fs.writeFileSync(rogue, '{"torn":', 'utf8');
+    const rogueBefore = fs.readFileSync(rogue);
+
+    const out = await rotateMaster(fx.store);
+    assert.deepEqual(out.skipped, [{ id: 'rogue', reason: 'unreadable-format' }]);
+    assert.ok(fs.readFileSync(rogue).equals(rogueBefore));
+
+    const fresh = makeStore(dir);
+    await fresh.unlock(Buffer.from(NEW_MASTER, 'utf8'));
+    assert.equal(fresh.listItems('work')[0].title, 'W-ITEM');
+    assert.equal(fresh.listItems('personal')[0].title, 'P-ITEM');
+    const stale = makeStore(dir);
+    await assert.rejects(stale.unlock(Buffer.from(OLD_MASTER, 'utf8')), (e) => e instanceof vs.VaultAuthError);
+  } finally {
+    rm(dir);
+  }
+});
+
+test('squawk 0191: when EVERY vault is unreadable the rotation refuses loudly and writes nothing', async () => {
+  const dir = tmpDir();
+  try {
+    const fx = await severFixture(dir);
+    for (const n of fs.readdirSync(fx.vdir).filter((x) => x.endsWith('.gfvault'))) {
+      fs.writeFileSync(path.join(fx.vdir, n), 'garbage', 'utf8');
+    }
+    const before = snapshot(fx.vdir);
+    await assert.rejects(rotateMaster(fx.store), (e) => e instanceof vs.VaultFormatError);
+    assertSnapshotUnchanged(fx.vdir, before, 'all-unreadable refusal');
+    assert.equal(fx.store._rekeyInProgress, false);
   } finally {
     rm(dir);
   }

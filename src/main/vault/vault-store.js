@@ -142,6 +142,19 @@ const BUNDLE_VERSION_V2 = 2;
 // vault-editor-model.js's EDITOR_TYPES). Edit all three by hand; none derive the others.
 const ITEM_TYPES = new Set(['login', 'card', 'note', 'identity']);
 
+/**
+ * Reason CODE for a vault skipped by a profile export (squawk 0190): a fixed vocabulary
+ * derived from the error class, never its message (which could carry vault detail).
+ * @param {any} err
+ * @returns {string}
+ */
+function exportSkipReason(err) {
+  const name = err && typeof err.name === 'string' ? err.name : '';
+  if (name === 'VaultAuthError') return 'no-unwrap';
+  if (name === 'VaultFormatError' || name === 'VaultWrongVaultError') return 'unreadable-format';
+  return 'read-failed';
+}
+
 // ---------------------------------------------------------------------------
 // Typed errors — a locked / not-set-up / unknown-jar condition throws these; the
 // crypto-layer VaultAuthError / VaultFormatError propagate unchanged.
@@ -528,9 +541,20 @@ function isPowerOfTwo(n) {
 }
 
 /**
+ * scrypt's real memory requirement in bytes (`128 * r * (N + p + 2)`); Node throws
+ * ERR_CRYPTO_INVALID_SCRYPT_PARAMS below it (measured: fails at exactly `128 * N * r`).
+ * The ONE formula, shared by `validateImportedKdf` and `chooseRewrapKdf`.
+ * @param {number} N @param {number} r @param {number} p
+ * @returns {number}
+ */
+function scryptMinMaxmem(N, r, p) {
+  return 128 * r * (N + p + 2);
+}
+
+/**
  * Validate an imported bundle's scrypt KDF against an EXACT bounded schema. Throws
  * VaultFormatError on any deviation (absent/extra-typed field, out-of-range value,
- * or a maxmem too small for scrypt's `128*N*r` floor — which would otherwise throw
+ * or a maxmem under scrypt's real requirement (`scryptMinMaxmem`) — which would otherwise throw
  * deep in the derive). Accepting only well-formed bounded params closes both the
  * silent-downgrade (absent N/r/p → Node defaults) and the resource-exhaustion class.
  * @param {any} kdf
@@ -553,7 +577,7 @@ function validateImportedKdf(kdf) {
   if (!Number.isInteger(p) || p < 1 || p > KDF_P_MAX) {
     throw new vc.VaultFormatError(`vault-store: bundle kdf.p out of range (${p})`);
   }
-  if (!Number.isInteger(maxmem) || maxmem < 128 * N * r || maxmem > KDF_MAXMEM_CAP) {
+  if (!Number.isInteger(maxmem) || maxmem < scryptMinMaxmem(N, r, p) || maxmem > KDF_MAXMEM_CAP) {
     throw new vc.VaultFormatError(`vault-store: bundle kdf.maxmem out of range (${maxmem})`);
   }
 }
@@ -562,8 +586,7 @@ function validateImportedKdf(kdf) {
  * The key-derivation parameters a master re-wrap uses (Mission 23 Flight 2 DD6).
  * Returns `stored` UNCHANGED (same object) only when it is scrypt, each of N, r and p
  * is at least the default's, and its own `maxmem` covers scrypt's real requirement
- * (`128 * r * (N + p + 2)` -- looser than `validateImportedKdf`'s `128 * N * r`, which
- * Node's scrypt fails at). Otherwise the default set whole: components are never mixed
+ * (`scryptMinMaxmem`, the same bound `validateImportedKdf` enforces). Otherwise the default set whole: components are never mixed
  * and no product comparison is used. Anything unexpected -> the default.
  * @param {any} stored
  * @param {any} dflt
@@ -577,7 +600,7 @@ function chooseRewrapKdf(stored, dflt) {
     if (typeof v !== 'number' || !Number.isFinite(v)) return dflt;
   }
   if (N < dflt.N || r < dflt.r || p < dflt.p) return dflt;
-  if (maxmem < 128 * r * (N + p + 2)) return dflt;
+  if (maxmem < scryptMinMaxmem(N, r, p)) return dflt;
   return stored;
 }
 
@@ -1792,11 +1815,17 @@ class VaultStore {
       if (/** @type {any} */ (err).code === 'ENOENT') return; // a fresh profile: nothing to upgrade.
       throw err;
     }
-    // A journal here is residue (the constructor's recovery already ran): settle it, skip this time.
+    // A journal here is residue (the constructor's recovery, line ~1125, already ran): settle it. Proceed in THIS
+    // unlock only when recovery left no journal on disk; a failed recovery keeps the skip (retried next unlock).
     if (vtxn.journalsIn(names).length > 0) {
       this._upgradeRecover('*');
       this._logUpgradeOnce('*', 'journal-present');
-      return;
+      try {
+        names = fs.readdirSync(this.vaultsDir);
+      } catch {
+        return;
+      }
+      if (vtxn.journalsIn(names).length > 0) return;
     }
 
     // ---- which files: registry ids whose EXACT file name is present; a stray is logged and left alone ----
@@ -2130,7 +2159,9 @@ class VaultStore {
    * The caller-supplied password Buffers are NOT zeroized here — the sheet
    * handler owns them (the `changeMasterPassword` idiom, inherited by leg 4).
    * @param {{ oldMasterPassword?: string | Buffer, recoveryKey?: string, newMasterPassword: string | Buffer }} args
-   * @returns {Promise<{ recoveryKey: string, revoked: { admin: boolean, vaultIds: string[] } }>}
+   * @returns {Promise<{ recoveryKey: string, revoked: { admin: boolean, vaultIds: string[] },
+   *   skipped: Array<{ id: string, reason: string }> }>}
+   *   `skipped` (squawk 0191): unreadable files left untouched, by id + reason code.
    *   `recoveryKey` is the one-time display (surfaced once by leg 4, never
    *   persisted); `revoked.admin` is true iff the manager carried the admin
    *   pair; `revoked.vaultIds` names exactly the vaults that carried ≥1 access
@@ -2233,9 +2264,8 @@ class VaultStore {
         // null-skip below). The union adds any *.gfvault outside the registry:
         // one whose mrk envelope unwraps under the old MRK is rotated like any
         // other (registry drift must never leave a vault severed under the old
-        // key); one that fails to parse or unwrap fails the rotation LOUDLY,
-        // PRE-COMMIT — a foreign/corrupt vault file during a security operation
-        // is an integrity anomaly to surface, never to skip silently. ----
+        // key); one that fails to parse or unwrap is SKIPPED and REPORTED
+        // (squawk 0191), left byte-untouched; see the read loop below. ----
         this._ensureVaultsDir();
         const registryIds = [
           GLOBAL_ID,
@@ -2258,19 +2288,37 @@ class VaultStore {
         const revokedVaultIds = [];
         /** @type {Array<{ finalName: string, content: Buffer }>} */
         const rebuilt = [];
+        // Squawk 0191 (operator ruling 2026-11-19): a file that cannot be read, unwrapped
+        // or decrypted under the old MRK is SKIPPED here, in the pre-transaction read phase
+        // (never inside the transaction): left untouched on disk, reported by id + reason
+        // code, one log line each. If nothing at all is readable the rotation refuses.
+        /** @type {Array<{ id: string, reason: string }>} */
+        const skipped = [];
         for (const vaultId of vaultIds) {
-          // Direct _readVault-level reads ONLY — the gated public ops would
-          // self-block at entry now that the gate is up.
-          const doc = this._readVault(vaultId); // corrupt → VaultFormatError, loud pre-commit.
-          if (doc === null) continue; // lazily-absent registry vault — skip (the enumeration recipe's null-skip).
-          const env = doc.envelopes.find((/** @type {any} */ e) => e.keyId === 'mrk');
-          if (!env) {
-            throw new vc.VaultFormatError(`vault "${vaultId}": missing mrk envelope`);
+          let doc;
+          let items;
+          try {
+            // Direct _readVault-level reads ONLY — the gated public ops would
+            // self-block at entry now that the gate is up.
+            doc = this._readVault(vaultId);
+            if (doc === null) continue; // lazily-absent registry vault — skip (the enumeration recipe's null-skip).
+            const env = doc.envelopes.find((/** @type {any} */ e) => e.keyId === 'mrk');
+            if (!env) {
+              throw new vc.VaultFormatError(`vault "${vaultId}": missing mrk envelope`);
+            }
+            const oldKey = vc.unwrapVaultKey(env, oldMrk, vc.mrkEnvelopeAad(doc.version, vaultId));
+            workingKeys.push(oldKey);
+            items = vc.decryptItems(doc.items, oldKey, doc.version, vaultId);
+          } catch (err) {
+            const reason = exportSkipReason(err);
+            skipped.push({ id: vaultId, reason });
+            try {
+              this._log(`[vault] compromise-rotate: skipped "${vaultId}": ${reason}`);
+            } catch {
+              /* logging never changes the outcome */
+            }
+            continue;
           }
-          // Un-unwrappable under the old MRK → VaultAuthError, loud pre-commit.
-          const oldKey = vc.unwrapVaultKey(env, oldMrk, vc.mrkEnvelopeAad(doc.version, vaultId));
-          workingKeys.push(oldKey);
-          const items = vc.decryptItems(doc.items, oldKey, doc.version, vaultId);
           if (doc.envelopes.some((/** @type {any} */ e) => e.keyId !== 'mrk')) {
             revokedVaultIds.push(vaultId); // carried ≥1 access envelope — reported as revoked.
           }
@@ -2297,6 +2345,10 @@ class VaultStore {
           // The decrypted item plaintext lives only in `items` — transient JS
           // objects released with this iteration (the same exposure class as
           // every listItems call); no Buffer form exists at this layer to fill.
+        }
+
+        if (rebuilt.length === 0 && skipped.length > 0) {
+          throw new vc.VaultFormatError('compromise rotation: no vault could be read');
         }
 
         // ---- the new manager: version 2 with NO admin fields (DD1 — absence is
@@ -2364,7 +2416,8 @@ class VaultStore {
         installed = true;
         return {
           recoveryKey: rec.display,
-          revoked: { admin: hadAdmin, vaultIds: revokedVaultIds }
+          revoked: { admin: hadAdmin, vaultIds: revokedVaultIds },
+          skipped
         };
       } finally {
         // Zeroization discipline (design-review ownership ruling): the old MRK
@@ -2484,7 +2537,11 @@ class VaultStore {
    * NO write, NO password argument (every input is already on disk).
    * @returns {{ bundle: { format: string, version: number, managerVersion: number, kdf: any,
    *   mrk: { master: any, recovery: any, admin?: any }, adminPublicKeyB64?: string,
-   *   vaults: Array<{ entryHandle: string, identity: any, vault: any }> }, carried: string[] }}
+   *   vaults: Array<{ entryHandle: string, identity: any, vault: any }> }, carried: string[],
+   *   skipped: Array<{ id: string, reason: string }> }}
+   * `skipped` (squawk 0190) lists vaults left out because they could not be read, by local
+   * vault id and a reason code only; like `carried` it is main-side and never in the bundle.
+   * If every present vault is unreadable the export throws (no empty bundle).
    */
   exportProfile() {
     const releaseOp = this._enterGatedOp();
@@ -2513,65 +2570,91 @@ class VaultStore {
     // bytes makes a real collision astronomically unlikely, but the invariant is
     // asserted rather than merely assumed).
     const usedHandles = new Set();
+    // Planner/actuator (squawk 0190): each vault is rebuilt in its OWN try, with no early
+    // return inside the loop, so one unreadable vault never stops the rest. A skipped vault
+    // is reported by id + reason CODE only (never an item, title or secret).
+    /** @type {Array<{ id: string, reason: string }>} */
+    const skipped = [];
     for (const localId of localIds) {
-      const doc = this._readVault(localId);
-      if (doc === null) continue; // lazy vault — absent by design.
-      let entryHandle = mintEntryHandle();
-      while (usedHandles.has(entryHandle)) entryHandle = mintEntryHandle();
-      usedHandles.add(entryHandle);
-      /** @type {{ kind: 'global' } | { kind: 'jar', name: string, color: string }} */
-      let identity;
-      if (localId === GLOBAL_ID) {
-        identity = { kind: 'global' };
-        carried.push('Global');
-      } else {
-        const jar = /** @type {{ id: string, name: string, color: string }} */ (jarById.get(localId));
-        identity = { kind: 'jar', name: jar.name, color: jar.color };
-        carried.push(jar.name);
-      }
-      // The embedded document is REBUILT, not copied (leg `vault-format-v2`, DD6). A bundle
-      // entry is bound to its handle, never to the real jar id (the id is the exact identity
-      // this entry's `identity` ciphertext hides): decrypt the slot's file at ITS OWN version
-      // and slot id, then write a fresh version-2 document under a NEW vault key, its key
-      // envelope and items bound to the handle. Whatever version the source file is, the
-      // entry is version 2 - no refusal path for a mixed profile. Access envelopes are
-      // DROPPED: restore never reads them (it writes only the master-key envelope) and a
-      // bundle that carried them would hand an access-key holder a second copy of the
-      // vault's ciphertext. The fresh key means the bundle shares no key with the live file.
-      const mrkEnv = doc.envelopes.find((/** @type {any} */ e) => e.keyId === 'mrk');
-      if (!mrkEnv) {
-        throw new vc.VaultFormatError(`vault "${localId}": missing mrk envelope`);
-      }
-      const sourceKey = vc.unwrapVaultKey(mrkEnv, mrk, vc.mrkEnvelopeAad(doc.version, localId));
-      const bundleKey = vc.newVaultKey();
-      /** @type {string} */
-      let rebuilt;
+      /** @type {string | null} */
+      let entryHandle = null;
       try {
-        const items = vc.decryptItems(doc.items, sourceKey, doc.version, localId);
-        rebuilt = vc.serializeVault(
-          {
-            vaultId: entryHandle,
-            kdf: doc.kdf,
-            envelopes: [
-              {
-                keyId: 'mrk',
-                type: 'mrk',
-                ...vc.wrapVaultKey(bundleKey, mrk, vc.mrkEnvelopeAad(vc.WRITE_VAULT_VERSION, entryHandle))
-              }
-            ],
-            items: vc.encryptItems(items, bundleKey, vc.WRITE_VAULT_VERSION, entryHandle)
-          },
-          { version: vc.WRITE_VAULT_VERSION }
-        );
-      } finally {
-        sourceKey.fill(0);
-        bundleKey.fill(0);
+        const doc = this._readVault(localId);
+        if (doc === null) continue; // lazy vault — absent by design.
+        entryHandle = mintEntryHandle();
+        while (usedHandles.has(entryHandle)) entryHandle = mintEntryHandle();
+        usedHandles.add(entryHandle);
+        /** @type {{ kind: 'global' } | { kind: 'jar', name: string, color: string }} */
+        let identity;
+        /** @type {string} */
+        let carriedName;
+        if (localId === GLOBAL_ID) {
+          identity = { kind: 'global' };
+          carriedName = 'Global';
+        } else {
+          const jar = /** @type {{ id: string, name: string, color: string }} */ (jarById.get(localId));
+          identity = { kind: 'jar', name: jar.name, color: jar.color };
+          carriedName = jar.name;
+        }
+        // The embedded document is REBUILT, not copied (leg `vault-format-v2`, DD6). A bundle
+        // entry is bound to its handle, never to the real jar id (the id is the exact identity
+        // this entry's `identity` ciphertext hides): decrypt the slot's file at ITS OWN version
+        // and slot id, then write a fresh version-2 document under a NEW vault key, its key
+        // envelope and items bound to the handle. Whatever version the source file is, the
+        // entry is version 2 - no refusal path for a mixed profile. Access envelopes are
+        // DROPPED: restore never reads them (it writes only the master-key envelope) and a
+        // bundle that carried them would hand an access-key holder a second copy of the
+        // vault's ciphertext. The fresh key means the bundle shares no key with the live file.
+        const mrkEnv = doc.envelopes.find((/** @type {any} */ e) => e.keyId === 'mrk');
+        if (!mrkEnv) {
+          throw new vc.VaultFormatError(`vault "${localId}": missing mrk envelope`);
+        }
+        const sourceKey = vc.unwrapVaultKey(mrkEnv, mrk, vc.mrkEnvelopeAad(doc.version, localId));
+        const bundleKey = vc.newVaultKey();
+        /** @type {string} */
+        let rebuilt;
+        try {
+          const items = vc.decryptItems(doc.items, sourceKey, doc.version, localId);
+          rebuilt = vc.serializeVault(
+            {
+              vaultId: entryHandle,
+              kdf: doc.kdf,
+              envelopes: [
+                {
+                  keyId: 'mrk',
+                  type: 'mrk',
+                  ...vc.wrapVaultKey(bundleKey, mrk, vc.mrkEnvelopeAad(vc.WRITE_VAULT_VERSION, entryHandle))
+                }
+              ],
+              items: vc.encryptItems(items, bundleKey, vc.WRITE_VAULT_VERSION, entryHandle)
+            },
+            { version: vc.WRITE_VAULT_VERSION }
+          );
+        } finally {
+          sourceKey.fill(0);
+          bundleKey.fill(0);
+        }
+        vaults.push({
+          entryHandle,
+          identity: encryptIdentity(mrk, entryHandle, identity),
+          vault: JSON.parse(rebuilt)
+        });
+        carried.push(carriedName); // after the push so it matches bundle.vaults exactly.
+      } catch (err) {
+        if (entryHandle !== null) usedHandles.delete(entryHandle);
+        if (err instanceof VaultLockedError) throw err; // a lock is not a per-vault failure.
+        const reason = exportSkipReason(err);
+        skipped.push({ id: localId, reason });
+        try {
+          this._log(`[vault] export-profile: skipped "${localId}": ${reason}`);
+        } catch {
+          /* logging never changes the outcome */
+        }
       }
-      vaults.push({
-        entryHandle,
-        identity: encryptIdentity(mrk, entryHandle, identity),
-        vault: JSON.parse(rebuilt)
-      });
+    }
+    // Refuse rather than write an empty bundle silently when every present vault was unreadable.
+    if (vaults.length === 0 && skipped.length > 0) {
+      throw new vc.VaultFormatError('profile export: no vault could be read');
     }
     return {
       bundle: {
@@ -2587,7 +2670,8 @@ class VaultStore {
         ...(hasAdmin ? { adminPublicKeyB64: m.adminPublicKeyB64 } : {}),
         vaults
       },
-      carried
+      carried,
+      skipped
     };
   }
 

@@ -56,7 +56,7 @@ function vaultHarness(rg, { locked = false, items } = {}) {
     exportProfile: () => {
       calls.push(['exportProfile']);
       if (state.locked) throw new VaultLockedError();
-      return { bundle: { all: true }, carried: ['Global'] };
+      return { bundle: { all: true }, carried: ['Global'], skipped: [] };
     }
   };
   const handlers = new Map();
@@ -279,7 +279,8 @@ test('AC15: export and export-profile - confirm BEFORE the bundle is built; refu
   assert.deepEqual(await nh.invoke('internal-vault-export-profile', internalEvent(nrg)), {
     ok: true,
     path: '/chosen',
-    carried: ['Global']
+    carried: ['Global'],
+    skipped: []
   });
   assert.equal(nrg.dialogs.length, 0);
 });

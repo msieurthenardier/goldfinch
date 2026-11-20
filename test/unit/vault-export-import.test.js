@@ -14,6 +14,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
 
@@ -103,6 +104,19 @@ test('validateImportedKdf: rejects absent fields (the silent Node-scrypt-default
   );
   // maxmem below scrypt's 128*N*r floor is refused up front (would otherwise throw deep in derive).
   assert.throws(() => vs.validateImportedKdf({ algo: 'scrypt', N: 2 ** 17, r: 8, p: 1, maxmem: 1024 }), /maxmem/);
+  // Node's real requirement is 128*r*(N+p+2): exactly 128*N*r is rejected at read by the
+  // validator's own error, and scrypt itself fails there (measured, not assumed).
+  const NN = 2 ** 12;
+  const old = { algo: 'scrypt', N: NN, r: 8, p: 1, maxmem: 128 * NN * 8 };
+  assert.throws(
+    () => vs.validateImportedKdf(old),
+    (e) => e instanceof vs.VaultFormatError && /kdf\.maxmem out of range/.test(e.message)
+  );
+  assert.throws(() => crypto.scryptSync('pw', 'salt', 32, old), /memory limit|SCRYPT_PARAMS/i);
+  const real = { ...old, maxmem: 128 * 8 * (NN + 1 + 2) };
+  assert.doesNotThrow(() => vs.validateImportedKdf(real));
+  assert.equal(crypto.scryptSync('pw', 'salt', 32, real).length, 32);
+  assert.throws(() => vs.validateImportedKdf({ ...real, maxmem: real.maxmem - 1 }), /maxmem/);
   // The production params AND the fast test params both pass.
   assert.doesNotThrow(() => vs.validateImportedKdf(vc.SCRYPT_PARAMS));
   assert.doesNotThrow(() => vs.validateImportedKdf(FAST_SCRYPT));

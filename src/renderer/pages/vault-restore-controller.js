@@ -213,13 +213,14 @@ export function createVaultRestoreController(deps) {
                 // The cast below is needed because `res`'s inferred type is the UNION of exportProfile's
                 // and exportVault's reply shapes (only the former declares `carried`) — this branch
                 // runs only when `wholeProfile` is true, i.e. only for an exportProfile reply.
-                const profileRes = /** @type {{ ok?: boolean; carried?: string[] }} */ (res);
+                const profileRes = /** @type {{ ok?: boolean; carried?: string[]; skipped?: unknown[] }} */ (res);
                 const names = Array.isArray(profileRes.carried) ? profileRes.carried : [];
                 const count = names.length;
+                const nSkipped = Array.isArray(profileRes.skipped) ? profileRes.skipped.length : 0;
                 setNotice(
                   count === 0
                     ? 'Exported 0 vaults.'
-                    : `Exported ${count} vault${count === 1 ? '' : 's'}: ${names.join(', ')}.`
+                    : `Exported ${count} vault${count === 1 ? '' : 's'}: ${names.join(', ')}.${nSkipped > 0 ? ` ${nSkipped} unreadable vault${nSkipped === 1 ? ' was' : 's were'} skipped.` : ''}`
                 );
               } else {
                 setNotice(`Exported ${select.selectedOptions[0].textContent}.`); // M18 F3 L6 (smoke polish 3)
