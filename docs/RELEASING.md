@@ -78,8 +78,8 @@ branch head, and not that it passed checks. It matters because the app's update 
 recoverable (merge, then tag the merged commit); a stable release from unreviewed history is not. The
 check ran at the acceptance walk (2026-11-17) on an annotated stable-looking tag on a commit not on `main`: compare
 answered `ahead` and the run refused, creating no release. That showed `GITHUB_SHA` on an annotated tag is
-the tagged commit and that the job's token may call the compare endpoint. **Still not exercised:** a stable
-tag on a `main` commit passing the check; the next real release is its first run.
+the tagged commit and that the job's token may call the compare endpoint. It has since passed for stable tags
+on squash commits of `main`: v0.19.16 and v0.19.17 both logged `answer='identical'` and published.
 
 ## Release notes
 
@@ -359,6 +359,8 @@ plan DD8) is planned to walk it. That leg strikes an item it has walked (the row
 | 12 | **The Settings About section's spacing (Flight 3).** The version line, the update status, the button and the checkbox row sit with sensible spacing (the checkbox row sat directly under the button in the spec run). | Any | **Walked** 2026-11-17, `v0.19.15-rc.3`, Windows (operator: pass, after the layout fix). |
 | 13 | **Flight 1's unwalked acceptance groups 2 to 6 and Flight 2's groups 3 to 7** (sheet cards behind the newly guarded channels, tabs and media, downloads and address bar, a second window, wording; the rest of Flight 2's walk). Each has unit or behavior-test coverage; nobody has looked. | Any | Not in the plan's seven; no owner assigned; the Flight Director decides |
 | 14 | **The About "Download now" button (Flight 3).** Press it on macOS and on Linux; the installer for that platform downloads. A real download was seen only on Windows (`v0.19.15-rc.3`, operator, 2026-11-17). | macOS, Linux | Not walkable by the operator on macOS; Linux not assigned; the Flight Director decides |
+
+**Before tagging: audit the Settings page.** Start the update fixture (`node tests/behavior/fixtures/update-check/server.cjs`, mode `higher`, port 8237), launch `GOLDFINCH_UPDATE_CHECK_URL=http://127.0.0.1:8237/latest GOLDFINCH_AUTOMATION_DEV_MINT=1 GOLDFINCH_AUTOMATION_ADMIN=1 npm run dev:automation` (as `tests/behavior/update-notice.md` *Preconditions* describes), open Settings so the newer-version notice and **Download now** button show, then run `npm run a11y -- --target=goldfinch://settings` with the admin key attached (`docs/dev-testing.md` *a11y audit*). Expect `No NEW violations`. It is here because v0.19.16 shipped a button whose accessible name did not contain its visible words (WCAG label-in-name), which CI cannot catch since the audit needs the running app.
 
 ## Notes
 
