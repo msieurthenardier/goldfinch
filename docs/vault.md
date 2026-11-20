@@ -554,7 +554,7 @@ business logic and no privileged APIs; it renders a model and runs the APG keybo
   tab (a cross-document main-frame commit, including a reload; deliberately **not**
   `did-navigate-in-page`, which stays on the same origin and is covered by the fill-time
   check); the sites that already close the save prompt and drop captures
-  (`closeSavePromptAndDrop`: tab switch, hide, close, move, and fullscreen entry); window
+  (`onTabLeftFront`: tab switch, hide, close, move, and fullscreen entry); window
   close; the sheet's `onClosed` reporting a dismissal of `vault-picker` or `vault-unlock`
   (explicit allowlists in `picker-dismissal.js`: escape, outside click, blur, teardown and the
   tab reasons - never `activated`, `superseded` or `vault-lock`; every context of that

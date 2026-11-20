@@ -9,13 +9,14 @@
 // pins the fixed standard stateful multi-session pattern.
 //
 // HEADLESS: mcp-server.js needs no Electron — we inject a fake engine. The real
-// SDK client connects over a TEST port (7790, to avoid colliding with a dev
-// instance on 7777). Each test starts + stops its own server in a try/finally
+// SDK client connects over a TEST port (an OS-assigned port per test, so it
+// cannot collide with a dev instance on 7777 or a parallel test file). Each test starts + stops its own server in a try/finally
 // so the port frees deterministically.
 
-const { test } = require('node:test');
+const { test, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('http');
+const net = require('node:net');
 const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
 const { StreamableHTTPClientTransport } = require('@modelcontextprotocol/sdk/client/streamableHttp.js');
 const {
@@ -36,8 +37,32 @@ const os = require('node:os');
 const path = require('node:path');
 const vaultStoreApi = require('../../src/main/vault/vault-store');
 
-const TEST_PORT = 7790;
-const ENDPOINT = new URL('http://127.0.0.1:' + TEST_PORT + '/mcp');
+// Every test gets its OWN OS-assigned port (the beforeEach below reassigns these).
+// A fixed port let a keep-alive socket pooled by undici's global fetch survive a
+// stopped server and be reused, dead, by the next test that bound the same
+// 127.0.0.1:port ("fetch failed" in whichever test happened to run next, so the
+// failure moved with test order). A fresh port per test means a stale pooled
+// socket is never addressed again.
+let TEST_PORT = 0;
+let ENDPOINT = new URL('http://127.0.0.1:0/mcp');
+
+// Ask the OS for a free loopback port: bind port 0, read it, close, and wait for
+// the close to finish before handing the number out.
+async function freePort() {
+  const probe = net.createServer();
+  await new Promise((resolve, reject) => {
+    probe.once('error', reject);
+    probe.listen(0, '127.0.0.1', resolve);
+  });
+  const { port } = /** @type {import('node:net').AddressInfo} */ (probe.address());
+  await new Promise((resolve) => probe.close(resolve));
+  return port;
+}
+
+beforeEach(async () => {
+  TEST_PORT = await freePort();
+  ENDPOINT = new URL('http://127.0.0.1:' + TEST_PORT + '/mcp');
+});
 // M09 F7 DD2: 29 → 30 (enumerateWindows, the window-topology discovery primitive).
 // M12 F1 Leg 3: 30 → 34 (the four vault tools — vaultUnlock/vaultList/vaultTotp/vaultFill).
 const EXPECTED_TOOL_COUNT = 35; // M14 F1 L2: +1 vaultAnswerAuth (the fifth non-engine-op vault tool)
@@ -416,8 +441,10 @@ test('rebind primitive — start→stop→start on a DIFFERENT port binds on B, 
   // current server, then create+start a fresh one on the (now-changed) resolved
   // port. Prove the sequence works across two distinct free ports — the fresh
   // server is reachable on B, and port A is free again (the old listener released).
-  const PORT_A = 7791;
-  const PORT_B = 7792;
+  const PORT_A = TEST_PORT;
+  let PORT_B = await freePort();
+  // The OS may hand back the number it just gave this test; B must differ from A.
+  while (PORT_B === PORT_A) PORT_B = await freePort();
 
   // Phase 1: bind on A and confirm a full SDK handshake reaches the fake engine.
   const onA = createMcpServer({

@@ -43,10 +43,13 @@ function applyGuestVisibility(entry) {
  * @param {string} reason
  * Fix 1 of leg `hat-and-alignment`: the same fan-out tells the reveal gate the tab is no longer in
  * front, so a native confirmation pending for it is cancelled (`gone`) and its window is never stranded.
- * @param {any} [vaultHuman]  the vault-human instance (or null/undefined)
- * @param {((wcId: number) => void) | null} [tabInactive]  the reveal gate's `tabInactive` (or none)
+ * Squawk 0193: named for what it is (the "this tab stopped being in front" fan-out) and takes its
+ * collaborators as one object, so the next consumer adds a field, not a positional parameter.
+ * @param {{ vaultHuman?: any, tabInactive?: ((wcId: number) => void) | null }} [deps]
+ *   `vaultHuman`: the vault-human instance (or null/undefined); `tabInactive`: the reveal gate's
+ *   `tabInactive` (or none)
  */
-function closeSavePromptAndDrop(owner, wcId, reason, vaultHuman, tabInactive) {
+function onTabLeftFront(owner, wcId, reason, { vaultHuman, tabInactive } = {}) {
   const prompt = owner && owner.savePrompt;
   if (prompt && prompt.currentWcId() === wcId) prompt.close(reason);
   vaultHuman?.dropCapturesForTab(wcId);
@@ -192,7 +195,7 @@ function registerTabIpc(deps) {
     // supply full deps.
     vaultHuman,
     // Fix 1 of leg `hat-and-alignment`: the reveal gate's `tabInactive(wcId)`, handed to every
-    // `closeSavePromptAndDrop` site (a native confirmation never outlives its tab being in front).
+    // `onTabLeftFront` site (a native confirmation never outlives its tab being in front).
     revealTabInactive,
     // Squawk 0073: arms the continuous session-snapshot debounce (built + owned in
     // main.js) — called from every site below that changes tab topology or the
@@ -416,7 +419,7 @@ function registerTabIpc(deps) {
       // dropped, never missed by a boot-time snapshot of a still-null memo.
       // Sortie 06 Leg 1 (AC13): the corner save prompt closes `tab-close` FIRST when it shows this
       // tab (its reason wins over "expired"), then the held captures drop.
-      closeSavePromptAndDrop(owner, wcId, 'tab-close', vaultHuman?.(), revealTabInactive);
+      onTabLeftFront(owner, wcId, 'tab-close', { vaultHuman: vaultHuman?.(), tabInactive: revealTabInactive });
       // M09 F4 Leg 1 (DD2) — closed-tab-stack capture. Sits strictly BEFORE destroy()/
       // tabViews.delete below (the webContents and its navigationHistory must still be
       // alive to read). The allowlist/exclusion body lives in captureClosedTabEntry
@@ -720,7 +723,7 @@ function registerTabIpc(deps) {
     // window and its held captures drop (flight DD5: "tab moved to another window"). ONE
     // insertion, beside the find-session close and strictly before htmlFullscreen.forceExit and
     // the re-parent. Synchronous (the move's pinned synchrony invariant).
-    closeSavePromptAndDrop(source, p.wcId, 'tab-moved', vaultHuman?.(), revealTabInactive);
+    onTabLeftFront(source, p.wcId, 'tab-moved', { vaultHuman: vaultHuman?.(), tabInactive: revealTabInactive });
 
     // M14 F1 L1 (DD1 exit edge): force-exit fullscreen BEFORE the H3 geometry
     // capture below — the captured rect must be the RESTORED slot rect, never
@@ -866,13 +869,10 @@ function registerTabIpc(deps) {
       // Sortie 06 Leg 1 (AC13): the TARGET's previous active tab is deactivated by this move, so
       // its corner save prompt closes `tab-switch` and that tab's captures drop - at the same
       // site, for the same reason (the async tab-set-active round-trip cannot do it this turn).
-      closeSavePromptAndDrop(
-        target,
-        /** @type {number} */ (target.activeTabWcId),
-        'tab-switch',
-        vaultHuman?.(),
-        revealTabInactive
-      );
+      onTabLeftFront(target, /** @type {number} */ (target.activeTabWcId), 'tab-switch', {
+        vaultHuman: vaultHuman?.(),
+        tabInactive: revealTabInactive
+      });
     }
 
     // Focus rules (Chrome parity): the target window is raised and the moved tab is
@@ -1179,7 +1179,7 @@ function registerTabIpc(deps) {
       // Sortie 06 Leg 1 (AC13): hiding a tab closes ITS corner save prompt (`tab-hide`) and drops
       // its held captures - FIRST, before the fullscreen restore and the overlay hides below, so
       // the prompt's removeChildView completes ahead of any bounds sync (squawk 0100).
-      closeSavePromptAndDrop(owner, wcId, 'tab-hide', vaultHuman?.(), revealTabInactive);
+      onTabLeftFront(owner, wcId, 'tab-hide', { vaultHuman: vaultHuman?.(), tabInactive: revealTabInactive });
       // M14 F1 L1 (DD1 exit edge): hiding the fullscreen tab force-exits the mode
       // FIRST — the restore must run while the entry is still resolvable; the
       // overlay-hide block below then re-hides whatever the restore re-showed.
@@ -1400,7 +1400,10 @@ function registerTabIpc(deps) {
       // later - so the prompt's removeChildView completes BEFORE any resize.
       const outgoingWcId = owner.activeTabWcId;
       if (outgoingWcId !== null && outgoingWcId !== wcId) {
-        closeSavePromptAndDrop(owner, outgoingWcId, 'tab-switch', vaultHuman?.(), revealTabInactive);
+        onTabLeftFront(owner, outgoingWcId, 'tab-switch', {
+          vaultHuman: vaultHuman?.(),
+          tabInactive: revealTabInactive
+        });
       }
       // Find-overlay z-order re-assert (DD2 invariant): strictly AFTER the guest re-add
       // above, or the guest buries the overlay. Do not "optimize" this away when the
@@ -1562,5 +1565,5 @@ module.exports = {
   queueChromeSend,
   createSendOrQueue,
   pushTabStateFor,
-  closeSavePromptAndDrop
+  onTabLeftFront
 };

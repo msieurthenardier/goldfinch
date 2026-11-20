@@ -10,18 +10,18 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { maskComments } = require('../helpers/source-scan');
-const { closeSavePromptAndDrop } = require('../../src/main/register-tab-ipc');
+const { onTabLeftFront } = require('../../src/main/register-tab-ipc');
 
 const MAIN = path.join(__dirname, '..', '..', 'src', 'main');
 const read = (f) => fs.readFileSync(path.join(MAIN, f), 'utf8');
 const assertMutated = (before, after, what) =>
   assert.notEqual(after, before, `the ${what} mutation did not apply - the .replace() target is stale`);
 
-/** The argument text of every `closeSavePromptAndDrop(` call (not the declaration) in a source. */
+/** The argument text of every `onTabLeftFront(` call (not the declaration) in a source. */
 function dropCalls(src) {
   const m = maskComments(src);
   const out = [];
-  const re = /(?<!function )closeSavePromptAndDrop\(/g;
+  const re = /(?<!function )onTabLeftFront\(/g;
   let x;
   while ((x = re.exec(m))) {
     let depth = 0;
@@ -40,14 +40,13 @@ function failingPins({ tabSrc, fsSrc, mainSrc, wiringSrc, factorySrc, sendersSrc
   const fails = [];
   const tabCalls = dropCalls(tabSrc);
   const fsCalls = dropCalls(fsSrc);
-  if (tabCalls.length !== 5)
-    fails.push(`register-tab-ipc.js has 5 closeSavePromptAndDrop call sites (${tabCalls.length})`);
-  if (fsCalls.length !== 1) fails.push('html-fullscreen.js has 1 closeSavePromptAndDrop call site');
-  if (!tabCalls.every((c) => /revealTabInactive,?\s*\)$/.test(c)))
+  if (tabCalls.length !== 5) fails.push(`register-tab-ipc.js has 5 onTabLeftFront call sites (${tabCalls.length})`);
+  if (fsCalls.length !== 1) fails.push('html-fullscreen.js has 1 onTabLeftFront call site');
+  if (!tabCalls.every((c) => /tabInactive:\s*revealTabInactive,?\s*\}\s*\)$/.test(c)))
     fails.push('every register-tab-ipc.js site passes revealTabInactive');
-  if (!fsCalls.every((c) => /revealTabInactive,?\s*\)$/.test(c)))
+  if (!fsCalls.every((c) => /tabInactive:\s*revealTabInactive,?\s*\}\s*\)$/.test(c)))
     fails.push('html-fullscreen.js site passes revealTabInactive');
-  if (!/tabInactive\?\.\(wcId\)/.test(maskComments(tabSrc))) fails.push('closeSavePromptAndDrop calls tabInactive');
+  if (!/tabInactive\?\.\(wcId\)/.test(maskComments(tabSrc))) fails.push('onTabLeftFront calls tabInactive');
   const mm = maskComments(mainSrc);
   if (
     !/registerTabIpc\(\{(?:(?!\n\}\);)[\s\S])*?revealTabInactive:\s*\(wcId\)\s*=>\s*revealGate\.tabInactive\(wcId\)/.test(
@@ -126,12 +125,17 @@ test('each pin flips when its wiring is removed (neuter-verified)', () => {
   const muts = [
     [
       'tabSrc',
-      /'tab-close',\s*vaultHuman\?\.\(\),\s*revealTabInactive\)/,
-      "'tab-close', vaultHuman?.())",
+      /'tab-close',\s*\{\s*vaultHuman: vaultHuman\?\.\(\),\s*tabInactive: revealTabInactive\s*\}\)/,
+      "'tab-close', { vaultHuman: vaultHuman?.() })",
       'tab-close site'
     ],
     ['tabSrc', /tabInactive\?\.\(wcId\);/, 'void 0;', 'fan-out call'],
-    ['fsSrc', /vaultHuman\(\),\s*revealTabInactive\)/, 'vaultHuman())', 'html-fullscreen site'],
+    [
+      'fsSrc',
+      /\{\s*vaultHuman: vaultHuman\(\),\s*tabInactive: revealTabInactive\s*\}\)/,
+      '{ vaultHuman: vaultHuman() })',
+      'html-fullscreen site'
+    ],
     ['mainSrc', /\.\.\.createGateSenderResolvers\(registry\),?/, '', 'sender resolvers spread'],
     [
       'sendersSrc',
@@ -159,14 +163,16 @@ test('each pin flips when its wiring is removed (neuter-verified)', () => {
   }
 });
 
-test('the fan-out reaches the gate: closeSavePromptAndDrop calls tabInactive with the tab id, and survives a throw', () => {
+test('the fan-out reaches the gate: onTabLeftFront calls tabInactive with the tab id, and survives a throw', () => {
   const seen = [];
-  closeSavePromptAndDrop(null, 42, 'tab-switch', undefined, (id) => seen.push(id));
+  onTabLeftFront(null, 42, 'tab-switch', { tabInactive: (id) => seen.push(id) });
   assert.deepEqual(seen, [42]);
   assert.doesNotThrow(() =>
-    closeSavePromptAndDrop(null, 1, 'tab-hide', undefined, () => {
-      throw new Error('x');
+    onTabLeftFront(null, 1, 'tab-hide', {
+      tabInactive: () => {
+        throw new Error('x');
+      }
     })
   );
-  assert.doesNotThrow(() => closeSavePromptAndDrop(null, 1, 'tab-hide'));
+  assert.doesNotThrow(() => onTabLeftFront(null, 1, 'tab-hide'));
 });

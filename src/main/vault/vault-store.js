@@ -4629,9 +4629,8 @@ function load(userDataPath, deps = {}) {
 module.exports = {
   load,
   VaultStore,
-  // Re-exported (M12 F4 Leg 1) so callers/tests reference the portable bundle format
-  // id + version without re-typing the literals.
-  BUNDLE_FORMAT,
+  // Re-exported (M12 F4 Leg 1) so callers/tests reference the portable bundle version
+  // without re-typing the literal.
   BUNDLE_VERSION,
   // The whole-profile, multi-vault bundle version (M18 F3 Leg 2 / DD1 ruling 2).
   BUNDLE_VERSION_V2,

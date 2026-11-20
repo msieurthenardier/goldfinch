@@ -134,6 +134,5 @@ module.exports = {
   BOX_TOLERANCE_PX,
   emptyRecord,
   readBox,
-  boxContains,
   verifyGesture
 };

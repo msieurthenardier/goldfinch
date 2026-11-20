@@ -116,8 +116,8 @@ test('AC1 drift: every reason the MANAGER emits is in the exported set', () => {
 
 test('AC1 drift: every reason the other main-side callers pass is in the exported set', () => {
   const callers = [
-    ['src/main/register-tab-ipc.js', /closeSavePromptAndDrop\([^)]*?'([a-z-]+)'/g],
-    ['src/main/html-fullscreen.js', /closeSavePromptAndDrop\([^)]*?'([a-z-]+)'/g],
+    ['src/main/register-tab-ipc.js', /onTabLeftFront\([^)]*?'([a-z-]+)'/g],
+    ['src/main/html-fullscreen.js', /onTabLeftFront\([^)]*?'([a-z-]+)'/g],
     ['src/main/vault-lock-teardown.js', /savePrompt\?\.close\('([a-z-]+)'/g],
     ['src/main/window-factory.js', /savePrompt\?\.close\('([a-z-]+)'/g]
   ];

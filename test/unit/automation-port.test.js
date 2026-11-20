@@ -145,7 +145,7 @@ test('resolvePort — zero-arg call still works (default honorEnv=true)', () => 
 // ---- start() strict-vs-fallback integration (DD6, Leg 5) ----
 //
 // No-hang discipline: occupy a port via net.createServer().listen(0) (an
-// OS-ephemeral port, NOT the fixed 7790/7791/7792 the mcp-server suite uses), and
+// OS-ephemeral port, never a fixed one; the mcp-server suite also uses OS-assigned ports now), and
 // wrap BOTH the occupier AND the started server in try/finally close. The retry
 // cap (≤20) guarantees the fallback loop terminates.
 

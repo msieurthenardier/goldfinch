@@ -217,7 +217,7 @@ export function buildVaultCaptureCard(document) {
 }
 
 /** The locked-offer note (Sortie 06 Leg 2). */
-export const LOCK_NOTE = 'Your vault is locked. You will enter your master password to save.';
+const LOCK_NOTE = 'Your vault is locked. You will enter your master password to save.';
 
 /**
  * The noun a success result uses ("Password saved to ...", "Card saved to ...", "Details saved

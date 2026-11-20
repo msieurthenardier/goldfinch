@@ -879,7 +879,5 @@ function createSavePromptManager({
 module.exports = {
   createSavePromptManager,
   SAVE_PROMPT_TIMEOUT_MS,
-  SAVE_PROMPT_SHOW_FALLBACK_MS,
-  SAVE_PROMPT_SUCCESS_HOLD_MS,
-  SAVE_PROMPT_FAILURE_HOLD_MS
+  SAVE_PROMPT_SHOW_FALLBACK_MS
 };
