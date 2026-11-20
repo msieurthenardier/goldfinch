@@ -243,3 +243,23 @@ test('toolbar mode "vault" (Sortie 07): locked + automationHeld offers note + [U
   assert.deepEqual(pageContextModel(null, v, { vaultLocked: false, automationHeld: false }), [lock]);
   assert.deepEqual(pageContextModel(null, v), [lock]);
 });
+
+// Squawk 0175 drift guard: the vault indicator's automation-held label must
+// contain the right-click menu note's text (case-insensitive).
+test('vault indicator automation-held label contains the menu note text (squawk 0175)', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const model = pageContextModel({}, 'vault', { vaultLocked: true, automationHeld: true });
+  const note = model.find((m) => m.type === 'note');
+  assert.ok(
+    note && typeof note.text === 'string' && note.text.length > 0,
+    'menu note not found in pageContextModel output'
+  );
+  const src = fs.readFileSync(path.join(__dirname, '../../src/renderer/chrome/vault-controller.js'), 'utf8');
+  const m = /model\.automationHeld\s*\?\s*'([^']+)'/.exec(src);
+  assert.ok(m, 'indicator automation-held label not found in vault-controller.js renderVaultIndicator');
+  assert.ok(
+    m[1].toLowerCase().includes(note.text.toLowerCase()),
+    `indicator label ${JSON.stringify(m[1])} must contain menu note ${JSON.stringify(note.text)}`
+  );
+});

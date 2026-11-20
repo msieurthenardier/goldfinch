@@ -30,7 +30,7 @@ What exists after this leg completes:
 - **Free consequence (in scope for leg 7's byte-unchanged assertion):** because `setPath` runs before any `session.fromPartition` / `createWindow`, persistent partition storage (`userData/Partitions/` — cookies + per-jar session data for `persist:goldfinch` and container jars) also relocates under `-dev`. Not just the three JSON files — dev cookies/jar sessions cannot leak into the installed profile either. Leg 7 should treat partition data as in-scope when asserting the installed dir is unchanged.
 
 ## Acceptance Criteria
-- [x] A pure helper (e.g. `devUserDataPath(defaultUserDataPath)` in a new `src/shared/dev-profile.js`, or co-located if the implementer prefers) returns the default path with `-dev` appended to its final path segment (`/home/x/.config/goldfinch` → `/home/x/.config/goldfinch-dev`), and is **electron-free** (no `require('electron')`) so it unit-tests without an Electron runtime.
+- [x] A pure helper (e.g. `devUserDataPath(defaultUserDataPath)` in a new `src/shared/dev-profile.js`, or co-located if the implementer prefers) returns the default path with `-dev` appended to its final path segment (`/home/<user>/.config/goldfinch` → `/home/<user>/.config/goldfinch-dev`), and is **electron-free** (no `require('electron')`) so it unit-tests without an Electron runtime.
 - [x] `src/main/main.js`, at the **top of the `whenReady` callback before `shields.load()` (`main.js:867`)**, calls `app.setPath('userData', devUserDataPath(app.getPath('userData')))` **iff `!app.isPackaged`**. Packaged builds are untouched (no redirect).
 - [x] **Owning AC (per the F7 `INTERNAL_PAGES` lesson — the ordering invariant must be nobody-can-orphan-it):** a dev launch writes **all three** of `settings.json`, `shields.json`, AND `containers.json` under the `-dev` directory — not just `settings.json`. The redirect runs before *every* `getPath('userData')` consumer, so adding a fourth store later inherits isolation automatically. _(Code inspection: the `setPath` precedes `shields.load()`/`settings.load(...)`/`jars.load()` at top of `whenReady`; live write verification is leg 7's.)_
 - [x] **Ordering-invariant AC (static proxy for the runtime check — addresses review Q1):** code inspection confirms **no** `getPath('userData')` consumer (in `main.js`, `shields.js`, `jars.js`, or any module) can resolve the pre-redirect path — i.e. every reader runs *after* the `app.setPath` call in `whenReady` (verified: the three readers are inside `load()` calls at `main.js:867-869`, all after the proposed `setPath` at top of `whenReady`; no module-scope reader). This static guarantee makes leg 7's live byte-unchanged check a formality rather than a discovery.
@@ -79,9 +79,9 @@ What exists after this leg completes:
    - Add `const { devUserDataPath } = require('../shared/dev-profile');` to the require block, **grouped with the other `../shared/*` requires** (near `main.js:10-11,16`), not appended at the end.
 
 3. **Add the unit test** (`test/unit/dev-profile.test.js`), mirroring the `node --test` style of the existing unit tests (e.g. `automation-dev.test.js`):
-   - Assert `devUserDataPath('/home/u/.config/goldfinch')` === `'/home/u/.config/goldfinch-dev'`.
+   - Assert `devUserDataPath('/home/<user>/.config/goldfinch')` === `'/home/<user>/.config/goldfinch-dev'`.
    - Assert a single-trailing-slash input yields the same single `-dev` suffix.
-   - Assert a **doubled-trailing-separator** input (`'/home/u/.config/goldfinch//'`) yields exactly `'/home/u/.config/goldfinch-dev'` (no stray separator) — this is the case the `+` quantifier fixes.
+   - Assert a **doubled-trailing-separator** input (`'/home/<user>/.config/goldfinch//'`) yields exactly `'/home/<user>/.config/goldfinch-dev'` (no stray separator) — this is the case the `+` quantifier fixes.
    - Assert a Windows-style path (`C:\\Users\\u\\AppData\\Roaming\\goldfinch`) gets `-dev` on the final segment (the regex handles `\\` and `/`).
    - Assert the helper file contains no `require('electron')` (read the source and check) — pins the electron-free invariant.
 

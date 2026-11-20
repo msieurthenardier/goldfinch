@@ -32,6 +32,7 @@ a colder verdict.
   playwright), HTTP / shell / filesystem.
 - **Per-step actions**: receive step → perform actions → save evidence →
   report structured state → await next step.
+- **Paths in artifacts**: write session paths as `<session-scratch>` and the repo root as `<repo>`, never an absolute path containing a user name.
 
 ### Validator
 - **Context**: project root (current working directory) — loads the project's CLAUDE.md.

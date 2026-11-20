@@ -63,6 +63,19 @@ test('decideFuses fails on any other fuse changing, a missing fuse, and an unkno
   assert.equal(decideFuses({ ...toStates(EXPECTED_FUSES), Index99: 'Enabled' }).ok, false);
 });
 
+test('unknown and missing fuse failures say to retire a local name', () => {
+  const hint = /retire its LOCAL_NAMES entry/;
+  const unknown = decideFuses({ ...toStates(EXPECTED_FUSES), Index99: 'Enabled' });
+  assert.ok(unknown.problems.some((p) => p.startsWith('unknown fuse: Index99') && hint.test(p)));
+  const missing = toStates(EXPECTED_FUSES);
+  delete missing.WasmTrapHandlers;
+  const v = decideFuses(missing);
+  assert.ok(v.problems.some((p) => p.includes('WasmTrapHandlers is Missing') && hint.test(p)));
+  // a plain state flip is not a naming problem and carries no hint
+  const flipped = decideFuses({ ...toStates(EXPECTED_FUSES), OnlyLoadAppFromAsar: 'Enabled' });
+  assert.ok(flipped.problems.every((p) => !hint.test(p)));
+});
+
 test('the script exits non-zero for a missing path and a non-Electron file', () => {
   const { spawnSync } = require('node:child_process');
   const script = path.join(__dirname, '..', '..', 'scripts', 'check-fuses.mjs');
