@@ -436,6 +436,38 @@ instructions beyond run-specific keys/ports.
   `tests/behavior/tls-trust-surface/runs/2026-09-16-04-59-20.md`
   (Checkpoint 9 / Orchestrator Notes).
 
+- **Per-session MCP state needs a persistent attach-only driver**: vault
+  keys live on the MCP session, so a spec that unlocks on one call and reads
+  on the next (`vaultUnlock` then `vaultList`) cannot use a fresh
+  `connectAutomation()` process per step — the session, and its keys, die
+  with it. Keep one long-lived driver per session, fed file-based commands
+  with unique command ids, substitute secrets from `$ENV` inside the driver
+  and redact its output so no secret reaches evidence — observed on
+  2026-11-06, see `tests/behavior/vault-mcp-lock-coupling/runs/2026-11-06-05-34-20.md` (Closing Summaries / Executor closing, lessons 1-2).
+- **`evaluate` awaits Promises** (`src/main/automation/observe.js`:
+  `executeJavaScript` natively awaits a returned Promise, so an async
+  expression such as `goldfinch.vaultLock()` resolves to its value). A string
+  return comes back JSON-quoted, so judge `"\"x\""` as `x` — see `tests/behavior/vault-mcp-lock-coupling/runs/2026-11-06-05-34-20.md`
+  (Executor closing, lesson 3).
+- **`readDom` takes only `wcId` — no selector**: any selector argument is
+  ignored and the result is always the full `documentElement` HTML
+  (`observe.js` `readDom`, one `READ_DOM_SNIPPET`). On the chrome wcId that is
+  the whole chrome document; read one element's `class` / `aria-label` with
+  `evaluate` (`document.querySelector('#id').className`) instead — see `tests/behavior/vault-mcp-lock-coupling/runs/2026-11-06-05-34-20.md`
+  (Executor closing, lesson 5).
+- **`readAxTree` works on the chrome wcId** (admin tier) and exposes an
+  element's computed accessible name (e.g. `#vault-indicator`'s
+  `aria-label`) — observed on 2026-11-06, see `tests/behavior/vault-mcp-lock-coupling/runs/2026-11-06-05-34-20.md` (Executor closing,
+  lesson 6).
+- **MCP session teardown: `client.close()` sends no DELETE; call
+  `transport.terminateSession()`**. Sessions here are JSON-response with no
+  stream, so closing the client drops nothing server-side and the session's
+  vault keys persist until an explicit DELETE, the idle timer or `stop()`
+  (see Key Learnings in `sorties/07-automation-honors-vault-lock/flight-debrief.md`).
+  A row that must prove teardown calls `terminateSession()` and logs its
+  HTTP status — observed on 2026-11-06, see `tests/behavior/vault-mcp-lock-coupling/runs/2026-11-06-05-34-20.md` (Executor closing,
+  lesson 4).
+
 ## Prompts
 
 ### Executor: Initial
