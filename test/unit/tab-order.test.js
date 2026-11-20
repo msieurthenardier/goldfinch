@@ -2,7 +2,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { moveIndex, keyboardMove, dropIndexFromPointer } = require('../../src/shared/tab-order');
+const { moveIndex, keyboardMove, dropIndexFromPointer, neighbourAfterRemoval } = require('../../src/shared/tab-order');
 
 // ---------------------------------------------------------------------------
 // moveIndex
@@ -201,4 +201,21 @@ test('dropIndexFromPointer: any absent index behaves as external — -1 is not a
   // than as a magic value with its own branch: -1 is simply the caller-facing
   // spelling of that.
   assert.equal(dropIndexFromPointer(FOUR_SLOTS, 999, -1), dropIndexFromPointer(FOUR_SLOTS, 999, 99));
+});
+
+// ---------------------------------------------------------------------------
+// neighbourAfterRemoval (squawk 0177)
+// ---------------------------------------------------------------------------
+
+test('neighbourAfterRemoval: middle -> right neighbour, leftmost -> right, rightmost -> left', () => {
+  assert.equal(neighbourAfterRemoval(['a', 'c', 'd', 'e'], 1), 'c');
+  assert.equal(neighbourAfterRemoval(['b', 'c'], 0), 'b');
+  assert.equal(neighbourAfterRemoval(['a', 'b', 'c'], 3), 'c');
+});
+
+test('neighbourAfterRemoval: empty, non-array and bad index are safe', () => {
+  assert.equal(neighbourAfterRemoval([], 0), undefined);
+  assert.equal(neighbourAfterRemoval(null, 0), undefined);
+  assert.equal(neighbourAfterRemoval(['a', 'b'], -1), 'b');
+  assert.equal(neighbourAfterRemoval(['a', 'b'], NaN), 'b');
 });

@@ -296,3 +296,23 @@ test('settings.css dims Shields child rows when #shield-enabled is unchecked, AA
   const html = fs.readFileSync(SETTINGS_HTML, 'utf8');
   assert.ok(/id="shield-enabled"/.test(html) && !/id="shield-block"[^>]*disabled/.test(html));
 });
+
+test('settings.js bookmarks-bar controller goes through bootReadGuard: boot, push, revert (squawk 0230)', () => {
+  const src = fs.readFileSync(SETTINGS_JS, 'utf8');
+  const start = src.indexOf('bookmarks-bar controller (M15 F1 Leg 3');
+  assert.notEqual(start, -1, 'bookmarks-bar controller marker comment is missing');
+  const end = src.indexOf('/* ---- About', start);
+  assert.notEqual(end, -1, 'end of the bookmarks-bar controller block not found');
+  const block = src.slice(start, end);
+  assert.match(block, /const barGuard = bootReadGuard\(/, 'controller builds a bootReadGuard');
+  assert.match(block, /\.then\(\(v\) => barGuard\.boot\(v === true\)\)/, 'boot read goes through barGuard.boot');
+  assert.match(
+    block,
+    /settingsSet\('bookmarksBarEnabled', !!el\.checked\)\.catch\(\(\) => barGuard\.revert\(\)\)/,
+    'a rejected write reverts through barGuard.revert'
+  );
+  assert.match(block, /barGuard\.push\(all\.bookmarksBarEnabled\)/, 'settings-changed goes through barGuard.push');
+  assert.doesNotMatch(block, /el\.checked = all\./, 'no direct assignment from the push');
+  const code = block.replace(/\/\/.*$/gm, '');
+  assert.doesNotMatch(code, /\.click\(|dispatchEvent/, 'never click/dispatch (echo loop)');
+});

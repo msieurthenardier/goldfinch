@@ -1,10 +1,10 @@
 # Squawk 0178: A second Ctrl+W can close the whole window (app quits) after closing the active tab
 
-**Status**: open
+**Status**: completed
 **Type**: defect
 **Severity**: routine
 **Reported**: 2026-11-08
-**Completed**: —
+**Completed**: 2026-11-19
 
 ## Report
 Sortie 08 HAT, step H6 (dev mode, ~27 tabs): the operator pressed Ctrl+W on a mid-strip tab — the tab closed — then pressed Ctrl+W again and the **whole window closed and the app quit** (clean exit, code 0, no crash in the log), with many tabs still open. Expected: the second Ctrl+W closes the next active tab. Exact focus state before the first Ctrl+W is unknown (the operator had been clicking the strip and pages during H1–H5). Needs a deliberate repro.
@@ -15,10 +15,16 @@ Sortie 08 HAT, step H6 (dev mode, ~27 tabs): the operator pressed Ctrl+W on a mi
 - Not on sortie 08's path: the keyboard close (`shortcut-controller.js` `case 'close-tab'` → `closeTab(ctx.activeTabId)`, no pointer) and main's tab-close/tab-set-active are untouched by the sortie; likely pre-existing — confirm on `main` during the repro.
 
 ## Corrective Action
-*(written at completion)*
+Hypothesis CONFIRMED by reading the path. Page-focused Ctrl+W is forwarded by `src/shared/guest-forward-allowlist.js` (`close-tab`) to the chrome's `shortcut-controller.js` `case 'close-tab'` -> `tab-controller.js` `closeTab`, which sends `tabClose` FIRST (`window.goldfinch.tabClose`) and only then `activateTab(next)` -> `tab-set-active`; both are one-way sends on one channel, so main sees them in that order. `register-tab-ipc.js` `tab-close` destroys the guest and runs `if (owner.activeTabWcId === wcId) owner.activeTabWcId = null;`, so `tab-set-active`'s `wasPageFocused` (`owner.activeTabWcId != null && ...isFocused()`) was always false, the incoming guest was not focused, and OS focus sat on no webContents; the next Ctrl+W reached the default menu's Window > Close.
+
+Fix (`src/main/register-tab-ipc.js`): `tab-close` computes `carryFocus = wasActive && guest.isFocused()` (read before destroy), stores `owner.pageFocusCarryAt = carryFocus ? Date.now() : null` (always rewritten, so any close clears a stale value) and, when set, focuses the CHROME view immediately (`owner.chromeView.webContents.focus()`, destroyed-guarded) so OS focus is never left on no webContents, including when the chrome then opens a viewless welcome tab (last-tab close) or activates a viewless neighbour and sends no `tab-set-active`. `tab-set-active` reads the carry, ALWAYS clears it, and honours it (ORs into `wasPageFocused`, so the destroyed-contents and `guestTakenOver` guards still apply) only when it arrives within `PAGE_FOCUS_CARRY_MS` (500 ms; the chrome's `closeTab` sends tabClose and tabSetActive back to back), so a stale carry can never steal focus from the address bar on a later switch. The time source is `Date.now()` (no injected clock dep exists in `registerTabIpc`). The earlier "taken-over incoming -> focus chrome" branch in `tab-set-active` was REMOVED: with the chrome focused at close it did nothing new.
+
+Not changed, reported: (a) empty strip / viewless welcome neighbour: now covered by the chrome focus at close (needs a by-eye check). (b) Other null-out sites: tab move (~L788, source window) and window-close (~L1193) do not share the problem: a move re-activates through the target's round-trip and the source's remaining tabs are re-activated by the chrome, but the moved tab's focus is not carried either (not investigated further; out of scope).
 
 ## Verification
 Repro first (by hand — keyboard focus state is not automatable over MCP): page-focused Ctrl+W twice vs strip-focused Ctrl+W twice, on `main` and on the fix. A fix touching the default menu (e.g. setting an application menu without the Close accelerator) is a global hook — if the fix goes that way, it fails the squawk gate (shared mechanism) and escalates to a sortie.
 
 ## Sign-Off
-*(written at completion)*
+**Reviewer**: Reviewer agent (independent, diff-scoped batch review of the seventh 2026-11-19 turnaround)
+**Verdict**: confirmed after one fix loop. The first review found the one-shot focus carry could outlive its purpose when the next active tab is viewless (closing the last tab opens a Welcome tab, so no `tab-set-active` follows): focus stayed on no webContents and a later unrelated switch could focus a guest. The fix focuses the chrome view at close time when the closing active guest held focus, and honours the carry only within 500 ms; the re-review confirmed it, with neuters on the window check and the close-time chrome focus. Live (dev mode): two page-focused Ctrl+W presses each closed one tab, the new active guest reported `document.hasFocus()` true and the chrome false, and the window stayed open; closing the last tab from a focused page left the Welcome surface showing and the chrome focused. **By-eye check still owed by the operator**: injected keys go to a named webContents, not OS focus, so the default menu's Close itself was not exercised — press Ctrl+W twice from a focused page, and Ctrl+W on the Welcome tab after closing the last tab. Gates at re-review: `npm test` 7,448 tests (7,443 pass, 0 fail, 5 skipped or todo); lint, typecheck and format:check clean.
+**Commit**: the `squawk: turnaround 2026-11-19` commit on `squawk/turnaround-2026-11-19-g`
