@@ -19,6 +19,8 @@ export function createWelcomeController(deps) {
     buildSearchUrl,
     currentSearchEngine,
     currentHomePage, // M16 F2 Leg 2
+    setHomePage, // squawk 0220: raw cache writers, written synchronously on a successful set
+    setSearchEngine,
     normalizeHomePageInput // M16 F3 Leg 2, HAT item 5: bare-domain home-page input agrees with the address bar
   } = deps;
   // `els.address` is no longer read by this controller (M16 F3 Leg 2, HAT
@@ -55,7 +57,7 @@ export function createWelcomeController(deps) {
   heading.textContent = 'Welcome to Goldfinch';
   brandHeader.appendChild(heading);
 
-  // Initial text only — render(tab, opts) below reassigns tagline.textContent
+  // Initial text only — render(tab) below reassigns tagline.textContent
   // from the same block-visibility decisions it already makes (M16 F3 Leg 2,
   // HAT state D): a single-card record (search-only or home-only) otherwise
   // read "Set up the two things…" beside just one card.
@@ -114,7 +116,7 @@ export function createWelcomeController(deps) {
   // built ONCE from SEARCH_ENGINES (never rebuilt on show/broadcast — the
   // settings.js engine IIFE's "build once, drive via accessor functions"
   // discipline, DD7 Implementation Guidance #3). Hidden unless the record's
-  // reasons include 'search' (render(tab, opts) below) — stays shown once an
+  // reasons include 'search' (render(tab) below) — stays shown once an
   // engine is chosen (M16 F3 Leg 2, HAT item 3).
   const engineBlock = document.createElement('div');
   engineBlock.id = 'welcome-engine-block';
@@ -183,7 +185,7 @@ export function createWelcomeController(deps) {
   /** @type {any} */
   let currentTab = null;
 
-  // render(tab, opts) (M16 F2 Leg 2 gate fix, split out of the old show();
+  // render(tab) (M16 F2 Leg 2 gate fix, split out of the old show();
   // opts added M16 F3 Leg 2, HAT item 3 design review; home block rewritten
   // M16 F3 Leg 2, HAT item 6, DD7 pivot): draws the panel for the record.
   // Safe to call unconditionally now — neither block's visibility depends on
@@ -195,12 +197,10 @@ export function createWelcomeController(deps) {
   // currently unset. Per the operator's HAT rulings (item 3 for search, item
   // 6/DD7 for home), making a choice must not hide its block — it stays,
   // reflecting the saved value and a confirmation line, for the life of a
-  // tab that was opened for that reason. `opts.search`/`opts.home`, when the
-  // key is present, override the live cache reads (`currentSearchEngine()`/
-  // `currentHomePage()`) — submitEngine/submitHome pass the value just
-  // written, since the settings-changed broadcast that refreshes the cache
-  // may not have landed yet; every other caller (show(), the
-  // onSettingsChanged handler) passes no opts and gets the live cache.
+  // tab that was opened for that reason. Both blocks read the live cache
+  // (`currentSearchEngine()`/`currentHomePage()`); submitEngine/submitHome
+  // write that cache synchronously on a successful set (squawk 0220), so the
+  // later settings-changed broadcast is a same-value no-op.
   // Squawk 0109: an empty Set clears the home page (writes null). render()
   // blanks the status whenever home is unset, and the settings-changed
   // broadcast may re-render after submitHome, so the confirmation is
@@ -210,12 +210,12 @@ export function createWelcomeController(deps) {
   // and dropped when that record is left (hide()) or another is shown.
   /** @type {any} */
   let homeClearedTab = null;
-  /** @param {any} tab @param {any} [opts] */
-  function render(tab, opts = {}) {
+  /** @param {any} tab */
+  function render(tab) {
     const showHome = !!(tab.welcome && tab.welcome.reasons.has('home'));
     homeBlock.classList.toggle('hidden', !showHome);
     burnerNote.classList.toggle('hidden', !(tab.container && tab.container.burner));
-    const home = 'home' in opts ? opts.home : currentHomePage();
+    const home = currentHomePage();
     if (showHome) {
       // Reflect the resolved value into the field, but never while the
       // operator is actively typing in it (M16 F3 Leg 2, HAT item 6 design
@@ -253,7 +253,7 @@ export function createWelcomeController(deps) {
         "Set up the two things Goldfinch won't guess for you. You can always change these in Settings.";
     }
     if (showEngine) {
-      const engine = 'search' in opts ? opts.search : currentSearchEngine();
+      const engine = currentSearchEngine();
       // Sync the radios to the resolved engine — reflects this tab's own
       // just-made choice, or one made/cleared elsewhere (Settings, another
       // window) while this tab's engine block is showing. Assign `.checked`
@@ -315,11 +315,11 @@ export function createWelcomeController(deps) {
       // M16 F3 Leg 2, HAT item 6 (DD7 pivot): save and stay — the welcome
       // surface no longer navigates itself away on a successful Set; the
       // saved home page applies starting with the next new tab
-      // (tab-controller.js's openNewTab). settle()'s override resolves the
-      // just-written value immediately (the settings-changed broadcast that
-      // refreshes the currentHomePage() cache may not have landed yet),
-      // which render() reflects into the field and its status line.
-      settle(tab, { home: value });
+      // (tab-controller.js's openNewTab). The cache is written here, before
+      // the settings-changed broadcast lands (an IPC round-trip), so
+      // render() reflects the just-written value into the field and status.
+      setHomePage(value);
+      settle(tab);
     } else {
       homeStatus.textContent = 'Enter a valid address.';
     }
@@ -328,7 +328,7 @@ export function createWelcomeController(deps) {
     submitHome();
   });
 
-  // settle(tab, opts) (M16 F2 Leg 2, DD3/DD7; opts added M16 F3 Leg 2, HAT
+  // settle(tab) (M16 F2 Leg 2, DD3/DD7; opts added M16 F3 Leg 2, HAT
   // item 3 design review; rewritten HAT item 6, DD7 pivot): the single place
   // that decides what happens to a welcome record — called after any
   // preference change (a successful home-page or engine submit, the
@@ -336,24 +336,22 @@ export function createWelcomeController(deps) {
   // welcome surface never navigates itself away any more EXCEPT to run a
   // pending search once an engine is known: if a query is waiting and an
   // engine is resolved, attach to the search URL; otherwise re-render —
-  // render(tab, opts) always has something correct to draw (each block
+  // render(tab) always has something correct to draw (each block
   // reflects its own saved-or-not state, per its own doc comment above), so
   // there is no separate "nothing left unset" branch left to detect. Setting
   // the home page alone, or with no pending query, therefore leaves the tab
   // showing the saved value rather than attaching to it — the home page
   // applies starting with the NEXT new tab (tab-controller.js's
-  // openNewTab), not this one. `opts.search`, when present, overrides the
-  // live engine cache for the attach check and URL — see render()'s doc
-  // comment above.
-  /** @param {any} tab @param {any} [opts] */
-  function settle(tab, opts = {}) {
-    const engine = 'search' in opts ? opts.search : currentSearchEngine();
+  // openNewTab), not this one.
+  /** @param {any} tab */
+  function settle(tab) {
+    const engine = currentSearchEngine();
     const query = tab.welcome && tab.welcome.pendingQuery;
     if (query != null && engine != null) {
       attachView(tab, buildSearchUrl(engine, query));
       return;
     }
-    render(tab, opts);
+    render(tab);
   }
 
   async function submitEngine(id) {
@@ -367,25 +365,15 @@ export function createWelcomeController(deps) {
       return;
     }
     engineStatus.textContent = '';
-    // The write succeeded, but the settings-changed broadcast that refreshes
-    // currentSearchEngine()'s cache may not have landed by the time this
-    // continuation runs (an IPC round-trip, not synchronous with the invoke
-    // reply) — resolve THIS tab's outcome from `id`, the value just written,
-    // never from the cache, via the settle() override below. `reasons` is
+    // The write succeeded; the settings-changed broadcast that refreshes the
+    // cache may not have landed yet (an IPC round-trip), so write the cache
+    // here, synchronously (squawk 0220), and settle from it. `reasons` is
     // deliberately left untouched (M16 F3 Leg 2, HAT item 3 design review):
     // the engine block's visibility is keyed off `reasons.has('search')`
     // (why the tab was opened), not the live unset state, so it stays shown
     // with the selection and a confirmation line rather than disappearing.
-    const pendingQuery = tab.welcome.pendingQuery;
-    if (pendingQuery != null) {
-      attachView(tab, buildSearchUrl(id, pendingQuery));
-      return;
-    }
-    // A `search`-only record is always created with a `pendingQuery` today
-    // (navigation-controller.js's handoffSearch, the context-menu handoff) —
-    // "engine-only, no query" is unreachable, so no defensive branch is
-    // built for it here; the branch above always returns first in practice.
-    settle(tab, { search: id });
+    setSearchEngine(id);
+    settle(tab);
   }
 
   // Edge Case (leg 1 spec, generalized this leg; re-scoped M16 F3 Leg 2, HAT

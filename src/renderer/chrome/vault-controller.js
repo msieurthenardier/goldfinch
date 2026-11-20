@@ -584,10 +584,14 @@ export function createVaultController({
   // recovery key ONLY (admin key deferred to F4). Opened DISMISS-DISABLED so a casual
   // dismiss can't lose the unrecoverable one-time key (Escape/backdrop/blur all inert;
   // only acknowledge closes). The key lives only main → chrome → sheet, never in the page.
-  goldfinch.onVaultRecoveryShow(({ recoveryKey, replacing }) => {
+  goldfinch.onVaultRecoveryShow(({ recoveryKey, replacing, skippedCount }) => {
     // `replacing` (rotate-recovery only; setup omits it) reveals the sheet's "this replaces
     // your previous recovery key" line — the rotation kills the old key (HAT I9). Non-secret.
-    openOverlayMenu('vault-recovery-show', { recoveryKey, replacing: replacing === true }, null, 0, {
+    // `skippedCount` (compromise rotation only, squawk 0229): how many vaults were left under
+    // the old master key. A count, never ids; absent/zero leaves the model as it was.
+    const model = { recoveryKey, replacing: replacing === true };
+    if (Number.isInteger(skippedCount) && skippedCount > 0) model.skippedCount = skippedCount;
+    openOverlayMenu('vault-recovery-show', model, null, 0, {
       dismissible: false
     });
   });

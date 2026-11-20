@@ -110,7 +110,8 @@ function createSendOrQueue(registry) {
 /**
  * Mission 20 Flight 3 Leg 3 (DD5): the ONE definition of the per-tab
  * re-push set — load-failure (if set), security (if set), crash (if set),
- * hung (if set), then nav-state (always, unconditional). Shared by the
+ * hung (if set), then devtools-state (always; the actual open boolean, squawk
+ * 0211), then nav-state (always, unconditional). Shared by the
  * move/adopt block below (queued thunks via `queueChromeSend`, values read
  * at DELIVERY time) and by `chrome-recovery.js`'s `buildRecoveryAdopts`
  * (direct array push). `send(channel, build)` abstracts the two delivery
@@ -135,6 +136,7 @@ function pushTabStateFor(target, wcId, entry, wc, send) {
   if (entry.hung) {
     send('tab-hung', () => ({ wcId, hung: true }));
   }
+  send('devtools-state-changed', () => ({ wcId, open: !wc.isDestroyed() && wc.isDevToolsOpened() }));
   send('tab-nav-state', () => ({
     wcId,
     canGoBack: !wc.isDestroyed() && wc.navigationHistory.canGoBack(),

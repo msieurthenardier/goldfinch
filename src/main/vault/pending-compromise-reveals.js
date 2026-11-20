@@ -42,15 +42,15 @@ const ADOPT_REASON = 'adopt';
  * @param {{ acquire: (chromeId: number, reason: string) => void, release: (chromeId: number, reason: string) => void }} holder
  *        The refcounted suppression holder (autolock-suppression.js).
  * @returns {{
- *   stash: (chromeId: number | null | undefined, recoveryKey: string, reason?: string) => void,
+ *   stash: (chromeId: number | null | undefined, recoveryKey: string, reason?: string, skippedCount?: number) => void,
  *   has: (chromeId: number | null | undefined) => boolean,
  *   ack: (chromeId: number | null | undefined) => { reason: string } | null,
- *   rekey: (fromChromeId: number, toChromeId: number | null | undefined) => { recoveryKey: string, reason: string } | null,
+ *   rekey: (fromChromeId: number, toChromeId: number | null | undefined) => { recoveryKey: string, reason: string, skippedCount?: number } | null,
  *   chromeIds: () => number[],
  * }}
  */
 function createCompromiseRevealStore(holder) {
-  /** @type {Map<number, { recoveryKey: string, reason: string }>} chromeId -> the pending reveal. */
+  /** @type {Map<number, { recoveryKey: string, reason: string, skippedCount?: number }>} chromeId -> the pending reveal. */
   const reveals = new Map();
 
   /**
@@ -62,11 +62,13 @@ function createCompromiseRevealStore(holder) {
    * @param {number | null | undefined} chromeId
    * @param {string} recoveryKey
    * @param {string} [reason]
+   * @param {number} [skippedCount] compromise only: vaults left under the old master key (a count, never ids)
    */
-  function stash(chromeId, recoveryKey, reason) {
+  function stash(chromeId, recoveryKey, reason, skippedCount) {
     if (chromeId == null || typeof recoveryKey !== 'string' || recoveryKey.length === 0) return;
     const r = reason === ADOPT_REASON ? ADOPT_REASON : COMPROMISE_REASON;
-    reveals.set(chromeId, { recoveryKey, reason: r });
+    const skipped = Number.isInteger(skippedCount) && /** @type {number} */ (skippedCount) > 0 ? skippedCount : 0;
+    reveals.set(chromeId, skipped > 0 ? { recoveryKey, reason: r, skippedCount: skipped } : { recoveryKey, reason: r });
     holder.acquire(chromeId, r);
   }
 

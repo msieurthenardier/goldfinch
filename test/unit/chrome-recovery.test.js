@@ -7,11 +7,12 @@ const { createChromeRecovery, adoptInputFor } = require('../../src/main/chrome-r
 const { buildAdoptPayload } = require('../../src/main/move-tab-payload');
 const { INTERNAL_PARTITION } = require('../../src/shared/internal-page');
 
-function makeWc({ url = 'https://example.com/', title = '', destroyed = false } = {}) {
+function makeWc({ url = 'https://example.com/', title = '', destroyed = false, devtools = false } = {}) {
   return {
     getURL: () => url,
     getTitle: () => title,
     isDestroyed: () => destroyed,
+    isDevToolsOpened: () => devtools,
     navigationHistory: {
       canGoBack: () => false,
       canGoForward: () => false
@@ -280,9 +281,17 @@ test('buildRecoveryAdopts: one adopt-tab per entry in insertion order, active/tr
   });
   const channels = out.map((o) => o[0]);
   // entry 1 (not active): adopt-tab, tab-nav-state; entry 2 (active, has security): adopt-tab, tab-security, tab-nav-state
-  assert.deepEqual(channels, ['adopt-tab', 'tab-nav-state', 'adopt-tab', 'tab-security', 'tab-nav-state']);
+  assert.deepEqual(channels, [
+    'adopt-tab',
+    'devtools-state-changed',
+    'tab-nav-state',
+    'adopt-tab',
+    'tab-security',
+    'devtools-state-changed',
+    'tab-nav-state'
+  ]);
   const adoptA = out[0][1];
-  const adoptB = out[2][1];
+  const adoptB = out[3][1];
   assert.equal(adoptA.active, false);
   assert.equal(adoptA.trusted, false);
   assert.equal(adoptA.wcId, 1);
@@ -324,7 +333,7 @@ test('buildRecoveryAdopts: crash/hung entries re-push tab-crash/tab-hung', () =>
   });
   assert.deepEqual(
     out.map((o) => o[0]),
-    ['adopt-tab', 'tab-crash', 'tab-nav-state']
+    ['adopt-tab', 'tab-crash', 'devtools-state-changed', 'tab-nav-state']
   );
 });
 
@@ -379,4 +388,23 @@ test('Sortie 06 AC13: an absent closeSavePrompt hook is tolerated (offline calle
   const recovery = createChromeRecovery({ now: () => 1000 });
   const { hooks } = makeHooks();
   assert.doesNotThrow(() => recovery.onChromeGone(makeRecord(), { reason: 'crashed', exitCode: 1 }, hooks));
+});
+
+test('buildRecoveryAdopts: re-pushes devtools-state-changed per tab with the actual open boolean (squawk 0211)', () => {
+  const recovery = createChromeRecovery({ now: () => 1000 });
+  const open = makeEntry({ wc: { url: 'https://a.example/', devtools: true } });
+  const closed = makeEntry({ wc: { url: 'https://b.example/', devtools: false } });
+  const record = makeRecord([
+    [1, open],
+    [2, closed]
+  ]);
+  const jar = { id: 'work', name: 'Work', color: '#f00', partition: 'persist:container:work' };
+  const out = recovery.buildRecoveryAdopts(record, { jarsList: [jar], defaultJar: jar, buildAdoptPayload });
+  assert.deepEqual(
+    out.filter((o) => o[0] === 'devtools-state-changed').map((o) => o[1]),
+    [
+      { wcId: 1, open: true },
+      { wcId: 2, open: false }
+    ]
+  );
 });

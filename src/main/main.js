@@ -76,6 +76,7 @@ const vaultStoreModule = require('./vault/vault-store');
 // the ladder inline). See the module for why each per-delegate config is shaped as it is.
 const {
   mapVaultSheetError,
+  compromiseRotateReply,
   VAULT_UNLOCK_CONFIG,
   VAULT_MINT_ACCESS_KEY_CONFIG,
   VAULT_COMPROMISE_ROTATE_CONFIG,
@@ -1685,7 +1686,7 @@ registerOverlayIpc({
         ? { recoveryKey: recoveryKey.toString('utf8'), newMasterPassword }
         : { oldMasterPassword, newMasterPassword };
       const res = await getVaultStore().compromiseRotate(args);
-      return { ok: true, recoveryKey: res.recoveryKey, revoked: res.revoked };
+      return compromiseRotateReply(res);
     } catch (e) {
       // M18 F3 L1 (DD9): routed through the extracted mapper — VAULT_COMPROMISE_ROTATE_CONFIG
       // (the widest config: five ruled classes, and the only one whose auth failure renders

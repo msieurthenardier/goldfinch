@@ -49,6 +49,7 @@ class FakeContents extends EventEmitter {
     // committed something" case) — a test exercising the empty-history reload
     // fallback overrides this directly (`wc.navigationHistory._length = 0`).
     this._historyLength = 1;
+    this.isDevToolsOpened = () => false;
     this.navigationHistory = {
       getAllEntries: () => [{ url: this.url }],
       getActiveIndex: () => 0,
@@ -2475,19 +2476,28 @@ test('createSendOrQueue: an unresolvable wcId (no owning record) is a silent no-
 });
 
 test('pushTabStateFor: sends only the SET fields, then nav-state unconditionally', () => {
-  const wc = { isDestroyed: () => false, navigationHistory: { canGoBack: () => true, canGoForward: () => false } };
+  const wc = {
+    isDestroyed: () => false,
+    isDevToolsOpened: () => false,
+    navigationHistory: { canGoBack: () => true, canGoForward: () => false }
+  };
   const entry = { loadFailure: null, security: 'secure', crash: null, hung: false };
   const out = [];
   const send = (ch, build) => out.push([ch, build()]);
   pushTabStateFor({}, 5, entry, wc, send);
   assert.deepEqual(out, [
     ['tab-security', { wcId: 5, security: 'secure' }],
+    ['devtools-state-changed', { wcId: 5, open: false }],
     ['tab-nav-state', { wcId: 5, canGoBack: true, canGoForward: false }]
   ]);
 });
 
 test('C4: pushTabStateFor re-pushes the crash with a credential-free address', () => {
-  const wc = { isDestroyed: () => false, navigationHistory: { canGoBack: () => false, canGoForward: () => false } };
+  const wc = {
+    isDestroyed: () => false,
+    isDevToolsOpened: () => false,
+    navigationHistory: { canGoBack: () => false, canGoForward: () => false }
+  };
   const entry = { crash: { reason: 'crashed', exitCode: 1, url: 'https://u:p@a.example/' } };
   const out = [];
   pushTabStateFor({}, 5, entry, wc, (ch, build) => out.push([ch, build()]));
@@ -2496,7 +2506,11 @@ test('C4: pushTabStateFor re-pushes the crash with a credential-free address', (
 });
 
 test('pushTabStateFor: all four optional fields set → all four re-pushed, then nav-state', () => {
-  const wc = { isDestroyed: () => false, navigationHistory: { canGoBack: () => false, canGoForward: () => true } };
+  const wc = {
+    isDestroyed: () => false,
+    isDevToolsOpened: () => false,
+    navigationHistory: { canGoBack: () => false, canGoForward: () => true }
+  };
   const entry = {
     loadFailure: { code: -1, name: 'refused' },
     security: 'insecure',
@@ -2508,20 +2522,57 @@ test('pushTabStateFor: all four optional fields set → all four re-pushed, then
   pushTabStateFor({}, 5, entry, wc, send);
   assert.deepEqual(
     out.map((o) => o[0]),
-    ['tab-load-failure', 'tab-security', 'tab-crash', 'tab-hung', 'tab-nav-state']
+    ['tab-load-failure', 'tab-security', 'tab-crash', 'tab-hung', 'devtools-state-changed', 'tab-nav-state']
   );
 });
 
-test('pushTabStateFor: nothing set beyond nav-state → exactly one send', () => {
-  const wc = { isDestroyed: () => true, navigationHistory: { canGoBack: () => false, canGoForward: () => false } };
+test('pushTabStateFor: nothing set beyond nav-state → devtools-state then nav-state', () => {
+  const wc = {
+    isDestroyed: () => true,
+    isDevToolsOpened: () => {
+      throw new Error('destroyed');
+    },
+    navigationHistory: { canGoBack: () => false, canGoForward: () => false }
+  };
   const entry = { loadFailure: null, security: null, crash: null, hung: false };
   const out = [];
   const send = (ch, build) => out.push([ch, build()]);
   pushTabStateFor({}, 5, entry, wc, send);
-  assert.deepEqual(out, [['tab-nav-state', { wcId: 5, canGoBack: false, canGoForward: false }]]);
+  assert.deepEqual(out, [
+    ['devtools-state-changed', { wcId: 5, open: false }],
+    ['tab-nav-state', { wcId: 5, canGoBack: false, canGoForward: false }]
+  ]);
 });
 
 // ---------------------------------------------------------------------------
+test('pushTabStateFor: re-pushes devtools-state-changed with the open boolean, read at delivery (squawk 0211)', () => {
+  let open = true;
+  const wc = {
+    isDestroyed: () => false,
+    isDevToolsOpened: () => open,
+    navigationHistory: { canGoBack: () => false, canGoForward: () => false }
+  };
+  const out = [];
+  pushTabStateFor({}, 7, {}, wc, (ch, build) => out.push([ch, build]));
+  open = false;
+  assert.deepEqual(out.find((o) => o[0] === 'devtools-state-changed')[1](), { wcId: 7, open: false });
+  open = true;
+  assert.deepEqual(out.find((o) => o[0] === 'devtools-state-changed')[1](), { wcId: 7, open: true });
+});
+
+test('pushTabStateFor: a destroyed contents does not throw and reports devtools closed', () => {
+  const wc = {
+    isDestroyed: () => true,
+    isDevToolsOpened: () => {
+      throw new Error('Object has been destroyed');
+    },
+    navigationHistory: {}
+  };
+  const out = [];
+  assert.doesNotThrow(() => pushTabStateFor({}, 7, {}, wc, (ch, build) => out.push([ch, build()])));
+  assert.deepEqual(out[0], ['devtools-state-changed', { wcId: 7, open: false }]);
+});
+
 // Sortie 06 Leg 1 (AC8 / AC13): the corner save prompt's hide/restore matrix. Each row is a
 // handler-level call-order test over recording fakes.
 // ---------------------------------------------------------------------------

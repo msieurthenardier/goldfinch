@@ -61,13 +61,13 @@ import {
   rightSheetAnchor
 } from './chrome/overlay-menus.js';
 
-// homePageCache (M16 F2 Leg 1, DD4 — squawk 0005 closed): the searchEngineCache
-// SHAPE below — boot-seeded, raw setter, no coalescing; null routes openNewTab
-// to the welcome surface. The removed home-page constant is gone with it.
+// homePageCache (M16 F2 Leg 1, DD4): the searchEngineCache SHAPE below — boot-seeded, raw setter,
+// no coalescing; null routes openNewTab to the welcome surface.
 let homePageCache = null;
 function currentHomePage() {
   return homePageCache;
 }
+const setHomePage = (value) => (homePageCache = value);
 
 // searchEngineCache (M16 F1 Leg 2, DD4; pre-seed null'd M16 F2 Leg 2, DD5 [high] — a placeholder would route a pre-seed search to an unchosen provider).
 let searchEngineCache = null;
@@ -595,9 +595,7 @@ windowController = createWindowController({
   activateTab,
   closeTab,
   activeTab,
-  setHomePage: (value) => {
-    homePageCache = value;
-  }, // M16 F2 Leg 1 (DD4): raw setter, the removed home-page constant is gone
+  setHomePage, // M16 F2 Leg 1 (DD4): raw setter, the removed home-page constant is gone
   setSearchEngine, // M16 F1 Leg 2: boot seed + settings-changed handler both write through this
   updateAutomationKeyState,
   sendActiveBounds
@@ -614,6 +612,8 @@ welcomeController = createWelcomeController({
   buildSearchUrl,
   currentSearchEngine,
   currentHomePage,
+  setSearchEngine,
+  setHomePage,
   normalizeHomePageInput // M16 F2 Leg 2 (DD7) / F3 Leg 2 (HAT item 5): engine block data + attach/gating reads + the domain-normalize rule
 });
 loadFailureController = createLoadFailureController({
