@@ -937,6 +937,7 @@ interface GoldfinchInternalBridge {
     ok?: boolean;
     path?: string;
     carried?: string[];
+    skipped?: Array<{ id: string; reason: string }>;
     canceled?: boolean;
     locked?: boolean;
     error?: string;
