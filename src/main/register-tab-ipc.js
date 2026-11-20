@@ -139,6 +139,9 @@ function pushTabStateFor(target, wcId, entry, wc, send) {
   }));
 }
 
+// Squawk 0178: how long a close's page-focus carry stays valid for the tab-set-active it produces.
+const PAGE_FOCUS_CARRY_MS = 500;
+
 /**
  * Register the complete tab lifecycle and cross-window move surface.
  * Electron constructors and every ownership authority are injected.
@@ -393,6 +396,16 @@ function registerTabIpc(deps) {
       if (!owner || !entry) return;
       // Captured BEFORE the null-out below — one line lower and this is always false.
       const wasActive = owner.activeTabWcId === wcId;
+      // Squawk 0178: a closing ACTIVE tab whose guest held OS focus, read BEFORE destroy. The
+      // null-out below erases the outgoing-active signal tab-set-active's L2 (T3) re-arm reads, so
+      // carry it as a one-shot timestamp on the record (`pageFocusCarryAt`, honoured only by the
+      // tab-set-active the same synchronous chrome closeTab sends right after, within
+      // PAGE_FOCUS_CARRY_MS). OS focus moves to the chrome view NOW, so it is never left on no
+      // webContents (a viewless welcome tab sends no tab-set-active). Always (re)written here, so a
+      // non-active or unfocused close also clears any stale value.
+      const carryFocus = wasActive && !!getTabContents(wcId)?.isFocused();
+      owner.pageFocusCarryAt = carryFocus ? Date.now() : null;
+      if (carryFocus && !owner.chromeView.webContents.isDestroyed()) owner.chromeView.webContents.focus();
       // M14 F1 L2 (DD2 resolution edge): a closing tab's pending auth challenges
       // are cancelled (exactly-once ledger) BEFORE any teardown — the later sheet
       // close below re-resolves idempotently.
@@ -1334,7 +1347,13 @@ function registerTabIpc(deps) {
     // iff this is true (see below), so page-focused Ctrl+#/Ctrl+Tab keeps routing to a
     // guest's before-input-event; AC5 strip nav / find / sheet are preserved untouched.
     // getTabContents already null-guards a missing/destroyed guest.
-    const wasPageFocused = owner.activeTabWcId != null && !!getTabContents(owner.activeTabWcId)?.isFocused();
+    // Squawk 0178: a just-closed focused active tab's focus rides `pageFocusCarry` (one-shot,
+    // always cleared here, whatever the outcome, so it cannot leak into a later switch).
+    const carriedPageFocus =
+      typeof owner.pageFocusCarryAt === 'number' && Date.now() - owner.pageFocusCarryAt <= PAGE_FOCUS_CARRY_MS;
+    owner.pageFocusCarryAt = null;
+    const wasPageFocused =
+      carriedPageFocus || (owner.activeTabWcId != null && !!getTabContents(owner.activeTabWcId)?.isFocused());
     // Atomic: set-bounds → show incoming (via applyGuestVisibility) → setVisible(false) outgoing
     const entry = owner.tabViews.get(wcId);
     if (entry) {

@@ -157,8 +157,8 @@ test('AC4: onTabMovedAway has no createTab( arm — real → 0, mutated → 1', 
   // Re-insert the deleted arm. An empty strip would then race a tab-create into a window
   // main is already closing (the orphan-guest leak the deletion prevents).
   const mutated = real.replace(
-    '    const next = orderedTabIds().pop();\n    if (next) activateTab(next);\n  }',
-    '    const next = orderedTabIds().pop();\n    if (next) activateTab(next);\n    else createTab();\n  }'
+    '    const next = neighbourAfterRemoval(orderedTabIds(), movedStripIndex);\n    if (next) activateTab(next);\n  }',
+    '    const next = neighbourAfterRemoval(orderedTabIds(), movedStripIndex);\n    if (next) activateTab(next);\n    else createTab();\n  }'
   );
   assertMutated(real, mutated, 'reintroduce-createTab');
   assert.equal(count(movedAwayBody(mutated), 'createTab('), 1, 'mutated → the arm is back and this pin FAILS');

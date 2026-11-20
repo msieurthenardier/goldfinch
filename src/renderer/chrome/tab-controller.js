@@ -3,6 +3,7 @@
 // failedTabTitle (post-acceptance fix pass F2): the SAME host-derived label
 // the strip shows, so census title can never drift from it on a failed tab.
 import { LOAD_STATES, failedTabTitle } from '../../shared/load-failure.js';
+import { neighbourAfterRemoval } from '../../shared/tab-order.js';
 
 /**
  * @typedef {{
@@ -904,8 +905,9 @@ export function createTabController(deps) {
     if (wasActive) {
       // DD1: DOM order is authoritative — orderedTabIds() reads the current strip,
       // NOT Map insertion order (which no longer necessarily matches visual order
-      // once a tab has been reordered).
-      const next = orderedTabIds().pop();
+      // once a tab has been reordered). Squawk 0177: the right neighbour of the
+      // closed tab, or the left one when it was rightmost (stripIndex above).
+      const next = neighbourAfterRemoval(orderedTabIds(), stripIndex);
       if (next) activateTab(next);
       else openNewTab(); // never leave the window with zero tabs
     }
@@ -1205,7 +1207,7 @@ export function createTabController(deps) {
   // tab-moved-away (SOURCE chrome): strip removal WITHOUT destroy — mirrors
   // closeTab FIELD BY FIELD minus the stack/IPC pieces: cancelDnd, button
   // remove, tabs.delete, the ctx.activeViewWcId clear, the next-activation fallback.
-  // NO stripIndex snapshot, NO tabClose IPC, NO closed-tab capture (the tab is
+  // The strip index is read only for the neighbour pick, NO tabClose IPC, NO closed-tab capture (the tab is
   // alive in another window). The ctx.activeViewWcId clear is load-bearing (review
   // M3's named cross-window bug): a stale ctx.activeViewWcId here would tabHide the
   // moved guest IN THE TARGET WINDOW on this window's next activation.
@@ -1227,15 +1229,16 @@ export function createTabController(deps) {
     // pending tab, BEFORE its reply lands — clearing here would silence our own success.
     if (pendingDrop && pendingDrop.tabId !== tab.id) pendingDrop = null;
     if (tab.wcId === ctx.activeViewWcId) ctx.activeViewWcId = null;
+    const movedStripIndex = orderedTabIds().indexOf(tab.id);
     tab.btn.remove();
     tabs.delete(tab.id);
     if (ctx.activeTabId === tab.id) {
-      // DD1: DOM order is authoritative — same fallback as closeTab. NO
+      // DD1: DOM order is authoritative — same neighbour pick as closeTab (squawk 0177). NO
       // else-createTab arm (M09 F10 L3): an empty-strip tab-moved-away now means
       // main is CLOSING this window (the sole-tab consolidate path closes the
       // emptied source), so booting a tab would race a tab-create into a closing
       // window (orphan-guest leak). The non-empty branch is all that remains.
-      const next = orderedTabIds().pop();
+      const next = neighbourAfterRemoval(orderedTabIds(), movedStripIndex);
       if (next) activateTab(next);
     }
   });

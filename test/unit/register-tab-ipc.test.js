@@ -2754,3 +2754,135 @@ test("tab-create records the new web tab's partition against its session; an int
   });
   assert.equal(h.log.filter((x) => x[0] === 'note-partition').length, 1, 'no partition noted for the internal tab');
 });
+
+// Squawk 0178: closing the focused ACTIVE tab must carry its page focus to the next tab-set-active.
+function squawk0178Switch(h, record, wcId) {
+  h.ipcMain.send('tab-set-active', record.chromeView.webContents, {
+    wcId,
+    bounds: { x: 0, y: 0, width: 900, height: 700 }
+  });
+}
+function squawk0178Focuses(h, wcId) {
+  return h.log.filter((x) => x[0] === 'focus-wc' && x[1] === wcId);
+}
+
+test('squawk 0178: closing the focused active tab then tab-set-active focuses the incoming guest', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  const closing = h.addTab(record, 101);
+  h.addTab(record, 102);
+  record.activeTabWcId = 101;
+  closing.webContents.focused = true;
+  h.ipcMain.send('tab-close', record.chromeView.webContents, 101, -1);
+  assert.equal(record.activeTabWcId, null);
+  h.log.length = 0;
+  squawk0178Switch(h, record, 102);
+  assert.equal(squawk0178Focuses(h, 102).length, 1);
+});
+
+test('squawk 0178: closing an UNfocused active tab does not focus the incoming guest', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  h.addTab(record, 101);
+  h.addTab(record, 102);
+  record.activeTabWcId = 101;
+  h.ipcMain.send('tab-close', record.chromeView.webContents, 101, -1);
+  h.log.length = 0;
+  squawk0178Switch(h, record, 102);
+  assert.deepEqual(squawk0178Focuses(h, 102), []);
+});
+
+test('squawk 0178: the carry is cleared after one tab-set-active', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  const closing = h.addTab(record, 101);
+  h.addTab(record, 102);
+  h.addTab(record, 103);
+  record.activeTabWcId = 101;
+  closing.webContents.focused = true;
+  h.ipcMain.send('tab-close', record.chromeView.webContents, 101, -1);
+  squawk0178Switch(h, record, 102);
+  h.log.length = 0;
+  squawk0178Switch(h, record, 103); // outgoing 102 is not focused
+  assert.deepEqual(squawk0178Focuses(h, 103), []);
+});
+
+test('squawk 0178: closing a NON-active focused tab does not set the carry', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  h.addTab(record, 101);
+  const other = h.addTab(record, 102);
+  h.addTab(record, 103);
+  record.activeTabWcId = 101;
+  other.webContents.focused = true;
+  h.ipcMain.send('tab-close', record.chromeView.webContents, 102, -1);
+  assert.ok(!record.pageFocusCarryAt);
+  h.log.length = 0;
+  squawk0178Switch(h, record, 103); // outgoing 101 unfocused
+  assert.deepEqual(squawk0178Focuses(h, 103), []);
+});
+
+test('squawk 0178: a taken-over incoming tab after a focused close leaves the guest unfocused (chrome focused at close)', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  const closing = h.addTab(record, 101);
+  h.addTab(record, 102);
+  record.tabViews.get(102).crash = { reason: 'crashed', exitCode: 139, url: 'https://x.test/' };
+  record.activeTabWcId = 101;
+  closing.webContents.focused = true;
+  h.ipcMain.send('tab-close', record.chromeView.webContents, 101, -1);
+  h.log.length = 0;
+  squawk0178Switch(h, record, 102);
+  assert.deepEqual(squawk0178Focuses(h, 102), []);
+});
+
+test('squawk 0178: a focused active close focuses the chrome at close time, with no tab-set-active following', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  const closing = h.addTab(record, 101);
+  record.activeTabWcId = 101;
+  closing.webContents.focused = true;
+  h.log.length = 0;
+  h.ipcMain.send('tab-close', record.chromeView.webContents, 101, -1);
+  assert.equal(squawk0178Focuses(h, 10).length, 1);
+});
+
+test('squawk 0178: an unfocused close does not focus the chrome', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  h.addTab(record, 101);
+  record.activeTabWcId = 101;
+  h.log.length = 0;
+  h.ipcMain.send('tab-close', record.chromeView.webContents, 101, -1);
+  assert.deepEqual(squawk0178Focuses(h, 10), []);
+});
+
+test('squawk 0178: a tab-set-active arriving after the carry window does not focus the incoming guest', (t) => {
+  t.mock.timers.enable({ apis: ['Date'] });
+  const h = setup();
+  const record = h.makeRecord(1);
+  const closing = h.addTab(record, 101);
+  h.addTab(record, 102);
+  record.activeTabWcId = 101;
+  closing.webContents.focused = true;
+  h.ipcMain.send('tab-close', record.chromeView.webContents, 101, -1);
+  t.mock.timers.tick(501);
+  h.log.length = 0;
+  squawk0178Switch(h, record, 102);
+  assert.deepEqual(squawk0178Focuses(h, 102), []);
+});
+
+test('squawk 0178: a tab-set-active inside the carry window still focuses the incoming guest', (t) => {
+  t.mock.timers.enable({ apis: ['Date'] });
+  const h = setup();
+  const record = h.makeRecord(1);
+  const closing = h.addTab(record, 101);
+  h.addTab(record, 102);
+  record.activeTabWcId = 101;
+  closing.webContents.focused = true;
+  h.ipcMain.send('tab-close', record.chromeView.webContents, 101, -1);
+  t.mock.timers.tick(100);
+  h.log.length = 0;
+  squawk0178Switch(h, record, 102);
+  assert.equal(squawk0178Focuses(h, 102).length, 1);
+});

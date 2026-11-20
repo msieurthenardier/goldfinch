@@ -264,10 +264,10 @@ test('ordered movement, close fallback, and geometry use the live strip and shar
   assert.deepEqual(controller.orderedTabIds(), [c.id, a.id, b.id]);
   controller.closeTab(c.id);
   assert.deepEqual(controller.orderedTabIds(), [a.id, b.id]);
-  assert.equal(controller.activeTab(), b);
+  assert.equal(controller.activeTab(), a); // leftmost closed -> its right neighbour (squawk 0177)
   assert.deepEqual(controller.measureWebviewsSlotDIP(), { x: 10, y: 20, width: 200, height: 100 });
   controller.sendActiveBounds();
-  assert.ok(h.calls.some(([name, wcId]) => name === 'tabSetBounds' && wcId === b.wcId));
+  assert.ok(h.calls.some(([name, wcId]) => name === 'tabSetBounds' && wcId === a.wcId));
 });
 
 test('cross-window adopt and moved-away reuse the strip authority without create or close IPC', async () => {
@@ -287,6 +287,59 @@ test('cross-window adopt and moved-away reuse the strip authority without create
   assert.equal(controller.findTabByWcId(777), null);
   assert.equal(controller.activeTab(), first);
   assert.equal(h.calls.filter(([name]) => name === 'tabClose').length, closesBefore);
+});
+
+// Squawk 0177: closing the ACTIVE tab (non-pointer) activates a neighbour, not the strip's last tab.
+async function neighbourHarness() {
+  const h = createHarness();
+  const controller = await loadController(h);
+  const list = [];
+  for (let i = 0; i < 5; i++) list.push(controller.createTab(`https://n${i}.test/`));
+  await settle();
+  return { h, controller, list };
+}
+
+test('squawk 0177: closing the active middle tab activates its right neighbour', async () => {
+  const { controller, list } = await neighbourHarness();
+  controller.activateTab(list[1].id);
+  controller.closeTab(list[1].id);
+  assert.equal(controller.activeTab(), list[2]);
+});
+
+test('squawk 0177: closing the active leftmost tab activates its right neighbour', async () => {
+  const { controller, list } = await neighbourHarness();
+  controller.activateTab(list[0].id);
+  controller.closeTab(list[0].id);
+  assert.equal(controller.activeTab(), list[1]);
+});
+
+test('squawk 0177: closing the active rightmost tab activates its left neighbour', async () => {
+  const { controller, list } = await neighbourHarness();
+  controller.activateTab(list[4].id);
+  controller.closeTab(list[4].id);
+  assert.equal(controller.activeTab(), list[3]);
+});
+
+test('squawk 0177: the neighbour follows DOM order after a reorder, not creation order', async () => {
+  const { controller, list } = await neighbourHarness();
+  controller.commitTabMove(list[0].id, 4); // strip: 1 2 3 4 0
+  controller.activateTab(list[2].id);
+  controller.closeTab(list[2].id);
+  assert.equal(controller.activeTab(), list[3]);
+});
+
+test('squawk 0177: moved-away of the active middle tab activates its right neighbour', async () => {
+  const { h, controller, list } = await neighbourHarness();
+  controller.activateTab(list[1].id);
+  h.callbacks.movedAway({ wcId: list[1].wcId });
+  assert.equal(controller.activeTab(), list[2]);
+});
+
+test('squawk 0177: moved-away of the active rightmost tab activates its left neighbour', async () => {
+  const { h, controller, list } = await neighbourHarness();
+  controller.activateTab(list[4].id);
+  h.callbacks.movedAway({ wcId: list[4].wcId });
+  assert.equal(controller.activeTab(), list[3]);
 });
 
 // ---------------------------------------------------------------------------
@@ -946,7 +999,7 @@ test('target already active (background close) -> no tabSetActive', async () => 
   assert.equal(h.calls.filter(([n]) => n === 'tabClose').length, 1);
 });
 
-test('no resolvable target: background close keeps active; active close takes the DOM-last fallback', async () => {
+test('no resolvable target: background close keeps active; active close takes the neighbour fallback', async () => {
   for (const el of [
     null,
     { closest: () => null },
@@ -963,7 +1016,7 @@ test('no resolvable target: background close keeps active; active close takes th
     b.setActiveSilently(b.list[1]);
     b.hit.el = el;
     b.list[1].btn.listeners.get('click')(b.closeEvent());
-    assert.equal(b.controller.activeTab(), b.list[4]);
+    assert.equal(b.controller.activeTab(), b.list[2]);
   }
 });
 
@@ -990,7 +1043,7 @@ test('closeTab(id) with no opts never consults elementFromPoint (existing caller
   hit.el = tabTarget(list[2]);
   controller.closeTab(list[1].id);
   assert.equal(hit.seen || 0, 0);
-  assert.equal(controller.activeTab(), list[4]);
+  assert.equal(controller.activeTab(), list[2]);
 });
 
 test('width freeze happens before the pointer target is resolved (mid-strip close)', async () => {

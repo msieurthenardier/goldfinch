@@ -136,3 +136,23 @@ export function dropIndexFromPointer(slotRects, pointerX, draggedIndex) {
   }
   return index;
 }
+
+/**
+ * neighbourAfterRemoval(orderAfter, removedIndex) (squawk 0177)
+ *
+ * Which tab becomes active after the ACTIVE tab at `removedIndex` is removed:
+ * the RIGHT neighbour (the tab now sitting at the removed tab's former index),
+ * or the LEFT neighbour when the removed tab was the rightmost. `orderAfter` is
+ * the strip order AFTER removal. Returns `undefined` for an empty order.
+ * An index that is not a non-negative integer (the tab was not in the strip)
+ * falls back to the last tab.
+ *
+ * @param {Array<string>} orderAfter
+ * @param {number} removedIndex
+ * @returns {string | undefined}
+ */
+export function neighbourAfterRemoval(orderAfter, removedIndex) {
+  if (!Array.isArray(orderAfter) || orderAfter.length === 0) return undefined;
+  if (!Number.isInteger(removedIndex) || removedIndex < 0) return orderAfter[orderAfter.length - 1];
+  return orderAfter[Math.min(removedIndex, orderAfter.length - 1)];
+}

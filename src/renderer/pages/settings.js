@@ -653,11 +653,13 @@ function bootReadGuard(apply, initial) {
   // Populate from the persisted setting on load. Assign .checked directly — never
   // .click()/dispatchEvent('change'), which would echo-loop back through settingsSet
   // (the restore-session checkbox's own idiom, byte-for-byte in shape).
+  // Push-seen guard + revert on a rejected write (squawk 0230, same shape as 0202).
+  const barGuard = bootReadGuard((v) => {
+    el.checked = v;
+  }, false);
   window.goldfinchInternal
     .settingsGet('bookmarksBarEnabled')
-    .then((v) => {
-      el.checked = v === true;
-    })
+    .then((v) => barGuard.boot(v === true))
     .catch(() => {});
 
   // Write a clean boolean on change (the strict validator rejects a non-boolean
@@ -665,14 +667,14 @@ function bootReadGuard(apply, initial) {
   // broadcast (window-controller.js's applyBookmarksBar) — the same stored value
   // Ctrl+Shift+B flips, so the checkbox and the shortcut never diverge.
   el.addEventListener('change', () => {
-    window.goldfinchInternal.settingsSet('bookmarksBarEnabled', !!el.checked).catch(() => {});
+    window.goldfinchInternal.settingsSet('bookmarksBarEnabled', !!el.checked).catch(() => barGuard.revert());
   });
 
   // Re-sync when another surface changes the setting (the shortcut, or another
   // window's checkbox). Capture the handle so we can remove this listener on
   // pagehide (DD5: prevents accumulation across reloads).
   const h = window.goldfinchInternal.onSettingsChanged((all) => {
-    if (all && typeof all.bookmarksBarEnabled === 'boolean') el.checked = all.bookmarksBarEnabled;
+    if (all && typeof all.bookmarksBarEnabled === 'boolean') barGuard.push(all.bookmarksBarEnabled);
   });
   window.addEventListener('pagehide', () => window.goldfinchInternal.offSettingsChanged(h), { once: true });
 })();
