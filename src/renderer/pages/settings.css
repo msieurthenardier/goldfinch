@@ -451,7 +451,8 @@ main section #about-last-checked {
   display: inline-block;
   background: var(--accent);
   color: var(--accent-fg);
-  border: none;
+  /* Same 1px box as .settings-btn / Clear beside it (squawk 0200: `none` left it 2px shorter). */
+  border: 1px solid transparent;
   border-radius: 6px;
   padding: 6px 14px;
   margin-left: 8px;
@@ -475,6 +476,8 @@ main section #about-last-checked {
    rule above, not `.settings-btn`'s — Clear needs its own explicit gap. */
 #home-page-clear {
   margin-left: 8px;
+  /* Same alignment as the input and Save beside it (squawk 0200: baseline left Clear 1px higher). */
+  vertical-align: middle;
 }
 
 /* ── Appearance — pin-icon toggle rows ───────────────────────────────────────── */

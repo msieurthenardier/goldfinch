@@ -241,6 +241,7 @@ export default [
       'src/renderer/pages/automation.js',
       'src/renderer/pages/automation-key-flow.js',
       'src/renderer/pages/automation-port-moved.js',
+      'src/renderer/pages/automation-session-row.js',
       'src/renderer/pages/section-scroll-spy.js',
       // vault.js (M12 Flight 3, Leg 1) is the goldfinch://vault page controller — a
       // real ES module importing its pure state-model via a flat serving-path specifier.

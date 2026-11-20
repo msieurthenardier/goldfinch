@@ -55,6 +55,7 @@ test('automation.js imports its flat siblings with @ts-ignore and each is routed
     'automation-key-flow.js',
     'automation-port-moved.js',
     'automation-port-note.js',
+    'automation-session-row.js',
     'safe-color.js',
     'section-scroll-spy.js'
   ]);

@@ -27,6 +27,37 @@ import {
 
 initSectionScrollSpy({ document, IntersectionObserver, window });
 
+/**
+ * Boot-read / push ordering guard (squawk 0202; the update-check controller's `checkPushSeen` /
+ * `checkKnown` pattern in settings-about-controller.js, factored). A `settingsChanged` push seen
+ * before the boot read resolves wins (the read is older): `boot` then drops the read. `known` is the
+ * last stored value this page learned of; `revert` re-applies it after a rejected write.
+ * @template T
+ * @param {(v: T) => void} apply render a value into the control (patch in place)
+ * @param {T} initial value `known` holds before any read or push lands
+ */
+function bootReadGuard(apply, initial) {
+  let pushSeen = false;
+  let known = initial;
+  return {
+    /** @param {T} v */
+    boot(v) {
+      if (pushSeen) return;
+      known = v;
+      apply(v);
+    },
+    /** @param {T} v */
+    push(v) {
+      pushSeen = true;
+      known = v;
+      apply(v);
+    },
+    revert() {
+      apply(known);
+    }
+  };
+}
+
 /* ---- home-page controller ---- */
 
 (function () {
@@ -66,7 +97,10 @@ initSectionScrollSpy({ document, IntersectionObserver, window });
   }
 
   // Populate the input with the persisted home page on load.
-  window.goldfinchInternal.settingsGet('homePage').then(reflect);
+  // A push seen first wins over this older read (squawk 0202). A rejected Save/Clear keeps the typed
+  // text and shows its error line (the operator's unsaved edit is not discarded), so no revert here.
+  const homeGuard = bootReadGuard(reflect, null);
+  window.goldfinchInternal.settingsGet('homePage').then((v) => homeGuard.boot(v));
 
   // Save button: write the new home page via the origin-locked bridge.
   // Ordering note: `internal-settings-set` (register-settings-ipc.js) calls
@@ -122,7 +156,7 @@ initSectionScrollSpy({ document, IntersectionObserver, window });
   // null) rather than truthiness, so a null broadcast clears the field instead of leaving
   // stale text — the old truthy guard's bug (Mission KI).
   const hSettings = window.goldfinchInternal.onSettingsChanged((all) => {
-    if (all && all.homePage !== undefined) reflect(all.homePage);
+    if (all && all.homePage !== undefined) homeGuard.push(all.homePage);
   });
   window.addEventListener('pagehide', () => window.goldfinchInternal.offSettingsChanged(hSettings), { once: true });
 })();
@@ -367,9 +401,11 @@ initSectionScrollSpy({ document, IntersectionObserver, window });
       renderIsolation();
     })
     .catch(() => {});
+  let restoreSeen = false;
   window.goldfinchInternal
     .settingsGet('restoreSession')
     .then((v) => {
+      if (restoreSeen) return; // a push seen first wins over this older read (squawk 0202)
       if (v !== undefined) restoreSession = v;
       renderIsolation();
     })
@@ -377,6 +413,7 @@ initSectionScrollSpy({ document, IntersectionObserver, window });
   // Guard is `!== undefined`, never truthiness.
   const hRestore = window.goldfinchInternal.onSettingsChanged((all) => {
     if (all && all.restoreSession !== undefined) {
+      restoreSeen = true;
       restoreSession = all.restoreSession;
       renderIsolation();
     }
@@ -428,9 +465,12 @@ initSectionScrollSpy({ document, IntersectionObserver, window });
   }
 
   // Populate from the persisted toolbarPins on load.
+  // A push seen first wins over this older read (squawk 0202). The buttons only change on a resolved
+  // write (`apply(next)` below), so a rejected write already leaves the last-known full map showing.
+  const pinsGuard = bootReadGuard(apply, current);
   window.goldfinchInternal
     .settingsGet('toolbarPins')
-    .then(apply)
+    .then((v) => pinsGuard.boot(v))
     .catch(() => {});
 
   // Click handler: flip the pin for the clicked key, write the full map.
@@ -441,8 +481,8 @@ initSectionScrollSpy({ document, IntersectionObserver, window });
       const next = { ...current, [k]: !current[k] };
       window.goldfinchInternal
         .settingsSet('toolbarPins', next)
-        .then(() => apply(next))
-        .catch(() => {});
+        .then(() => pinsGuard.push(next))
+        .catch(() => pinsGuard.revert());
     });
   }
 
@@ -450,7 +490,7 @@ initSectionScrollSpy({ document, IntersectionObserver, window });
   // Capture the handle so we can remove this listener on pagehide (DD5: prevents accumulation
   // across reloads — pagehide fires in the OLD document context where handle + wrapper are valid).
   const h = window.goldfinchInternal.onSettingsChanged((all) => {
-    if (all && all.toolbarPins) apply(all.toolbarPins);
+    if (all && all.toolbarPins) pinsGuard.push(all.toolbarPins);
   });
   window.addEventListener('pagehide', () => window.goldfinchInternal.offSettingsChanged(h), { once: true });
 })();
@@ -466,23 +506,25 @@ initSectionScrollSpy({ document, IntersectionObserver, window });
 
   // Populate from the persisted setting on load. Assign .checked directly — never
   // .click()/dispatchEvent('change'), which would echo-loop back through settingsSet.
+  // Push-seen guard + revert on a rejected write (squawk 0202).
+  const spellGuard = bootReadGuard((v) => {
+    el.checked = v;
+  }, false);
   window.goldfinchInternal
     .settingsGet('spellcheck')
-    .then((v) => {
-      el.checked = v === true;
-    })
+    .then((v) => spellGuard.boot(v === true))
     .catch(() => {});
 
   // Write a real boolean (the internal-settings-set side-effect uses value === true, so a
   // non-boolean truthy value would not silently enable — but we send a clean boolean anyway).
   el.addEventListener('change', () => {
-    window.goldfinchInternal.settingsSet('spellcheck', !!el.checked).catch(() => {});
+    window.goldfinchInternal.settingsSet('spellcheck', !!el.checked).catch(() => spellGuard.revert());
   });
 
   // Re-sync when another surface changes the setting. Capture the handle so we can remove
   // this listener on pagehide (DD5: prevents accumulation across reloads).
   const h = window.goldfinchInternal.onSettingsChanged((all) => {
-    if (all && typeof all.spellcheck === 'boolean') el.checked = all.spellcheck;
+    if (all && typeof all.spellcheck === 'boolean') spellGuard.push(all.spellcheck);
   });
   window.addEventListener('pagehide', () => window.goldfinchInternal.offSettingsChanged(h), { once: true });
 })();
@@ -577,22 +619,24 @@ initSectionScrollSpy({ document, IntersectionObserver, window });
   // Populate from the persisted setting on load. Assign .checked directly — never
   // .click()/dispatchEvent('change'), which would echo-loop back through settingsSet.
   // No live side-effect: the flag is read by main only at the next whenReady (startup-only).
+  // Push-seen guard + revert on a rejected write (squawk 0202).
+  const restoreGuard = bootReadGuard((v) => {
+    el.checked = v;
+  }, false);
   window.goldfinchInternal
     .settingsGet('restoreSession')
-    .then((v) => {
-      el.checked = v === true;
-    })
+    .then((v) => restoreGuard.boot(v === true))
     .catch(() => {});
 
   // Write a clean boolean on change (the strict validator rejects a non-boolean anyway).
   el.addEventListener('change', () => {
-    window.goldfinchInternal.settingsSet('restoreSession', !!el.checked).catch(() => {});
+    window.goldfinchInternal.settingsSet('restoreSession', !!el.checked).catch(() => restoreGuard.revert());
   });
 
   // Re-sync when another surface changes the setting. Capture the handle so we can remove
   // this listener on pagehide (DD5: prevents accumulation across reloads).
   const h = window.goldfinchInternal.onSettingsChanged((all) => {
-    if (all && typeof all.restoreSession === 'boolean') el.checked = all.restoreSession;
+    if (all && typeof all.restoreSession === 'boolean') restoreGuard.push(all.restoreSession);
   });
   window.addEventListener('pagehide', () => window.goldfinchInternal.offSettingsChanged(h), { once: true });
 })();

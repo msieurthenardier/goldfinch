@@ -149,9 +149,9 @@ test('settings.js defines a persistent home-page unset hint and reflects it from
   const broadcastMatch = /onSettingsChanged\(\(all\) => \{[\s\S]*?\}\);/.exec(block);
   assert.ok(broadcastMatch, 'home-page controller must register an onSettingsChanged handler');
   assert.ok(
-    /reflect\(all\.homePage\)/.test(broadcastMatch[0]),
-    'the settings-changed broadcast handler must call reflect(all.homePage) so the unset hint (and the field) ' +
-      'update on an external write, not just on load'
+    /homeGuard\.push\(all\.homePage\)/.test(broadcastMatch[0]) && /bootReadGuard\(reflect,/.test(block),
+    'the settings-changed broadcast handler must call homeGuard.push(all.homePage), whose apply is reflect, so the ' +
+      'unset hint (and the field) update on an external write, not just on load (squawk 0202: push-seen guard)'
   );
 });
 
