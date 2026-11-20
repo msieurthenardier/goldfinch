@@ -16,7 +16,9 @@ import { runKeyMint } from './automation-key-flow.js';
 // @ts-ignore — serving-path vs disk-path mismatch (see above)
 import { portMovedLine } from './automation-port-note.js';
 // @ts-ignore — serving-path vs disk-path mismatch (see above)
-import { renderPortMoved } from './automation-port-moved.js';
+import { renderPortMoved, portFieldState, savedPortOf } from './automation-port-moved.js';
+// @ts-ignore — serving-path vs disk-path mismatch (see above)
+import { sessionIdPrefix } from './automation-session-row.js';
 
 /**
  * automation.js — controller for goldfinch://automation (sortie 05). The three
@@ -115,31 +117,22 @@ async function copyText(text, messageEl, opts) {
   /** @type {number|null} */
   let savedPort = null;
 
-  /** @param {string} v @returns {boolean} */
-  function isValidPort(v) {
-    const n = Number(v);
-    return Number.isInteger(n) && n >= 1024 && n <= 65535;
-  }
-
-  /** Sync the Save button disabled state to the dirty / validity check. */
+  /** Sync the Save button to the field-vs-SAVED-port comparison (one source with the hint). */
   function updatePortSaveDirty() {
-    const v = portInput.value;
-    portSaveBtn.disabled = !(isValidPort(v) && Number(v) !== savedPort);
+    portSaveBtn.disabled = portFieldState({ value: portInput.value, savedPort, bound: true }).saveDisabled;
   }
 
   /**
-   * Recompute the pending-port annotation. Shows "(unsaved — applies on Save)"
-   * ONLY when the surface is bound AND the entered/pending port differs from the
-   * active port — gating on `bound` avoids a misleading note when nothing is
-   * running (AC6).
+   * Recompute the pending-port annotation: "(unsaved — applies on Save)" only while the surface is bound AND the
+   * field differs from the SAVED port (operator ruling 2026-11-19, squawk 0160). Where the server listens is the
+   * moved-port line's job, not this hint's.
    */
   function recomputePortNote() {
-    portNote.textContent =
-      lastStatus &&
-      lastStatus.bound &&
-      Number(portInput.value) !== (lastStatus.configuredPort != null ? lastStatus.configuredPort : lastStatus.port)
-        ? '(unsaved — applies on Save)'
-        : '';
+    portNote.textContent = portFieldState({
+      value: portInput.value,
+      savedPort,
+      bound: !!(lastStatus && lastStatus.bound)
+    }).hint;
   }
 
   /**
@@ -197,9 +190,10 @@ async function copyText(text, messageEl, opts) {
       renderStatus(status);
       // Fallback: if the persisted-port path hasn't resolved yet, use the active
       // port as the baseline so Save starts disabled.
-      if (savedPort === null && status && status.port != null) {
-        savedPort = status.port;
-        portInput.value = String(status.port);
+      if (savedPort === null && savedPortOf(status) !== null) {
+        savedPort = savedPortOf(status);
+        portInput.value = String(savedPort);
+        recomputePortNote();
         updatePortSaveDirty();
       }
     })
@@ -249,8 +243,9 @@ async function copyText(text, messageEl, opts) {
   // clears as pending == active). A validator rejection surfaces inline; the field
   // keeps the user's text for correction.
   portSaveBtn.addEventListener('click', () => {
+    const requested = Number(portInput.value);
     window.goldfinchInternal
-      .automationSetPort(Number(portInput.value))
+      .automationSetPort(requested)
       .then((status) => {
         messageEl.textContent = 'Saved';
         renderStatus(status);
@@ -258,8 +253,11 @@ async function copyText(text, messageEl, opts) {
         // disabled (clean signal the save registered).
         // The SAVED port is the configured one; after a fallback the bound port differs (and the moved-port line
         // says so), so the field must keep showing what was saved, not where the server landed.
-        savedPort = status.configuredPort != null ? status.configuredPort : status.port;
+        // Seed from what was SAVED (the submitted value), not the status: under a GOLDFINCH_MCP_PORT pin the
+        // status's `configuredPort` is the env port, not the persisted one (squawk 0160).
+        savedPort = requested;
         portInput.value = String(savedPort);
+        recomputePortNote();
         updatePortSaveDirty();
       })
       .catch(() => {
@@ -283,8 +281,9 @@ async function copyText(text, messageEl, opts) {
           messageEl.textContent = 'Saved';
           renderStatus(status);
           // Advance baseline so Save is disabled after find-free-port completes.
-          savedPort = status.port;
-          portInput.value = String(status.port);
+          savedPort = port;
+          portInput.value = String(savedPort);
+          recomputePortNote();
           updatePortSaveDirty();
         });
       })
@@ -794,6 +793,14 @@ function automationKeysOnce() {
       name.className = 'activity-name';
       name.textContent = isAdmin ? 'app / chrome' : jarDisplayName(s.jarId);
       row.appendChild(name);
+
+      const idPrefix = sessionIdPrefix(s.sessionId);
+      if (idPrefix !== null) {
+        const id = document.createElement('span');
+        id.className = 'activity-session-id muted';
+        id.textContent = idPrefix;
+        row.appendChild(id);
+      }
 
       const since = document.createElement('span');
       since.className = 'activity-since muted';

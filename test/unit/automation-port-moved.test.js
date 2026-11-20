@@ -6,7 +6,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { renderPortMoved } = require('../../src/renderer/pages/automation-port-moved.js');
+const { renderPortMoved, portFieldState, savedPortOf } = require('../../src/renderer/pages/automation-port-moved.js');
 const { portMovedLine } = require('../../src/shared/automation-port-note.js');
 
 const fakeEl = () => ({ textContent: '', hidden: true });
@@ -56,4 +56,42 @@ test('automation.js wires it into renderStatus and the page has the element', ()
   const html = fs.readFileSync(path.join(dir, 'automation.html'), 'utf8');
   assert.match(js, /renderPortMoved\(\{\s*el:\s*portMovedEl,\s*status,\s*portMovedLine\s*\}\)/);
   assert.match(html, /id="automation-port-moved"/);
+});
+
+// Squawk 0160: the hint and Save's dirty state both compare the field with the SAVED port, never the bound one.
+test('bound != saved, field equal to the saved port: no unsaved hint, Save disabled', () => {
+  const r = portFieldState({ value: '49153', savedPort: 49153, bound: true });
+  assert.equal(r.hint, '');
+  assert.equal(r.saveDisabled, true);
+});
+
+test('bound != saved, field edited to another value: hint shown, Save enabled', () => {
+  const r = portFieldState({ value: '49200', savedPort: 49153, bound: true });
+  assert.equal(r.hint, '(unsaved — applies on Save)');
+  assert.equal(r.saveDisabled, false);
+});
+
+test('the field equal to the BOUND port while differing from the saved one is unsaved', () => {
+  const r = portFieldState({ value: '49707', savedPort: 49153, bound: true });
+  assert.equal(r.hint, '(unsaved — applies on Save)');
+});
+
+test('not bound: no hint; invalid or empty values never enable Save', () => {
+  assert.equal(portFieldState({ value: '49200', savedPort: 49153, bound: false }).hint, '');
+  for (const value of ['', '80', '70000', 'abc', '1.5']) {
+    assert.equal(portFieldState({ value, savedPort: 49153, bound: true }).saveDisabled, true);
+  }
+});
+
+test('after Save with bound != saved the field is seeded with the submitted (saved) port and reads clean', () => {
+  // automation.js seeds from the submitted value: under an env pin status.configuredPort is the env port.
+  const saved = 49153;
+  const r = portFieldState({ value: String(saved), savedPort: saved, bound: true });
+  assert.deepEqual(r, { hint: '', saveDisabled: true });
+});
+
+test('savedPortOf is the boot fallback only: configuredPort, else port, else null', () => {
+  assert.equal(savedPortOf({ port: 49707, configuredPort: 49153 }), 49153);
+  assert.equal(savedPortOf({ port: 5000 }), 5000);
+  assert.equal(savedPortOf(null), null);
 });

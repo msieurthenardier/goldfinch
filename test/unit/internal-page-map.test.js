@@ -28,6 +28,7 @@ test('createInternalPageMap returns the exact current host/path allowlist', () =
     '/automation-key-flow.js',
     '/automation-port-moved.js',
     '/automation-port-note.js',
+    '/automation-session-row.js',
     '/automation.css',
     '/automation.js',
     '/safe-color.js',

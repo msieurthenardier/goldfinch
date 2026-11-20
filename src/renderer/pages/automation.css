@@ -124,6 +124,10 @@
   font-weight: 600;
   word-break: break-word;
 }
+.activity-session-id {
+  flex: 0 0 auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
 .activity-since {
   flex: 0 0 auto;
 }

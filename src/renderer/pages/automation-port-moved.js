@@ -19,3 +19,29 @@ export function renderPortMoved({ el, status, portMovedLine }) {
   }
   return line;
 }
+
+/**
+ * The Port field edits the STORED setting (operator ruling 2026-11-19, squawk 0160), so the "unsaved" hint and
+ * Save's dirty state both compare the field against the SAVED port, never the bound one. One source for both.
+ * @param {{ value: string, savedPort: number | null, bound: boolean }} input
+ * @returns {{ hint: string, saveDisabled: boolean }}
+ */
+export function portFieldState({ value, savedPort, bound }) {
+  const n = Number(value);
+  const valid = value !== '' && Number.isInteger(n) && n >= 1024 && n <= 65535;
+  return {
+    hint: bound && savedPort !== null && n !== savedPort ? '(unsaved — applies on Save)' : '',
+    saveDisabled: !(valid && n !== savedPort)
+  };
+}
+
+/**
+ * Boot-time fallback only: the port a status carries (`configuredPort`, else `port`). NOT the persisted port under a GOLDFINCH_MCP_PORT pin; the settings read overwrites it.
+ * @param {any} status
+ * @returns {number | null}
+ */
+export function savedPortOf(status) {
+  if (!status) return null;
+  if (status.configuredPort != null) return Number(status.configuredPort);
+  return status.port != null ? Number(status.port) : null;
+}

@@ -47,7 +47,8 @@ function createInternalPageMap({ baseDir, path }) {
       '/safe-color.js': shared('safe-color.js'),
       // Mission 23 Flight 2 (leg `port-and-permissions`): the moved-port line, one sentence shared with the chrome.
       '/automation-port-note.js': shared('automation-port-note.js'),
-      '/automation-port-moved.js': rendererPage('automation-port-moved.js')
+      '/automation-port-moved.js': rendererPage('automation-port-moved.js'),
+      '/automation-session-row.js': rendererPage('automation-session-row.js')
     },
     // App-level downloads surface; save-path authority remains main-side.
     downloads: {
