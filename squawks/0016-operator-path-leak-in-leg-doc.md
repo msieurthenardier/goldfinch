@@ -8,7 +8,7 @@
 
 ## Report
 
-`missions/03-automation-surface/flights/05-settings-key-management/legs/01-port-and-address-backend.md:42` contains the operator's actual `/home/<username>/projects/goldfinch` path in a `cd … && npm test` line. This is a public repository; the house rule is never to commit operator identity or absolute home paths. The other 26 path-shaped hits in the tree are already placeholders (`/home/x/`, `/home/user/`). Replace with `~/projects/goldfinch`. Operator ruling 2026-08-27: **no history rewrite** — clean up the file only; the prior revisions stay as they are.
+`missions/03-automation-surface/flights/05-settings-key-management/legs/01-port-and-address-backend.md:42` contains the operator's actual `/home/<user>/projects/goldfinch` path in a `cd … && npm test` line. This is a public repository; the house rule is never to commit operator identity or absolute home paths. The other 26 path-shaped hits in the tree are already placeholders (`/home/<user>/`). Replace with `~/projects/goldfinch`. Operator ruling 2026-08-27: **no history rewrite** — clean up the file only; the prior revisions stay as they are.
 
 Source: maintenance report 2026-08-27, finding F33.
 
@@ -22,9 +22,11 @@ Source: maintenance report 2026-08-27, finding F33.
 
 ## Verification
 
-- `git grep -n -E "/home/[a-z]+/|/Users/[a-z]+/"` — 28 hits (28 once this artifact's own placeholder prose is counted — Reviewer correction), all placeholders (`/home/x/`, `/home/user/`) or descriptive text in this squawk itself; the leg-doc line no longer appears.
+- `git grep -n -E "/home/[a-z]+/|/Users/[a-z]+/"` — 28 hits (28 once this artifact's own placeholder prose is counted — Reviewer correction), all placeholders (`/home/<user>/`) or descriptive text in this squawk itself; the leg-doc line no longer appears.
 - `grep -rn "<user>" --exclude-dir=node_modules --exclude-dir=.git .` — 0 hits across tracked content.
 - `git diff --stat` — 2 files changed (the leg doc, this squawk artifact), 2 insertions(+), 2 deletions(-).
+
+*Note (2026-11-19, squawk 0204):* the one-letter and `user` placeholder examples in this artifact were rewritten as `/home/<user>/` so the new path-hygiene test (`test/unit/path-hygiene.test.js`) passes. The grep counts above describe the tree as it was on 2026-08-27 and no longer reproduce.
 
 ## Sign-Off
 

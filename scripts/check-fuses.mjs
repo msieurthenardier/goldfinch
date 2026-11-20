@@ -28,8 +28,18 @@ export const EXPECTED_FUSES = Object.freeze({
   WasmTrapHandlers: true
 });
 
-/** Wire indexes @electron/fuses 1.8.0 has no name for. */
+/**
+ * Wire indexes @electron/fuses 1.8.0 has no name for. Index 8 was read from the
+ * Electron 45.4.1 binary (node_modules/electron/dist/electron), which exports the
+ * symbol electron::fuses::IsWasmTrapHandlersEnabled; @electron/fuses 1.8.0's
+ * FuseV1Options does not name it. The name is by position, so if Electron reorders
+ * the wire it would describe the wrong fuse: re-check the symbol on each Electron
+ * bump, and retire an entry here once @electron/fuses names that index.
+ */
 const LOCAL_NAMES = Object.freeze({ 8: 'WasmTrapHandlers' });
+
+const LOCAL_HINT =
+  '. If @electron/fuses now names a fuse this script names locally, retire its LOCAL_NAMES entry and use the library name in EXPECTED_FUSES.';
 
 /** The three that make the binary a general-purpose Node runtime / debugger target. */
 export const RUNTIME_FUSES = Object.freeze([
@@ -50,11 +60,14 @@ export function decideFuses(states, expected = EXPECTED_FUSES) {
     const want = expected[name] ? 'Enabled' : 'Disabled';
     const got = states && Object.hasOwn(states, name) ? states[name] : 'Missing';
     if (got === want) continue;
+    const hint = got === 'Missing' ? LOCAL_HINT : '';
     const kind = RUNTIME_FUSES.includes(name) ? 'RUNTIME FUSE ON' : 'unexpected fuse state';
-    problems.push(`${kind}: ${name} is ${got}, expected ${want}`);
+    problems.push(`${kind}: ${name} is ${got}, expected ${want}${hint}`);
   }
   for (const name of Object.keys(states || {})) {
-    if (!Object.hasOwn(expected, name)) problems.push(`unknown fuse: ${name} is ${states[name]}`);
+    if (!Object.hasOwn(expected, name)) {
+      problems.push(`unknown fuse: ${name} is ${states[name]}${LOCAL_HINT}`);
+    }
   }
   return { ok: problems.length === 0, problems };
 }

@@ -12,6 +12,7 @@ The Flight Director (Mission Control) orchestrates this phase using the
 - **Role**: Implements code changes. Also performs design reviews against real
   codebase to validate leg specs before implementation.
 - **Actions**: implement, fix-review-issues, commit, review-leg-design
+- **Paths in artifacts**: write session paths as `<session-scratch>` and the repo root as `<repo>`, never an absolute path containing a user name.
 
 ### Reviewer
 - **Context**: project root (current working directory)

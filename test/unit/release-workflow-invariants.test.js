@@ -371,7 +371,7 @@ function split(content, base, tag, cand, { noContent = false } = {}) {
     const ok = r.status === 0;
     return {
       ok,
-      reason: r.stderr.trim(),
+      reason: r.stderr.trim().split('\n').pop(),
       title: ok ? readFileSync(path.join(dir, 'title'), 'utf8') : null,
       body: ok ? readFileSync(path.join(dir, 'body'), 'utf8') : null,
       stdout: r.stdout,
@@ -400,16 +400,13 @@ test('split_release_notes: every docs/releases/v*.md splits for its own version'
   }
 });
 
-test('split_release_notes: rejects malformed files with a reason word', { skip: runSkip }, () => {
+/** Every rejection fixture: [content, expected reason word, label, opts]. */
+function rejectFixtures() {
   const B = '1.2.3';
   const T = 'v1.2.3';
   const body = '\nSummary line.\n';
-  const bad = (content, reason, label) => {
-    const r = split(content, B, T, false);
-    assert.equal(r.ok, false, `${label}: should fail`);
-    assert.equal(r.reason, reason, label);
-    assert.equal(r.stdout, '', `${label}: nothing on stdout`);
-  };
+  const list = [];
+  const bad = (content, reason, label, opts) => list.push({ content, reason, label, opts, B, T });
   bad(`v1.2.3 — x${body}`, 'no-title-line', 'missing "# "');
   bad(`#v1.2.3 — x${body}`, 'no-title-line', 'no space after #');
   bad(`# v1.2.3${body}`, 'no-title-text', 'no title text');
@@ -436,8 +433,60 @@ test('split_release_notes: rejects malformed files with a reason word', { skip: 
   const h = '# v1.2.3 — x\n\n';
   const exact = (n) => h + 'a'.repeat(n - Buffer.byteLength(h) - 1) + '\n';
   bad(exact(65537), 'too-large', 'exactly 65,537 bytes');
-  const r = split('', B, T, false, { noContent: true });
-  assert.equal(r.ok, false, 'missing file fails');
+  bad('', 'unreadable', 'missing file', { noContent: true });
+  return list;
+}
+
+test('split_release_notes: rejects malformed files with a reason word', { skip: runSkip }, () => {
+  for (const { content, reason, label, opts, B, T } of rejectFixtures()) {
+    const r = split(content, B, T, false, opts);
+    assert.equal(r.ok, false, `${label}: should fail`);
+    assert.equal(r.reason, reason, label);
+    assert.equal(r.stdout, '', `${label}: nothing on stdout`);
+  }
+});
+
+// The set of reason words the workflow can emit. A new `echo <word> >&2` in
+// split_release_notes must be added here AND get a fixture in rejectFixtures().
+const SPLIT_REASON_WORDS = [
+  'control-byte',
+  'empty-body',
+  'no-title-line',
+  'no-title-text',
+  'title-too-long',
+  'too-large',
+  'trailing-space',
+  'unreadable',
+  'wrong-version'
+];
+
+/** Every `echo <word> >&2` reason word in a splitter text; throws on zero. */
+function reasonWordsOf(fn) {
+  const words = new Set([...fn.matchAll(/echo ([a-z][a-z-]*) >&2/g)].map((m) => m[1]));
+  assert.ok(words.size > 0, 'no `echo <word> >&2` reason words found in split_release_notes');
+  return words;
+}
+
+test("split_release_notes: reason words in the workflow equal the tests' list", () => {
+  const [fn] = functionTexts('split_release_notes', createJob);
+  assert.ok(fn, 'split_release_notes not found in create-release');
+  assert.deepEqual([...reasonWordsOf(fn)].sort(), [...SPLIT_REASON_WORDS].sort());
+  // A word added to an in-memory copy goes red.
+  const neutered = reasonWordsOf(`${fn}\necho new-word >&2\n`);
+  assert.notDeepEqual([...neutered].sort(), [...SPLIT_REASON_WORDS].sort());
+  // Zero words throws rather than passing vacuously.
+  assert.throws(() => reasonWordsOf('split_release_notes() { :; }'), /no `echo <word>/);
+});
+
+test('split_release_notes: every reason word has a fixture that produces it', { skip: runSkip }, () => {
+  const observed = new Set();
+  for (const { content, label, opts, B, T } of rejectFixtures()) {
+    const r = split(content, B, T, false, opts);
+    assert.equal(r.ok, false, `${label}: should fail`);
+    observed.add(r.reason);
+  }
+  const missing = SPLIT_REASON_WORDS.filter((w) => !observed.has(w));
+  assert.deepEqual(missing, [], `reason words with no fixture: ${missing.join(', ')}`);
 });
 
 test('split_release_notes: accepted shapes and the candidate rewrite', { skip: runSkip }, () => {
