@@ -80,4 +80,4 @@ function createMediaProxyHandler({ getTabContents, isInternalContents, parseMedi
   };
 }
 
-module.exports = { createMediaProxyHandler, ALLOWED_RESPONSE_HEADERS, FORWARDED_REQUEST_HEADERS };
+module.exports = { createMediaProxyHandler, ALLOWED_RESPONSE_HEADERS };

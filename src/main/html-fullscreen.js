@@ -1,7 +1,7 @@
 // @ts-check
 'use strict';
 
-const { closeSavePromptAndDrop } = require('./register-tab-ipc');
+const { onTabLeftFront } = require('./register-tab-ipc');
 
 // HTML5 element fullscreen as a WINDOW-RECORD MODE (M14 F1 L1, flight DD1).
 //
@@ -142,7 +142,7 @@ function createHtmlFullscreen(deps) {
     // Sortie 06 Leg 1 (AC13/DD1): the page is taking over the screen - the corner save prompt
     // closes (`tab-hide`, BEFORE the capture drop so its reason wins over "expired") and this
     // tab's held captures are dropped.
-    closeSavePromptAndDrop(record, wcId, 'tab-hide', vaultHuman(), revealTabInactive);
+    onTabLeftFront(record, wcId, 'tab-hide', { vaultHuman: vaultHuman(), tabInactive: revealTabInactive });
   }
 
   /**

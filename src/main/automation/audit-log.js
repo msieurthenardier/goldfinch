@@ -161,4 +161,4 @@ function createAuditLog(opts = {}) {
   return { record, noteSessionOpen, noteSessionClose, recentEntries, activeSessions, snapshot };
 }
 
-module.exports = { createAuditLog, DEFAULT_CAPACITY, MAX_FIELD_CODE_POINTS, clipField };
+module.exports = { createAuditLog, DEFAULT_CAPACITY, MAX_FIELD_CODE_POINTS };

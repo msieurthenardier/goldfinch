@@ -1039,7 +1039,6 @@ module.exports = {
   importAdminPublicKey,
   importAdminPrivateKey,
   // base32 helpers (shared)
-  base32Encode,
   base32Decode,
   // serialization
   serializeVault,

@@ -265,7 +265,7 @@ test('a vault LOCK keeps contexts (dropAllCaptures leaves them): the re-raised u
   }
 });
 
-test('the lifecycle drops: a tab drop (the closeSavePromptAndDrop path), a window drop, a dismissed-sheet drop', async () => {
+test('the lifecycle drops: a tab drop (the onTabLeftFront path), a window drop, a dismissed-sheet drop', async () => {
   const dir = tmpDir();
   try {
     const h = await makeHarness(dir);

@@ -156,4 +156,4 @@ function createFileModes({ fs, logger = console }) {
   return { chmodFile, chmodDir, ensureOwnerDir, tightenFilesIn, precreateOwnerFile, prepareDatabaseFiles };
 }
 
-module.exports = { createFileModes, OWNER_FILE, OWNER_DIR, DB_FAMILY_RE, MIGRATED_RE };
+module.exports = { createFileModes };

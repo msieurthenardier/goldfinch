@@ -97,4 +97,4 @@ function buildMoveTargets(records, source) {
   return out;
 }
 
-module.exports = { buildMoveTargets, FALLBACK_LABEL, MAX_LABEL };
+module.exports = { buildMoveTargets, FALLBACK_LABEL };

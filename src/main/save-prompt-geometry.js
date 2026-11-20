@@ -38,10 +38,5 @@ function computeSavePromptBounds({ guest, anchorRightDip, findVisible, contentHe
 }
 
 module.exports = {
-  computeSavePromptBounds,
-  SAVE_PROMPT_WIDTH,
-  SAVE_PROMPT_MIN_HEIGHT,
-  SAVE_PROMPT_MARGIN,
-  SAVE_PROMPT_MARGIN_RIGHT,
-  SAVE_PROMPT_FIND_OFFSET
+  computeSavePromptBounds
 };

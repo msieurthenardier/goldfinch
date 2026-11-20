@@ -315,4 +315,4 @@ function registerSavePromptIpc({
   );
 }
 
-module.exports = { registerSavePromptIpc, sanitizeSavePromptModel, sanitizeQueue };
+module.exports = { registerSavePromptIpc, sanitizeSavePromptModel };

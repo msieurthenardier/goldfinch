@@ -48,4 +48,4 @@ function chromeSettingsGet(settings, key) {
   return settings.get(key);
 }
 
-module.exports = { WITHHELD_KEYS, projectSettingsForChrome, chromeSettingsGet };
+module.exports = { projectSettingsForChrome, chromeSettingsGet };

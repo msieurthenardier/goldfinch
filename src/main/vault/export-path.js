@@ -96,4 +96,4 @@ function validateExportPath(savePath, { allowOverwrite = false } = {}) {
   return { ok: true, path: resolved };
 }
 
-module.exports = { validateExportPath, ALLOWED_EXT };
+module.exports = { validateExportPath };

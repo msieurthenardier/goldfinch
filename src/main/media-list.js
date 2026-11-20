@@ -165,10 +165,7 @@ function validateMediaList(raw) {
 
 module.exports = {
   validateMediaList,
-  isWebUrl,
-  isBlobUrl,
   isDownloadableMediaUrl,
-  dataImageType,
   MAX_ITEMS,
   MAX_WEB_URL_LENGTH,
   MAX_DATA_URL_LENGTH,

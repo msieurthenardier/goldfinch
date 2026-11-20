@@ -1510,7 +1510,6 @@ module.exports = {
   resolvePort,
   freePortInRange,
   DEFAULT_PORT,
-  MAX_SESSIONS,
   MAX_SESSIONS_PER_IDENTITY,
   ADMIN_ACTIVE_WINDOW_MS,
   pickVictim,

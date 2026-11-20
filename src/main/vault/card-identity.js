@@ -114,4 +114,4 @@ function titleForNumber(raw) {
   return 'Card';
 }
 
-module.exports = { digitsOf, luhnValid, isPlausibleCardNumber, brandForNumber, last4Of, titleForNumber };
+module.exports = { digitsOf, isPlausibleCardNumber, brandForNumber, last4Of, titleForNumber };
