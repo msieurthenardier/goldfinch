@@ -75,7 +75,7 @@ import {
 } from '../shared/vault-picker-template.js';
 import { armingDelayFor } from '../shared/sheet-arming.js';
 import { buildVaultSetCard } from '../shared/vault-set-template.js';
-import { buildVaultRecoveryCard } from '../shared/vault-recovery-template.js';
+import { buildVaultRecoveryCard, skippedVaultsLine } from '../shared/vault-recovery-template.js';
 import { buildVaultStepupCard } from '../shared/vault-stepup-template.js';
 import { buildVaultAccessKeyCard } from '../shared/vault-accesskey-template.js';
 import { buildVaultAdminKeyCard } from '../shared/vault-adminkey-template.js';
@@ -1148,8 +1148,28 @@ import {
     onOpen() {
       certPickerNode.classList.remove('hidden');
       certPickerList.focus();
+    },
+    onClose() {
+      clearCertPickerArming();
     }
   });
+
+  // The cosmetic half of arming for the certificate picker, mirroring the vault picker's: one style hook
+  // (`cert-picker-arming`, dimmed rows) cleared by a timer. The GATE is the timestamp in `report.sendActivatedOnce`.
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let certPickerArmingTimer = null;
+  function clearCertPickerArming() {
+    if (certPickerArmingTimer !== null) clearTimeout(certPickerArmingTimer);
+    certPickerArmingTimer = null;
+    certPickerNode.classList.remove('cert-picker-arming');
+  }
+  /** @param {number} delayMs */
+  function startCertPickerArming(delayMs) {
+    clearCertPickerArming();
+    if (!(delayMs > 0)) return;
+    certPickerNode.classList.add('cert-picker-arming');
+    certPickerArmingTimer = setTimeout(clearCertPickerArming, delayMs);
+  }
 
   // Header close (X): a deliberate dismiss — parity with Escape/backdrop; the
   // store maps the dismissal to resolution-cancel (continue cert-less).
@@ -1366,6 +1386,11 @@ import {
     recoveryKey = model && typeof model.recoveryKey === 'string' ? model.recoveryKey : '';
     recovery.keyValue.textContent = recoveryKey || '';
     recovery.replacingLede.hidden = !(model && model.replacing === true);
+    // Compromise rotation: a count of vaults left under the old master key (squawk 0229).
+    // Re-read each init so a later open without it hides the line again.
+    const skippedText = skippedVaultsLine(model && model.skippedCount);
+    recovery.skippedLede.textContent = skippedText;
+    recovery.skippedLede.hidden = skippedText === '';
   }
 
   /* -------------------------------------------------------- template: vault-stepup */
@@ -3048,6 +3073,7 @@ import {
       // the anchor is ignored. Build FIRST (the items getter reads the rows at
       // open), then open through the controller (vault-picker discipline).
       renderCertPicker(model);
+      startCertPickerArming(armingDelay);
       menuController.open(certPickerEntry, 0);
     } else if (template === 'vault-set') {
       // Fixed layout (password + confirm + error + Set up/Cancel), centered via CSS — the

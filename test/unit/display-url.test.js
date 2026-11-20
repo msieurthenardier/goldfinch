@@ -3,7 +3,12 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { displayUrl } = require('../../src/shared/display-url.js');
+const {
+  displayUrl,
+  capDisplayUrl,
+  addressForChrome,
+  ADDRESS_DISPLAY_MAX_CHARS
+} = require('../../src/shared/display-url.js');
 
 test('displayUrl: unchanged when there is nothing to remove', () => {
   for (const u of [
@@ -63,10 +68,10 @@ test('capTitle: caps at 512, keeps shorter titles, never splits a surrogate pair
 test('displayUrl is applied only to what is displayed or stored (source-scan pin)', () => {
   const read = (p) => fs.readFileSync(path.join(__dirname, '..', '..', p), 'utf8');
   const gw = read('src/main/guest-wiring.js');
-  assert.match(gw, /sendToChrome\('tab-did-navigate',\s*\{\s*wcId,\s*url:\s*displayUrl\(url\)\s*\}\)/);
+  assert.match(gw, /sendToChrome\('tab-did-navigate',\s*\{\s*wcId,\s*url:\s*addressForChrome\(url\)\s*\}\)/);
   assert.match(
     gw,
-    /sendToChrome\('tab-did-navigate-in-page',\s*\{\s*wcId,\s*url:\s*displayUrl\(wc\.getURL\(\)\)\s*\}\)/
+    /sendToChrome\('tab-did-navigate-in-page',\s*\{\s*wcId,\s*url:\s*addressForChrome\(wc\.getURL\(\)\)\s*\}\)/
   );
   // It must never wrap a URL handed to navigation, the snapshot or credential code.
   for (const f of ['src/main/session-snapshot.js', 'src/main/auth-challenges.js', 'src/main/closed-tab-capture.js']) {
@@ -80,5 +85,39 @@ test('displayUrl is applied only to what is displayed or stored (source-scan pin
   // Review fix C4: the crash push (both sites) and the window-move / recovery adopt payload.
   assert.match(gw, /sendToChrome\('tab-crash',\s*\{\s*wcId,\s*crash:\s*crashForChrome\(entry\.crash\)\s*\}\)/);
   assert.match(read('src/main/register-tab-ipc.js'), /crash:\s*crashForChrome\(entry\.crash\)/);
-  assert.match(read('src/main/move-tab-payload.js'), /url:\s*displayUrl\(\(live && live\.getURL\(\)\) \|\| p\.url\)/);
+  assert.match(
+    read('src/main/move-tab-payload.js'),
+    /url:\s*addressForChrome\(\(live && live\.getURL\(\)\) \|\| p\.url\)/
+  );
+});
+
+test('capDisplayUrl: under, at and over the limit; ends in an ellipsis; never splits a surrogate pair', () => {
+  const max = ADDRESS_DISPLAY_MAX_CHARS;
+  assert.equal(max, 8192);
+  const under = 'https://e.test/' + 'a'.repeat(max - 20);
+  assert.equal(capDisplayUrl(under), under);
+  const at = 'a'.repeat(max);
+  assert.equal(capDisplayUrl(at), at);
+  const over = 'a'.repeat(max + 1);
+  const cut = capDisplayUrl(over);
+  assert.equal(cut.length, max);
+  assert.equal(cut, 'a'.repeat(max - 1) + '\u2026');
+  assert.equal(capDisplayUrl('x'.repeat(400000)).length, max);
+  // A pair straddling the cut point is dropped whole, not halved.
+  const pair = 'a'.repeat(max - 2) + '\u{1F600}' + 'bbb';
+  const cutPair = capDisplayUrl(pair);
+  assert.equal(cutPair, 'a'.repeat(max - 2) + '\u2026');
+  assert.doesNotMatch(cutPair, /[\ud800-\udbff](?![\udc00-\udfff])/);
+  assert.equal(capDisplayUrl(undefined), undefined);
+});
+
+test('addressForChrome removes credentials and cuts; crashForChrome cuts, failureForChrome does not', () => {
+  const { crashForChrome, failureForChrome } = require('../../src/shared/display-url.js');
+  const long = 'https://u:p@e.test/' + 'a'.repeat(9000);
+  const shown = addressForChrome(long);
+  assert.equal(shown.length, ADDRESS_DISPLAY_MAX_CHARS);
+  assert.ok(shown.startsWith('https://e.test/') && shown.endsWith('\u2026'));
+  assert.equal(crashForChrome({ url: long }).url, shown);
+  // Retry compares the chrome's address with displayUrl(recorded); the load-failure copy stays whole.
+  assert.equal(failureForChrome({ url: long }).url, displayUrl(long));
 });

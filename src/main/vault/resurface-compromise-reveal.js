@@ -19,8 +19,8 @@
  * @param {{
  *   chromeId: number,
  *   liveChromeIds: Set<number>,
- *   reveals: { chromeIds: () => number[], rekey: (from: number, to: number) => ({ recoveryKey: string } | null) },
- *   send: (payload: { recoveryKey: string, replacing: true }) => void
+ *   reveals: { chromeIds: () => number[], rekey: (from: number, to: number) => ({ recoveryKey: string, skippedCount?: number } | null) },
+ *   send: (payload: { recoveryKey: string, replacing: true, skippedCount?: number }) => void
  * }} args
  */
 function resurfaceCompromiseReveal({ chromeId, liveChromeIds, reveals, send }) {
@@ -28,7 +28,13 @@ function resurfaceCompromiseReveal({ chromeId, liveChromeIds, reveals, send }) {
   for (const staleId of reveals.chromeIds()) {
     if (liveChromeIds.has(staleId)) continue; // still owned by a live window — nothing to resurface
     const reveal = reveals.rekey(staleId, chromeId);
-    if (reveal) send({ recoveryKey: reveal.recoveryKey, replacing: true });
+    if (reveal) {
+      send({
+        recoveryKey: reveal.recoveryKey,
+        replacing: true,
+        ...(reveal.skippedCount ? { skippedCount: reveal.skippedCount } : {})
+      });
+    }
     break; // at-most-one — the store's busy gate serializes rotations in practice
   }
 }

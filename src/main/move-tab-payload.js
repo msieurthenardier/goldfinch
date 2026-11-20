@@ -2,7 +2,7 @@
 'use strict';
 
 const { isSafeColor } = require('../shared/safe-color');
-const { displayUrl } = require('../shared/display-url');
+const { addressForChrome } = require('../shared/display-url');
 
 // Move-to-new-window payload rules (M09 Flight 6, DD5 + leg-4 design review H2).
 // Pure, Electron-free (the window-registry / closed-tab-capture precedent) so the
@@ -87,7 +87,7 @@ function buildAdoptPayload(p, wc) {
     wcId: p.wcId,
     // Display only: the chrome shows this in the strip / address bar and never navigates or restores from it
     // (the move re-parents the existing view; reopen and restore take their URLs from main).
-    url: displayUrl((live && live.getURL()) || p.url),
+    url: addressForChrome((live && live.getURL()) || p.url),
     title: (live && live.getTitle()) || p.title,
     favicon: p.favicon,
     container: p.container,

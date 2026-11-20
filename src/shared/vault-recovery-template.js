@@ -18,6 +18,20 @@ import { buildCopyIcon } from './copy-icon.js';
 // rendered via textContent only (never markup) and dropped from the DOM on close.
 
 /**
+ * The fixed sentence for a compromise rotation that left vaults under the old master key.
+ * Takes a count only (no vault ids or content); anything but a positive integer is ''.
+ * @param {unknown} count
+ * @returns {string}
+ */
+export function skippedVaultsLine(count) {
+  if (typeof count !== 'number' || !Number.isInteger(count) || count < 1) return '';
+  const subject = count === 1 ? '1 vault' : `${count} vaults`;
+  const they = count === 1 ? 'it still opens' : 'they still open';
+  const them = count === 1 ? 'it' : 'them';
+  return `${subject} could not be rotated and ${they} only with the old master key. Restore ${them} from a backup bundle or delete ${them}.`;
+}
+
+/**
  * Build the vault-recovery-show card DOM. The key value node is a read-only element
  * (no input — nothing to submit); Copy + Acknowledge are the only controls.
  * @param {Document} document
@@ -26,6 +40,7 @@ import { buildCopyIcon } from './copy-icon.js';
  *   card: HTMLElement,
  *   keyValue: HTMLElement,
  *   replacingLede: HTMLElement,
+ *   skippedLede: HTMLElement,
  *   copy: HTMLButtonElement,
  *   acknowledge: HTMLButtonElement,
  *   scrub: () => void,
@@ -65,6 +80,14 @@ export function buildVaultRecoveryCard(document) {
   replacingLede.hidden = true;
   card.appendChild(replacingLede);
 
+  // Compromise rotation only (squawk 0229): vaults that could not be rotated stay under the
+  // OLD master key. Hidden by default; menu-overlay.js fills it from `skippedCount` (a count,
+  // never vault ids) via skippedVaultsLine(). textContent-only.
+  const skippedLede = document.createElement('p');
+  skippedLede.className = 'vault-recovery-lede vault-recovery-skipped';
+  skippedLede.hidden = true;
+  card.appendChild(skippedLede);
+
   // Read-only key display. A non-editable element (not an input) — there is nothing to
   // submit; the key is displayed, copied, and acknowledged. aria-readonly + a role/label
   // so assistive tech announces it as the recovery key value.
@@ -102,7 +125,9 @@ export function buildVaultRecoveryCard(document) {
   // via an importable, unit-testable seam (menu-overlay.js's onClose calls refs.scrub()).
   const scrub = () => {
     keyValue.textContent = '';
+    skippedLede.textContent = '';
+    skippedLede.hidden = true;
   };
 
-  return { node, card, keyValue, replacingLede, copy, acknowledge, scrub };
+  return { node, card, keyValue, replacingLede, skippedLede, copy, acknowledge, scrub };
 }

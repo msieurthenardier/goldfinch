@@ -216,3 +216,70 @@ test("the certificate picker's Cancel row is a dismissal (escape reason), never 
   assert.match(auth, /RESOLUTION_REASONS = new Set\(\[[^\]]*'escape'/);
   assert.doesNotMatch(auth.match(/OCCLUSION_REASONS = new Set\(\[[^\]]*\]/)[0], /escape/);
 });
+
+// ---- the certificate picker's cosmetic arming cue (squawk 0182) ---------------------------------------------
+
+function certArmingBlock() {
+  const start = SHEET_SRC.indexOf('let certPickerArmingTimer = null;');
+  const end = SHEET_SRC.indexOf('// Header close (X): a deliberate dismiss', start);
+  assert.ok(start > 0 && end > start, 'the cert arming block was found');
+  return { start, block: SHEET_SRC.slice(start, end) };
+}
+
+// Runs the shipped helper source against a fake node and fake timers.
+function runCertArming() {
+  const { block } = certArmingBlock();
+  const classes = new Set();
+  const certPickerNode = { classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c) } };
+  const timers = [];
+  const cleared = [];
+  const fakeSetTimeout = (fn, ms) => (timers.push({ fn, ms }), timers.length);
+  const fakeClearTimeout = (id) => cleared.push(id);
+  const body = block.slice(0, block.lastIndexOf('}') + 1);
+  const api = new Function(
+    'certPickerNode',
+    'setTimeout',
+    'clearTimeout',
+    `${body.replace(/\/\*\*[^*]*\*\//g, '')}; return { startCertPickerArming, clearCertPickerArming };`
+  )(certPickerNode, fakeSetTimeout, fakeClearTimeout);
+  return { api, classes, timers, cleared };
+}
+
+test('certificate picker: the class is added on start, removed when the delay timer fires, and the timer uses the table delay', () => {
+  const { api, classes, timers } = runCertArming();
+  api.startCertPickerArming(armingDelayFor('cert-picker'));
+  assert.ok(classes.has('cert-picker-arming'));
+  assert.equal(timers.length, 1);
+  assert.equal(timers[0].ms, 500);
+  timers[0].fn();
+  assert.ok(!classes.has('cert-picker-arming'), 'cleared by the timer');
+});
+
+test('certificate picker: a re-init re-applies the class and cancels the earlier timer; a zero delay applies nothing; close clears it', () => {
+  const { api, classes, timers, cleared } = runCertArming();
+  api.startCertPickerArming(500);
+  api.startCertPickerArming(500);
+  assert.deepEqual(cleared, [1], 'the first timer was cancelled by the re-init');
+  assert.equal(timers.length, 2);
+  assert.ok(classes.has('cert-picker-arming'));
+  api.clearCertPickerArming();
+  assert.ok(!classes.has('cert-picker-arming'), 'close clears it');
+  api.startCertPickerArming(0);
+  assert.ok(!classes.has('cert-picker-arming'), 'no delay, no cue');
+});
+
+test('certificate picker: init starts the cue before opening, onClose clears it, and the stylesheet defines the rule (source scan)', () => {
+  assert.match(
+    SHEET_SRC,
+    /renderCertPicker\(model\);\s*startCertPickerArming\(armingDelay\);\s*menuController\.open\(certPickerEntry, 0\);/
+  );
+  const start = SHEET_SRC.indexOf('const certPickerEntry = sheet({');
+  const end = SHEET_SRC.indexOf('// The cosmetic half of arming for the certificate picker', start);
+  assert.ok(start > 0 && end > start, 'the cert picker entry block was found');
+  assert.match(maskComments(SHEET_SRC.slice(start, end)), /onClose\(\) \{\s*clearCertPickerArming\(\);/);
+  const css = fs.readFileSync(path.join(ROOT, 'src/renderer/menu-overlay.css'), 'utf8');
+  assert.match(
+    css,
+    /#sheet-cert-picker\.cert-picker-arming \.cm-item:not\(\.cert-picker-cancel\)\s*\{\s*opacity: 0\.55;/
+  );
+});

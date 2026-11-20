@@ -27,7 +27,7 @@ const { isOperatorInput } = require('./automation/injected-input');
 const { shouldRecordLoadFailure, isChromeErrorUrl, classifyCertError } = require('../shared/load-failure');
 const { effectiveUrl } = require('./tab-entry-url');
 // Leg `prompts-and-bounds`: what the chrome is SHOWN carries no user:pass@; navigation keeps the real URL.
-const { displayUrl, failureForChrome, crashForChrome, capTitle } = require('../shared/display-url');
+const { addressForChrome, failureForChrome, crashForChrome, capTitle } = require('../shared/display-url');
 // Mission 20 Flight 2 Leg 2 (DD6/DD7): the security-state enum + pure
 // derivation, and the observer's durable-copy read seam.
 const { deriveSecurityState, SECURITY_STATES } = require('../shared/site-security');
@@ -877,7 +877,7 @@ function createGuestWiring(deps) {
           }
           sendToChrome('vault-capture-offer', { captureId: gestureOffer.captureId, model: gestureOffer.model, wcId });
         }
-        sendToChrome('tab-did-navigate', { wcId, url: displayUrl(url) });
+        sendToChrome('tab-did-navigate', { wcId, url: addressForChrome(url) });
         // Mission 20 Flight 2 Leg 2 (DD6/DD7, FD amendment to DD7): certificate +
         // security state at each main-frame commit. Its OWN owner-routed push
         // (`tab-security`), sent right after `tab-did-navigate` — never riding
@@ -938,7 +938,7 @@ function createGuestWiring(deps) {
     wc.on(
       'did-navigate-in-page',
       guard(() => {
-        sendToChrome('tab-did-navigate-in-page', { wcId, url: displayUrl(wc.getURL()) });
+        sendToChrome('tab-did-navigate-in-page', { wcId, url: addressForChrome(wc.getURL()) });
         sendToChrome('tab-nav-state', {
           wcId,
           canGoBack: wc.navigationHistory.canGoBack(),

@@ -1070,6 +1070,11 @@ body {
 #sheet-vault-picker.vault-picker-arming .cm-item {
   opacity: 0.55;
 }
+/* Same cue for the certificate picker. The "Continue without a certificate" row is a dismissal, never
+   delayed, so it stays at full strength. */
+#sheet-cert-picker.cert-picker-arming .cm-item:not(.cert-picker-cancel) {
+  opacity: 0.55;
+}
 
 /* ---------- suggestions template (address-bar, M08 Flight 4 Leg 2) ----------
    Listbox panel matching the menu panel's chrome (same tokens/box as #sheet-menu);

@@ -189,8 +189,20 @@ const VAULT_CHANGE_MASTER_CONFIG = { VaultAuthError: true, VaultBusyError: 'busy
 /** @type {VaultSheetErrorConfig} */
 const VAULT_RECOVER_CONFIG = { VaultAuthError: true, VaultFormatError: 'format', VaultBusyError: 'busy' };
 
+/**
+ * The success reply of a compromise rotation, as main hands it to the sheet handlers.
+ * `skipped` (squawk 0191: vaults left under the old master key) is reduced to a COUNT;
+ * vault ids and reason codes stay in main (the store already logs them).
+ * @param {{ recoveryKey: string, revoked: any, skipped?: any }} res
+ */
+function compromiseRotateReply(res) {
+  const skippedCount = Array.isArray(res.skipped) ? res.skipped.length : 0;
+  return { ok: true, recoveryKey: res.recoveryKey, revoked: res.revoked, skippedCount };
+}
+
 module.exports = {
   mapVaultSheetError,
+  compromiseRotateReply,
   VAULT_IMPORT_PREVIEW_CONFIG,
   VAULT_RESTORE_COMMIT_CONFIG,
   VAULT_BROWSER_IMPORT_COMMIT_CONFIG,

@@ -310,7 +310,7 @@ function createVaultWiring(deps) {
   // Stash the pending compromise reveal + report at op resolution (H2: this runs
   // BEFORE any sheet interaction — the stash + hold must be durable-in-memory before
   // the handler touches a possibly-dead sheet/window handle).
-  function stashCompromiseReveal(chromeId, { recoveryKey, revoked }) {
+  function stashCompromiseReveal(chromeId, { recoveryKey, revoked, skippedCount }) {
     _compromiseReport = revoked
       ? {
           admin: revoked.admin === true,
@@ -318,7 +318,7 @@ function createVaultWiring(deps) {
           generation: mintGeneration()
         }
       : { admin: false, vaultIds: [], generation: mintGeneration() };
-    _compromiseReveals.stash(chromeId, recoveryKey, COMPROMISE_REASON);
+    _compromiseReveals.stash(chromeId, recoveryKey, COMPROMISE_REASON, skippedCount);
   }
 
   // The recovery-show ack (H1, GENERALIZED M18 F3 L3 / DD6 ruling 5 — the old two-sheet

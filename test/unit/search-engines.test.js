@@ -365,7 +365,7 @@ test("welcome-controller.js: render(tab) gates the engine block on reasons.has('
   );
 });
 
-test("welcome-controller.js: submitEngine no longer deletes 'search' from reasons and settles with a search: override (M16 F3 Leg 2, HAT item 3)", () => {
+test("welcome-controller.js: submitEngine no longer deletes 'search' from reasons and settles from the cache (M16 F3 Leg 2, HAT item 3)", () => {
   const fs = require('fs');
   const path = require('path');
   const src = fs.readFileSync(path.join(__dirname, '../../src/renderer/chrome/welcome-controller.js'), 'utf8');
@@ -378,9 +378,8 @@ test("welcome-controller.js: submitEngine no longer deletes 'search' from reason
       "reasons.has('search')) hide the block instead of keeping it visible with the selection"
   );
   assert.ok(
-    /settle\(tab,\s*{\s*search:\s*id\s*}\)/.test(submitEngineMatch[1]),
-    'submitEngine must call settle(tab, { search: id }) so the just-chosen engine overrides the live ' +
-      '(possibly-stale) searchEngineCache read'
+    /setSearchEngine\(id\);\s*settle\(tab\);/.test(submitEngineMatch[1]),
+    'submitEngine must write the engine cache synchronously (squawk 0220) and then settle(tab) from it'
   );
 });
 
@@ -485,7 +484,7 @@ test("welcome-controller.js: render(tab) gates the home block on reasons.has('ho
   );
 });
 
-test('welcome-controller.js: submitHome calls settle(tab, { home: ... }) and never attachView (M16 F3 Leg 2, HAT item 6, DD7 pivot)', () => {
+test('welcome-controller.js: submitHome writes the cache, calls settle(tab) and never attachView (M16 F3 Leg 2, HAT item 6, DD7 pivot)', () => {
   const fs = require('fs');
   const path = require('path');
   const src = fs.readFileSync(path.join(__dirname, '../../src/renderer/chrome/welcome-controller.js'), 'utf8');
@@ -493,9 +492,8 @@ test('welcome-controller.js: submitHome calls settle(tab, { home: ... }) and nev
   const submitHomeMatch = src.match(/async function submitHome\(\)\s*{([\s\S]*?)\n {2}}/);
   assert.ok(submitHomeMatch, 'welcome-controller.js must export an async function submitHome() { ... }');
   assert.ok(
-    /settle\(tab,\s*{\s*home:\s*value\s*}\)/.test(submitHomeMatch[1]),
-    'submitHome must call settle(tab, { home: value }) so the just-written home page overrides ' +
-      'the live (possibly-stale) homePageCache read, instead of attaching the tab to it'
+    /setHomePage\(value\);\s*settle\(tab\);/.test(submitHomeMatch[1]),
+    'submitHome must write the home cache synchronously (squawk 0220) and then settle(tab) from it, instead of attaching the tab to it'
   );
   assert.ok(
     !/attachView\(/.test(submitHomeMatch[1]),

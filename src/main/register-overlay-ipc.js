@@ -23,6 +23,16 @@ const SHEET_DISMISS_REASONS = new Set(['escape', 'outside-click', 'blur']);
 // template unit suite cross-pins the two literals so they cannot drift.
 const CERT_PICK_PREFIX = 'cert:';
 
+/**
+ * The compromise rotation's skipped-vault COUNT from a delegate reply: a positive integer
+ * or 0. Only this number goes past main (squawk 0229); ids and reasons never do.
+ * @param {any} res
+ */
+function skippedCountOf(res) {
+  const n = res && res.skippedCount;
+  return Number.isInteger(n) && n > 0 ? n : 0;
+}
+
 // Squawk 0057: validate the chrome-supplied #webviews slot rect that rides the
 // menu-overlay:open payload (`slotBounds`, added by overlay-menus.js's open()).
 // Used ONLY when the window has no live active guest view to measure — a
@@ -657,13 +667,18 @@ function registerOverlayIpc({
           const res = await vaultCompromiseRotate({ oldMasterPassword: oldBuf, newMasterPassword: newBuf });
           if (res && res.ok) {
             // H2 step 1 — stash + hold FIRST (before ANY sheet interaction).
-            stashCompromiseReveal?.(chromeId, { recoveryKey: res.recoveryKey, revoked: res.revoked });
+            stashCompromiseReveal?.(chromeId, {
+              recoveryKey: res.recoveryKey,
+              revoked: res.revoked,
+              skippedCount: skippedCountOf(res)
+            });
             // H2 step 2 — the null-guarded window path.
             if (rec.sheet && rec.win && !rec.win.isDestroyed?.()) {
               rec.sheet.closeMenuOverlay('activated', current.token);
               chromeForAttachment(rec.win)?.send('vault-recovery-show', {
                 recoveryKey: res.recoveryKey,
-                replacing: true
+                replacing: true,
+                ...(skippedCountOf(res) > 0 ? { skippedCount: skippedCountOf(res) } : {})
               });
             }
             return { ok: true };
@@ -712,12 +727,17 @@ function registerOverlayIpc({
           const chromeId = chromeForAttachment(rec.win)?.id;
           const res = await vaultCompromiseRotate({ recoveryKey: recoveryBuf, newMasterPassword: newBuf });
           if (res && res.ok) {
-            stashCompromiseReveal?.(chromeId, { recoveryKey: res.recoveryKey, revoked: res.revoked });
+            stashCompromiseReveal?.(chromeId, {
+              recoveryKey: res.recoveryKey,
+              revoked: res.revoked,
+              skippedCount: skippedCountOf(res)
+            });
             if (rec.sheet && rec.win && !rec.win.isDestroyed?.()) {
               rec.sheet.closeMenuOverlay('activated', current.token);
               chromeForAttachment(rec.win)?.send('vault-recovery-show', {
                 recoveryKey: res.recoveryKey,
-                replacing: true
+                replacing: true,
+                ...(skippedCountOf(res) > 0 ? { skippedCount: skippedCountOf(res) } : {})
               });
             }
             return { ok: true };

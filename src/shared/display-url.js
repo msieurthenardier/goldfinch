@@ -38,9 +38,39 @@ export function displayUrl(url) {
   return parsed.href;
 }
 
+/** Longest address pushed to the chrome for the address bar, in UTF-16 units. Same value as the history recorder's `ADDRESS_MAX_CHARS`. */
+export const ADDRESS_DISPLAY_MAX_CHARS = 8192;
+
+/**
+ * Cut an address to the display limit for the chrome, ending with `\u2026` so it cannot pass for a real, shorter
+ * address. The result is at most the limit long and never ends in half a surrogate pair. Display only: main keeps
+ * the real address. Non-strings and addresses within the limit come back unchanged.
+ * @template T
+ * @param {T} url
+ * @returns {T}
+ */
+export function capDisplayUrl(url) {
+  if (typeof url !== 'string' || url.length <= ADDRESS_DISPLAY_MAX_CHARS) return url;
+  let end = ADDRESS_DISPLAY_MAX_CHARS - 1; // room for the ellipsis
+  const last = url.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) end -= 1;
+  return /** @type {T} */ (/** @type {unknown} */ (url.slice(0, end) + '\u2026'));
+}
+
+/**
+ * The address as the chrome's address bar is shown it: credentials removed, then cut to the display limit.
+ * @param {unknown} url
+ * @returns {string}
+ */
+export function addressForChrome(url) {
+  return capDisplayUrl(displayUrl(url));
+}
+
 /**
  * A load-failure record as the chrome is shown it: a copy whose `url` has no credentials. The stored
- * record (snapshot, closed-tab capture) keeps the real address.
+ * record (snapshot, closed-tab capture) keeps the real address. NOT cut to the display limit (squawk 0181):
+ * Retry's `restoreRecordedCredentials` matches the address the chrome sends back against `displayUrl` of the
+ * recorded one, so a cut copy would break Retry for a very long address.
  * @template {{ url?: string } | null | undefined} T
  * @param {T} failure
  * @returns {T}
@@ -60,7 +90,7 @@ export function failureForChrome(failure) {
  */
 export function crashForChrome(crash) {
   if (!crash || typeof crash.url !== 'string') return crash;
-  return /** @type {T} */ ({ ...crash, url: displayUrl(crash.url) });
+  return /** @type {T} */ ({ ...crash, url: addressForChrome(crash.url) });
 }
 
 /** Longest page title stored in history or pushed to the chrome, in characters. */

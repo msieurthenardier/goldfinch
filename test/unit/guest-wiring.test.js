@@ -732,6 +732,23 @@ test('tab events forward navigation, record history, retitle active move targets
   assert.deepEqual(overlaySends, [['find-overlay:count', { activeMatchOrdinal: 2, matches: 5 }]]);
 });
 
+test('a very long in-page navigation pushes a bounded address to the chrome while history gets the real one (squawk 0181)', () => {
+  const h = setup();
+  const wc = new FakeContents(13);
+  wc.url = 'https://u:p@example.test/' + 'a'.repeat(400000);
+  h.wiring.wireTabViewEvents({ webContents: wc }, 13, 'persist:jar-a');
+  wc.emit('did-navigate-in-page');
+  const push = h.sends.find((x) => x[0] === 'tab-did-navigate-in-page');
+  assert.equal(push[1].url.length, 8192);
+  assert.ok(push[1].url.startsWith('https://example.test/') && push[1].url.endsWith('\u2026'));
+  const nav = h.calls.filter((c) => Array.isArray(c) && c[0] === 'history-nav').map((c) => c[1]);
+  assert.equal(nav.at(-1).url, wc.url, 'the recorder is handed the real address');
+  assert.equal(wc.getURL(), wc.url, 'main keeps the real address');
+  wc.emit('did-navigate', {}, wc.url);
+  const full = h.sends.find((x) => x[0] === 'tab-did-navigate');
+  assert.equal(full[1].url.length, 8192);
+});
+
 test('page-favicon-updated routes through the favicon fetcher and forwards a data: URL only on success', async () => {
   const h = setup();
   const wc = new FakeContents(11);
